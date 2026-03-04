@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getCampaignAnalytics } from '@/lib/instantly'
+import { getCampaignAnalytics, getDailyAnalytics, getStepAnalytics } from '@/lib/instantly'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
@@ -10,8 +12,14 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const analytics = await getCampaignAnalytics(campaignId)
-    return NextResponse.json(analytics)
+    const [summary, daily, steps] = await Promise.all([
+      getCampaignAnalytics(campaignId),
+      getDailyAnalytics(campaignId),
+      getStepAnalytics(campaignId),
+    ])
+    return NextResponse.json({ summary, daily, steps }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    })
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
