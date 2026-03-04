@@ -35,6 +35,20 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
+  // If there's no valid user but there are stale auth cookies, clear them
+  // to prevent login issues caused by expired sessions.
+  if (!user) {
+    const allCookies = request.cookies.getAll()
+    const authCookies = allCookies.filter(c =>
+      c.name.startsWith('sb-') && (c.name.includes('auth-token') || c.name.includes('auth-token-code-verifier'))
+    )
+    if (authCookies.length > 0) {
+      authCookies.forEach(c => {
+        supabaseResponse.cookies.set(c.name, '', { maxAge: 0, path: '/' })
+      })
+    }
+  }
+
   // Protected routes
   if (!user && (request.nextUrl.pathname.startsWith('/dashboard') || request.nextUrl.pathname.startsWith('/admin'))) {
     const url = request.nextUrl.clone()
