@@ -62,10 +62,9 @@ export async function getCampaignAnalytics(campaignId: string): Promise<Campaign
   }
 
   const data = await response.json()
-  console.log('[instantly/overview] raw:', JSON.stringify(data, null, 2))
 
-  const totalSent = data.new_leads_contacted_count ?? data.contacted_count ?? 0
-  const totalReplies = data.reply_count ?? data.reply_count_unique ?? 0
+  const totalSent = data.emails_sent_count ?? data.contacted_count ?? 0
+  const totalReplies = data.reply_count ?? 0
   const totalOpportunities = data.total_opportunities ?? 0
 
   return {
@@ -88,13 +87,12 @@ export async function getStepAnalytics(campaignId: string): Promise<StepAnalytic
   }
 
   const data = await response.json()
-  console.log('[instantly/steps] raw:', JSON.stringify(data, null, 2))
   if (!Array.isArray(data)) return []
 
-  // Filter out null steps and parse raw rows
+  // Filter out null/\N steps (PostgreSQL NULLs come through as "\N")
   const VARIANT_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
   const rows = data
-    .filter((s: Record<string, unknown>) => s.step !== 'null' && s.step !== null)
+    .filter((s: Record<string, unknown>) => !isNaN(parseInt(String(s.step ?? ''), 10)))
     .map((s: Record<string, unknown>) => {
       const stepNum = parseInt(String(s.step), 10)
       const variantIdx = s.variant != null ? parseInt(String(s.variant), 10) : -1
