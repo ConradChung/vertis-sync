@@ -141,8 +141,10 @@ const inputCls = 'w-full px-3 py-2 bg-[#0F0F0F] border border-[#1E1E1E] rounded-
 const btnPrimary = 'px-4 py-2 bg-white text-[#0A0A0A] text-[13px] font-medium rounded-lg hover:bg-[#E0E0E0] transition-colors'
 
 const STAGE_LABELS: Record<number, string> = {
-  0: 'Pre-start', 1: 'Stage 1', 2: 'Stage 2', 3: 'Stage 3', 4: 'Complete',
+  0: 'Pre-start', 1: 'Inbox Setup', 2: 'Questionnaire', 3: 'ICP Form', 4: 'Complete',
 }
+const STAGE_STEPS: string[] = ['Inbox Setup', 'Questionnaire', 'ICP Form']
+
 
 export default function AdminDashboard() {
   const [clients, setClients] = useState<Client[]>([])
@@ -267,7 +269,7 @@ export default function AdminDashboard() {
   const navItems: { id: Section; label: string; icon: React.ReactNode }[] = [
     { id: 'clients', label: 'Clients', icon: <Users size={18} /> },
     { id: 'campaigns', label: 'Campaigns', icon: <Megaphone size={18} /> },
-    { id: 'onboarding', label: 'Onboarding', icon: <ClipboardList size={18} /> },
+    { id: 'onboarding', label: 'Client Next Steps', icon: <ClipboardList size={18} /> },
     { id: 'onboarding-data', label: 'Onboarding Data', icon: <Database size={18} /> },
     { id: 'email-validator', label: 'Email Validator', icon: <Mail size={18} /> },
   ]
@@ -347,19 +349,43 @@ export default function AdminDashboard() {
                         </span>
                       </div>
                     </div>
-                    <div className="mt-3 flex gap-2" onClick={e => e.stopPropagation()}>
-                      <input
-                        type="text"
-                        value={docuSignInputs[client.id] ?? client.docusign_url ?? ''}
-                        onChange={e => setDocuSignInputs(prev => ({ ...prev, [client.id]: e.target.value }))}
-                        onBlur={e => saveDocuSignUrl(client.id, e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && saveDocuSignUrl(client.id, docuSignInputs[client.id] ?? '')}
-                        placeholder="DocuSign URL (paste link to save)"
-                        className="flex-1 px-2.5 py-1.5 bg-[#0A0A0A] border border-[#1E1E1E] rounded-lg text-[12px] text-white placeholder-[#3A3A3A] focus:outline-none focus:border-[#3A3A3A]"
-                      />
-                      {(docuSignInputs[client.id] ?? client.docusign_url) && (
-                        <span className="text-[11px] text-[#2ECC71] flex items-center">✓</span>
-                      )}
+                    <div className="mt-3 space-y-3" onClick={e => e.stopPropagation()}>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={docuSignInputs[client.id] ?? client.docusign_url ?? ''}
+                          onChange={e => setDocuSignInputs(prev => ({ ...prev, [client.id]: e.target.value }))}
+                          onBlur={e => saveDocuSignUrl(client.id, e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && saveDocuSignUrl(client.id, docuSignInputs[client.id] ?? '')}
+                          placeholder="DocuSign URL (paste link to save)"
+                          className="flex-1 px-2.5 py-1.5 bg-[#0A0A0A] border border-[#1E1E1E] rounded-lg text-[12px] text-white placeholder-[#3A3A3A] focus:outline-none focus:border-[#3A3A3A]"
+                        />
+                        {(docuSignInputs[client.id] ?? client.docusign_url) && (
+                          <span className="text-[11px] text-[#2ECC71] flex items-center">✓</span>
+                        )}
+                      </div>
+                      {/* Stage progress bar */}
+                      <div className="space-y-1.5">
+                        <div className="flex gap-1">
+                          {STAGE_STEPS.map((label, i) => {
+                            const stageNum = i + 1
+                            const done = client.onboarding_stage > stageNum
+                            const active = client.onboarding_stage === stageNum
+                            return (
+                              <div key={label} className="flex-1 space-y-1">
+                                <div className={`h-1 rounded-full ${
+                                  done || client.onboarding_stage >= 4
+                                    ? 'bg-[#2ECC71]'
+                                    : active
+                                    ? 'bg-[#5E6AD2]'
+                                    : 'bg-[#1E1E1E]'
+                                }`} />
+                                <p className="text-[10px] text-[#3A3A3A] truncate">{label}</p>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -428,7 +454,7 @@ export default function AdminDashboard() {
             <motion.div key="onboarding" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
               className="max-w-3xl mx-auto px-6 py-8">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-base font-medium text-white">Onboarding</h2>
+                <h2 className="text-base font-medium text-white">Client Next Steps</h2>
                 <button onClick={() => setShowAddStep(v => !v)} className={btnPrimary}>
                   Add Step
                 </button>
