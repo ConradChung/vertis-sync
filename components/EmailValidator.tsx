@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
 import { Button } from '@/components/ui/button'
 import { Upload, RotateCcw, CheckCircle2, Download, Clock } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -20,6 +19,72 @@ type Step = 'upload' | 'ambiguous' | 'processing' | 'done' | 'error'
 interface Progress {
   processed: number
   total: number
+}
+
+function RingChart({ pct, valid, invalid }: { pct: number; valid: number; invalid: number }) {
+  const radius = 54
+  const stroke = 6
+  const circumference = 2 * Math.PI * radius
+  const validDash = (pct / 100) * circumference
+  const invalidDash = ((100 - pct) / 100) * circumference
+
+  return (
+    <div className="flex items-center gap-8">
+      <div className="relative w-32 h-32 shrink-0">
+        <svg className="w-full h-full -rotate-90" viewBox="0 0 128 128">
+          {/* Track */}
+          <circle cx="64" cy="64" r={radius} fill="none" stroke="#1A1A1A" strokeWidth={stroke} />
+          {/* Invalid arc (red, behind) */}
+          {invalid > 0 && (
+            <circle
+              cx="64" cy="64" r={radius} fill="none"
+              stroke="#ef4444" strokeWidth={stroke}
+              strokeDasharray={`${invalidDash} ${circumference}`}
+              strokeDashoffset={-validDash}
+              strokeLinecap="round"
+              className="transition-all duration-700"
+            />
+          )}
+          {/* Valid arc (green, on top) */}
+          {valid > 0 && (
+            <circle
+              cx="64" cy="64" r={radius} fill="none"
+              stroke="#22c55e" strokeWidth={stroke}
+              strokeDasharray={`${validDash} ${circumference}`}
+              strokeDashoffset={0}
+              strokeLinecap="round"
+              className="transition-all duration-700"
+            />
+          )}
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-white text-xl font-semibold tabular-nums leading-none">{pct}%</span>
+          <span className="text-[10px] text-[#4A4A4A] mt-0.5">valid</span>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-8">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-[#22c55e]" />
+            <span className="text-[13px] text-[#6B6B6B]">Valid</span>
+          </div>
+          <span className="text-[13px] text-white tabular-nums font-medium">{valid.toLocaleString()}</span>
+        </div>
+        <div className="flex items-center justify-between gap-8">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-[#ef4444]" />
+            <span className="text-[13px] text-[#6B6B6B]">Invalid</span>
+          </div>
+          <span className="text-[13px] text-white tabular-nums font-medium">{invalid.toLocaleString()}</span>
+        </div>
+        <div className="border-t border-[#1E1E1E] pt-3 flex items-center justify-between gap-8">
+          <span className="text-[13px] text-[#6B6B6B]">Total</span>
+          <span className="text-[13px] text-white tabular-nums font-medium">{(valid + invalid).toLocaleString()}</span>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function EmailValidator() {
@@ -191,14 +256,7 @@ export default function EmailValidator() {
                   {fileName ? 'Click to change' : 'or drag and drop here'}
                 </p>
               </div>
-              <input
-                type="file"
-                name="csv"
-                accept=".csv"
-                required
-                className="sr-only"
-                onChange={handleFileChange}
-              />
+              <input type="file" name="csv" accept=".csv" required className="sr-only" onChange={handleFileChange} />
             </label>
             <Button type="submit" className="w-full rounded-xl bg-white text-[#0A0A0A] hover:bg-[#E8E8E8] font-medium text-[13px] h-10">
               Validate Emails
@@ -213,19 +271,15 @@ export default function EmailValidator() {
               <p className="text-[12px] text-[#6B6B6B] mb-4">Which column should we validate?</p>
               <div className="space-y-2">
                 {ambiguousColumns.map(col => (
-                  <button
-                    key={col}
-                    onClick={() => handleColumnSelect(col)}
-                    className="w-full text-left px-4 py-2.5 border border-[#1E1E1E] rounded-lg text-[13px] text-[#6B6B6B] hover:border-[#3A3A3A] hover:text-white hover:bg-[#141414] transition-colors"
-                  >
+                  <button key={col} onClick={() => handleColumnSelect(col)}
+                    className="w-full text-left px-4 py-2.5 border border-[#1E1E1E] rounded-lg text-[13px] text-[#6B6B6B] hover:border-[#3A3A3A] hover:text-white hover:bg-[#141414] transition-colors">
                     {col}
                   </button>
                 ))}
               </div>
             </div>
             <button onClick={reset} className="flex items-center gap-1.5 text-[12px] text-[#4A4A4A] hover:text-[#A0A0A0] transition-colors">
-              <RotateCcw size={12} />
-              Upload a different file
+              <RotateCcw size={12} /> Upload a different file
             </button>
           </div>
         )}
@@ -239,15 +293,10 @@ export default function EmailValidator() {
               </span>
             </div>
             <div className="h-1 bg-[#1E1E1E] rounded-full overflow-hidden">
-              <div
-                className="h-full bg-white rounded-full transition-all duration-300"
-                style={{ width: `${pct}%` }}
-              />
+              <div className="h-full bg-white rounded-full transition-all duration-300" style={{ width: `${pct}%` }} />
             </div>
             <p className="text-[11px] text-[#4A4A4A]">
-              {progress.total > 0
-                ? `${pct}% complete — processing sequentially to avoid rate limits`
-                : 'Starting…'}
+              {progress.total > 0 ? `${pct}% complete — processing sequentially to avoid rate limits` : 'Starting…'}
             </p>
           </div>
         )}
@@ -261,14 +310,9 @@ export default function EmailValidator() {
               <p className="text-[13px] text-white font-medium">Validation complete</p>
               <p className="text-[12px] text-[#6B6B6B] mt-0.5">CSV downloaded to your device</p>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={reset}
-              className="text-[12px] text-[#4A4A4A] hover:text-white hover:bg-[#1A1A1A] rounded-lg mt-1"
-            >
-              <RotateCcw size={12} className="mr-1.5" />
-              Validate another file
+            <Button variant="ghost" size="sm" onClick={reset}
+              className="text-[12px] text-[#4A4A4A] hover:text-white hover:bg-[#1A1A1A] rounded-lg mt-1">
+              <RotateCcw size={12} className="mr-1.5" /> Validate another file
             </Button>
           </div>
         )}
@@ -279,78 +323,33 @@ export default function EmailValidator() {
               <p className="text-[13px] text-red-400">{error}</p>
             </div>
             <button onClick={reset} className="flex items-center gap-1.5 text-[12px] text-[#4A4A4A] hover:text-[#A0A0A0] transition-colors">
-              <RotateCcw size={12} />
-              Try again
+              <RotateCcw size={12} /> Try again
             </button>
           </div>
         )}
       </div>
 
-      {step === 'done' && totalCount > 0 && (() => {
-        const invalid = totalCount - validCount
-        const validPct = Math.round((validCount / totalCount) * 100)
-        const data = [
-          { name: 'Valid', value: validCount },
-          { name: 'Not Valid', value: invalid },
-        ]
-        const COLORS = ['#22c55e', '#ef4444']
-
-        return (
-          <div className="mt-6 max-w-lg border border-[#1E1E1E] rounded-xl bg-[#0F0F0F] p-6">
-            <p className="text-[13px] font-medium text-white mb-5">Results</p>
-            <div className="flex items-center gap-10">
-              <div className="relative w-32 h-32 flex-shrink-0">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={data}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={36}
-                      outerRadius={56}
-                      paddingAngle={2}
-                      dataKey="value"
-                      strokeWidth={0}
-                    >
-                      {data.map((_, i) => (
-                        <Cell key={i} fill={COLORS[i]} />
-                      ))}
-                    </Pie>
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-white text-lg font-semibold tabular-nums">{validPct}%</span>
-                </div>
-              </div>
-              <div className="space-y-3 min-w-[140px]">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-[#22c55e]" />
-                    <span className="text-[13px] text-[#6B6B6B]">Valid</span>
-                  </div>
-                  <span className="text-[13px] text-white tabular-nums font-medium">{validCount}</span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-[#ef4444]" />
-                    <span className="text-[13px] text-[#6B6B6B]">Not Valid</span>
-                  </div>
-                  <span className="text-[13px] text-white tabular-nums font-medium">{invalid}</span>
-                </div>
-                <div className="border-t border-[#1E1E1E] pt-3 flex items-center justify-between gap-4">
-                  <span className="text-[13px] text-[#6B6B6B]">Total</span>
-                  <span className="text-[13px] text-white tabular-nums font-medium">{totalCount}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )
-      })()}
+      {/* Results chart */}
+      {step === 'done' && totalCount > 0 && (
+        <div className="mt-6 max-w-lg border border-[#1E1E1E] rounded-xl bg-[#0F0F0F] p-6">
+          <p className="text-[13px] font-medium text-white mb-5">Results</p>
+          <RingChart
+            pct={Math.round((validCount / totalCount) * 100)}
+            valid={validCount}
+            invalid={totalCount - validCount}
+          />
+        </div>
+      )}
 
       {/* Previous runs */}
-      {runs.length > 0 && (
-        <div className="mt-8 max-w-lg">
-          <p className="text-[13px] font-medium text-white mb-3">Previous Runs</p>
+      <div className="mt-8 max-w-lg">
+        <p className="text-[13px] font-medium text-white mb-3">Previous Runs</p>
+        {runs.length === 0 ? (
+          <div className="border border-[#1E1E1E] rounded-xl bg-[#0F0F0F] px-5 py-8 text-center">
+            <p className="text-[13px] text-[#4A4A4A]">No previous runs yet</p>
+            <p className="text-[12px] text-[#3A3A3A] mt-1">Completed validations will appear here</p>
+          </div>
+        ) : (
           <div className="space-y-2">
             {runs.map(run => {
               const validPct = run.total > 0 ? Math.round((run.valid_count / run.total) * 100) : 0
@@ -364,7 +363,7 @@ export default function EmailValidator() {
                         <Clock size={10} />
                         {date.toLocaleDateString()} {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
-                      <span className="text-[11px] text-[#4A4A4A]">{run.total} emails</span>
+                      <span className="text-[11px] text-[#4A4A4A]">{run.total.toLocaleString()} emails</span>
                       <span className="text-[11px] text-[#22c55e]">{validPct}% valid</span>
                     </div>
                   </div>
@@ -380,8 +379,8 @@ export default function EmailValidator() {
               )
             })}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </section>
   )
 }
