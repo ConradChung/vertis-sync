@@ -3,6 +3,17 @@ import { createClient } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
 
+async function sendTelegram(text: string) {
+  const token = process.env.TELEGRAM_BOT_TOKEN
+  const chatId = process.env.TELEGRAM_CHAT_ID
+  if (!token || !chatId) return
+  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text }),
+  }).catch(() => {})
+}
+
 async function triggerWebhooks(payload: Record<string, unknown>) {
   const notionKey = process.env.NOTION_API_KEY
   const dbId = process.env.NOTION_DATABASE_ID
@@ -80,6 +91,8 @@ export async function POST(request: NextRequest) {
     )
     if (e1) return NextResponse.json({ error: e1.message }, { status: 500 })
     await supabase.from('profiles').update({ onboarding_stage: 2 }).eq('id', user.id)
+    const { data: p1 } = await supabase.from('profiles').select('company_name').eq('id', user.id).single()
+    sendTelegram(`✅ ${p1?.company_name || 'A client'} completed Stage 1 — Inbox Setup`)
   } else if (stage === 2) {
     const { error: e2 } = await supabase.from('stage2_onboarding').upsert(
       { ...data, client_id: user.id, completed: true },
@@ -87,6 +100,8 @@ export async function POST(request: NextRequest) {
     )
     if (e2) return NextResponse.json({ error: e2.message }, { status: 500 })
     await supabase.from('profiles').update({ onboarding_stage: 3 }).eq('id', user.id)
+    const { data: p2 } = await supabase.from('profiles').select('company_name').eq('id', user.id).single()
+    sendTelegram(`✅ ${p2?.company_name || 'A client'} completed Stage 2 — Questionnaire`)
   } else if (stage === 3) {
     const { error: e3 } = await supabase.from('onboarding_forms').upsert(
       { ...data, client_id: user.id, completed: true, completed_at: new Date().toISOString() },
@@ -97,6 +112,8 @@ export async function POST(request: NextRequest) {
 
     // Fetch profile for company name
     const { data: profile } = await supabase.from('profiles').select('company_name').eq('id', user.id).single()
+
+    sendTelegram(`✅ ${profile?.company_name || 'A client'} completed Stage 3 — ICP Form. Onboarding complete! 🎉`)
 
     // Trigger Notion + n8n (non-blocking)
     triggerWebhooks({ ...data, client_id: user.id, company_name: profile?.company_name }).catch(() => {})
