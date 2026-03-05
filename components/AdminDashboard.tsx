@@ -272,8 +272,8 @@ export default function AdminDashboard() {
 
   return (
     <div className="flex h-screen bg-[#0A0A0A] overflow-hidden">
-      <Sidebar animate={true}>
-        <SidebarBody className="!bg-[#0A0A0A] !border-r !border-[#1E1E1E] justify-between gap-8">
+      <Sidebar animate={false}>
+        <SidebarBody className="!bg-[#0A0A0A] !border-r !border-[#1E1E1E] !w-[220px] justify-between gap-8">
           <div className="flex flex-col flex-1 overflow-y-auto overflow-x-hidden gap-0.5">
             <SidebarLogo />
             <div className="mt-2 flex flex-col gap-0.5">
