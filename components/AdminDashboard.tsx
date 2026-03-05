@@ -57,7 +57,7 @@ function SidebarLogo() {
         alt="NorthStar"
         width={28}
         height={28}
-        className="shrink-0"
+        className="shrink-0 rounded-lg"
       />
       <motion.span
         animate={{
