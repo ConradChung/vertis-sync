@@ -194,9 +194,9 @@ export default function ClientDashboard({
   ]
 
   return (
-    <div className="flex h-screen bg-[#0A0A0A] overflow-hidden">
+    <div className="flex h-screen bg-[#0A0A0A] overflow-hidden p-3 gap-3">
       <Sidebar animate={false}>
-        <SidebarBody className="!bg-[#0A0A0A] !border-r !border-[#1E1E1E] !w-[220px] justify-between gap-8">
+        <SidebarBody className="!bg-[#111111] !border !border-[#1E1E1E] !w-[220px] !rounded-2xl !h-full justify-between gap-8">
           <div className="flex flex-col flex-1 overflow-y-auto overflow-x-hidden gap-0.5">
             <SidebarLogo />
             <div className="mt-2 flex flex-col gap-0.5">
@@ -220,7 +220,7 @@ export default function ClientDashboard({
       </Sidebar>
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto bg-[#0A0A0A]">
+      <main className="flex-1 overflow-y-auto bg-[#0A0A0A] rounded-2xl">
         <AnimatePresence mode="wait">
           {activeTab === 'onboarding' && (
             <motion.div

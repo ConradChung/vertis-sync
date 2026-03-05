@@ -247,10 +247,13 @@ export default function AdminDashboard() {
 
   const loadStageData = async (clientId: string) => {
     const [s1, s2, s3] = await Promise.all([
-      supabase.from('stage1_onboarding').select('*').eq('client_id', clientId).single(),
-      supabase.from('stage2_onboarding').select('*').eq('client_id', clientId).single(),
-      supabase.from('onboarding_forms').select('*').eq('client_id', clientId).single(),
+      supabase.from('stage1_onboarding').select('*').eq('client_id', clientId).maybeSingle(),
+      supabase.from('stage2_onboarding').select('*').eq('client_id', clientId).maybeSingle(),
+      supabase.from('onboarding_forms').select('*').eq('client_id', clientId).maybeSingle(),
     ])
+    if (s1.error) console.error('stage1 error:', s1.error)
+    if (s2.error) console.error('stage2 error:', s2.error)
+    if (s3.error) console.error('stage3 error:', s3.error)
     setStageData({ stage1: s1.data, stage2: s2.data, stage3: s3.data })
   }
 
@@ -271,9 +274,9 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="flex h-screen bg-[#0A0A0A] overflow-hidden">
+    <div className="flex h-screen bg-[#0A0A0A] overflow-hidden p-3 gap-3">
       <Sidebar animate={false}>
-        <SidebarBody className="!bg-[#0A0A0A] !border-r !border-[#1E1E1E] !w-[220px] justify-between gap-8">
+        <SidebarBody className="!bg-[#111111] !border !border-[#1E1E1E] !w-[220px] !rounded-2xl !h-full justify-between gap-8">
           <div className="flex flex-col flex-1 overflow-y-auto overflow-x-hidden gap-0.5">
             <SidebarLogo />
             <div className="mt-2 flex flex-col gap-0.5">
@@ -293,7 +296,7 @@ export default function AdminDashboard() {
       </Sidebar>
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto bg-[#0A0A0A]">
+      <main className="flex-1 overflow-y-auto bg-[#0A0A0A] rounded-2xl">
         <AnimatePresence mode="wait">
 
           {/* ── Clients ── */}
