@@ -124,3 +124,23 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Clean thin scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #2A2A2A;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3A3A3A;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2A2A2A transparent;
+}
