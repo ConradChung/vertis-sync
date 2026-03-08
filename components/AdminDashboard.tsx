@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils'
 import { Sidebar, SidebarBody, useSidebar } from '@/components/ui/sidebar'
 import CampaignAnalytics from '@/components/CampaignAnalytics'
 import EmailValidator from '@/components/EmailValidator'
+import ClientNextSteps from '@/components/ClientNextSteps'
 
 interface Client {
   id: string
@@ -35,14 +36,6 @@ interface Campaign {
   status: string
 }
 
-interface OnboardingStep {
-  id: string
-  client_id: string
-  step_title: string
-  step_description: string
-  completed: boolean
-  order: number
-}
 
 type Section = 'clients' | 'campaigns' | 'onboarding' | 'onboarding-data' | 'email-validator'
 
@@ -149,15 +142,14 @@ const STAGE_STEPS: string[] = ['Inbox Setup', 'Questionnaire', 'ICP Form']
 export default function AdminDashboard() {
   const [clients, setClients] = useState<Client[]>([])
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
-  const [onboardingSteps, setOnboardingSteps] = useState<OnboardingStep[]>([])
   const [selectedClient, setSelectedClient] = useState<string | null>(null)
   const [showCreateClient, setShowCreateClient] = useState(false)
   const [showAddCampaign, setShowAddCampaign] = useState(false)
-  const [showAddStep, setShowAddStep] = useState(false)
   const [activeSection, setActiveSection] = useState<Section>('clients')
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
   const [docuSignInputs, setDocuSignInputs] = useState<Record<string, string>>({})
   const [onboardingDataClientId, setOnboardingDataClientId] = useState<string>('')
+  const [checklistClientId, setChecklistClientId] = useState<string>('')
   const [stageData, setStageData] = useState<{ stage1: Record<string, unknown> | null; stage2: Record<string, unknown> | null; stage3: Record<string, unknown> | null }>({ stage1: null, stage2: null, stage3: null })
 
   const router = useRouter()
@@ -166,7 +158,6 @@ export default function AdminDashboard() {
   useEffect(() => {
     loadClients()
     loadCampaigns()
-    loadOnboardingSteps()
   }, [])
 
   const loadClients = async () => {
@@ -177,11 +168,6 @@ export default function AdminDashboard() {
   const loadCampaigns = async () => {
     const { data } = await supabase.from('campaigns').select('*').order('created_at', { ascending: false })
     if (data) setCampaigns(data)
-  }
-
-  const loadOnboardingSteps = async () => {
-    const { data } = await supabase.from('onboarding_steps').select('*').order('client_id', { ascending: true }).order('order', { ascending: true })
-    if (data) setOnboardingSteps(data)
   }
 
   const handleLogout = async () => {
@@ -224,28 +210,6 @@ export default function AdminDashboard() {
     ;(e.target as HTMLFormElement).reset()
   }
 
-  const handleAddStep = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    const fd = new FormData(e.currentTarget)
-    const { error } = await supabase.from('onboarding_steps').insert({
-      client_id: fd.get('client_id'),
-      step_title: fd.get('step_title'),
-      step_description: fd.get('step_description'),
-      order: parseInt(fd.get('order') as string),
-      completed: false,
-    })
-    if (error) { alert(`Error: ${error.message}`); return }
-    setShowAddStep(false)
-    loadOnboardingSteps()
-    ;(e.target as HTMLFormElement).reset()
-  }
-
-  const toggleStepCompletion = async (stepId: string, current: boolean) => {
-    const { error } = await supabase.from('onboarding_steps').update({ completed: !current }).eq('id', stepId)
-    if (error) { alert(`Error: ${error.message}`); return }
-    loadOnboardingSteps()
-  }
-
   const saveDocuSignUrl = async (clientId: string, url: string) => {
     await supabase.from('profiles').update({ docusign_url: url || null }).eq('id', clientId)
     setClients(prev => prev.map(c => c.id === clientId ? { ...c, docusign_url: url || null } : c))
@@ -264,7 +228,6 @@ export default function AdminDashboard() {
   }
 
   const filteredCampaigns = selectedClient ? campaigns.filter(c => c.client_id === selectedClient) : campaigns
-  const filteredSteps = selectedClient ? onboardingSteps.filter(s => s.client_id === selectedClient) : onboardingSteps
 
   const navItems: { id: Section; label: string; icon: React.ReactNode }[] = [
     { id: 'clients', label: 'Clients', icon: <Users size={18} /> },
@@ -449,63 +412,35 @@ export default function AdminDashboard() {
             </motion.div>
           )}
 
-          {/* ── Onboarding Steps ── */}
+          {/* ── Client Next Steps ── */}
           {activeSection === 'onboarding' && (
             <motion.div key="onboarding" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
               className="max-w-3xl mx-auto px-6 py-8">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-base font-medium text-white">Client Next Steps</h2>
-                <button onClick={() => setShowAddStep(v => !v)} className={btnPrimary}>
-                  Add Step
-                </button>
+              <div className="mb-6">
+                <h2 className="text-base font-medium text-white mb-4">Client Next Steps</h2>
+                <select
+                  value={checklistClientId}
+                  onChange={e => setChecklistClientId(e.target.value)}
+                  className={inputCls}
+                  style={{ maxWidth: 280 }}
+                >
+                  <option value="">Select a client</option>
+                  {clients.map(c => <option key={c.id} value={c.id}>{c.company_name || c.email}</option>)}
+                </select>
               </div>
 
-              {showAddStep && (
-                <form onSubmit={handleAddStep} className="mb-5 p-5 border border-[#1E1E1E] rounded-xl space-y-3">
-                  <select name="client_id" required className={inputCls}>
-                    <option value="">Select Client</option>
-                    {clients.map(c => <option key={c.id} value={c.id}>{c.company_name || c.email}</option>)}
-                  </select>
-                  <input name="step_title" type="text" placeholder="Step Title" required className={inputCls} />
-                  <textarea name="step_description" placeholder="Step Description" rows={3}
-                    className={`${inputCls} resize-none`} />
-                  <input name="order" type="number" placeholder="Order" required min="1" className={inputCls} />
-                  <button type="submit" className={`${btnPrimary} w-full`}>Add Step</button>
-                </form>
-              )}
-
-              <div className="space-y-1">
-                {filteredSteps.map(step => {
-                  const client = clients.find(c => c.id === step.client_id)
-                  return (
-                    <div key={step.id} className="px-4 py-3 rounded-lg hover:bg-[#111111] transition-colors">
-                      <div className="flex items-start gap-3">
-                        <button onClick={() => toggleStepCompletion(step.id, step.completed)}
-                          className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center transition-colors shrink-0 ${
-                            step.completed ? 'bg-[#5E6AD2] border-[#5E6AD2]' : 'border-[#3A3A3A] hover:border-[#5E6AD2]'
-                          }`}>
-                          {step.completed && (
-                            <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                            </svg>
-                          )}
-                        </button>
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-[13px] ${step.completed ? 'text-[#4A4A4A] line-through' : 'text-white'}`}>
-                            {step.step_title}
-                          </p>
-                          {step.step_description && (
-                            <p className="text-[12px] text-[#5A5A5A] mt-0.5">{step.step_description}</p>
-                          )}
-                          <p className="text-[11px] text-[#3A3A3A] mt-1">
-                            {client?.company_name || 'Unknown'} · #{step.order}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+              {checklistClientId && (() => {
+                const client = clients.find(c => c.id === checklistClientId)
+                const hasCampaign = campaigns.some(c => c.client_id === checklistClientId)
+                return (
+                  <ClientNextSteps
+                    clientId={checklistClientId}
+                    docusignUrl={client?.docusign_url ?? null}
+                    onboardingStage={client?.onboarding_stage ?? 0}
+                    hasCampaign={hasCampaign}
+                  />
+                )
+              })()}
             </motion.div>
           )}
 
