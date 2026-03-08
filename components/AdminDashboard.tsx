@@ -282,13 +282,13 @@ export default function AdminDashboard() {
       </Sidebar>
 
       {/* Main content */}
-      <main className="flex-1 overflow-hidden bg-[#0A0A0A] rounded-2xl">
+      <main className={`flex-1 bg-[#0A0A0A] rounded-2xl ${activeSection === 'onboarding' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
         <AnimatePresence mode="wait">
 
           {/* ── Clients ── */}
           {activeSection === 'clients' && (
             <motion.div key="clients" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
-              className="max-w-3xl mx-auto px-6 py-8 overflow-y-auto h-full">
+              className="max-w-3xl mx-auto px-6 py-8">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-base font-medium text-white">Clients</h2>
                 <button onClick={() => setShowCreateClient(v => !v)} className={btnPrimary}>
@@ -376,7 +376,7 @@ export default function AdminDashboard() {
           {/* ── Campaigns ── */}
           {activeSection === 'campaigns' && !selectedCampaign && (
             <motion.div key="campaigns" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
-              className="max-w-3xl mx-auto px-6 py-8 overflow-y-auto h-full">
+              className="max-w-3xl mx-auto px-6 py-8">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-base font-medium text-white">Campaigns</h2>
                 <button onClick={() => setShowAddCampaign(v => !v)} className={btnPrimary}>
@@ -420,7 +420,7 @@ export default function AdminDashboard() {
 
           {activeSection === 'campaigns' && selectedCampaign && (
             <motion.div key="campaign-detail" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
-              className="max-w-3xl mx-auto px-6 py-8 overflow-y-auto h-full">
+              className="max-w-3xl mx-auto px-6 py-8">
               <CampaignAnalytics
                 campaignId={selectedCampaign.instantly_campaign_id}
                 campaignName={selectedCampaign.campaign_name}
@@ -471,7 +471,7 @@ export default function AdminDashboard() {
           {/* ── Onboarding Data ── */}
           {activeSection === 'onboarding-data' && (
             <motion.div key="onboarding-data" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
-              className="max-w-3xl mx-auto px-6 py-8 overflow-y-auto h-full">
+              className="max-w-3xl mx-auto px-6 py-8">
               <div className="mb-6">
                 <h2 className="text-base font-medium text-white mb-4">Onboarding Data</h2>
                 <select
@@ -609,7 +609,7 @@ export default function AdminDashboard() {
           <motion.div
             animate={{ opacity: activeSection === 'email-validator' ? 1 : 0 }}
             transition={{ duration: 0.15 }}
-            className="max-w-3xl mx-auto px-6 py-8 overflow-y-auto h-full"
+            className="max-w-3xl mx-auto px-6 py-8"
           >
             <EmailValidator onStatusChange={setValidatorStatus} />
           </motion.div>
