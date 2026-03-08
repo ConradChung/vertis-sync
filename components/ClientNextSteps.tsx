@@ -222,8 +222,9 @@ export default function ClientNextSteps({ clientId, docusignUrl, onboardingStage
     load()
   }, [clientId, isAutoChecked])
 
-  // Auto fit-to-view on mount
+  // Auto fit-to-view once canvas is visible (after loading)
   useEffect(() => {
+    if (loading) return
     const el = containerRef.current
     if (!el) return
     const { width, height } = el.getBoundingClientRect()
@@ -231,7 +232,7 @@ export default function ClientNextSteps({ clientId, docusignUrl, onboardingStage
     const s = Math.min(width / CW, height / CH) * 0.9
     setScale(s)
     setPan({ x: (width - CW * s) / 2, y: (height - CH * s) / 2 })
-  }, [])
+  }, [loading])
 
   const toggle = async (n: ND) => {
     if (!n.checkKey) return
@@ -269,8 +270,10 @@ export default function ClientNextSteps({ clientId, docusignUrl, onboardingStage
     return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
   }, [])
 
-  // Non-passive wheel listener so preventDefault works
+  // Non-passive wheel listener — must re-attach after loading since containerRef
+  // is null during the loading state (early return skips the canvas div render)
   useEffect(() => {
+    if (loading) return
     const el = containerRef.current
     if (!el) return
     const handler = (e: WheelEvent) => {
@@ -280,7 +283,7 @@ export default function ClientNextSteps({ clientId, docusignUrl, onboardingStage
     }
     el.addEventListener('wheel', handler, { passive: false })
     return () => el.removeEventListener('wheel', handler)
-  }, [])
+  }, [loading])
 
   const fitToView = () => {
     const el = containerRef.current
