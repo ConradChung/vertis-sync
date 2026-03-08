@@ -236,11 +236,18 @@ export default function ClientNextSteps({ clientId, docusignUrl, onboardingStage
     return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
   }, [])
 
-  const onWheel = (e: React.WheelEvent) => {
-    e.preventDefault()
-    const factor = e.deltaY > 0 ? 0.92 : 1.08
-    setScale(s => Math.max(0.05, Math.min(3, s * factor)))
-  }
+  // Native (non-passive) wheel listener so preventDefault actually works
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const handler = (e: WheelEvent) => {
+      e.preventDefault()
+      const factor = e.deltaY > 0 ? 0.92 : 1.08
+      setScale(s => Math.max(0.05, Math.min(3, s * factor)))
+    }
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
+  }, [])
 
   const fitToView = () => {
     const el = containerRef.current
@@ -263,7 +270,6 @@ export default function ClientNextSteps({ clientId, docusignUrl, onboardingStage
       className="relative w-full h-full overflow-hidden bg-[#0A0A0A]"
       style={{ cursor: 'grab' }}
       onMouseDown={onContainerMouseDown}
-      onWheel={onWheel}
     >
       {/* Controls */}
       <div className="absolute top-3 right-3 z-10 flex flex-col gap-1">

@@ -151,7 +151,13 @@ export default function AdminDashboard() {
   const [selectedClient, setSelectedClient] = useState<string | null>(null)
   const [showCreateClient, setShowCreateClient] = useState(false)
   const [showAddCampaign, setShowAddCampaign] = useState(false)
-  const [activeSection, setActiveSection] = useState<Section>('clients')
+  const [activeSection, setActiveSection] = useState<Section>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('ns_active_section') as Section | null
+      if (saved) return saved
+    }
+    return 'clients'
+  })
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
   const [docuSignInputs, setDocuSignInputs] = useState<Record<string, string>>({})
   const [onboardingDataClientId, setOnboardingDataClientId] = useState<string>('')
@@ -239,6 +245,7 @@ export default function AdminDashboard() {
   const navigate = (section: Section) => {
     setActiveSection(section)
     setSelectedCampaign(null)
+    localStorage.setItem('ns_active_section', section)
   }
 
   return (
