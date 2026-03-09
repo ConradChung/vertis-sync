@@ -123,6 +123,8 @@
   html,
   body {
     @apply bg-[#0A0A0A] text-foreground;
+    overflow: hidden;
+    height: 100%;
   }
 }
 
