@@ -34,6 +34,7 @@ interface Client {
   created_at: string
   docusign_url: string | null
   onboarding_stage: number
+  company_logo_url: string | null
 }
 
 interface Campaign {
@@ -196,6 +197,7 @@ export default function AdminDashboard() {
   const [checklistClientId, setChecklistClientId] = useState<string>('')
   const [stageData, setStageData] = useState<{ stage1: Record<string, unknown> | null; stage2: Record<string, unknown> | null; stage3: Record<string, unknown> | null }>({ stage1: null, stage2: null, stage3: null })
   const [validatorStatus, setValidatorStatus] = useState<{ step: string; processed: number; total: number } | null>(null)
+  const [logoUploading, setLogoUploading] = useState<string | null>(null) // client id currently uploading
 
   const router = useRouter()
   const supabase = createClient()
@@ -258,6 +260,29 @@ export default function AdminDashboard() {
   const saveDocuSignUrl = async (clientId: string, url: string) => {
     await supabase.from('profiles').update({ docusign_url: url || null }).eq('id', clientId)
     setClients(prev => prev.map(c => c.id === clientId ? { ...c, docusign_url: url || null } : c))
+  }
+
+  const uploadLogo = async (clientId: string, file: File) => {
+    if (file.size > 512 * 1024) {
+      alert('Logo must be under 512 KB')
+      return
+    }
+    setLogoUploading(clientId)
+    const ext = file.name.split('.').pop()
+    const path = `${clientId}/logo.${ext}`
+    const { error: uploadError } = await supabase.storage
+      .from('logos')
+      .upload(path, file, { upsert: true })
+    if (uploadError) {
+      alert(`Upload failed: ${uploadError.message}`)
+      setLogoUploading(null)
+      return
+    }
+    const { data } = supabase.storage.from('logos').getPublicUrl(path)
+    const url = data.publicUrl
+    await supabase.from('profiles').update({ company_logo_url: url }).eq('id', clientId)
+    setClients(prev => prev.map(c => c.id === clientId ? { ...c, company_logo_url: url } : c))
+    setLogoUploading(null)
   }
 
   const loadStageData = async (clientId: string) => {
@@ -395,6 +420,47 @@ export default function AdminDashboard() {
                         {(docuSignInputs[client.id] ?? client.docusign_url) && (
                           <span className="text-[11px] text-[#2ECC71] flex items-center">✓</span>
                         )}
+                      </div>
+                      {/* Logo upload */}
+                      <div className="flex items-center gap-3">
+                        {client.company_logo_url ? (
+                          <img
+                            src={client.company_logo_url}
+                            alt="Logo"
+                            className="w-8 h-8 rounded-full object-cover border"
+                            style={{ borderColor: 'var(--border)' }}
+                          />
+                        ) : (
+                          <div
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-medium shrink-0"
+                            style={{ background: 'var(--surface-raised)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+                          >
+                            {(client.company_name?.[0] || '?').toUpperCase()}
+                          </div>
+                        )}
+                        <label
+                          className="flex-1 flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[12px] cursor-pointer transition-colors"
+                          style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+                        >
+                          {logoUploading === client.id ? (
+                            <span className="flex items-center gap-2">
+                              <span className="w-3 h-3 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+                              Uploading...
+                            </span>
+                          ) : (
+                            client.company_logo_url ? 'Replace logo' : 'Upload logo'
+                          )}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={e => {
+                              const file = e.target.files?.[0]
+                              if (file) uploadLogo(client.id, file)
+                              e.target.value = ''
+                            }}
+                          />
+                        </label>
                       </div>
                       {/* Stage progress bar */}
                       <div className="flex gap-1">
