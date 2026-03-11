@@ -10,10 +10,12 @@ import {
   BookOpen,
   BarChart2,
   LogOut,
+  Settings,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Sidebar, SidebarBody, useSidebar } from '@/components/ui/sidebar'
 import CampaignAnalytics from '@/components/CampaignAnalytics'
+import AccountSettings from '@/components/AccountSettings'
 import DocuSignSection from '@/components/onboarding/DocuSignSection'
 import StageProgress from '@/components/onboarding/StageProgress'
 import Stage1 from '@/components/onboarding/Stage1'
@@ -30,6 +32,7 @@ interface Profile {
   docusign_url: string | null
   onboarding_stage: number
   docusign_acknowledged: boolean
+  company_logo_url: string | null
 }
 
 interface Campaign {
@@ -39,7 +42,7 @@ interface Campaign {
   status: string
 }
 
-type Tab = 'onboarding' | 'modules' | 'analytics'
+type Tab = 'onboarding' | 'modules' | 'analytics' | 'settings'
 
 // ── Sidebar sub-components (must be inside SidebarProvider to use useSidebar) ──
 
@@ -195,6 +198,7 @@ export default function ClientDashboard({
     ...(hasAnalytics
       ? [{ id: 'analytics' as Tab, label: 'Analytics', icon: <BarChart2 size={18} /> }]
       : []),
+    { id: 'settings', label: 'Settings', icon: <Settings size={18} /> },
   ]
 
   return (
@@ -316,6 +320,18 @@ export default function ClientDashboard({
                 campaignId={activeCampaign.instantly_campaign_id}
                 campaignName={activeCampaign.campaign_name}
               />
+            </motion.div>
+          )}
+
+          {activeTab === 'settings' && (
+            <motion.div
+              key="settings"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+            >
+              <AccountSettings />
             </motion.div>
           )}
         </AnimatePresence>
