@@ -137,7 +137,10 @@ function SidebarUserFooter({
             className="w-7 h-7 rounded-full object-cover shrink-0"
           />
         ) : (
-          <div className="w-7 h-7 rounded-full bg-[#2A2A2A] flex items-center justify-center shrink-0 text-[11px] text-[var(--text-primary)] font-medium">
+          <div
+            className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-[11px] font-medium"
+            style={{ background: 'var(--surface-raised)', color: 'var(--text-primary)' }}
+          >
             {initial}
           </div>
         )}
