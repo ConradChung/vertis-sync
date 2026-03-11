@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
+
+export const runtime = 'edge'
 
 const MAILTESTER_API_KEY = process.env.MAILTESTER_API_KEY!
 const MAILTESTER_BASE_URL = 'https://happy.mailtester.ninja/ninja'
@@ -119,7 +121,10 @@ function sseEvent(data: object): Uint8Array {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    const supabase = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
     const formData = await request.formData()
     const file = formData.get('file') as File | null
     const columnOverride = formData.get('column') as string | null
