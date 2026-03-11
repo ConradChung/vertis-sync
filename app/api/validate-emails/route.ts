@@ -161,9 +161,12 @@ export async function POST(request: NextRequest) {
     const total = rows.length
     console.log(`[validate-emails] key present=${!!MAILTESTER_API_KEY}, column="${targetColumn}", rows=${total}`)
 
-    const stream = new ReadableStream({
-      async start(controller) {
-        controller.enqueue(sseEvent({ type: 'start', total }))
+    const { readable, writable } = new TransformStream()
+    const writer = writable.getWriter()
+
+    const run = async () => {
+      try {
+        await writer.write(sseEvent({ type: 'start', total }))
 
         const enrichedRows: string[][] = []
         let lastMilestoneSent = 0
@@ -172,7 +175,7 @@ export async function POST(request: NextRequest) {
           const email = rows[i][colIndex]?.trim() ?? ''
           const result = email ? await validateEmail(email) : { status: 'unknown' as ValidationStatus, debug: 'empty' }
           enrichedRows.push([...rows[i], result.status])
-          controller.enqueue(sseEvent({ type: 'progress', processed: i + 1, total, email, status: result.status, debug: result.debug }))
+          await writer.write(sseEvent({ type: 'progress', processed: i + 1, total, email, status: result.status, debug: result.debug }))
 
           const pct = Math.floor(((i + 1) / total) * 100)
           const milestone = Math.floor(pct / 10) * 10
@@ -182,7 +185,6 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Filter to valid rows only, strip the validation_status column
         const validRows = enrichedRows.filter(r => r[r.length - 1] === 'valid')
         const validCount = validRows.length
         const outputRows = validRows.map(r => r.slice(0, -1))
@@ -196,13 +198,18 @@ export async function POST(request: NextRequest) {
           supabase.from('email_validation_runs').insert({ id: runId, file_name: file.name, total, valid_count: validCount, storage_path: storagePath }),
         ])
 
-        controller.enqueue(sseEvent({ type: 'complete', csv, runId }))
+        await writer.write(sseEvent({ type: 'complete', csv, runId }))
         await sendTelegram(`100% complete — ${total} emails validated`)
-        controller.close()
-      },
-    })
+      } catch (e) {
+        await writer.write(sseEvent({ type: 'error', message: String(e) }))
+      } finally {
+        await writer.close()
+      }
+    }
 
-    return new Response(stream, {
+    run()
+
+    return new Response(readable, {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
