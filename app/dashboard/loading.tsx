@@ -31,8 +31,6 @@ export default function Loading() {
           <motion.div
             key={i}
             className="absolute"
-            originX={0.5}
-            originY={0.5}
             style={{
               width: p.size,
               height: p.size,
