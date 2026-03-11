@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion'
 import Image from 'next/image'
+import { useTheme } from '@/contexts/ThemeContext'
 
 const PARTICLES = [
   { radius: 36, duration: 2.8, delay: 0,    size: 3 },
@@ -12,6 +13,11 @@ const PARTICLES = [
 ]
 
 export default function Loading() {
+  const { themeId } = useTheme()
+  const logoSrc = (themeId === 'frost' || themeId === 'stark')
+    ? '/northstar-logo-dark.png'
+    : '/northstar-logo-white.png'
+
   return (
     <div
       className="fixed inset-0 flex flex-col items-center justify-center gap-8 z-50"
@@ -66,7 +72,7 @@ export default function Loading() {
           }}
         >
           <Image
-            src="/northstar-logo-white.png"
+            src={logoSrc}
             alt="Northstar"
             width={40}
             height={40}
