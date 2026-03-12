@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 
-export const runtime = 'edge'
+export const runtime = 'nodejs'
+export const maxDuration = 300
 
 const MAILTESTER_API_KEY = process.env.MAILTESTER_API_KEY!
 const MAILTESTER_BASE_URL = 'https://happy.mailtester.ninja/ninja'
@@ -166,18 +167,43 @@ export async function POST(request: NextRequest) {
 
     const run = async () => {
       try {
+        // 16 KB SSE comment to bust Vercel's response-buffer threshold so the
+        // start event is flushed to the client immediately, even for large CSVs.
+        const flush = new TextEncoder().encode(': ' + ' '.repeat(1024 * 16) + '\n\n')
+        await writer.write(flush)
         await writer.write(sseEvent({ type: 'start', total }))
 
-        const enrichedRows: string[][] = []
+        const enrichedRows: string[][] = new Array(rows.length)
+        let processed = 0
         let lastMilestoneSent = 0
 
-        for (let i = 0; i < rows.length; i++) {
-          const email = rows[i][colIndex]?.trim() ?? ''
-          const result = email ? await validateEmail(email) : { status: 'unknown' as ValidationStatus, debug: 'empty' }
-          enrichedRows.push([...rows[i], result.status])
-          await writer.write(sseEvent({ type: 'progress', processed: i + 1, total, email, status: result.status, debug: result.debug }))
+        // Process in parallel batches of 11 (rate limit: 11 per 10 s).
+        // Each batch fires concurrently then we wait for all before the next.
+        const BATCH = 11
+        for (let batchStart = 0; batchStart < rows.length; batchStart += BATCH) {
+          const batchEnd = Math.min(batchStart + BATCH, rows.length)
+          const batchPromises = []
 
-          const pct = Math.floor(((i + 1) / total) * 100)
+          for (let i = batchStart; i < batchEnd; i++) {
+            const email = rows[i][colIndex]?.trim() ?? ''
+            batchPromises.push(
+              (email ? validateEmail(email) : Promise.resolve({ status: 'unknown' as ValidationStatus, debug: 'empty' }))
+                .then(async result => {
+                  enrichedRows[i] = [...rows[i], result.status]
+                  processed++
+                  await writer.write(sseEvent({ type: 'progress', processed, total, email, status: result.status, debug: result.debug }))
+                })
+            )
+          }
+
+          await Promise.all(batchPromises)
+
+          // Respect rate limit: 11 per 10 s → wait before next batch
+          if (batchEnd < rows.length) {
+            await new Promise(r => setTimeout(r, 10_000))
+          }
+
+          const pct = Math.floor((processed / total) * 100)
           const milestone = Math.floor(pct / 10) * 10
           if (milestone > lastMilestoneSent && milestone < 100) {
             lastMilestoneSent = milestone
