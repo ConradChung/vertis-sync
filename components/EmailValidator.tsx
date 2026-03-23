@@ -7,10 +7,14 @@ import { createClient } from '@/lib/supabase/client'
 
 interface ValidationRun {
   id: string
-  file_name: string
-  total: number
+  filename: string
+  total_rows: number
   valid_count: number
-  storage_path: string
+  invalid_count: number
+  processed_rows: number
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  error_message: string | null
+  storage_path: string | null
   created_at: string
 }
 
@@ -98,6 +102,7 @@ export default function EmailValidator({ onStatusChange }: Props) {
   const [progress, setProgress] = useState<Progress>({ processed: 0, total: 0 })
   const fileRef = useRef<File | null>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const jobIdRef = useRef<string | null>(null)
   const [fileName, setFileName] = useState<string>('')
   const [validCount, setValidCount] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
@@ -125,28 +130,49 @@ export default function EmailValidator({ onStatusChange }: Props) {
 
   const loadRuns = useCallback(async () => {
     const { data } = await supabase
-      .from('email_validation_runs')
+      .from('validation_jobs')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(20)
-    if (data) setRuns(data)
+    if (data) setRuns(data as ValidationRun[])
   }, [supabase])
 
   useEffect(() => { loadRuns() }, [loadRuns])
 
   async function handleDownload(run: ValidationRun) {
     setDownloadingId(run.id)
-    const { data, error } = await supabase.storage
-      .from('validation-results')
-      .createSignedUrl(run.storage_path, 3600)
-    setDownloadingId(null)
-    if (error || !data?.signedUrl) return
-    const a = document.createElement('a')
-    a.href = data.signedUrl
-    a.download = run.file_name.replace('.csv', '') + '_validated.csv'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+
+    if (run.storage_path) {
+      const { data, error: urlError } = await supabase.storage
+        .from('validation-results')
+        .createSignedUrl(run.storage_path, 3600)
+      setDownloadingId(null)
+      if (urlError || !data?.signedUrl) return
+      const a = document.createElement('a')
+      a.href = data.signedUrl
+      a.download = run.filename.replace(/\.csv$/i, '') + '_validated.csv'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    } else {
+      try {
+        const res = await fetch(`/api/validate/results?job_id=${run.id}`)
+        setDownloadingId(null)
+        if (!res.ok) return
+        const csv = await res.text()
+        const blob = new Blob([csv], { type: 'text/csv' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = run.filename.replace(/\.csv$/i, '') + '_validated.csv'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      } catch {
+        setDownloadingId(null)
+      }
+    }
   }
 
   async function submit(file: File, column?: string) {
@@ -161,7 +187,7 @@ export default function EmailValidator({ onStatusChange }: Props) {
     if (column) formData.append('column', column)
 
     try {
-      const res = await fetch('/api/validate-emails', { method: 'POST', body: formData })
+      const res = await fetch('/api/validate/start', { method: 'POST', body: formData })
       const json = await res.json()
 
       if (json.status === 'ambiguous') {
@@ -175,40 +201,51 @@ export default function EmailValidator({ onStatusChange }: Props) {
         return
       }
 
-      const { runId, total } = json
+      const { job_id, total } = json
+      jobIdRef.current = job_id
       setProgress({ processed: 0, total })
 
-      // Poll Supabase-backed status endpoint every 3 s
-      // n8n writes progress to DB after each email — no SSE needed
+      // Poll status endpoint every 2s
       pollingRef.current = setInterval(async () => {
         try {
-          const pollRes = await fetch(`/api/validate-emails/status/${runId}`)
+          const pollRes = await fetch(`/api/validate/status?job_id=${job_id}`)
           const poll = await pollRes.json()
 
-          setProgress({ processed: poll.processed ?? 0, total: poll.total })
+          setProgress({ processed: poll.processed_rows ?? 0, total: poll.total_rows })
           setValidCount(poll.valid_count ?? 0)
-          setTotalCount(poll.total)
+          setTotalCount(poll.total_rows)
 
-          if (poll.status === 'complete') {
+          if (poll.status === 'completed') {
             clearInterval(pollingRef.current!)
             pollingRef.current = null
-            // Fetch validated CSV text so download/copy-for-clay still works
-            if (poll.signedUrl) {
-              const csvRes = await fetch(poll.signedUrl)
+
+            if (poll.storage_path) {
+              // Fetch via signed URL
+              const { data } = await supabase.storage
+                .from('validation-results')
+                .createSignedUrl(poll.storage_path, 3600)
+              if (data?.signedUrl) {
+                const csvRes = await fetch(data.signedUrl)
+                setValidCsv(await csvRes.text())
+              }
+            } else {
+              // Fetch from results API
+              const csvRes = await fetch(`/api/validate/results?job_id=${job_id}`)
               setValidCsv(await csvRes.text())
             }
+
             setStep('done')
             loadRuns()
-          } else if (poll.status === 'error') {
+          } else if (poll.status === 'failed') {
             clearInterval(pollingRef.current!)
             pollingRef.current = null
-            setError('Validation failed in n8n. Check n8n logs.')
+            setError(poll.error_message || 'Validation failed in Edge Function.')
             setStep('error')
           }
         } catch {
           // transient poll error — keep retrying
         }
-      }, 3000)
+      }, 2000)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Network error')
       setStep('error')
@@ -270,10 +307,21 @@ export default function EmailValidator({ onStatusChange }: Props) {
 
   async function copyRunForClay(run: ValidationRun) {
     setCopyingId(run.id)
-    const { data } = await supabase.storage.from('validation-results').createSignedUrl(run.storage_path, 60)
-    if (!data?.signedUrl) { setCopyingId(null); return }
-    const res = await fetch(data.signedUrl)
-    const csv = await res.text()
+    let csv = ''
+
+    if (run.storage_path) {
+      const { data } = await supabase.storage
+        .from('validation-results')
+        .createSignedUrl(run.storage_path, 60)
+      if (!data?.signedUrl) { setCopyingId(null); return }
+      const res = await fetch(data.signedUrl)
+      csv = await res.text()
+    } else {
+      const res = await fetch(`/api/validate/results?job_id=${run.id}`)
+      if (!res.ok) { setCopyingId(null); return }
+      csv = await res.text()
+    }
+
     await navigator.clipboard.writeText(csvToTsv(csv))
     setCopyingId(null)
     setCopiedId(run.id)
@@ -282,6 +330,7 @@ export default function EmailValidator({ onStatusChange }: Props) {
 
   function reset() {
     if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null }
+    jobIdRef.current = null
     setStep('upload')
     setAmbiguousColumns([])
     setError('')
@@ -360,7 +409,7 @@ export default function EmailValidator({ onStatusChange }: Props) {
               <div className="h-full bg-white rounded-full transition-all duration-300" style={{ width: `${pct}%` }} />
             </div>
             <p className="text-[11px] text-[var(--text-placeholder)]">
-              {progress.total > 0 ? `${pct}% complete — running on n8n, safe to close this tab` : 'Queued — waiting for n8n to start…'}
+              {progress.total > 0 ? `${pct}% complete — running on Supabase Edge Function, safe to close this tab` : 'Queued — waiting for Supabase Edge Function to start…'}
             </p>
           </div>
         )}
@@ -432,34 +481,58 @@ export default function EmailValidator({ onStatusChange }: Props) {
         ) : (
           <div className="space-y-2">
             {runs.map(run => {
-              const validPct = run.total > 0 ? Math.round((run.valid_count / run.total) * 100) : 0
+              const validPct = run.total_rows > 0 ? Math.round((run.valid_count / run.total_rows) * 100) : 0
               const date = new Date(run.created_at)
+              const isCompleted = run.status === 'completed'
               return (
                 <div key={run.id} className="flex items-center justify-between gap-4 border border-[var(--border)] rounded-xl bg-[var(--surface-raised)] px-4 py-3">
                   <div className="flex-1 min-w-0">
-                    <p className="text-[13px] text-[var(--text-primary)] truncate">{run.file_name}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-[13px] text-[var(--text-primary)] truncate">{run.filename}</p>
+                      {run.status === 'processing' && (
+                        <span className="flex items-center gap-1 shrink-0">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                          <span className="text-[11px] text-amber-400">Validating…</span>
+                        </span>
+                      )}
+                      {run.status === 'pending' && (
+                        <span className="flex items-center gap-1 shrink-0">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-placeholder)]" />
+                          <span className="text-[11px] text-[var(--text-placeholder)]">Queued</span>
+                        </span>
+                      )}
+                      {run.status === 'failed' && (
+                        <span className="flex items-center gap-1 shrink-0" title={run.error_message ?? ''}>
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                          <span className="text-[11px] text-red-400">Failed</span>
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-3 mt-0.5">
                       <span className="text-[11px] text-[var(--text-placeholder)] flex items-center gap-1">
                         <Clock size={10} />
                         {date.toLocaleDateString()} {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
-                      <span className="text-[11px] text-[var(--text-placeholder)]">{run.total.toLocaleString()} emails</span>
-                      <span className="text-[11px] text-[#22c55e]">{validPct}% valid</span>
+                      <span className="text-[11px] text-[var(--text-placeholder)]">{run.total_rows.toLocaleString()} emails</span>
+                      {isCompleted && <span className="text-[11px] text-[#22c55e]">{validPct}% valid</span>}
                     </div>
+                    {run.status === 'failed' && run.error_message && (
+                      <p className="text-[11px] text-red-400/70 mt-0.5 truncate">{run.error_message}</p>
+                    )}
                   </div>
                   <div className="shrink-0 flex items-center gap-2">
                     <button
                       onClick={() => copyRunForClay(run)}
-                      disabled={copyingId === run.id}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] text-[12px] text-[var(--text-secondary)] hover:border-[var(--border)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-40"
+                      disabled={!isCompleted || copyingId === run.id}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] text-[12px] text-[var(--text-secondary)] hover:border-[var(--border)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {copiedId === run.id ? <ClipboardCheck size={12} className="text-[#22c55e]" /> : <Clipboard size={12} />}
                       {copyingId === run.id ? 'Copying…' : copiedId === run.id ? 'Copied!' : 'Copy for Clay'}
                     </button>
                     <button
                       onClick={() => handleDownload(run)}
-                      disabled={downloadingId === run.id}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] text-[12px] text-[var(--text-secondary)] hover:border-[var(--border)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-40"
+                      disabled={!isCompleted || downloadingId === run.id}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] text-[12px] text-[var(--text-secondary)] hover:border-[var(--border)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <Download size={12} />
                       {downloadingId === run.id ? 'Getting link…' : 'Download'}
