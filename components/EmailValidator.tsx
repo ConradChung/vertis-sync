@@ -104,6 +104,7 @@ export default function EmailValidator({ onStatusChange }: Props) {
   const fileRef = useRef<File | null>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const jobIdRef = useRef<string | null>(null)
+  const storagePathRef = useRef<string | null>(null)
   const [fileName, setFileName] = useState<string>('')
   const [validCount, setValidCount] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
@@ -191,17 +192,28 @@ export default function EmailValidator({ onStatusChange }: Props) {
     setValidCount(0)
     setTotalCount(0)
 
-    const formData = new FormData()
-    formData.append('file', file)
-    if (column) formData.append('column', column)
-
     try {
-      const res = await fetch('/api/validate/start', { method: 'POST', body: formData })
-      if (!res.ok && !res.headers.get('content-type')?.includes('application/json')) {
-        setError(`Upload failed (${res.status} ${res.statusText || 'error'})`)
-        setStep('error')
-        return
+      // Upload CSV directly to Supabase Storage — bypasses Vercel's 4.5MB body limit entirely.
+      // storagePathRef persists across ambiguous-column retries so we only upload once.
+      if (!storagePathRef.current) {
+        const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.csv`
+        const { error: uploadError } = await supabase.storage
+          .from('raw-uploads')
+          .upload(path, file, { contentType: 'text/csv' })
+        if (uploadError) {
+          setError(`Failed to upload file: ${uploadError.message}`)
+          setStep('error')
+          return
+        }
+        storagePathRef.current = path
       }
+
+      // Tiny JSON request to Vercel — no file data, just the storage path
+      const res = await fetch('/api/validate/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storage_path: storagePathRef.current, filename: file.name, column }),
+      })
       const json = await res.json()
 
       if (json.status === 'ambiguous') {
@@ -345,6 +357,7 @@ export default function EmailValidator({ onStatusChange }: Props) {
   function reset() {
     if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null }
     jobIdRef.current = null
+    storagePathRef.current = null
     setStep('upload')
     setAmbiguousColumns([])
     setError('')

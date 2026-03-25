@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 
-// Edge Runtime: no 4.5MB body size limit — streams large CSV uploads without rejection
-export const runtime = 'edge'
-
 const TIER1_NAMES = new Set(['email', 'work_email', 'business_email'])
 const PERSONAL_SUBSTRINGS = ['personal']
 
@@ -80,15 +77,30 @@ function createServiceClient() {
 
 export async function POST(request: NextRequest) {
   try {
-    const formData = await request.formData()
-    const file = formData.get('file') as File | null
-    const columnOverride = formData.get('column') as string | null
-
-    if (!file) {
-      return NextResponse.json({ error: 'No file provided' }, { status: 400 })
+    // Accepts JSON: { storage_path, filename, column? }
+    // CSV is pre-uploaded by the client directly to Supabase Storage,
+    // so this request is tiny and never hits Vercel's 4.5MB body limit.
+    const body = await request.json()
+    const { storage_path, filename, column: columnOverride } = body as {
+      storage_path: string
+      filename: string
+      column?: string
     }
 
-    const text = await file.text()
+    if (!storage_path || !filename) {
+      return NextResponse.json({ error: 'Missing storage_path or filename' }, { status: 400 })
+    }
+
+    const supabase = createServiceClient()
+    const { data: blob, error: dlError } = await supabase.storage
+      .from('raw-uploads')
+      .download(storage_path)
+
+    if (dlError || !blob) {
+      return NextResponse.json({ error: `Failed to read uploaded file: ${dlError?.message}` }, { status: 500 })
+    }
+
+    const text = await blob.text()
     const { headers, rows } = parseCSV(text)
 
     if (headers.length === 0) {
@@ -115,15 +127,12 @@ export async function POST(request: NextRequest) {
     const colIndex = headers.indexOf(targetColumn)
     const job_id = crypto.randomUUID()
 
-    // Use service role client for inserts to bypass RLS
-    const supabase = createServiceClient()
-
     // Insert validation_jobs row
     const { error: jobError } = await supabase
       .from('validation_jobs')
       .insert({
         id: job_id,
-        filename: file.name,
+        filename,
         total_rows: rows.length,
         processed_rows: 0,
         valid_count: 0,
