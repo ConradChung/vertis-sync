@@ -48,6 +48,7 @@ interface ValidationRow {
   row_index: number
   status: string
   validation_result: unknown
+  row_data: Record<string, unknown> | null
 }
 
 interface ValidationJob {
@@ -60,6 +61,7 @@ interface ValidationJob {
   status: string
   error_message: string | null
   storage_path: string | null
+  source: string
 }
 
 async function validateEmail(
@@ -109,7 +111,7 @@ async function processJob(jobId: string): Promise<void> {
   // 2. Fetch job metadata for total_rows
   const jobs = (await supabaseRequest(
     'GET',
-    `validation_jobs?id=eq.${jobId}&select=id,total_rows,processed_rows,valid_count,invalid_count`,
+    `validation_jobs?id=eq.${jobId}&select=id,total_rows,processed_rows,valid_count,invalid_count,source`,
   )) as ValidationJob[]
 
   if (!jobs || jobs.length === 0) {
@@ -180,17 +182,36 @@ async function processJob(jobId: string): Promise<void> {
     }
   }
 
-  // 4. Build valid-only CSV and upload to Storage
+  // 4. Build CSV and upload to Storage
   const validRows = (await supabaseRequest(
     'GET',
-    `validation_rows?job_id=eq.${jobId}&status=eq.valid&order=row_index.asc`,
+    `validation_rows?job_id=eq.${jobId}&status=eq.valid&order=row_index.asc&select=email,row_data`,
   )) as ValidationRow[]
 
-  const csvLines: string[] = ['email']
-  for (const row of validRows) {
-    csvLines.push(row.email)
+  let csvContent: string
+
+  if (job.source === 'apify' && validRows.length > 0 && validRows[0].row_data) {
+    // Full-column CSV: all row_data fields, nested objects JSON-stringified
+    const allKeys = Object.keys(validRows[0].row_data)
+    const headers = allKeys.join(',')
+    const dataLines = validRows.map(row => {
+      return allKeys.map(key => {
+        const val = row.row_data![key]
+        if (val === null || val === undefined) return ''
+        if (typeof val === 'object') return `"${JSON.stringify(val).replace(/"/g, '""')}"`
+        const str = String(val)
+        return str.includes(',') || str.includes('"') || str.includes('\n')
+          ? `"${str.replace(/"/g, '""')}"`
+          : str
+      }).join(',')
+    })
+    csvContent = [headers, ...dataLines].join('\n')
+  } else {
+    // Email-only CSV for regular jobs
+    const csvLines: string[] = ['email']
+    for (const row of validRows) csvLines.push(row.email)
+    csvContent = csvLines.join('\n')
   }
-  const csvContent = csvLines.join('\n')
   const csvBytes = new TextEncoder().encode(csvContent)
   const storagePath = `jobs/${jobId}/valid.csv`
 
