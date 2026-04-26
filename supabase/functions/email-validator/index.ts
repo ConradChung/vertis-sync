@@ -101,6 +101,11 @@ async function sendTelegram(message: string): Promise<void> {
 }
 
 async function processJob(jobId: string): Promise<void> {
+  const startTime = Date.now()
+  // Re-invoke self after 110s to stay within the edge function wall clock limit.
+  // Each re-invocation picks up remaining pending rows automatically.
+  const CHUNK_LIMIT_MS = 110_000
+
   // 1. Mark job as processing
   await supabaseRequest(
     'PATCH',
@@ -179,6 +184,24 @@ async function processJob(jobId: string): Promise<void> {
 
       // Brief pause to avoid rate-limit hammering
       await new Promise((resolve) => setTimeout(resolve, 100))
+
+      // Approaching wall clock limit — hand off to a fresh invocation and exit.
+      // The next invocation resumes from remaining pending rows automatically.
+      if (Date.now() - startTime > CHUNK_LIMIT_MS) {
+        fetch(
+          `${SUPABASE_URL}/functions/v1/email-validator`,
+          {
+            method: 'POST',
+            headers: {
+              'apikey': SUPABASE_SERVICE_ROLE_KEY,
+              'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ job_id: jobId }),
+          },
+        ).catch(err => console.error('[email-validator] Self re-invoke error:', err))
+        return
+      }
     }
   }
 
