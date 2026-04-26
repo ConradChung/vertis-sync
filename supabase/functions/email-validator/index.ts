@@ -75,8 +75,12 @@ async function validateEmail(
       return { valid: false, result: { error: `HTTP ${res.status}` } }
     }
     const data = await res.json() as Record<string, unknown>
-    // MailTester returns { valid: boolean, ... }
-    const valid = Boolean(data.valid ?? data.deliverable ?? false)
+    const msg = String(data.message ?? '').toLowerCase()
+    const valid = Boolean(
+      data.valid ??
+      data.deliverable ??
+      (data.mx && (msg === 'accepted' || msg === 'catch-all'))
+    )
     return { valid, result: data }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
@@ -182,8 +186,8 @@ async function processJob(jobId: string): Promise<void> {
         }
       }
 
-      // Brief pause to avoid rate-limit hammering
-      await new Promise((resolve) => setTimeout(resolve, 100))
+      // MailTester rate limit: 1 req/sec — 1100ms keeps us safely under
+      await new Promise((resolve) => setTimeout(resolve, 1100))
 
       // Approaching wall clock limit — hand off to a fresh invocation and exit.
       // The next invocation resumes from remaining pending rows automatically.
