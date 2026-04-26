@@ -79,7 +79,7 @@ async function validateEmail(
     const valid = Boolean(
       data.valid ??
       data.deliverable ??
-      (data.mx && (msg === 'accepted' || msg === 'catch-all'))
+      (data.mx && msg === 'accepted')
     )
     return { valid, result: data }
   } catch (err: unknown) {
