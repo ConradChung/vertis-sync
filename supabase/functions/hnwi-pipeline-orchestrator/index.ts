@@ -109,7 +109,20 @@ async function pollApify(
     const data = await res.json() as { data: { status: string; defaultDatasetId: string } }
     const { status, defaultDatasetId } = data.data
     if (status === 'SUCCEEDED') return { datasetId: defaultDatasetId, timedOut: false }
-    if (TERMINAL.has(status)) throw new Error(`Apify run ${runId} ended: ${status}`)
+    if (TERMINAL.has(status)) {
+      // Actor failed — check for a partial dataset (e.g. EDGAR 500 mid-run)
+      if (defaultDatasetId) {
+        const chk = await fetch(`https://api.apify.com/v2/datasets/${defaultDatasetId}?token=${APIFY_TOKEN}`)
+        if (chk.ok) {
+          const meta = await chk.json() as { data: { itemCount: number } }
+          if (meta.data.itemCount > 0) {
+            console.warn(`[orchestrator] Run ${runId} ${status} but has ${meta.data.itemCount} partial items — using them`)
+            return { datasetId: defaultDatasetId, timedOut: false }
+          }
+        }
+      }
+      throw new Error(`Apify run ${runId} ended: ${status} with no dataset items`)
+    }
   }
   throw new Error(`Apify run ${runId} polling exhausted`)
 }
@@ -120,6 +133,22 @@ async function fetchDataset(datasetId: string): Promise<ARecord[]> {
   )
   if (!res.ok) throw new Error(`Dataset fetch failed: ${res.status}`)
   return res.json() as Promise<ARecord[]>
+}
+
+// Deduplicate before splitting into streams.
+// Stream A (has email): keyed by email. Stream B (no email): keyed by name+domain.
+function deduplicateRecords(records: ARecord[]): ARecord[] {
+  const seen = new Set<string>()
+  return records.filter(r => {
+    const email = String(r.email ?? '').toLowerCase().trim()
+    const name  = String(r.person_name ?? r.contact_name ?? r.name ?? '').toLowerCase().trim()
+    const domain = String(r.domain ?? r.company_domain ?? r.website ?? '').toLowerCase().trim()
+    const key = email || (name && domain ? `${name}::${domain}` : '')
+    if (!key) return true
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 async function insertInBatches(rows: unknown[], batchSize = 100): Promise<void> {
@@ -149,8 +178,9 @@ async function processRecords(
   jobIdA: string,
   jobIdB: string,
 ): Promise<{ streamALen: number; streamBLen: number }> {
-  const streamA = records.filter(r => hasEmail(r))
-  const streamB = records.filter(r => !hasEmail(r))
+  const deduped = deduplicateRecords(records)
+  const streamA = deduped.filter(r => hasEmail(r))
+  const streamB = deduped.filter(r => !hasEmail(r))
 
   await Promise.all([
     supabaseRequest('PATCH', `validation_jobs?id=eq.${jobIdA}`, { total_rows: streamA.length }),
