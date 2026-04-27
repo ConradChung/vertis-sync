@@ -64,6 +64,18 @@ interface ValidationJob {
   source: string
 }
 
+function jobTitle(filename: string): string {
+  if (filename.startsWith('hnwi-signals'))     return '🎯 HNWI Demand — Direct Emails'
+  if (filename.startsWith('hnwi-email-found')) return '🔍 HNWI Demand — Email Finder'
+  if (filename.startsWith('ria-signals'))      return '🏢 RIA Supply — Direct Emails'
+  if (filename.startsWith('ria-email-found'))  return '🔍 RIA Supply — Email Finder'
+  return `📊 ${filename}`
+}
+
+function isEmailFinderJob(filename: string): boolean {
+  return filename.startsWith('hnwi-email-found') || filename.startsWith('ria-email-found')
+}
+
 async function validateEmail(
   email: string,
 ): Promise<{ valid: boolean; result: Record<string, unknown> }> {
@@ -112,10 +124,10 @@ async function processJob(jobId: string): Promise<void> {
     { status: 'processing' },
   )
 
-  // 2. Fetch job metadata for total_rows
+  // 2. Fetch job metadata
   const jobs = (await supabaseRequest(
     'GET',
-    `validation_jobs?id=eq.${jobId}&select=id,total_rows,processed_rows,valid_count,invalid_count,source`,
+    `validation_jobs?id=eq.${jobId}&select=id,filename,total_rows,processed_rows,valid_count,invalid_count,source`,
   )) as ValidationJob[]
 
   if (!jobs || jobs.length === 0) {
@@ -271,9 +283,21 @@ async function processJob(jobId: string): Promise<void> {
     },
   )
 
-  await sendTelegram(
-    `Email validation complete! ${validCount}/${totalRows} valid emails saved to Storage.`,
-  )
+  const pct = totalRows > 0 ? ((validCount / totalRows) * 100).toFixed(1) : '0.0'
+  const isFinderJob = isEmailFinderJob(job.filename)
+  const lines = [
+    `✅ ${jobTitle(job.filename)}`,
+    ``,
+    `1. Valid emails: ${validCount}`,
+    `2. Valid %: ${pct}%`,
+    isFinderJob
+      ? `3. Emails found: ${totalRows}`
+      : `3. Emails found: N/A (direct)`,
+    isFinderJob
+      ? `4. Valid % of found: ${pct}%`
+      : `4. Valid % of found: N/A`,
+  ]
+  await sendTelegram(lines.join('\n'))
 }
 
 Deno.serve(async (req: Request) => {

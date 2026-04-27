@@ -5,7 +5,6 @@ import { createServerClient } from '@supabase/ssr'
 export const maxDuration = 60
 
 const HNWI_ACTOR_ID = 'belcaidsaad~scrape-hnwi-for-wealth-management-market-saad-belcaid'
-const WEALTH_ACTOR_ID = 'belcaidsaad~wealth-management-scraper-saad-belcaid-market-saad-belcaid'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ARecord = Record<string, any>
@@ -71,7 +70,8 @@ export async function POST(request: NextRequest) {
     maxResults: Number(body.maxResultsHnwi ?? 200),
   }
 
-  const wealthInput = {
+  // RIA input is passed to the orchestrator — it starts the RIA actor only after HNWI completes
+  const riaInput = {
     minAUM: Number(body.minAUM ?? 100_000_000),
     maxAUM: 0,
     minEmployees: 0,
@@ -82,45 +82,28 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // 1. Start both actors — returns immediately with run IDs
-    const [hnwiRunId, wealthRunId] = await Promise.all([
-      startActorRun(HNWI_ACTOR_ID, hnwiInput, APIFY_API_TOKEN),
-      startActorRun(WEALTH_ACTOR_ID, wealthInput, APIFY_API_TOKEN),
-    ])
+    // 1. Start only the HNWI actor — RIA starts sequentially after HNWI completes
+    const hnwiRunId = await startActorRun(HNWI_ACTOR_ID, hnwiInput, APIFY_API_TOKEN)
 
-    // 2. Create validation jobs — total_rows starts at 0, orchestrator updates it once actors finish
+    // 2. Create 4 validation jobs (2 per scraper: direct emails + email finder)
     const today = dateString(0)
-    const jobIdA = crypto.randomUUID()
-    const jobIdB = crypto.randomUUID()
+    const hnwiJobA = crypto.randomUUID()  // HNWI direct emails
+    const hnwiJobB = crypto.randomUUID()  // HNWI email finder
+    const riaJobA  = crypto.randomUUID()  // RIA direct emails
+    const riaJobB  = crypto.randomUUID()  // RIA email finder
     const supabase = createServiceClient()
 
     const { error: jobsError } = await supabase.from('validation_jobs').insert([
-      {
-        id: jobIdA,
-        filename: `hnwi-signals-${today}`,
-        total_rows: 0,
-        processed_rows: 0,
-        valid_count: 0,
-        invalid_count: 0,
-        status: 'pending',
-        source: 'hnwi',
-      },
-      {
-        id: jobIdB,
-        filename: `hnwi-email-found-${today}`,
-        total_rows: 0,
-        processed_rows: 0,
-        valid_count: 0,
-        invalid_count: 0,
-        status: 'pending',
-        source: 'hnwi',
-      },
+      { id: hnwiJobA, filename: `hnwi-signals-${today}`,     total_rows: 0, processed_rows: 0, valid_count: 0, invalid_count: 0, status: 'pending', source: 'hnwi' },
+      { id: hnwiJobB, filename: `hnwi-email-found-${today}`, total_rows: 0, processed_rows: 0, valid_count: 0, invalid_count: 0, status: 'pending', source: 'hnwi' },
+      { id: riaJobA,  filename: `ria-signals-${today}`,      total_rows: 0, processed_rows: 0, valid_count: 0, invalid_count: 0, status: 'pending', source: 'hnwi' },
+      { id: riaJobB,  filename: `ria-email-found-${today}`,  total_rows: 0, processed_rows: 0, valid_count: 0, invalid_count: 0, status: 'pending', source: 'hnwi' },
     ])
     if (jobsError) {
       return NextResponse.json({ error: `Failed to create jobs: ${jobsError.message}` }, { status: 500 })
     }
 
-    // 3. Fire orchestrator (fire-and-forget) — handles polling, row insertion, and email validation
+    // 3. Fire orchestrator (fire-and-forget) — handles sequential scraping + all validation
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
     fetch(`${supabaseUrl}/functions/v1/hnwi-pipeline-orchestrator`, {
@@ -131,14 +114,21 @@ export async function POST(request: NextRequest) {
         'apikey': serviceKey,
       },
       body: JSON.stringify({
-        job_id_a: jobIdA,
-        job_id_b: jobIdB,
+        hnwi_job_a: hnwiJobA,
+        hnwi_job_b: hnwiJobB,
+        ria_job_a:  riaJobA,
+        ria_job_b:  riaJobB,
         hnwi_run_id: hnwiRunId,
-        wealth_run_id: wealthRunId,
+        ria_input: riaInput,
       }),
     }).catch(err => console.error('[hnwi/start] orchestrator invoke error:', err))
 
-    return NextResponse.json({ job_id_a: jobIdA, job_id_b: jobIdB })
+    return NextResponse.json({
+      hnwi_job_a: hnwiJobA,
+      hnwi_job_b: hnwiJobB,
+      ria_job_a:  riaJobA,
+      ria_job_b:  riaJobB,
+    })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     return NextResponse.json({ error: message }, { status: 500 })

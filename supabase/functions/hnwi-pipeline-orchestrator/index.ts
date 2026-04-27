@@ -4,6 +4,10 @@ declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const APIFY_TOKEN = Deno.env.get('APIFY_API_TOKEN')!
+const TELEGRAM_BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN') ?? ''
+const TELEGRAM_CHAT_ID = Deno.env.get('TELEGRAM_CHAT_ID') ?? ''
+
+const WEALTH_ACTOR_ID = 'belcaidsaad~wealth-management-scraper-saad-belcaid-market-saad-belcaid'
 
 const REST_HEADERS = {
   'apikey': SERVICE_KEY,
@@ -18,16 +22,30 @@ const EDGE_HEADERS = {
   'Content-Type': 'application/json',
 }
 
-// Self-invoke before hitting Supabase's wall-clock limit
+// Self-invoke before hitting Supabase wall-clock limit
 const CHUNK_LIMIT_MS = 110_000
 
 type ARecord = Record<string, unknown>
 
+interface RiaInput {
+  minAUM: number
+  maxAUM: number
+  minEmployees: number
+  maxEmployees: number
+  stateFilter: string
+  firmCategory: string
+  maxResults: number
+}
+
 interface Payload {
-  job_id_a: string
-  job_id_b: string
+  hnwi_job_a: string   // HNWI direct emails
+  hnwi_job_b: string   // HNWI email finder
+  ria_job_a: string    // RIA direct emails
+  ria_job_b: string    // RIA email finder
   hnwi_run_id: string
-  wealth_run_id: string
+  ria_input: RiaInput
+  phase?: 'hnwi' | 'ria'
+  ria_run_id?: string  // set after RIA actor is started
 }
 
 async function supabaseRequest(method: string, path: string, body?: unknown): Promise<unknown> {
@@ -44,14 +62,40 @@ async function supabaseRequest(method: string, path: string, body?: unknown): Pr
   return ct.includes('application/json') ? res.json() : null
 }
 
+async function sendTelegram(message: string): Promise<void> {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return
+  try {
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: message }),
+    })
+  } catch {
+    // Non-critical
+  }
+}
+
 function hasEmail(r: ARecord): boolean {
   const e = String(r.email ?? '')
   return e.includes('@') && e.includes('.')
 }
 
-// Returns datasetId on success, or { timedOut: true } when approaching the wall-clock limit.
-// On timedOut, caller should self-invoke with the same payload — Apify run state persists,
-// so the next invocation's first poll will return SUCCEEDED immediately if already done.
+async function startActorRun(actorId: string, input: unknown): Promise<string> {
+  const res = await fetch(`https://api.apify.com/v2/acts/${actorId}/runs?token=${APIFY_TOKEN}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ input }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Failed to start actor ${actorId}: ${res.status} ${text}`)
+  }
+  const data = await res.json() as { data: { id: string } }
+  return data.data.id
+}
+
+// Returns datasetId on success, or timedOut when approaching wall-clock limit.
+// Caller should self-invoke with same payload — Apify run state persists across invocations.
 async function pollApify(
   runId: string,
   startTime: number,
@@ -65,7 +109,7 @@ async function pollApify(
     const data = await res.json() as { data: { status: string; defaultDatasetId: string } }
     const { status, defaultDatasetId } = data.data
     if (status === 'SUCCEEDED') return { datasetId: defaultDatasetId, timedOut: false }
-    if (TERMINAL.has(status)) throw new Error(`Apify run ${runId} ended with status: ${status}`)
+    if (TERMINAL.has(status)) throw new Error(`Apify run ${runId} ended: ${status}`)
   }
   throw new Error(`Apify run ${runId} polling exhausted`)
 }
@@ -92,89 +136,119 @@ async function insertInBatches(rows: unknown[], batchSize = 100): Promise<void> 
   }
 }
 
-async function run(payload: Payload): Promise<void> {
-  const { job_id_a, job_id_b, hnwi_run_id, wealth_run_id } = payload
-  const startTime = Date.now()
+function selfInvoke(payload: Payload): void {
+  fetch(`${SUPABASE_URL}/functions/v1/hnwi-pipeline-orchestrator`, {
+    method: 'POST',
+    headers: EDGE_HEADERS,
+    body: JSON.stringify(payload),
+  }).catch(err => console.error('[hnwi-pipeline-orchestrator] Self-invoke error:', err))
+}
 
-  // Poll both actors concurrently — if either times out, self-invoke with same payload.
-  // Apify run state persists so the re-invocation's first check returns SUCCEEDED immediately.
-  const [hnwiResult, wealthResult] = await Promise.all([
-    pollApify(hnwi_run_id, startTime),
-    pollApify(wealth_run_id, startTime),
-  ])
+async function processRecords(
+  records: ARecord[],
+  jobIdA: string,
+  jobIdB: string,
+): Promise<{ streamALen: number; streamBLen: number }> {
+  const streamA = records.filter(r => hasEmail(r))
+  const streamB = records.filter(r => !hasEmail(r))
 
-  if (hnwiResult.timedOut || wealthResult.timedOut) {
-    fetch(`${SUPABASE_URL}/functions/v1/hnwi-pipeline-orchestrator`, {
-      method: 'POST',
-      headers: EDGE_HEADERS,
-      body: JSON.stringify(payload),
-    }).catch(err => console.error('[hnwi-pipeline-orchestrator] Self-invoke error:', err))
-    return
-  }
-
-  // Fetch both datasets
-  const [hnwiRecords, wealthRecords] = await Promise.all([
-    fetchDataset(hnwiResult.datasetId!),
-    fetchDataset(wealthResult.datasetId!),
-  ])
-
-  // Merge and split by email presence
-  const all = [...hnwiRecords, ...wealthRecords]
-  const streamA = all.filter(r => hasEmail(r))
-  const streamB = all.filter(r => !hasEmail(r))
-
-  // Update total_rows now that we have real counts
   await Promise.all([
-    supabaseRequest('PATCH', `validation_jobs?id=eq.${job_id_a}`, { total_rows: streamA.length }),
-    supabaseRequest('PATCH', `validation_jobs?id=eq.${job_id_b}`, { total_rows: streamB.length }),
+    supabaseRequest('PATCH', `validation_jobs?id=eq.${jobIdA}`, { total_rows: streamA.length }),
+    supabaseRequest('PATCH', `validation_jobs?id=eq.${jobIdB}`, { total_rows: streamB.length }),
   ])
 
-  // Insert rows for Stream A
   if (streamA.length > 0) {
     await insertInBatches(
       streamA.map((r, i) => ({
-        job_id: job_id_a,
+        job_id: jobIdA,
         email: String(r.email ?? ''),
         row_index: i,
         status: 'pending',
         row_data: r,
       })),
     )
+    fetch(`${SUPABASE_URL}/functions/v1/email-validator`, {
+      method: 'POST',
+      headers: EDGE_HEADERS,
+      body: JSON.stringify({ job_id: jobIdA }),
+    }).catch(err => console.error('[orchestrator] email-validator invoke error:', err))
   } else {
-    await supabaseRequest('PATCH', `validation_jobs?id=eq.${job_id_a}`, { status: 'completed' })
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobIdA}`, { status: 'completed' })
   }
 
-  // Insert rows for Stream B
   if (streamB.length > 0) {
     await insertInBatches(
       streamB.map((r, i) => ({
-        job_id: job_id_b,
+        job_id: jobIdB,
         email: '',
         row_index: i,
         status: 'pending',
         row_data: r,
       })),
     )
-  } else {
-    await supabaseRequest('PATCH', `validation_jobs?id=eq.${job_id_b}`, { status: 'completed' })
-  }
-
-  // Fire email-validator for Stream A (fire-and-forget)
-  if (streamA.length > 0) {
-    fetch(`${SUPABASE_URL}/functions/v1/email-validator`, {
-      method: 'POST',
-      headers: EDGE_HEADERS,
-      body: JSON.stringify({ job_id: job_id_a }),
-    }).catch(err => console.error('[hnwi-pipeline-orchestrator] email-validator invoke error:', err))
-  }
-
-  // Fire hnwi-email-finder for Stream B (fire-and-forget)
-  if (streamB.length > 0) {
     fetch(`${SUPABASE_URL}/functions/v1/hnwi-email-finder`, {
       method: 'POST',
       headers: EDGE_HEADERS,
-      body: JSON.stringify({ job_id: job_id_b }),
-    }).catch(err => console.error('[hnwi-pipeline-orchestrator] hnwi-email-finder invoke error:', err))
+      body: JSON.stringify({ job_id: jobIdB }),
+    }).catch(err => console.error('[orchestrator] hnwi-email-finder invoke error:', err))
+  } else {
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobIdB}`, { status: 'completed' })
+  }
+
+  return { streamALen: streamA.length, streamBLen: streamB.length }
+}
+
+async function run(payload: Payload): Promise<void> {
+  const phase = payload.phase ?? 'hnwi'
+  const startTime = Date.now()
+
+  if (phase === 'hnwi') {
+    // ── Phase 1: HNWI Demand Scraper ───────────────────────────────────────────
+    const hnwiResult = await pollApify(payload.hnwi_run_id, startTime)
+
+    if (hnwiResult.timedOut) {
+      selfInvoke({ ...payload, phase: 'hnwi' })
+      return
+    }
+
+    const hnwiRecords = await fetchDataset(hnwiResult.datasetId!)
+    const { streamALen, streamBLen } = await processRecords(
+      hnwiRecords,
+      payload.hnwi_job_a,
+      payload.hnwi_job_b,
+    )
+
+    // Telegram: HNWI done, switching to RIA
+    await sendTelegram(
+      `🎯 HNWI Demand Scraper — complete\n\n` +
+      `${hnwiRecords.length} signals scraped\n` +
+      `├ ${streamALen} with emails → direct validation\n` +
+      `└ ${streamBLen} without emails → email finder\n\n` +
+      `🔄 Starting RIA Supply Scraper...`,
+    )
+
+    // Start RIA actor now that HNWI is done
+    const riaRunId = await startActorRun(WEALTH_ACTOR_ID, payload.ria_input)
+
+    // Hand off to RIA phase in a fresh invocation
+    selfInvoke({ ...payload, phase: 'ria', ria_run_id: riaRunId })
+    return
+  }
+
+  if (phase === 'ria') {
+    // ── Phase 2: RIA Supply Scraper ────────────────────────────────────────────
+    if (!payload.ria_run_id) throw new Error('ria_run_id missing in ria phase')
+
+    const riaResult = await pollApify(payload.ria_run_id, startTime)
+
+    if (riaResult.timedOut) {
+      selfInvoke({ ...payload, phase: 'ria' })
+      return
+    }
+
+    const riaRecords = await fetchDataset(riaResult.datasetId!)
+    await processRecords(riaRecords, payload.ria_job_a, payload.ria_job_b)
+    // Completion Telegrams are sent by email-validator when each job finishes
   }
 }
 
@@ -186,7 +260,11 @@ Deno.serve(async (req: Request) => {
   let payload: Payload
   try {
     payload = await req.json() as Payload
-    if (!payload.job_id_a || !payload.job_id_b || !payload.hnwi_run_id || !payload.wealth_run_id) {
+    if (
+      !payload.hnwi_job_a || !payload.hnwi_job_b ||
+      !payload.ria_job_a || !payload.ria_job_b ||
+      !payload.hnwi_run_id || !payload.ria_input
+    ) {
       return new Response(JSON.stringify({ error: 'Missing required fields' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
@@ -202,15 +280,15 @@ Deno.serve(async (req: Request) => {
   const asyncWork = run(payload).catch(async (err: unknown) => {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[hnwi-pipeline-orchestrator] Failed:', message)
-    try {
-      // PATCH doesn't support in() via REST without PostgREST filter — patch each job
-      await Promise.all([
-        supabaseRequest('PATCH', `validation_jobs?id=eq.${payload.job_id_a}`, { status: 'failed', error_message: message }),
-        supabaseRequest('PATCH', `validation_jobs?id=eq.${payload.job_id_b}`, { status: 'failed', error_message: message }),
-      ])
-    } catch (patchErr) {
-      console.error('[hnwi-pipeline-orchestrator] Failed to mark jobs failed:', patchErr)
-    }
+    const jobIds = [payload.hnwi_job_a, payload.hnwi_job_b, payload.ria_job_a, payload.ria_job_b]
+    await Promise.all(
+      jobIds.map(id =>
+        supabaseRequest('PATCH', `validation_jobs?id=eq.${id}`, {
+          status: 'failed',
+          error_message: message,
+        }).catch(() => {}),
+      ),
+    )
   })
 
   EdgeRuntime.waitUntil(asyncWork)
