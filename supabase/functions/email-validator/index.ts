@@ -75,12 +75,7 @@ async function validateEmail(
       return { valid: false, result: { error: `HTTP ${res.status}` } }
     }
     const data = await res.json() as Record<string, unknown>
-    const msg = String(data.message ?? '').toLowerCase()
-    const valid = Boolean(
-      data.valid ??
-      data.deliverable ??
-      (data.mx && msg === 'accepted')
-    )
+    const valid = Boolean(data.valid ?? data.deliverable)
     return { valid, result: data }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
