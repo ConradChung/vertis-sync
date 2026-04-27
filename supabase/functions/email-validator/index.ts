@@ -219,7 +219,7 @@ async function processJob(jobId: string): Promise<void> {
 
   let csvContent: string
 
-  if (job.source === 'apify' && validRows.length > 0 && validRows[0].row_data) {
+  if ((job.source === 'apify' || job.source === 'hnwi') && validRows.length > 0 && validRows[0].row_data) {
     // Full-column CSV: all row_data fields, nested objects JSON-stringified
     const allKeys = Object.keys(validRows[0].row_data)
     const headers = allKeys.join(',')
