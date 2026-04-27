@@ -51,6 +51,7 @@ async function startActorRun(actorId: string, input: unknown, token: string): Pr
 async function waitForRun(runId: string, token: string): Promise<string> {
   const TERMINAL = new Set(['SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED_OUT'])
   for (let attempt = 0; attempt < 60; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 5_000))
     const res = await fetch(
       `https://api.apify.com/v2/actor-runs/${runId}?token=${token}`,
     )
@@ -59,7 +60,6 @@ async function waitForRun(runId: string, token: string): Promise<string> {
     const { status, defaultDatasetId } = data.data
     if (status === 'SUCCEEDED') return defaultDatasetId
     if (TERMINAL.has(status)) throw new Error(`Actor run ${runId} ended with status: ${status}`)
-    await new Promise(r => setTimeout(r, 5_000))
   }
   throw new Error(`Actor run ${runId} timed out after 5 minutes`)
 }
@@ -205,6 +205,18 @@ function renderLineChart(points: Array<{ label: string; count: number }>): strin
   return lines
 }
 
+async function insertInBatches(
+  supabase: ReturnType<typeof createServiceClient>,
+  rows: unknown[],
+  batchSize = 100,
+): Promise<{ error: { message: string } | null }> {
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const { error } = await supabase.from('validation_rows').insert(rows.slice(i, i + batchSize))
+    if (error) return { error }
+  }
+  return { error: null }
+}
+
 // ── Main handler ───────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
@@ -310,7 +322,8 @@ export async function POST(request: NextRequest) {
 
     // 7. Insert validation rows for Stream A (have email)
     if (streamA.length > 0) {
-      const { error: rowsAError } = await supabase.from('validation_rows').insert(
+      const { error: rowsAError } = await insertInBatches(
+        supabase,
         streamA.map((r, i) => ({
           job_id: jobIdA,
           email: String(r.email ?? ''),
@@ -320,13 +333,15 @@ export async function POST(request: NextRequest) {
         })),
       )
       if (rowsAError) {
+        await supabase.from('validation_jobs').delete().in('id', [jobIdA, jobIdB])
         return NextResponse.json({ error: `Failed to insert Stream A rows: ${rowsAError.message}` }, { status: 500 })
       }
     }
 
     // 8. Insert validation rows for Stream B (no email yet — blank email, status pending)
     if (streamB.length > 0) {
-      const { error: rowsBError } = await supabase.from('validation_rows').insert(
+      const { error: rowsBError } = await insertInBatches(
+        supabase,
         streamB.map((r, i) => ({
           job_id: jobIdB,
           email: '',
@@ -336,6 +351,7 @@ export async function POST(request: NextRequest) {
         })),
       )
       if (rowsBError) {
+        await supabase.from('validation_jobs').delete().in('id', [jobIdA, jobIdB])
         return NextResponse.json({ error: `Failed to insert Stream B rows: ${rowsBError.message}` }, { status: 500 })
       }
     }
@@ -345,6 +361,7 @@ export async function POST(request: NextRequest) {
     const edgeHeaders = {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${serviceKey}`,
+      'apikey': serviceKey,
     }
 
     // 9. Fire email-validator for Stream A
