@@ -96,7 +96,9 @@ export async function POST(request: NextRequest) {
     // 3. Fire orchestrator (fire-and-forget) — handles sequential scraping + all validation
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
-    fetch(`${supabaseUrl}/functions/v1/hnwi-pipeline-orchestrator`, {
+    // Must await — Next.js serverless kills in-flight fire-and-forget fetches on return.
+    // Orchestrator ACKs with 200 immediately and does real work via EdgeRuntime.waitUntil.
+    const orchRes = await fetch(`${supabaseUrl}/functions/v1/hnwi-pipeline-orchestrator`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -111,7 +113,11 @@ export async function POST(request: NextRequest) {
         hnwi_run_id: hnwiRunId,
         ria_input: riaInput,
       }),
-    }).catch(err => console.error('[hnwi/start] orchestrator invoke error:', err))
+    })
+    if (!orchRes.ok) {
+      const text = await orchRes.text()
+      throw new Error(`Orchestrator invoke failed (${orchRes.status}): ${text}`)
+    }
 
     return NextResponse.json({
       hnwi_job_a: hnwiJobA,
