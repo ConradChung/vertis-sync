@@ -424,8 +424,7 @@ export default function EmailValidator({ onStatusChange }: Props) {
               type="button"
               disabled={!fileName}
               onClick={() => startValidation(true)}
-              variant="outline"
-              className="w-full rounded-xl text-[13px] h-10"
+              className="w-full rounded-xl border border-[var(--border)] bg-transparent text-[var(--text-primary)] hover:bg-[var(--surface-raised)] font-medium text-[13px] h-10 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Validate Emails + Enrich Operating City
             </Button>
