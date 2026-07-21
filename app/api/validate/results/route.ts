@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     // Fetch job to check storage_path
     const { data: job, error: jobError } = await supabase
       .from('validation_jobs')
-      .select('id, storage_path, filename, column_order, icp_filter')
+      .select('id, storage_path, filename, column_order, icp_filter, enrich')
       .eq('id', job_id)
       .single()
 
@@ -22,8 +22,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Job not found' }, { status: 404 })
     }
 
-    // If storage_path is set (completed with uploaded CSV), return signed URL
-    if (job.storage_path) {
+    // If storage_path is set, return a signed URL to the pre-built CSV — but
+    // only for non-enriched jobs. Enriched jobs' icp_filter can be toggled
+    // after the job completes (without re-running Perplexity/Haiku), so
+    // those always rebuild from validation_rows below to reflect the current
+    // filter value rather than serving a stale frozen export.
+    if (job.storage_path && !job.enrich) {
       const { data, error: urlError } = await supabase.storage
         .from('validation-results')
         .createSignedUrl(job.storage_path, 3600)
