@@ -8,6 +8,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const TELEGRAM_BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN')!
 const TELEGRAM_CHAT_ID = Deno.env.get('TELEGRAM_CHAT_ID')!
 const TELEGRAM_WEBHOOK_SECRET = Deno.env.get('TELEGRAM_WEBHOOK_SECRET')!
+const SLACK_BOT_TOKEN = Deno.env.get('SLACK_BOT_TOKEN') ?? ''
 
 const TG_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`
 
@@ -48,6 +49,28 @@ async function tg(method: string, body: unknown): Promise<Record<string, unknown
     body: JSON.stringify(body),
   })
   return res.json()
+}
+
+async function slackPostMessage(channel: string, text: string): Promise<void> {
+  if (!SLACK_BOT_TOKEN || !channel) return
+  try {
+    await fetch('https://slack.com/api/chat.postMessage', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${SLACK_BOT_TOKEN}`, 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ channel, text }),
+    })
+  } catch {
+    // Non-critical — ignore Slack errors
+  }
+}
+
+// Replies to whichever platform the ingest came from.
+async function replyToSender(ingest: TelegramIngest, text: string): Promise<void> {
+  if (ingest.sender_platform === 'slack') {
+    await slackPostMessage(ingest.slack_channel_id ?? '', text)
+  } else {
+    await tg('sendMessage', { chat_id: ingest.sender_chat_id, text })
+  }
 }
 
 // ---- Compact CSV parsing (mirrors app/api/validate/start/route.ts;
@@ -120,6 +143,8 @@ interface TelegramIngest {
   telegram_message_id: number | null
   sender_chat_id: string
   sender_name: string | null
+  sender_platform: string
+  slack_channel_id: string | null
   filename: string
   storage_path: string
   status: string
@@ -257,7 +282,7 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
         text: `❌ Denied — ${ingest.filename}`,
       })
     }
-    await tg('sendMessage', { chat_id: ingest.sender_chat_id, text: "Your file wasn't approved for processing right now." })
+    await replyToSender(ingest, "Your file wasn't approved for processing right now.")
     return
   }
 
@@ -330,7 +355,7 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
         : `✅ Approved — running — ${ingest.filename} (${rows.length} rows)`,
     })
   }
-  await tg('sendMessage', { chat_id: ingest.sender_chat_id, text: 'Approved — running now.' })
+  await replyToSender(ingest, 'Approved — running now.')
 }
 
 Deno.serve(async (req: Request) => {
