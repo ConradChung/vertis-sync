@@ -250,8 +250,45 @@ async function handleDocument(message: NonNullable<TelegramUpdate['message']>): 
   }
 }
 
+async function handleEnrichDecision(action: 'enrich_confirm' | 'enrich_skip', jobId: string, callbackQueryId: string): Promise<void> {
+  if (action === 'enrich_skip') {
+    // Turning enrich off means email-validator's next pass skips the
+    // handoff check entirely and goes straight to building the CSV.
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { enrich: false })
+  } else {
+    await supabaseRequest(
+      'PATCH',
+      `validation_rows?job_id=eq.${jobId}&status=eq.valid&enrichment_status=eq.skipped`,
+      { enrichment_status: 'pending' },
+    )
+  }
+
+  await tg('answerCallbackQuery', {
+    callback_query_id: callbackQueryId,
+    text: action === 'enrich_skip' ? 'Skipping enrichment.' : 'Enriching now.',
+  })
+
+  const nextFunction = action === 'enrich_skip' ? 'email-validator' : 'operating-city-enricher'
+  fetch(`${SUPABASE_URL}/functions/v1/${nextFunction}`, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_SERVICE_ROLE_KEY,
+      'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ job_id: jobId }),
+  }).catch(err => console.error(`[telegram-inbox] ${nextFunction} invoke error:`, err))
+}
+
 async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>): Promise<void> {
-  const [action, ingestId] = (cb.data ?? '').split(':')
+  const [action, targetId] = (cb.data ?? '').split(':')
+
+  if ((action === 'enrich_confirm' || action === 'enrich_skip') && targetId) {
+    await handleEnrichDecision(action, targetId, cb.id)
+    return
+  }
+
+  const ingestId = targetId
   if (!ingestId || (action !== 'approve' && action !== 'approve_enrich' && action !== 'deny')) {
     await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Unrecognized action.' })
     return

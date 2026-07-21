@@ -221,33 +221,30 @@ async function processJob(jobId: string): Promise<void> {
     }
   }
 
-  // 3b. Hand off to operating-city-enricher for just the newly-valid rows —
-  // enrichment must never spend Perplexity/Haiku credits on emails that
-  // already failed validation. It re-invokes this function afterward to
-  // finish (build CSV, mark completed) once there's nothing left to enrich.
+  // 3b. If enrichment was requested, don't auto-run it — ask the owner to
+  // confirm now that real valid/invalid counts are known, so a mostly-dead
+  // list doesn't silently burn Perplexity/Haiku credits. telegram-inbox
+  // handles the enrich_confirm/enrich_skip button taps.
   if (job.enrich) {
     const pendingEnrichment = (await supabaseRequest(
       'GET',
       `validation_rows?job_id=eq.${jobId}&status=eq.valid&enrichment_status=eq.skipped&select=id&limit=1`,
     )) as { id: string }[]
     if (pendingEnrichment.length > 0) {
-      await supabaseRequest(
-        'PATCH',
-        `validation_rows?job_id=eq.${jobId}&status=eq.valid&enrichment_status=eq.skipped`,
-        { enrichment_status: 'pending' },
-      )
-      fetch(
-        `${SUPABASE_URL}/functions/v1/operating-city-enricher`,
-        {
-          method: 'POST',
-          headers: {
-            'apikey': SUPABASE_SERVICE_ROLE_KEY,
-            'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-            'Content-Type': 'application/json',
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: TELEGRAM_CHAT_ID,
+          text: `✅ Validation complete — ${job.filename}\n${validCount} valid / ${invalidCount} invalid\n\nEnrich the ${validCount} valid rows with operating city research?`,
+          reply_markup: {
+            inline_keyboard: [[
+              { text: '🔎 Enrich now', callback_data: `enrich_confirm:${jobId}` },
+              { text: '⏭ Skip enrichment', callback_data: `enrich_skip:${jobId}` },
+            ]],
           },
-          body: JSON.stringify({ job_id: jobId }),
-        },
-      ).catch(err => console.error('[email-validator] operating-city-enricher invoke error:', err))
+        }),
+      })
       return
     }
   }
