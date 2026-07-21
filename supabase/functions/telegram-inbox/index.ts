@@ -211,6 +211,7 @@ async function handleDocument(message: NonNullable<TelegramUpdate['message']>): 
   const keyboard = detectedColumn
     ? { inline_keyboard: [[
         { text: '✅ Approve', callback_data: `approve:${ingest.id}` },
+        { text: '🔎 Approve + Enrich', callback_data: `approve_enrich:${ingest.id}` },
         { text: '❌ Deny', callback_data: `deny:${ingest.id}` },
       ]] }
     : { inline_keyboard: [[
@@ -226,7 +227,7 @@ async function handleDocument(message: NonNullable<TelegramUpdate['message']>): 
 
 async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>): Promise<void> {
   const [action, ingestId] = (cb.data ?? '').split(':')
-  if (!ingestId || (action !== 'approve' && action !== 'deny')) {
+  if (!ingestId || (action !== 'approve' && action !== 'approve_enrich' && action !== 'deny')) {
     await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Unrecognized action.' })
     return
   }
@@ -260,7 +261,8 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
     return
   }
 
-  // action === 'approve'
+  // action === 'approve' | 'approve_enrich'
+  const enrich = action === 'approve_enrich'
   const dl = await fetch(`${SUPABASE_URL}/storage/v1/object/raw-uploads/${ingest.storage_path}`, {
     headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
   })
@@ -284,6 +286,8 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
     status: 'pending',
     source: 'telegram',
     column_order: headers,
+    enrich,
+    enriched_rows: 0,
   })
 
   const validationRows = rows.map((row, i) => ({
@@ -291,6 +295,7 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
     email: row[colIndex] ?? '',
     row_index: i,
     status: 'pending',
+    enrichment_status: enrich ? 'pending' : 'skipped',
     row_data: Object.fromEntries(headers.map((h, hi) => [h, row[hi] ?? ''])),
   }))
   const CHUNK_SIZE = 500
@@ -300,7 +305,8 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
 
   await supabaseRequest('PATCH', `telegram_ingests?id=eq.${ingestId}`, { status: 'approved', validation_job_id: jobId })
 
-  fetch(`${SUPABASE_URL}/functions/v1/email-validator`, {
+  const nextFunction = enrich ? 'operating-city-enricher' : 'email-validator'
+  fetch(`${SUPABASE_URL}/functions/v1/${nextFunction}`, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -308,14 +314,16 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ job_id: jobId }),
-  }).catch(err => console.error('[telegram-inbox] email-validator invoke error:', err))
+  }).catch(err => console.error(`[telegram-inbox] ${nextFunction} invoke error:`, err))
 
   await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Approved — running now.' })
   if (ingest.telegram_message_id) {
     await tg('editMessageText', {
       chat_id: ingest.telegram_chat_id,
       message_id: ingest.telegram_message_id,
-      text: `✅ Approved — running — ${ingest.filename} (${rows.length} rows)`,
+      text: enrich
+        ? `🔎 Approved + Enrich — running — ${ingest.filename} (${rows.length} rows)`
+        : `✅ Approved — running — ${ingest.filename} (${rows.length} rows)`,
     })
   }
   await tg('sendMessage', { chat_id: ingest.sender_chat_id, text: 'Approved — running now.' })
