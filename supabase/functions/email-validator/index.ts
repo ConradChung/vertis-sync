@@ -63,6 +63,7 @@ interface ValidationJob {
   storage_path: string | null
   source: string
   column_order: string[] | null
+  icp_filter: boolean
 }
 
 function jobTitle(filename: string): string {
@@ -128,7 +129,7 @@ async function processJob(jobId: string): Promise<void> {
   // 2. Fetch job metadata
   const jobs = (await supabaseRequest(
     'GET',
-    `validation_jobs?id=eq.${jobId}&select=id,filename,total_rows,processed_rows,valid_count,invalid_count,source,column_order`,
+    `validation_jobs?id=eq.${jobId}&select=id,filename,total_rows,processed_rows,valid_count,invalid_count,source,column_order,icp_filter`,
   )) as ValidationJob[]
 
   if (!jobs || jobs.length === 0) {
@@ -220,10 +221,12 @@ async function processJob(jobId: string): Promise<void> {
   }
 
   // 4. Build CSV and upload to Storage
-  const validRows = (await supabaseRequest(
-    'GET',
-    `validation_rows?job_id=eq.${jobId}&status=eq.valid&order=row_index.asc&select=email,row_data`,
-  )) as ValidationRow[]
+  // ICP filter applies only here, at the export exit — it never re-triggers
+  // enrichment. row_data.icp_status is merged in by operating-city-enricher.
+  const validRowsFilterQuery = job.icp_filter
+    ? `validation_rows?job_id=eq.${jobId}&status=eq.valid&row_data->>icp_status=eq.confirmed&order=row_index.asc&select=email,row_data`
+    : `validation_rows?job_id=eq.${jobId}&status=eq.valid&order=row_index.asc&select=email,row_data`
+  const validRows = (await supabaseRequest('GET', validRowsFilterQuery)) as ValidationRow[]
 
   let csvContent: string
 

@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     // Fetch job to check storage_path
     const { data: job, error: jobError } = await supabase
       .from('validation_jobs')
-      .select('id, storage_path, filename, column_order')
+      .select('id, storage_path, filename, column_order, icp_filter')
       .eq('id', job_id)
       .single()
 
@@ -35,13 +35,17 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ signedUrl: data.signedUrl })
     }
 
-    // Otherwise build CSV from validation_rows
-    const { data: validRows, error: rowsError } = await supabase
+    // Otherwise build CSV from validation_rows. ICP filter applies only at
+    // this export exit — it never re-triggers enrichment.
+    let rowsQuery = supabase
       .from('validation_rows')
       .select('email, row_data')
       .eq('job_id', job_id)
       .eq('status', 'valid')
-      .order('row_index', { ascending: true })
+    if (job.icp_filter) {
+      rowsQuery = rowsQuery.eq('row_data->>icp_status', 'confirmed')
+    }
+    const { data: validRows, error: rowsError } = await rowsQuery.order('row_index', { ascending: true })
 
     if (rowsError) {
       return NextResponse.json({ error: `Failed to fetch rows: ${rowsError.message}` }, { status: 500 })
