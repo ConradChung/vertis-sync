@@ -64,6 +64,7 @@ interface ValidationJob {
   source: string
   column_order: string[] | null
   icp_filter: boolean
+  enrich: boolean
 }
 
 function jobTitle(filename: string): string {
@@ -129,7 +130,7 @@ async function processJob(jobId: string): Promise<void> {
   // 2. Fetch job metadata
   const jobs = (await supabaseRequest(
     'GET',
-    `validation_jobs?id=eq.${jobId}&select=id,filename,total_rows,processed_rows,valid_count,invalid_count,source,column_order,icp_filter`,
+    `validation_jobs?id=eq.${jobId}&select=id,filename,total_rows,processed_rows,valid_count,invalid_count,source,column_order,icp_filter,enrich`,
   )) as ValidationJob[]
 
   if (!jobs || jobs.length === 0) {
@@ -217,6 +218,37 @@ async function processJob(jobId: string): Promise<void> {
         await new Promise(r => setTimeout(r, 3000))
         return
       }
+    }
+  }
+
+  // 3b. Hand off to operating-city-enricher for just the newly-valid rows —
+  // enrichment must never spend Perplexity/Haiku credits on emails that
+  // already failed validation. It re-invokes this function afterward to
+  // finish (build CSV, mark completed) once there's nothing left to enrich.
+  if (job.enrich) {
+    const pendingEnrichment = (await supabaseRequest(
+      'GET',
+      `validation_rows?job_id=eq.${jobId}&status=eq.valid&enrichment_status=eq.skipped&select=id&limit=1`,
+    )) as { id: string }[]
+    if (pendingEnrichment.length > 0) {
+      await supabaseRequest(
+        'PATCH',
+        `validation_rows?job_id=eq.${jobId}&status=eq.valid&enrichment_status=eq.skipped`,
+        { enrichment_status: 'pending' },
+      )
+      fetch(
+        `${SUPABASE_URL}/functions/v1/operating-city-enricher`,
+        {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_SERVICE_ROLE_KEY,
+            'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ job_id: jobId }),
+        },
+      ).catch(err => console.error('[email-validator] operating-city-enricher invoke error:', err))
+      return
     }
   }
 

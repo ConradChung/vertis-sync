@@ -230,9 +230,17 @@ async function processJob(jobId: string): Promise<void> {
     : [...workingHeaders, ...ENRICHMENT_COLUMNS]
   await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { column_order: newColumnOrder })
 
+  // Only rows with a valid email are ever eligible for enrichment (email-validator
+  // flips them from 'skipped' to 'pending' before invoking this function) — use
+  // that eligible count as the percentage denominator, not the raw CSV row count.
+  const eligibleRows = (await supabaseRequest(
+    'GET',
+    `validation_rows?job_id=eq.${jobId}&status=eq.valid&select=id`,
+  )) as { id: string }[]
+  const enrichableCount = eligibleRows.length
+
   let enriched = job.enriched_rows
-  const totalRows = job.total_rows
-  let lastMilestonePct = totalRows > 0 ? Math.floor((enriched / totalRows) * 10) * 10 : 0
+  let lastMilestonePct = enrichableCount > 0 ? Math.floor((enriched / enrichableCount) * 10) * 10 : 0
 
   while (true) {
     const rows = (await supabaseRequest(
@@ -287,12 +295,12 @@ async function processJob(jobId: string): Promise<void> {
       enriched++
       await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { enriched_rows: enriched })
 
-      if (totalRows > 0) {
-        const currentPct = Math.floor((enriched / totalRows) * 100)
+      if (enrichableCount > 0) {
+        const currentPct = Math.floor((enriched / enrichableCount) * 100)
         const milestonePct = Math.floor(currentPct / 10) * 10
         if (milestonePct > lastMilestonePct && milestonePct <= 100) {
           lastMilestonePct = milestonePct
-          await sendTelegram(`City enrichment ${milestonePct}% complete (${enriched}/${totalRows}).`)
+          await sendTelegram(`City enrichment ${milestonePct}% complete (${enriched}/${enrichableCount}).`)
         }
       }
 
@@ -315,7 +323,9 @@ async function processJob(jobId: string): Promise<void> {
     }
   }
 
-  // Enrichment complete for this job — summarize, then chain into email-validator.
+  // Enrichment complete for this job — summarize, then hand back to
+  // email-validator to finish (it will find nothing left to validate and
+  // proceed straight to building the CSV with enrichment merged in).
   const statusCounts = (await supabaseRequest(
     'GET',
     `validation_rows?job_id=eq.${jobId}&select=enrichment_status`,
@@ -327,14 +337,14 @@ async function processJob(jobId: string): Promise<void> {
     `validation_rows?job_id=eq.${jobId}&select=id&enrichment->>icp_status=eq.confirmed`,
   )) as { id: string }[]
   const confirmedCount = confirmedIcp.length
-  const excludedByMembrane = job.icp_filter ? totalRows - confirmedCount : 0
-  const resolvedPct = totalRows > 0 ? ((doneCount / totalRows) * 100).toFixed(1) : '0.0'
+  const excludedByMembrane = job.icp_filter ? enrichableCount - confirmedCount : 0
+  const resolvedPct = enrichableCount > 0 ? ((doneCount / enrichableCount) * 100).toFixed(1) : '0.0'
 
   await sendTelegram(
     [
       `🏙️ City enrichment complete — ${job.filename}`,
-      `Resolved: ${doneCount}/${totalRows} (${resolvedPct}%)`,
-      `Confirmed ICP: ${confirmedCount}/${totalRows}`,
+      `Resolved: ${doneCount}/${enrichableCount} valid-email rows (${resolvedPct}%)`,
+      `Confirmed ICP: ${confirmedCount}/${enrichableCount}`,
       job.icp_filter
         ? `Excluded by ICP filter: ${excludedByMembrane}`
         : 'ICP filter: off (all valid-email rows will export)',

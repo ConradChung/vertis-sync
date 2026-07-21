@@ -290,12 +290,14 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
     enriched_rows: 0,
   })
 
+  // enrichment_status starts at its DB default ('skipped') for every row —
+  // email-validator is what flips valid rows to 'pending' once it knows
+  // which emails are actually worth enriching.
   const validationRows = rows.map((row, i) => ({
     job_id: jobId,
     email: row[colIndex] ?? '',
     row_index: i,
     status: 'pending',
-    enrichment_status: enrich ? 'pending' : 'skipped',
     row_data: Object.fromEntries(headers.map((h, hi) => [h, row[hi] ?? ''])),
   }))
   const CHUNK_SIZE = 500
@@ -305,8 +307,10 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
 
   await supabaseRequest('PATCH', `telegram_ingests?id=eq.${ingestId}`, { status: 'approved', validation_job_id: jobId })
 
-  const nextFunction = enrich ? 'operating-city-enricher' : 'email-validator'
-  fetch(`${SUPABASE_URL}/functions/v1/${nextFunction}`, {
+  // Always start with email-validator, whether or not enrichment was
+  // requested — it internally hands off to operating-city-enricher for
+  // valid rows only, then reclaims control to finish once that's done.
+  fetch(`${SUPABASE_URL}/functions/v1/email-validator`, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -314,7 +318,7 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ job_id: jobId }),
-  }).catch(err => console.error(`[telegram-inbox] ${nextFunction} invoke error:`, err))
+  }).catch(err => console.error('[telegram-inbox] email-validator invoke error:', err))
 
   await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Approved — running now.' })
   if (ingest.telegram_message_id) {
