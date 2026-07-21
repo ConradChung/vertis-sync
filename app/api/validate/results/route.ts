@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     // Fetch job to check storage_path
     const { data: job, error: jobError } = await supabase
       .from('validation_jobs')
-      .select('id, storage_path, filename')
+      .select('id, storage_path, filename, column_order')
       .eq('id', job_id)
       .single()
 
@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
     // Otherwise build CSV from validation_rows
     const { data: validRows, error: rowsError } = await supabase
       .from('validation_rows')
-      .select('email')
+      .select('email, row_data')
       .eq('job_id', job_id)
       .eq('status', 'valid')
       .order('row_index', { ascending: true })
@@ -47,11 +47,34 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: `Failed to fetch rows: ${rowsError.message}` }, { status: 500 })
     }
 
-    const lines: string[] = ['email']
-    for (const row of validRows ?? []) {
-      lines.push(row.email)
+    let csv: string
+
+    if (validRows && validRows.length > 0 && validRows[0].row_data) {
+      // Full-column CSV: mirrors supabase/functions/email-validator's CSV build.
+      const allKeys: string[] = job.column_order && job.column_order.length > 0
+        ? job.column_order
+        : Object.keys(validRows[0].row_data as Record<string, unknown>)
+      const headerLine = allKeys.join(',')
+      const dataLines = validRows.map(row => {
+        const rowData = row.row_data as Record<string, unknown>
+        return allKeys.map(key => {
+          const val = rowData[key]
+          if (val === null || val === undefined) return ''
+          if (typeof val === 'object') return `"${JSON.stringify(val).replace(/"/g, '""')}"`
+          const str = String(val)
+          return str.includes(',') || str.includes('"') || str.includes('\n')
+            ? `"${str.replace(/"/g, '""')}"`
+            : str
+        }).join(',')
+      })
+      csv = [headerLine, ...dataLines].join('\n')
+    } else {
+      const lines: string[] = ['email']
+      for (const row of validRows ?? []) {
+        lines.push(row.email)
+      }
+      csv = lines.join('\n')
     }
-    const csv = lines.join('\n')
 
     const baseName = (job.filename ?? 'validated_emails').replace(/\.csv$/i, '')
     return new NextResponse(csv, {

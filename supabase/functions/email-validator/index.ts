@@ -62,6 +62,7 @@ interface ValidationJob {
   error_message: string | null
   storage_path: string | null
   source: string
+  column_order: string[] | null
 }
 
 function jobTitle(filename: string): string {
@@ -127,7 +128,7 @@ async function processJob(jobId: string): Promise<void> {
   // 2. Fetch job metadata
   const jobs = (await supabaseRequest(
     'GET',
-    `validation_jobs?id=eq.${jobId}&select=id,filename,total_rows,processed_rows,valid_count,invalid_count,source`,
+    `validation_jobs?id=eq.${jobId}&select=id,filename,total_rows,processed_rows,valid_count,invalid_count,source,column_order`,
   )) as ValidationJob[]
 
   if (!jobs || jobs.length === 0) {
@@ -226,9 +227,13 @@ async function processJob(jobId: string): Promise<void> {
 
   let csvContent: string
 
-  if ((job.source === 'apify' || job.source === 'hnwi') && validRows.length > 0 && validRows[0].row_data) {
-    // Full-column CSV: all row_data fields, nested objects JSON-stringified
-    const allKeys = Object.keys(validRows[0].row_data)
+  if (validRows.length > 0 && validRows[0].row_data) {
+    // Full-column CSV: all row_data fields, nested objects JSON-stringified.
+    // column_order is a jsonb array (order-preserving); row_data is a jsonb
+    // object (key order not guaranteed), so prefer column_order when present.
+    const allKeys = job.column_order && job.column_order.length > 0
+      ? job.column_order
+      : Object.keys(validRows[0].row_data)
     const headers = allKeys.join(',')
     const dataLines = validRows.map(row => {
       return allKeys.map(key => {

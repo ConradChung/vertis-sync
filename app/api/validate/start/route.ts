@@ -138,26 +138,33 @@ export async function POST(request: NextRequest) {
         valid_count: 0,
         invalid_count: 0,
         status: 'pending',
+        column_order: headers,
       })
 
     if (jobError) {
       return NextResponse.json({ error: `Failed to create job: ${jobError.message}` }, { status: 500 })
     }
 
-    // Bulk insert validation_rows
+    // Bulk insert validation_rows, chunked to keep each request payload small
+    // now that every row carries a full row_data object.
     const validationRows = rows.map((row, i) => ({
       job_id,
       email: row[colIndex] ?? '',
       row_index: i,
       status: 'pending',
+      row_data: Object.fromEntries(headers.map((h, hi) => [h, row[hi] ?? ''])),
     }))
 
-    const { error: rowsError } = await supabase
-      .from('validation_rows')
-      .insert(validationRows)
+    const CHUNK_SIZE = 500
+    for (let i = 0; i < validationRows.length; i += CHUNK_SIZE) {
+      const chunk = validationRows.slice(i, i + CHUNK_SIZE)
+      const { error: rowsError } = await supabase
+        .from('validation_rows')
+        .insert(chunk)
 
-    if (rowsError) {
-      return NextResponse.json({ error: `Failed to insert rows: ${rowsError.message}` }, { status: 500 })
+      if (rowsError) {
+        return NextResponse.json({ error: `Failed to insert rows: ${rowsError.message}` }, { status: 500 })
+      }
     }
 
     try {
