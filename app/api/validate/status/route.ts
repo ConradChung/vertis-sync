@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
 
     const { data: job, error } = await supabase
       .from('validation_jobs')
-      .select('id, filename, total_rows, processed_rows, valid_count, invalid_count, status, error_message, storage_path, created_at')
+      .select('id, filename, total_rows, processed_rows, valid_count, invalid_count, status, error_message, storage_path, created_at, enrich, enriched_rows')
       .eq('id', job_id)
       .single()
 
@@ -31,6 +31,8 @@ export async function GET(request: NextRequest) {
       error_message: job.error_message ?? null,
       storage_path: job.storage_path ?? null,
       filename: job.filename,
+      enrich: job.enrich ?? false,
+      enriched_rows: job.enriched_rows ?? 0,
     })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error'

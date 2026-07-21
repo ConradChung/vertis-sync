@@ -114,6 +114,9 @@ export default function EmailValidator({ onStatusChange }: Props) {
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [validCsv, setValidCsv] = useState<string>('')
   const [copied, setCopied] = useState(false)
+  const [enrichEnabled, setEnrichEnabled] = useState(false)
+  const [enrichedRows, setEnrichedRows] = useState(0)
+  const enrichRef = useRef(false)
   const supabase = createClient()
 
   useEffect(() => {
@@ -185,12 +188,14 @@ export default function EmailValidator({ onStatusChange }: Props) {
     }
   }
 
-  async function submit(file: File, column?: string) {
+  async function submit(file: File, column?: string, enrich?: boolean) {
     setStep('processing')
     setProgress({ processed: 0, total: 0 })
     setError('')
     setValidCount(0)
     setTotalCount(0)
+    setEnrichedRows(0)
+    setEnrichEnabled(!!enrich)
 
     try {
       // Upload CSV directly to Supabase Storage — bypasses Vercel's 4.5MB body limit entirely.
@@ -212,7 +217,7 @@ export default function EmailValidator({ onStatusChange }: Props) {
       const res = await fetch('/api/validate/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storage_path: storagePathRef.current, filename: file.name, column }),
+        body: JSON.stringify({ storage_path: storagePathRef.current, filename: file.name, column, enrich }),
       })
       const json = await res.json()
 
@@ -240,6 +245,7 @@ export default function EmailValidator({ onStatusChange }: Props) {
           setProgress({ processed: poll.processed_rows ?? 0, total: poll.total_rows })
           setValidCount(poll.valid_count ?? 0)
           setTotalCount(poll.total_rows)
+          setEnrichedRows(poll.enriched_rows ?? 0)
 
           if (poll.status === 'completed') {
             clearInterval(pollingRef.current!)
@@ -278,22 +284,21 @@ export default function EmailValidator({ onStatusChange }: Props) {
     }
   }
 
-  function handleUpload(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    const file = (e.currentTarget.elements.namedItem('csv') as HTMLInputElement).files?.[0]
-    if (!file) return
-    fileRef.current = file
-    submit(file)
-  }
-
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
+    fileRef.current = file ?? null
     setFileName(file?.name ?? '')
+  }
+
+  function startValidation(enrich: boolean) {
+    if (!fileRef.current) return
+    enrichRef.current = enrich
+    submit(fileRef.current, undefined, enrich)
   }
 
   function handleColumnSelect(column: string) {
     if (!fileRef.current) return
-    submit(fileRef.current, column)
+    submit(fileRef.current, column, enrichRef.current)
   }
 
   function csvToTsv(csv: string): string {
@@ -367,10 +372,19 @@ export default function EmailValidator({ onStatusChange }: Props) {
     setFileName('')
     setValidCsv('')
     setCopied(false)
+    setEnrichEnabled(false)
+    setEnrichedRows(0)
+    enrichRef.current = false
     fileRef.current = null
   }
 
-  const pct = progress.total > 0 ? Math.round((progress.processed / progress.total) * 100) : 0
+  // Email validation always runs first; once it's fully processed, an
+  // enrich-enabled job moves into a second phase (city enrichment) before
+  // the job flips to 'completed' — show progress for whichever is active.
+  const enrichPhaseActive = enrichEnabled && progress.total > 0 && progress.processed >= progress.total
+  const validationPct = progress.total > 0 ? Math.round((progress.processed / progress.total) * 100) : 0
+  const enrichPct = validCount > 0 ? Math.round((enrichedRows / validCount) * 100) : 0
+  const pct = enrichPhaseActive ? enrichPct : validationPct
 
   return (
     <section>
@@ -383,7 +397,7 @@ export default function EmailValidator({ onStatusChange }: Props) {
 
       <div className="max-w-lg space-y-3">
         {step === 'upload' && (
-          <form onSubmit={handleUpload} className="space-y-3">
+          <div className="space-y-3">
             <label className="flex flex-col items-center justify-center gap-3 border border-dashed border-[var(--border)] rounded-xl bg-[var(--surface-raised)] px-6 py-10 cursor-pointer hover:border-[var(--border)] hover:bg-[var(--surface-raised)] transition-colors group">
               <div className="w-10 h-10 rounded-full bg-[var(--border-subtle)] border border-[var(--border)] flex items-center justify-center group-hover:border-[var(--border)] transition-colors">
                 <Upload size={18} className="text-[var(--text-secondary)]" />
@@ -396,12 +410,26 @@ export default function EmailValidator({ onStatusChange }: Props) {
                   {fileName ? 'Click to change' : 'or drag and drop here'}
                 </p>
               </div>
-              <input type="file" name="csv" accept=".csv" required className="sr-only" onChange={handleFileChange} />
+              <input type="file" name="csv" accept=".csv" className="sr-only" onChange={handleFileChange} />
             </label>
-            <Button type="submit" className="w-full rounded-xl bg-[var(--accent)] text-[var(--accent-fg)] hover:opacity-90 font-medium text-[13px] h-10">
+            <Button
+              type="button"
+              disabled={!fileName}
+              onClick={() => startValidation(false)}
+              className="w-full rounded-xl bg-[var(--accent)] text-[var(--accent-fg)] hover:opacity-90 font-medium text-[13px] h-10 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
               Validate Emails
             </Button>
-          </form>
+            <Button
+              type="button"
+              disabled={!fileName}
+              onClick={() => startValidation(true)}
+              variant="outline"
+              className="w-full rounded-xl text-[13px] h-10"
+            >
+              Validate Emails + Enrich Operating City
+            </Button>
+          </div>
         )}
 
         {step === 'ambiguous' && (
@@ -427,16 +455,24 @@ export default function EmailValidator({ onStatusChange }: Props) {
         {step === 'processing' && (
           <div className="border border-[var(--border)] rounded-xl bg-[var(--surface-raised)] p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-[13px] text-[var(--text-secondary)]">Validating emails…</span>
+              <span className="text-[13px] text-[var(--text-secondary)]">
+                {enrichPhaseActive ? 'Enriching operating cities…' : 'Validating emails…'}
+              </span>
               <span className="text-[13px] text-[var(--text-primary)] tabular-nums font-medium">
-                {progress.total > 0 ? `${progress.processed} / ${progress.total}` : '—'}
+                {enrichPhaseActive
+                  ? (validCount > 0 ? `${enrichedRows} / ${validCount}` : '—')
+                  : (progress.total > 0 ? `${progress.processed} / ${progress.total}` : '—')}
               </span>
             </div>
             <div className="h-1 bg-[#1E1E1E] rounded-full overflow-hidden">
               <div className="h-full bg-white rounded-full transition-all duration-300" style={{ width: `${pct}%` }} />
             </div>
             <p className="text-[11px] text-[var(--text-placeholder)]">
-              {progress.total > 0 ? `${pct}% complete — running on Supabase Edge Function, safe to close this tab` : 'Queued — waiting for Supabase Edge Function to start…'}
+              {progress.total === 0
+                ? 'Queued — waiting for Supabase Edge Function to start…'
+                : enrichPhaseActive
+                  ? `${pct}% complete — researching each company via Perplexity + Claude, safe to close this tab`
+                  : `${pct}% complete — running on Supabase Edge Function, safe to close this tab`}
             </p>
           </div>
         )}

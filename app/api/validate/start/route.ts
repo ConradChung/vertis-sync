@@ -77,14 +77,15 @@ function createServiceClient() {
 
 export async function POST(request: NextRequest) {
   try {
-    // Accepts JSON: { storage_path, filename, column? }
+    // Accepts JSON: { storage_path, filename, column?, enrich? }
     // CSV is pre-uploaded by the client directly to Supabase Storage,
     // so this request is tiny and never hits Vercel's 4.5MB body limit.
     const body = await request.json()
-    const { storage_path, filename, column: columnOverride } = body as {
+    const { storage_path, filename, column: columnOverride, enrich } = body as {
       storage_path: string
       filename: string
       column?: string
+      enrich?: boolean
     }
 
     if (!storage_path || !filename) {
@@ -139,6 +140,8 @@ export async function POST(request: NextRequest) {
         invalid_count: 0,
         status: 'pending',
         column_order: headers,
+        enrich: !!enrich,
+        enriched_rows: 0,
       })
 
     if (jobError) {
