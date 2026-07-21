@@ -146,7 +146,16 @@ async function handleDocument(message: NonNullable<TelegramUpdate['message']>): 
   const fileInfo = await tg('getFile', { file_id: doc.file_id })
   const filePath = (fileInfo.result as { file_path?: string } | undefined)?.file_path
   if (!filePath) {
-    await tg('sendMessage', { chat_id: senderChatId, text: 'Could not read that file — try sending it again.' })
+    const reason = (fileInfo as { description?: string }).description ?? 'unknown error'
+    const tooBig = reason.toLowerCase().includes('too big')
+    console.error('[telegram-inbox] getFile failed:', JSON.stringify(fileInfo))
+    await tg('sendMessage', {
+      chat_id: senderChatId,
+      text: tooBig
+        ? "That file is over Telegram's 20MB bot download limit — split it into smaller files, or send it another way."
+        : 'Could not read that file — try sending it again.',
+    })
+    await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: `⚠️ getFile failed for ${name}: ${reason}` })
     return
   }
 
@@ -336,7 +345,9 @@ Deno.serve(async (req: Request) => {
     // All other update types (plain text, etc.) are silently ignored —
     // Telegram just needs a 200 regardless so it doesn't retry.
   } catch (err) {
-    console.error('[telegram-inbox] handler error:', err instanceof Error ? err.message : String(err))
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[telegram-inbox] handler error:', message)
+    await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: `⚠️ telegram-inbox error: ${message}` }).catch(() => {})
   }
 
   return new Response('OK', { status: 200 })
