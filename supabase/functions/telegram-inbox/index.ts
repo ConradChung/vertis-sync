@@ -9,8 +9,10 @@ const TELEGRAM_BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN')!
 const TELEGRAM_CHAT_ID = Deno.env.get('TELEGRAM_CHAT_ID')!
 const TELEGRAM_WEBHOOK_SECRET = Deno.env.get('TELEGRAM_WEBHOOK_SECRET')!
 const SLACK_BOT_TOKEN = Deno.env.get('SLACK_BOT_TOKEN') ?? ''
+const INSTANTLY_API_KEY = Deno.env.get('INSTANTLY_API_KEY') ?? ''
 
 const TG_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`
+const INSTANTLY_BASE_URL = 'https://api.instantly.ai/api/v2'
 
 const REST_HEADERS: Record<string, string> = {
   'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -129,11 +131,14 @@ interface TelegramUpdate {
     from?: { id: number; first_name?: string; username?: string }
     chat: { id: number }
     document?: { file_id: string; file_name?: string }
+    text?: string
+    reply_to_message?: { message_id: number }
   }
   callback_query?: {
     id: string
     from: { id: number; first_name?: string; username?: string }
     data?: string
+    message?: { message_id: number; chat: { id: number } }
   }
 }
 
@@ -250,6 +255,371 @@ async function handleDocument(message: NonNullable<TelegramUpdate['message']>): 
   }
 }
 
+// ---- Instantly push: campaign selection, barriers, company-name review ----
+
+interface InstantlyJob {
+  id: string
+  filename: string
+  valid_count: number
+  instantly_status: string
+  instantly_campaign_id: string | null
+  instantly_campaign_name: string | null
+  instantly_campaign_candidates: { id: string; name: string }[] | null
+  location_barrier: boolean
+  company_barrier: boolean
+  company_strict: boolean
+}
+
+const INSTANTLY_JOB_SELECT =
+  'id,filename,valid_count,instantly_status,instantly_campaign_id,instantly_campaign_name,' +
+  'instantly_campaign_candidates,location_barrier,company_barrier,company_strict'
+
+async function getInstantlyJob(jobId: string): Promise<InstantlyJob | null> {
+  const jobs = (await supabaseRequest(
+    'GET',
+    `validation_jobs?id=eq.${jobId}&select=${INSTANTLY_JOB_SELECT}`,
+  )) as InstantlyJob[]
+  return jobs?.[0] ?? null
+}
+
+// Campaign lookup by NAME — the owner never has to paste a raw campaign ID.
+// Instantly's own server-side search does the matching; deleted campaigns
+// (status < 0) are dropped so a dead name can't be picked.
+async function searchCampaigns(query: string): Promise<{ id: string; name: string; status: number }[]> {
+  const res = await fetch(
+    `${INSTANTLY_BASE_URL}/campaigns?limit=50&search=${encodeURIComponent(query)}`,
+    { headers: { 'Authorization': `Bearer ${INSTANTLY_API_KEY}` } },
+  )
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Instantly campaign search failed (${res.status}): ${text.slice(0, 200)}`)
+  }
+  const data = await res.json() as { items?: { id: string; name: string; status: number }[] }
+  return (data.items ?? []).filter(c => c.status >= 0)
+}
+
+function statusLabel(status: number): string {
+  if (status === 0) return 'draft'
+  if (status === 1) return 'active'
+  if (status === 2) return 'paused'
+  if (status === 3) return 'completed'
+  return String(status)
+}
+
+async function sendCampaignPrompt(jobId: string, text: string): Promise<void> {
+  const sent = await tg('sendMessage', {
+    chat_id: TELEGRAM_CHAT_ID,
+    text,
+    reply_markup: { force_reply: true },
+  })
+  const messageId = (sent.result as { message_id?: number } | undefined)?.message_id
+  await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
+    instantly_prompt_message_id: messageId ?? null,
+    instantly_status: 'awaiting_campaign',
+  })
+}
+
+function barrierScreen(job: InstantlyJob): { text: string; reply_markup: unknown } {
+  const text = [
+    `📤 Push to: ${job.instantly_campaign_name}`,
+    `File: ${job.filename}`,
+    `Valid leads: ${job.valid_count}`,
+    ``,
+    `Barriers`,
+    job.location_barrier
+      ? `📍 Location: ON — only rows with a resolved city and high confidence`
+      : `📍 Location: OFF — keep every row, blank out unknown cities`,
+    job.company_barrier
+      ? `🏢 Company: ON — review the first 10 names, drop junk ones`
+      : `🏢 Company: OFF — no review, push names as normalized`,
+  ].join('\n')
+
+  return {
+    text,
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: `📍 Location: ${job.location_barrier ? 'ON' : 'OFF'}`, callback_data: `bar_loc:${job.id}` },
+          { text: `🏢 Company: ${job.company_barrier ? 'ON' : 'OFF'}`, callback_data: `bar_co:${job.id}` },
+        ],
+        [
+          { text: '▶️ Continue', callback_data: `push_next:${job.id}` },
+          { text: '✖️ Cancel', callback_data: `push_cancel:${job.id}` },
+        ],
+      ],
+    },
+  }
+}
+
+async function showBarrierScreen(job: InstantlyJob, edit?: { chatId: number; messageId: number }): Promise<void> {
+  await supabaseRequest('PATCH', `validation_jobs?id=eq.${job.id}`, { instantly_status: 'configuring' })
+  const screen = barrierScreen(job)
+  if (edit) {
+    await tg('editMessageText', {
+      chat_id: edit.chatId,
+      message_id: edit.messageId,
+      text: screen.text,
+      reply_markup: screen.reply_markup,
+    })
+  } else {
+    await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: screen.text, reply_markup: screen.reply_markup })
+  }
+}
+
+interface PushPreview {
+  ok: boolean
+  eligible: number
+  filtered: number
+  junk: number
+  missingFirstName: number
+  blankLocation: number
+  samples: { original: string; normalized: string }[]
+  strict: boolean
+  error?: string
+}
+
+// The preview is produced by instantly-push itself, not reimplemented here —
+// the names shown for approval are the exact ones that get pushed.
+async function fetchPreview(jobId: string): Promise<PushPreview> {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/instantly-push`, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_SERVICE_ROLE_KEY,
+      'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ job_id: jobId, mode: 'preview' }),
+  })
+  return await res.json() as PushPreview
+}
+
+async function showCompanyReview(job: InstantlyJob, edit?: { chatId: number; messageId: number }): Promise<void> {
+  await supabaseRequest('PATCH', `validation_jobs?id=eq.${job.id}`, { instantly_status: 'reviewing_company' })
+  const preview = await fetchPreview(job.id)
+
+  if (!preview.ok) {
+    await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: `⚠️ Couldn't build the name preview: ${preview.error}` })
+    return
+  }
+
+  const sampleLines = preview.samples.length > 0
+    ? preview.samples.map((s, i) => {
+        const n = String(i + 1).padStart(2, ' ')
+        return s.original === s.normalized
+          ? `${n}. ${s.normalized}`
+          : `${n}. ${s.normalized}   ← ${s.original}`
+      })
+    : ['(no eligible rows)']
+
+  const notes: string[] = []
+  if (preview.junk > 0) notes.push(`${preview.junk} junk name${preview.junk === 1 ? '' : 's'} dropped`)
+  if (preview.missingFirstName > 0) notes.push(`${preview.missingFirstName} with no first name`)
+  if (preview.blankLocation > 0) notes.push(`${preview.blankLocation} will send a blank location`)
+
+  const text = [
+    `🏢 Company names — ${job.instantly_campaign_name}`,
+    preview.strict ? `Mode: stricter (descriptive suffixes stripped)` : `Mode: standard (legal suffixes stripped)`,
+    ``,
+    ...sampleLines,
+    ``,
+    `${preview.eligible} ready to push · ${preview.filtered} filtered out`,
+    ...(notes.length > 0 ? [notes.join(' · ')] : []),
+  ].join('\n')
+
+  const toggleButton = preview.strict
+    ? { text: '↩️ Standard names', callback_data: `push_std:${job.id}` }
+    : { text: '✂️ Stricter names', callback_data: `push_strict:${job.id}` }
+
+  const reply_markup = {
+    inline_keyboard: [
+      [{ text: '✅ Push these', callback_data: `push_go:${job.id}` }, toggleButton],
+      [{ text: '✖️ Cancel', callback_data: `push_cancel:${job.id}` }],
+    ],
+  }
+
+  if (edit) {
+    await tg('editMessageText', { chat_id: edit.chatId, message_id: edit.messageId, text, reply_markup })
+  } else {
+    await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text, reply_markup })
+  }
+}
+
+async function startPush(job: InstantlyJob): Promise<void> {
+  await supabaseRequest('PATCH', `validation_jobs?id=eq.${job.id}`, { instantly_status: 'pushing' })
+  fetch(`${SUPABASE_URL}/functions/v1/instantly-push`, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_SERVICE_ROLE_KEY,
+      'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ job_id: job.id }),
+  }).catch(err => console.error('[telegram-inbox] instantly-push invoke error:', err))
+}
+
+// A plain-text reply to the campaign prompt. Telegram's reply threading is the
+// whole state machine: reply_to_message.message_id identifies the job.
+async function handleCampaignNameReply(
+  text: string,
+  repliedToMessageId: number,
+): Promise<boolean> {
+  const jobs = (await supabaseRequest(
+    'GET',
+    `validation_jobs?instantly_prompt_message_id=eq.${repliedToMessageId}&select=${INSTANTLY_JOB_SELECT}`,
+  )) as InstantlyJob[]
+  const job = jobs?.[0]
+  if (!job) return false
+  if (job.instantly_status !== 'awaiting_campaign') {
+    await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: 'That campaign prompt was already answered.' })
+    return true
+  }
+
+  const query = text.trim()
+  if (!query) return true
+
+  let matches: { id: string; name: string; status: number }[]
+  try {
+    matches = await searchCampaigns(query)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: `⚠️ Campaign lookup failed: ${message}` })
+    return true
+  }
+
+  if (matches.length === 0) {
+    await sendCampaignPrompt(job.id, `No campaign matched "${query}". Reply with another name.`)
+    return true
+  }
+
+  // An exact name match wins outright even when it shares a prefix with others
+  // ("Scaleport - R3" alongside "Scaleport - Managers").
+  const exact = matches.filter(c => c.name.trim().toLowerCase() === query.toLowerCase())
+  const resolved = exact.length === 1 ? exact[0] : (matches.length === 1 ? matches[0] : null)
+
+  if (resolved) {
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${job.id}`, {
+      instantly_campaign_id: resolved.id,
+      instantly_campaign_name: resolved.name,
+      instantly_campaign_candidates: null,
+    })
+    const refreshed = await getInstantlyJob(job.id)
+    if (refreshed) await showBarrierScreen(refreshed)
+    return true
+  }
+
+  // Several hits — store them so a 2-byte index in callback_data can resolve
+  // back to a full campaign id (Telegram caps callback_data at 64 bytes).
+  const candidates = matches.slice(0, 8).map(c => ({ id: c.id, name: c.name }))
+  await supabaseRequest('PATCH', `validation_jobs?id=eq.${job.id}`, {
+    instantly_campaign_candidates: candidates,
+    instantly_status: 'choosing_campaign',
+  })
+  await tg('sendMessage', {
+    chat_id: TELEGRAM_CHAT_ID,
+    text: `${matches.length} campaigns match "${query}" — which one?`,
+    reply_markup: {
+      inline_keyboard: matches.slice(0, 8).map((c, i) => [
+        { text: `${c.name} (${statusLabel(c.status)})`, callback_data: `camp_pick:${job.id}:${i}` },
+      ]),
+    },
+  })
+  return true
+}
+
+async function handlePushCallback(
+  action: string,
+  jobId: string,
+  extra: string | undefined,
+  cb: NonNullable<TelegramUpdate['callback_query']>,
+): Promise<void> {
+  const job = await getInstantlyJob(jobId)
+  if (!job) {
+    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Job not found.' })
+    return
+  }
+
+  const edit = cb.message ? { chatId: cb.message.chat.id, messageId: cb.message.message_id } : undefined
+
+  if (action === 'push_cancel') {
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { instantly_status: 'cancelled' })
+    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Cancelled.' })
+    if (edit) {
+      await tg('editMessageText', {
+        chat_id: edit.chatId,
+        message_id: edit.messageId,
+        text: `✖️ Instantly push cancelled — ${job.filename}`,
+      })
+    }
+    return
+  }
+
+  if (action === 'camp_pick') {
+    const idx = Number(extra)
+    const candidate = job.instantly_campaign_candidates?.[idx]
+    if (!candidate) {
+      await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'That option expired.' })
+      return
+    }
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
+      instantly_campaign_id: candidate.id,
+      instantly_campaign_name: candidate.name,
+      instantly_campaign_candidates: null,
+    })
+    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: candidate.name })
+    const refreshed = await getInstantlyJob(jobId)
+    if (refreshed) await showBarrierScreen(refreshed, edit)
+    return
+  }
+
+  if (action === 'bar_loc' || action === 'bar_co') {
+    const field = action === 'bar_loc' ? 'location_barrier' : 'company_barrier'
+    const next = action === 'bar_loc' ? !job.location_barrier : !job.company_barrier
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { [field]: next })
+    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: `${action === 'bar_loc' ? 'Location' : 'Company'}: ${next ? 'ON' : 'OFF'}` })
+    const refreshed = await getInstantlyJob(jobId)
+    if (refreshed) await showBarrierScreen(refreshed, edit)
+    return
+  }
+
+  if (action === 'push_next') {
+    await tg('answerCallbackQuery', { callback_query_id: cb.id })
+    if (job.company_barrier) {
+      await showCompanyReview(job, edit)
+    } else {
+      await startPush(job)
+      if (edit) {
+        await tg('editMessageText', {
+          chat_id: edit.chatId,
+          message_id: edit.messageId,
+          text: `📤 Pushing to ${job.instantly_campaign_name} — ${job.filename}`,
+        })
+      }
+    }
+    return
+  }
+
+  if (action === 'push_strict' || action === 'push_std') {
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { company_strict: action === 'push_strict' })
+    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: action === 'push_strict' ? 'Stricter names' : 'Standard names' })
+    const refreshed = await getInstantlyJob(jobId)
+    if (refreshed) await showCompanyReview(refreshed, edit)
+    return
+  }
+
+  if (action === 'push_go') {
+    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Pushing.' })
+    await startPush(job)
+    if (edit) {
+      await tg('editMessageText', {
+        chat_id: edit.chatId,
+        message_id: edit.messageId,
+        text: `📤 Pushing to ${job.instantly_campaign_name} — ${job.filename}`,
+      })
+    }
+    return
+  }
+}
+
 async function handleEnrichDecision(action: 'enrich_confirm' | 'enrich_skip', jobId: string, callbackQueryId: string): Promise<void> {
   if (action === 'enrich_skip') {
     // Turning enrich off means email-validator's next pass skips the
@@ -280,11 +650,20 @@ async function handleEnrichDecision(action: 'enrich_confirm' | 'enrich_skip', jo
   }).catch(err => console.error(`[telegram-inbox] ${nextFunction} invoke error:`, err))
 }
 
+const PUSH_ACTIONS = new Set([
+  'camp_pick', 'bar_loc', 'bar_co', 'push_next', 'push_go', 'push_strict', 'push_std', 'push_cancel',
+])
+
 async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>): Promise<void> {
-  const [action, targetId] = (cb.data ?? '').split(':')
+  const [action, targetId, extra] = (cb.data ?? '').split(':')
 
   if ((action === 'enrich_confirm' || action === 'enrich_skip') && targetId) {
     await handleEnrichDecision(action, targetId, cb.id)
+    return
+  }
+
+  if (PUSH_ACTIONS.has(action) && targetId) {
+    await handlePushCallback(action, targetId, extra, cb)
     return
   }
 
@@ -415,9 +794,13 @@ Deno.serve(async (req: Request) => {
       await handleDocument(update.message)
     } else if (update.callback_query) {
       await handleCallback(update.callback_query)
+    } else if (update.message?.text && update.message.reply_to_message) {
+      // The only plain text we act on is a reply to the Instantly campaign
+      // prompt. Anything else falls through and is ignored as before.
+      await handleCampaignNameReply(update.message.text, update.message.reply_to_message.message_id)
     }
-    // All other update types (plain text, etc.) are silently ignored —
-    // Telegram just needs a 200 regardless so it doesn't retry.
+    // All other update types are silently ignored — Telegram just needs a 200
+    // regardless so it doesn't retry.
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[telegram-inbox] handler error:', message)

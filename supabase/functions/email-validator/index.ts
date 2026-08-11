@@ -65,6 +65,7 @@ interface ValidationJob {
   column_order: string[] | null
   icp_filter: boolean
   enrich: boolean
+  instantly_status: string
 }
 
 function jobTitle(filename: string): string {
@@ -130,7 +131,7 @@ async function processJob(jobId: string): Promise<void> {
   // 2. Fetch job metadata
   const jobs = (await supabaseRequest(
     'GET',
-    `validation_jobs?id=eq.${jobId}&select=id,filename,total_rows,processed_rows,valid_count,invalid_count,source,column_order,icp_filter,enrich`,
+    `validation_jobs?id=eq.${jobId}&select=id,filename,total_rows,processed_rows,valid_count,invalid_count,source,column_order,icp_filter,enrich,instantly_status`,
   )) as ValidationJob[]
 
   if (!jobs || jobs.length === 0) {
@@ -335,6 +336,42 @@ async function processJob(jobId: string): Promise<void> {
       : `4. Valid % of found: N/A`,
   ]
   await sendTelegram(lines.join('\n'))
+
+  // 6. This is the true end of the job — the same point whether or not
+  // enrichment ran. Ask which Instantly campaign the valid leads should go
+  // into, by NAME. The force_reply is what makes the answer findable later:
+  // telegram-inbox matches the reply's reply_to_message.message_id back to
+  // this job, so no separate state machine is needed.
+  // Guarded on 'idle' because operating-city-enricher chains back into this
+  // function, and a re-invocation must not re-prompt.
+  if (validCount > 0 && job.instantly_status === 'idle' && TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
+    await promptForCampaign(jobId, job.filename, validCount)
+  }
+}
+
+async function promptForCampaign(jobId: string, filename: string, validCount: number): Promise<void> {
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: TELEGRAM_CHAT_ID,
+        text:
+          `📤 Push ${validCount} valid leads to Instantly?\n${filename}\n\n` +
+          `Reply to this message with the campaign NAME (partial is fine — I'll match it against your campaign list).`,
+        reply_markup: { force_reply: true },
+      }),
+    })
+    const sent = await res.json() as { result?: { message_id?: number } }
+    const messageId = sent.result?.message_id
+    if (!messageId) return
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
+      instantly_prompt_message_id: messageId,
+      instantly_status: 'awaiting_campaign',
+    })
+  } catch (err) {
+    console.error('[email-validator] Instantly campaign prompt failed:', err)
+  }
 }
 
 Deno.serve(async (req: Request) => {
