@@ -114,25 +114,60 @@ function detectEmailColumn(headers: string[]): { column: string } | { ambiguous:
   return { error: 'No email column found in CSV' }
 }
 
+// Slice-based rather than char-by-char, matching telegram-inbox. The previous
+// version built each cell with `current += char`, one intermediate string per
+// character: a 13MB file peaked at 444MB of heap and the worker was killed
+// with a 546. Slack has no 20MB download ceiling, so this mattered here on
+// even smaller-looking files.
 function parseCSVRow(row: string): string[] {
-  const result: string[] = []
-  let current = ''
-  let inQuotes = false
-  for (let i = 0; i < row.length; i++) {
-    const char = row[i]
-    if (char === '"') {
-      if (inQuotes && row[i + 1] === '"') { current += '"'; i++ } else inQuotes = !inQuotes
-    } else if (char === ',' && !inQuotes) { result.push(current); current = '' } else current += char
+  const out: string[] = []
+  let i = 0
+  while (i <= row.length) {
+    if (row.charCodeAt(i) === 34 /* " */) {
+      let val = ''
+      i++
+      let start = i
+      while (i < row.length) {
+        if (row.charCodeAt(i) === 34) {
+          if (row.charCodeAt(i + 1) === 34) { val += row.slice(start, i) + '"'; i += 2; start = i; continue }
+          break
+        }
+        i++
+      }
+      val += row.slice(start, i)
+      out.push(val)
+      i++ // closing quote
+      if (row.charCodeAt(i) === 44 /* , */) i++
+      else if (i >= row.length) break
+    } else {
+      const next = row.indexOf(',', i)
+      if (next === -1) { out.push(row.slice(i)); break }
+      out.push(row.slice(i, next))
+      i = next + 1
+    }
   }
-  result.push(current)
-  return result
+  return out
 }
 
-function parseCSV(text: string): { headers: string[]; rows: string[][] } {
-  const lines = text.split(/\r?\n/)
-  const nonEmpty = lines.filter(l => l.trim() !== '')
-  if (nonEmpty.length === 0) return { headers: [], rows: [] }
-  return { headers: parseCSVRow(nonEmpty[0]), rows: nonEmpty.slice(1).map(parseCSVRow) }
+// ---- Intake-only helpers: header + row count straight off the raw bytes ----
+// Intake never needs the parsed body; telegram-inbox re-reads the stored file
+// and parses it on approval. 0x0A can't appear inside a UTF-8 multi-byte
+// sequence, so counting newline bytes is exact without decoding the file.
+
+function headerFromBytes(bytes: Uint8Array): string {
+  let end = bytes.indexOf(10)
+  if (end === -1) end = bytes.length
+  let sliceEnd = end
+  if (sliceEnd > 0 && bytes[sliceEnd - 1] === 13) sliceEnd--
+  return new TextDecoder().decode(bytes.subarray(0, sliceEnd))
+}
+
+function countDataRows(bytes: Uint8Array): number {
+  let newlines = 0
+  for (let i = 0; i < bytes.length; i++) if (bytes[i] === 10) newlines++
+  const endsWithNewline = bytes.length > 0 && bytes[bytes.length - 1] === 10
+  const totalLines = endsWithNewline ? newlines : newlines + 1
+  return Math.max(0, totalLines - 1) // minus the header
 }
 
 interface TelegramIngest { id: string }
@@ -163,8 +198,12 @@ async function handleFileShared(fileId: string, channelId: string): Promise<void
   const fileRes = await fetch(file.url_private_download, {
     headers: { 'Authorization': `Bearer ${SLACK_BOT_TOKEN}` },
   })
-  const csvText = await fileRes.text()
-  const { headers, rows } = parseCSV(csvText)
+  // Keep the file as bytes: header and row count come straight off them, and
+  // the same buffer is what gets uploaded. Decoding the whole CSV to a string
+  // (let alone parsing it) is what blew the worker's memory limit.
+  const bytes = new Uint8Array(await fileRes.arrayBuffer())
+  const headers = parseCSVRow(headerFromBytes(bytes))
+  const rowCount = countDataRows(bytes)
   const detection = detectEmailColumn(headers)
   const detectedColumn = 'column' in detection ? detection.column : null
 
@@ -177,7 +216,7 @@ async function handleFileShared(fileId: string, channelId: string): Promise<void
       'Content-Type': 'text/csv',
       'x-upsert': 'true',
     },
-    body: new TextEncoder().encode(csvText),
+    body: bytes,
   })
   if (!uploadRes.ok) {
     await slackApi('chat.postMessage', { channel: channelId, text: 'Something went wrong saving your file — try again in a bit.' })
@@ -199,7 +238,7 @@ async function handleFileShared(fileId: string, channelId: string): Promise<void
     slack_channel_id: channelId,
     filename: name,
     storage_path: storagePath,
-    row_count: rows.length,
+    row_count: rowCount,
     detected_email_column: detectedColumn,
     status: 'awaiting_approval',
   }, { returning: true })) as TelegramIngest[]
@@ -214,7 +253,7 @@ async function handleFileShared(fileId: string, channelId: string): Promise<void
   const ownerText = [
     `📥 New CSV from ${senderName} (Slack)`,
     `File: ${name}`,
-    `Rows: ${rows.length}`,
+    `Rows: ${rowCount}`,
     columnLine,
   ].join('\n')
 
