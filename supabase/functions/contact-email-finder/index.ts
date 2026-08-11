@@ -20,6 +20,8 @@ const TELEGRAM_BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN') ?? ''
 const TELEGRAM_CHAT_ID = Deno.env.get('TELEGRAM_CHAT_ID') ?? ''
 
 const FINDER_URL = 'https://api.connector-os.com/api/email/v2/find'
+// Report every 10%, matching the email-validator milestones.
+const MILESTONE_STEP = 10
 
 const REST_HEADERS: Record<string, string> = {
   'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -210,6 +212,10 @@ async function processJob(jobId: string): Promise<void> {
 
   let found = job.emails_found
   let notFound = job.emails_not_found
+  // Seed from progress already made. This function re-invokes itself roughly
+  // every 110s, so initialising to 0 meant every invocation past the first
+  // milestone re-fired it — a 7-hour run would have sent the same "25%"
+  // message a couple of hundred times. email-validator seeds the same way.
   let lastMilestone = 0
 
   const missingRows = (await supabaseRequest(
@@ -217,6 +223,9 @@ async function processJob(jobId: string): Promise<void> {
     `validation_rows?job_id=eq.${jobId}&status=eq.pending&email=eq.&select=id`,
   )) as { id: string }[]
   const totalMissing = missingRows.length + found + notFound
+  if (totalMissing > 0) {
+    lastMilestone = Math.floor(((found + notFound) / totalMissing) * 100 / MILESTONE_STEP) * MILESTONE_STEP
+  }
 
   while (true) {
     const rows = (await supabaseRequest(
@@ -277,7 +286,7 @@ async function processJob(jobId: string): Promise<void> {
 
       const done = found + notFound
       if (totalMissing > 0) {
-        const milestone = Math.floor((done / totalMissing) * 100 / 25) * 25
+        const milestone = Math.floor((done / totalMissing) * 100 / MILESTONE_STEP) * MILESTONE_STEP
         if (milestone > lastMilestone && milestone <= 100) {
           lastMilestone = milestone
           await sendTelegram(`🔍 Email finder ${milestone}% (${done}/${totalMissing}) — ${found} found so far.`)
