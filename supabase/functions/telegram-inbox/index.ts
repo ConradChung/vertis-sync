@@ -385,6 +385,8 @@ interface InstantlyJob {
   instantly_campaign_id: string | null
   instantly_campaign_name: string | null
   instantly_campaign_candidates: { id: string; name: string }[] | null
+  instantly_campaign_id_nolocation: string | null
+  instantly_campaign_name_nolocation: string | null
   location_barrier: boolean
   company_barrier: boolean
   company_strict: boolean
@@ -392,7 +394,8 @@ interface InstantlyJob {
 
 const INSTANTLY_JOB_SELECT =
   'id,filename,valid_count,instantly_status,instantly_campaign_id,instantly_campaign_name,' +
-  'instantly_campaign_candidates,location_barrier,company_barrier,company_strict'
+  'instantly_campaign_candidates,instantly_campaign_id_nolocation,instantly_campaign_name_nolocation,' +
+  'location_barrier,company_barrier,company_strict'
 
 async function getInstantlyJob(jobId: string): Promise<InstantlyJob | null> {
   const jobs = (await supabaseRequest(
@@ -463,6 +466,58 @@ async function applyTemplate(campaignId: string, template: CampaignTemplate): Pr
     const text = await res.text()
     throw new Error(`Applying "${template.name}" failed (${res.status}): ${text.slice(0, 200)}`)
   }
+}
+
+const NO_LOCATION_TEMPLATE = 'Zenport Campaign \u2014 No Location'
+
+// Creates a sibling campaign for leads with no resolved city and points the
+// job at it. It mirrors the main campaign's senders, schedule and limits so
+// the only difference is the copy: variant C alone, whose subject carries no
+// {{location}}. Instantly rotates A/B variants by its own algorithm, so this
+// separation is the only way to guarantee a city-less lead never receives a
+// subject line with an empty interpolation in it.
+async function createNoLocationCampaign(job: InstantlyJob): Promise<string> {
+  if (!job.instantly_campaign_id) throw new Error('Pick the main campaign first')
+
+  const mainRes = await fetch(`${INSTANTLY_BASE_URL}/campaigns/${job.instantly_campaign_id}`, {
+    headers: { 'Authorization': `Bearer ${INSTANTLY_API_KEY}` },
+  })
+  if (!mainRes.ok) throw new Error(`Could not read the main campaign (${mainRes.status})`)
+  const main = await mainRes.json() as {
+    name?: string
+    email_list?: string[]
+    campaign_schedule?: unknown
+    daily_limit?: number
+    stop_on_reply?: boolean
+  }
+
+  const templates = await listTemplates()
+  const template = templates.find(t => t.name === NO_LOCATION_TEMPLATE)
+  if (!template) throw new Error(`Template "${NO_LOCATION_TEMPLATE}" is missing`)
+
+  const name = `${main.name ?? 'Campaign'} \u2014 No Location`
+  const body: Record<string, unknown> = { name, sequences: template.sequences }
+  // Mirror rather than invent: same inboxes, same sending window, same caps.
+  if (main.email_list) body.email_list = main.email_list
+  if (main.campaign_schedule) body.campaign_schedule = main.campaign_schedule
+  if (typeof main.daily_limit === 'number') body.daily_limit = main.daily_limit
+  if (typeof main.stop_on_reply === 'boolean') body.stop_on_reply = main.stop_on_reply
+
+  const res = await fetch(`${INSTANTLY_BASE_URL}/campaigns`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${INSTANTLY_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const text = await res.text()
+  if (!res.ok) throw new Error(`Creating the no-location campaign failed (${res.status}): ${text.slice(0, 200)}`)
+  const created = JSON.parse(text) as { id?: string }
+  if (!created.id) throw new Error('Instantly returned no campaign id')
+
+  await supabaseRequest('PATCH', `validation_jobs?id=eq.${job.id}`, {
+    instantly_campaign_id_nolocation: created.id,
+    instantly_campaign_name_nolocation: name,
+  })
+  return name
 }
 
 async function launchCampaign(campaignId: string): Promise<void> {
@@ -827,6 +882,25 @@ async function handlePushCallback(
     return
   }
 
+  if (action === 'camp_nolo') {
+    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Creating\u2026' })
+    try {
+      const name = await createNoLocationCampaign(job)
+      await tg('sendMessage', {
+        chat_id: TELEGRAM_CHAT_ID,
+        text: `\ud83d\uddfa Created "${name}" \u2014 variant C only, no {{location}} in the subject. ` +
+              `Same senders, schedule and daily limit as the main campaign.`,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: `\u26a0\ufe0f ${message}` })
+      return
+    }
+    const refreshed = await getInstantlyJob(jobId)
+    if (refreshed) await showBarrierScreen(refreshed, edit)
+    return
+  }
+
   if (action === 'camp_launch') {
     if (!job.instantly_campaign_id) {
       await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'No campaign on this job.' })
@@ -905,7 +979,7 @@ async function handleEnrichDecision(action: 'enrich_confirm' | 'enrich_skip', jo
 }
 
 const PUSH_ACTIONS = new Set([
-  'camp_pick', 'camp_tpl', 'camp_launch',
+  'camp_pick', 'camp_tpl', 'camp_launch', 'camp_nolo',
   'bar_loc', 'bar_co', 'push_next', 'push_go', 'push_strict', 'push_std', 'push_cancel',
 ])
 

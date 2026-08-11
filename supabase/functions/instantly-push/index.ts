@@ -242,6 +242,9 @@ interface ValidationJob {
   column_order: string[] | null
   instantly_campaign_id: string | null
   instantly_campaign_name: string | null
+  instantly_campaign_id_nolocation: string | null
+  instantly_campaign_name_nolocation: string | null
+  instantly_pushed_nolocation: number
   instantly_pushed: number
   instantly_filtered: number
   instantly_errors: number
@@ -317,7 +320,7 @@ function decideRow(row: ValidationRow, cols: Columns, job: ValidationJob): Decis
 async function loadJob(jobId: string): Promise<ValidationJob> {
   const jobs = (await supabaseRequest(
     'GET',
-    `validation_jobs?id=eq.${jobId}&select=id,filename,icp_filter,column_order,instantly_campaign_id,instantly_campaign_name,instantly_pushed,instantly_filtered,instantly_errors,location_barrier,company_barrier,company_strict`,
+    `validation_jobs?id=eq.${jobId}&select=id,filename,icp_filter,column_order,instantly_campaign_id,instantly_campaign_name,instantly_campaign_id_nolocation,instantly_campaign_name_nolocation,instantly_pushed_nolocation,instantly_pushed,instantly_filtered,instantly_errors,location_barrier,company_barrier,company_strict`,
   )) as ValidationJob[]
   if (!jobs || jobs.length === 0) throw new Error(`Job ${jobId} not found`)
   return jobs[0]
@@ -345,6 +348,9 @@ interface PreviewResult {
   blankLocation: number
   samples: { original: string; normalized: string }[]
   strict: boolean
+  // How many would route to the separate no-location campaign, if one is set.
+  noLocationRouted: number
+  hasNoLocationCampaign: boolean
   // Edge functions have their own secret store, separate from the Next.js
   // app's Vercel env. Surfacing this in the preview means a missing key shows
   // up on the review screen instead of failing mid-push.
@@ -382,6 +388,8 @@ async function buildPreview(jobId: string): Promise<PreviewResult> {
   const result: PreviewResult = {
     eligible: 0, filtered: 0, junk: 0, missingFirstName: 0, blankLocation: 0,
     samples: [], strict: job.company_strict,
+    noLocationRouted: 0,
+    hasNoLocationCampaign: Boolean(job.instantly_campaign_id_nolocation),
     instantlyKeyPresent: INSTANTLY_API_KEY.length > 0,
   }
 
@@ -394,7 +402,10 @@ async function buildPreview(jobId: string): Promise<PreviewResult> {
     }
     result.eligible++
     if (!decision.lead.first_name) result.missingFirstName++
-    if (!decision.lead.location) result.blankLocation++
+    if (!decision.lead.location) {
+      result.blankLocation++
+      if (job.instantly_campaign_id_nolocation) result.noLocationRouted++
+    }
     if (result.samples.length < SAMPLE_SIZE) {
       result.samples.push({
         original: decision.originalCompany || '(blank)',
@@ -491,6 +502,13 @@ async function processJob(jobId: string): Promise<void> {
   await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { instantly_status: 'pushing' })
 
   const cols = await resolveColumns(job)
+  // A lead with no resolved city must never land in a campaign whose subject
+  // line interpolates {{location}}. Instantly rotates A/B variants by its own
+  // algorithm, so there is no per-lead variant targeting — a separate campaign
+  // is the only guarantee. Without one configured, everything goes to the main
+  // campaign exactly as before.
+  const noLocationCampaignId = job.instantly_campaign_id_nolocation
+  let pushedNoLocation = job.instantly_pushed_nolocation
   let pushed = job.instantly_pushed
   let filtered = job.instantly_filtered
   let errors = job.instantly_errors
@@ -515,11 +533,15 @@ async function processJob(jobId: string): Promise<void> {
         continue
       }
 
+      const targetCampaign = (!decision.lead.location && noLocationCampaignId)
+        ? noLocationCampaignId
+        : campaignId
+
       try {
-        const created = await createLead(campaignId, decision.lead)
+        const created = await createLead(targetCampaign, decision.lead)
 
         if (!verified) {
-          const problem = await verifyFirstLead(campaignId, decision.lead)
+          const problem = await verifyFirstLead(targetCampaign, decision.lead)
           if (problem) {
             await supabaseRequest('PATCH', `validation_rows?id=eq.${row.id}`, {
               instantly_status: 'pushed',
@@ -542,9 +564,10 @@ async function processJob(jobId: string): Promise<void> {
 
         await supabaseRequest('PATCH', `validation_rows?id=eq.${row.id}`, {
           instantly_status: 'pushed',
-          instantly_result: created,
+          instantly_result: { ...created, routed_to: targetCampaign },
         })
-        pushed++
+        if (targetCampaign === noLocationCampaignId) pushedNoLocation++
+        else pushed++
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err)
         await supabaseRequest('PATCH', `validation_rows?id=eq.${row.id}`, {
@@ -556,6 +579,7 @@ async function processJob(jobId: string): Promise<void> {
 
       await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
         instantly_pushed: pushed,
+        instantly_pushed_nolocation: pushedNoLocation,
         instantly_filtered: filtered,
         instantly_errors: errors,
       })
@@ -595,6 +619,9 @@ async function processJob(jobId: string): Promise<void> {
       `Campaign: ${job.instantly_campaign_name}`,
       ``,
       `Pushed: ${pushed}`,
+      ...(noLocationCampaignId
+        ? [`Pushed (no location): ${pushedNoLocation} \u2192 ${job.instantly_campaign_name_nolocation}`]
+        : []),
       `Filtered out: ${filtered}`,
       `Errors: ${errors}`,
       ``,
