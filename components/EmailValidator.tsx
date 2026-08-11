@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
-import { Upload, RotateCcw, CheckCircle2, Download, Clock, Clipboard, ClipboardCheck } from 'lucide-react'
+import { Upload, RotateCcw, CheckCircle2, Download, Clock, Clipboard, ClipboardCheck, Send, ChevronDown } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
 interface ValidationRun {
@@ -17,6 +17,33 @@ interface ValidationRun {
   storage_path: string | null
   created_at: string
   source: 'csv' | 'apify' | null
+  instantly_status: string | null
+  instantly_campaign_name: string | null
+  instantly_pushed: number | null
+  instantly_filtered: number | null
+  instantly_errors: number | null
+  location_barrier: boolean | null
+  company_barrier: boolean | null
+  company_strict: boolean | null
+}
+
+interface InstantlyCampaignOption {
+  id: string
+  name: string
+  statusLabel: string
+}
+
+interface PushPreview {
+  ok: boolean
+  eligible: number
+  filtered: number
+  junk: number
+  missingFirstName: number
+  blankLocation: number
+  samples: { original: string; normalized: string }[]
+  strict: boolean
+  instantlyKeyPresent: boolean
+  error?: string
 }
 
 type Step = 'upload' | 'ambiguous' | 'processing' | 'done' | 'error'
@@ -117,6 +144,16 @@ export default function EmailValidator({ onStatusChange }: Props) {
   const [enrichEnabled, setEnrichEnabled] = useState(false)
   const [enrichedRows, setEnrichedRows] = useState(0)
   const enrichRef = useRef(false)
+  // Instantly push (dashboard-side trigger — the Telegram flow is unchanged)
+  const [pushOpenId, setPushOpenId] = useState<string | null>(null)
+  const [campaigns, setCampaigns] = useState<InstantlyCampaignOption[]>([])
+  const [campaignsError, setCampaignsError] = useState<string>('')
+  const [campaignsLoading, setCampaignsLoading] = useState(false)
+  const [selectedCampaign, setSelectedCampaign] = useState<string>('')
+  const [preview, setPreview] = useState<PushPreview | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [pushingId, setPushingId] = useState<string | null>(null)
+  const [pushError, setPushError] = useState<string>('')
   const supabase = createClient()
 
   useEffect(() => {
@@ -185,6 +222,86 @@ export default function EmailValidator({ onStatusChange }: Props) {
       } catch {
         setDownloadingId(null)
       }
+    }
+  }
+
+  // ---- Instantly push ----
+
+  async function loadPreview(jobId: string) {
+    setPreviewLoading(true)
+    try {
+      const res = await fetch(`/api/instantly/push?job_id=${jobId}`)
+      setPreview(await res.json() as PushPreview)
+    } catch {
+      setPreview(null)
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  async function openPush(run: ValidationRun) {
+    if (pushOpenId === run.id) { setPushOpenId(null); return }
+    setPushOpenId(run.id)
+    setPushError('')
+    setPreview(null)
+    setSelectedCampaign(run.instantly_campaign_name ? selectedCampaign : '')
+
+    loadPreview(run.id)
+
+    if (campaigns.length === 0) {
+      setCampaignsLoading(true)
+      setCampaignsError('')
+      try {
+        const res = await fetch('/api/instantly/campaigns')
+        const data = await res.json()
+        if (!res.ok) setCampaignsError(data.error ?? 'Could not load campaigns')
+        else setCampaigns(data.campaigns as InstantlyCampaignOption[])
+      } catch (err) {
+        setCampaignsError(err instanceof Error ? err.message : 'Could not load campaigns')
+      } finally {
+        setCampaignsLoading(false)
+      }
+    }
+  }
+
+  // Barriers live on the job row because the preview derives from them, so a
+  // toggle is persisted before the names are re-read.
+  async function setBarrier(jobId: string, patch: Record<string, boolean>) {
+    setRuns(prev => prev.map(r => (r.id === jobId ? { ...r, ...patch } : r)))
+    await fetch('/api/instantly/push', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job_id: jobId, ...patch }),
+    })
+    await loadPreview(jobId)
+  }
+
+  async function startPush(run: ValidationRun) {
+    const campaign = campaigns.find(c => c.id === selectedCampaign)
+    if (!campaign) { setPushError('Pick a campaign first'); return }
+    setPushingId(run.id)
+    setPushError('')
+    try {
+      const res = await fetch('/api/instantly/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          job_id: run.id,
+          campaign_id: campaign.id,
+          campaign_name: campaign.name,
+          location_barrier: run.location_barrier ?? false,
+          company_barrier: run.company_barrier ?? true,
+          company_strict: run.company_strict ?? false,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setPushError(data.error ?? 'Push failed to start'); return }
+      setPushOpenId(null)
+      loadRuns()
+    } catch (err) {
+      setPushError(err instanceof Error ? err.message : 'Push failed to start')
+    } finally {
+      setPushingId(null)
     }
   }
 
@@ -546,8 +663,10 @@ export default function EmailValidator({ onStatusChange }: Props) {
               const validPct = run.total_rows > 0 ? Math.round((run.valid_count / run.total_rows) * 100) : 0
               const date = new Date(run.created_at)
               const isCompleted = run.status === 'completed'
+              const pushOpen = pushOpenId === run.id
               return (
-                <div key={run.id} className="flex items-center justify-between gap-4 border border-[var(--border)] rounded-xl bg-[var(--surface-raised)] px-4 py-3">
+                <div key={run.id} className="border border-[var(--border)] rounded-xl bg-[var(--surface-raised)]">
+                <div className="flex items-center justify-between gap-4 px-4 py-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <div className="flex items-center gap-1.5 min-w-0">
@@ -606,7 +725,152 @@ export default function EmailValidator({ onStatusChange }: Props) {
                       <Download size={12} />
                       {downloadingId === run.id ? 'Getting link…' : 'Download'}
                     </button>
+                    <button
+                      onClick={() => openPush(run)}
+                      disabled={!isCompleted}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] text-[12px] text-[var(--text-secondary)] hover:border-[var(--border)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <Send size={12} />
+                      Instantly
+                      <ChevronDown size={12} className={pushOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                    </button>
                   </div>
+                </div>
+
+                {run.instantly_status === 'done' && (
+                  <div className="px-4 pb-3 -mt-1">
+                    <span className="text-[11px] text-[#22c55e]">
+                      Pushed {run.instantly_pushed?.toLocaleString() ?? 0} to {run.instantly_campaign_name}
+                      {run.instantly_filtered ? ` · ${run.instantly_filtered} filtered` : ''}
+                      {run.instantly_errors ? ` · ${run.instantly_errors} errors` : ''}
+                    </span>
+                  </div>
+                )}
+                {run.instantly_status === 'pushing' && (
+                  <div className="px-4 pb-3 -mt-1 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    <span className="text-[11px] text-amber-400">
+                      Pushing to {run.instantly_campaign_name} — {run.instantly_pushed?.toLocaleString() ?? 0} so far
+                    </span>
+                  </div>
+                )}
+
+                {pushOpen && (
+                  <div className="border-t border-[var(--border)] px-4 py-3 space-y-3">
+                    <div>
+                      <label className="block text-[11px] text-[var(--text-placeholder)] mb-1">Campaign</label>
+                      {campaignsLoading ? (
+                        <p className="text-[12px] text-[var(--text-placeholder)]">Loading campaigns…</p>
+                      ) : campaignsError ? (
+                        <p className="text-[12px] text-red-400">{campaignsError}</p>
+                      ) : (
+                        <select
+                          value={selectedCampaign}
+                          onChange={e => setSelectedCampaign(e.target.value)}
+                          className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-[12px] text-[var(--text-primary)]"
+                        >
+                          <option value="">Select a campaign…</option>
+                          {campaigns.map(c => (
+                            <option key={c.id} value={c.id}>{c.name} ({c.statusLabel})</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={run.location_barrier ?? false}
+                          onChange={e => setBarrier(run.id, { location_barrier: e.target.checked })}
+                        />
+                        Location barrier
+                        <span className="text-[var(--text-placeholder)]">
+                          {run.location_barrier ? 'resolved city + high confidence only' : 'keep every row, blank unknown cities'}
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={run.company_barrier ?? true}
+                          onChange={e => setBarrier(run.id, { company_barrier: e.target.checked })}
+                        />
+                        Company barrier
+                        <span className="text-[var(--text-placeholder)]">
+                          {run.company_barrier ?? true ? 'drop junk names' : 'no filtering'}
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={run.company_strict ?? false}
+                          onChange={e => setBarrier(run.id, { company_strict: e.target.checked })}
+                        />
+                        Stricter names
+                        <span className="text-[var(--text-placeholder)]">&quot;Wildwood Management Group&quot; → &quot;Wildwood&quot;</span>
+                      </label>
+                    </div>
+
+                    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+                      {previewLoading ? (
+                        <p className="text-[12px] text-[var(--text-placeholder)]">Building preview…</p>
+                      ) : !preview ? (
+                        <p className="text-[12px] text-[var(--text-placeholder)]">No preview</p>
+                      ) : !preview.ok ? (
+                        <p className="text-[12px] text-red-400">{preview.error}</p>
+                      ) : (
+                        <>
+                          {!preview.instantlyKeyPresent && (
+                            <p className="text-[11px] text-red-400 mb-1">
+                              INSTANTLY_API_KEY is not set on the Supabase edge functions — the push will fail.
+                            </p>
+                          )}
+                          <p className="text-[12px] text-[var(--text-secondary)]">
+                            {preview.eligible.toLocaleString()} ready · {preview.filtered.toLocaleString()} filtered
+                            {preview.junk ? ` (${preview.junk} junk names)` : ''}
+                          </p>
+                          {(preview.missingFirstName > 0 || preview.blankLocation > 0) && (
+                            <p className="text-[11px] text-[var(--text-placeholder)] mt-0.5">
+                              {preview.missingFirstName > 0 && `${preview.missingFirstName} with no first name`}
+                              {preview.missingFirstName > 0 && preview.blankLocation > 0 && ' · '}
+                              {preview.blankLocation > 0 && `${preview.blankLocation} blank location`}
+                            </p>
+                          )}
+                          {preview.samples.length > 0 && (
+                            <ul className="mt-2 space-y-0.5">
+                              {preview.samples.map((s, i) => (
+                                <li key={i} className="text-[11px] text-[var(--text-placeholder)] truncate">
+                                  {s.normalized}
+                                  {s.original !== s.normalized && <span className="opacity-60"> ← {s.original}</span>}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </>
+                      )}
+                    </div>
+
+                    {pushError && <p className="text-[12px] text-red-400">{pushError}</p>}
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        onClick={() => startPush(run)}
+                        disabled={!selectedCampaign || pushingId === run.id || !preview?.ok || preview.eligible === 0}
+                        className="text-[12px]"
+                      >
+                        {pushingId === run.id
+                          ? 'Starting…'
+                          : `Push ${preview?.ok ? preview.eligible.toLocaleString() : ''} leads`}
+                      </Button>
+                      <button
+                        onClick={() => setPushOpenId(null)}
+                        className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
                 </div>
               )
             })}
