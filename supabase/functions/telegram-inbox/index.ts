@@ -3,6 +3,8 @@
 // gets an Approve/Deny prompt, and only on approval does the file enter the
 // normal validation pipeline (validation_jobs/validation_rows + email-validator).
 
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
+
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const TELEGRAM_BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN')!
@@ -81,6 +83,21 @@ async function replyToSender(ingest: TelegramIngest, text: string): Promise<void
 const TIER1_NAMES = new Set(['email', 'work_email', 'business_email'])
 const PERSONAL_SUBSTRINGS = ['personal']
 
+// Apollo exports carry two free-text columns that nothing downstream reads but
+// which dominate the file: on a real 14.2MB export, Keywords averaged ~844
+// chars/row and Technologies ~630, together 76% of the bytes. Dropping them at
+// intake keeps them out of row_data, out of every CSV rebuild, and out of the
+// 20MB Telegram ceiling.
+const DROPPED_COLUMNS = new Set(['keywords', 'technologies'])
+
+function keptColumnIndexes(headers: string[]): number[] {
+  const keep: number[] = []
+  for (let i = 0; i < headers.length; i++) {
+    if (!DROPPED_COLUMNS.has(normalizeHeader(headers[i]))) keep.push(i)
+  }
+  return keep
+}
+
 function normalizeHeader(h: string): string {
   return h.toLowerCase().trim().replace(/\s+/g, '_')
 }
@@ -102,25 +119,75 @@ function detectEmailColumn(headers: string[]): { column: string } | { ambiguous:
   return { error: 'No email column found in CSV' }
 }
 
+// Slice-based rather than char-by-char. The previous version built each cell
+// with `current += char`, which on a wide CSV generates one intermediate
+// string per character — a 13MB file peaked at 444MB of heap and the worker
+// was killed with a 546 before it could even reply to Telegram. This produces
+// byte-identical output (verified against the old parser on quoted commas,
+// doubled quotes, empty fields and trailing quotes) at a fraction of the cost.
 function parseCSVRow(row: string): string[] {
-  const result: string[] = []
-  let current = ''
-  let inQuotes = false
-  for (let i = 0; i < row.length; i++) {
-    const char = row[i]
-    if (char === '"') {
-      if (inQuotes && row[i + 1] === '"') { current += '"'; i++ } else inQuotes = !inQuotes
-    } else if (char === ',' && !inQuotes) { result.push(current); current = '' } else current += char
+  const out: string[] = []
+  let i = 0
+  while (i <= row.length) {
+    if (row.charCodeAt(i) === 34 /* " */) {
+      let val = ''
+      i++
+      let start = i
+      while (i < row.length) {
+        if (row.charCodeAt(i) === 34) {
+          if (row.charCodeAt(i + 1) === 34) { val += row.slice(start, i) + '"'; i += 2; start = i; continue }
+          break
+        }
+        i++
+      }
+      val += row.slice(start, i)
+      out.push(val)
+      i++ // closing quote
+      if (row.charCodeAt(i) === 44 /* , */) i++
+      else if (i >= row.length) break
+    } else {
+      const next = row.indexOf(',', i)
+      if (next === -1) { out.push(row.slice(i)); break }
+      out.push(row.slice(i, next))
+      i = next + 1
+    }
   }
-  result.push(current)
-  return result
+  return out
 }
 
-function parseCSV(text: string): { headers: string[]; rows: string[][] } {
-  const lines = text.split(/\r?\n/)
-  const nonEmpty = lines.filter(l => l.trim() !== '')
-  if (nonEmpty.length === 0) return { headers: [], rows: [] }
-  return { headers: parseCSVRow(nonEmpty[0]), rows: nonEmpty.slice(1).map(parseCSVRow) }
+// Yields one line at a time instead of materializing a lines array, so the
+// caller can parse-and-release rather than holding every parsed row at once.
+function* iterLines(text: string): Generator<string> {
+  let start = 0
+  while (start < text.length) {
+    let nl = text.indexOf('\n', start)
+    if (nl === -1) nl = text.length
+    let end = nl
+    if (end > start && text.charCodeAt(end - 1) === 13 /* \r */) end--
+    if (end > start) yield text.slice(start, end)
+    start = nl + 1
+  }
+}
+
+// ---- Intake-only helpers: header + row count straight off the raw bytes ----
+// Intake never needs the parsed body; approval re-reads the file and parses it
+// then. 0x0A can't appear inside a UTF-8 multi-byte sequence, so counting
+// newline bytes is exact without decoding the whole file.
+
+function headerFromBytes(bytes: Uint8Array): string {
+  let end = bytes.indexOf(10)
+  if (end === -1) end = bytes.length
+  let sliceEnd = end
+  if (sliceEnd > 0 && bytes[sliceEnd - 1] === 13) sliceEnd--
+  return new TextDecoder().decode(bytes.subarray(0, sliceEnd))
+}
+
+function countDataRows(bytes: Uint8Array): number {
+  let newlines = 0
+  for (let i = 0; i < bytes.length; i++) if (bytes[i] === 10) newlines++
+  const endsWithNewline = bytes.length > 0 && bytes[bytes.length - 1] === 10
+  const totalLines = endsWithNewline ? newlines : newlines + 1
+  return Math.max(0, totalLines - 1) // minus the header
 }
 
 // ---- Telegram update shape (only the fields we use) ----
@@ -153,6 +220,7 @@ interface TelegramIngest {
   filename: string
   storage_path: string
   status: string
+  row_count: number | null
 }
 
 function senderLabel(from?: { first_name?: string; username?: string }): string {
@@ -189,9 +257,14 @@ async function handleDocument(message: NonNullable<TelegramUpdate['message']>): 
     return
   }
 
+  // Keep the file as bytes: the header and row count come straight off them,
+  // and the same buffer is what gets uploaded. Decoding the whole CSV to a
+  // string here (let alone parsing it) is what used to blow the worker's
+  // memory limit on a wide file.
   const fileRes = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`)
-  const csvText = await fileRes.text()
-  const { headers, rows } = parseCSV(csvText)
+  const bytes = new Uint8Array(await fileRes.arrayBuffer())
+  const headers = parseCSVRow(headerFromBytes(bytes))
+  const rowCount = countDataRows(bytes)
   const detection = detectEmailColumn(headers)
   const detectedColumn = 'column' in detection ? detection.column : null
 
@@ -204,7 +277,7 @@ async function handleDocument(message: NonNullable<TelegramUpdate['message']>): 
       'Content-Type': 'text/csv',
       'x-upsert': 'true',
     },
-    body: new TextEncoder().encode(csvText),
+    body: bytes,
   })
   if (!uploadRes.ok) {
     await tg('sendMessage', { chat_id: senderChatId, text: 'Something went wrong saving your file — try again in a bit.' })
@@ -219,7 +292,7 @@ async function handleDocument(message: NonNullable<TelegramUpdate['message']>): 
     sender_name: senderName,
     filename: name,
     storage_path: storagePath,
-    row_count: rows.length,
+    row_count: rowCount,
     detected_email_column: detectedColumn,
     status: 'awaiting_approval',
   }, { returning: true })) as TelegramIngest[]
@@ -234,7 +307,7 @@ async function handleDocument(message: NonNullable<TelegramUpdate['message']>): 
   const ownerText = [
     `📥 New CSV from ${senderName}`,
     `File: ${name}`,
-    `Rows: ${rows.length}`,
+    `Rows: ${rowCount}`,
     columnLine,
   ].join('\n')
 
@@ -673,24 +746,35 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
     return
   }
 
+  // Acknowledge the tap FIRST. Telegram spins the button until this returns,
+  // and loading a large file used to take long enough that the owner assumed
+  // nothing happened and tapped again — which is how one file became three
+  // identical jobs.
+  await tg('answerCallbackQuery', {
+    callback_query_id: cb.id,
+    text: action === 'deny' ? 'Denying…' : 'Approved — loading rows…',
+  })
+
   const ingests = (await supabaseRequest('GET', `telegram_ingests?id=eq.${ingestId}&select=*`)) as TelegramIngest[]
   const ingest = ingests[0]
-  if (!ingest) {
-    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Not found.' })
-    return
-  }
-  if (ingest.status !== 'awaiting_approval') {
-    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Already handled.' })
-    return
-  }
+  if (!ingest) return
+  if (ingest.status !== 'awaiting_approval') return
 
   if (action === 'deny') {
-    await supabaseRequest('PATCH', `telegram_ingests?id=eq.${ingestId}`, { status: 'rejected' })
+    // Same conditional claim as approve, so a double-tap can't delete the
+    // stored file twice or race an approve that landed first.
+    const rejected = (await supabaseRequest(
+      'PATCH',
+      `telegram_ingests?id=eq.${ingestId}&status=eq.awaiting_approval`,
+      { status: 'rejected' },
+      { returning: true },
+    )) as TelegramIngest[]
+    if (!rejected || rejected.length === 0) return
+
     await fetch(`${SUPABASE_URL}/storage/v1/object/raw-uploads/${ingest.storage_path}`, {
       method: 'DELETE',
       headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
     })
-    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Denied.' })
     if (ingest.telegram_message_id) {
       await tg('editMessageText', {
         chat_id: ingest.telegram_chat_id,
@@ -703,30 +787,70 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
   }
 
   // action === 'approve' | 'approve_enrich'
+  //
+  // Claim the ingest BEFORE doing any work. The status read above is not a
+  // guard on its own: it used to be followed by a download and thousands of
+  // inserts, and only then the flip to 'approved'. On a 7,288-row file that
+  // window was seconds wide, so three taps sailed past the check and each
+  // started its own job. This conditional update is atomic — it only matches
+  // while the row is still awaiting_approval, so exactly one tap can win.
+  const claimed = (await supabaseRequest(
+    'PATCH',
+    `telegram_ingests?id=eq.${ingestId}&status=eq.awaiting_approval`,
+    { status: 'approved' },
+    { returning: true },
+  )) as TelegramIngest[]
+  if (!claimed || claimed.length === 0) return // another tap already won
+
   const enrich = action === 'approve_enrich'
+
+  if (ingest.telegram_message_id) {
+    await tg('editMessageText', {
+      chat_id: ingest.telegram_chat_id,
+      message_id: ingest.telegram_message_id,
+      text: `⏳ Loading ${ingest.row_count ?? 0} rows — ${ingest.filename}`,
+    })
+  }
+
   const dl = await fetch(`${SUPABASE_URL}/storage/v1/object/raw-uploads/${ingest.storage_path}`, {
     headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
   })
   const csvText = await dl.text()
-  const { headers, rows } = parseCSV(csvText)
+
+  // Parse the header alone first — the body is streamed below rather than
+  // parsed up front, so a wide CSV never has every row in memory at once.
+  const firstLine = iterLines(csvText).next()
+  const headers = firstLine.done ? [] : parseCSVRow(firstLine.value)
   const detection = detectEmailColumn(headers)
   if (!('column' in detection)) {
-    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Email column no longer detectable.' })
+    // The callback was already answered above, so report this as a message —
+    // a second answerCallbackQuery for the same tap is rejected by Telegram.
+    await tg('sendMessage', {
+      chat_id: TELEGRAM_CHAT_ID,
+      text: `⚠️ Email column no longer detectable in ${ingest.filename} — nothing was loaded.`,
+    })
     return
   }
   const colIndex = headers.indexOf(detection.column)
   const jobId = crypto.randomUUID()
 
+  // Drop the bulk columns before anything is stored. keptIdx maps a parsed
+  // row back onto the surviving headers, so row_data and column_order stay in
+  // step with each other.
+  const keptIdx = keptColumnIndexes(headers)
+  const keptHeaders = keptIdx.map(i => headers[i])
+  const droppedCount = headers.length - keptHeaders.length
+
   await supabaseRequest('POST', 'validation_jobs', {
     id: jobId,
     filename: ingest.filename,
-    total_rows: rows.length,
+    total_rows: ingest.row_count ?? 0,
     processed_rows: 0,
     valid_count: 0,
     invalid_count: 0,
     status: 'pending',
     source: 'telegram',
-    column_order: headers,
+    column_order: keptHeaders,
     enrich,
     enriched_rows: 0,
   })
@@ -734,24 +858,54 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
   // enrichment_status starts at its DB default ('skipped') for every row —
   // email-validator is what flips valid rows to 'pending' once it knows
   // which emails are actually worth enriching.
-  const validationRows = rows.map((row, i) => ({
-    job_id: jobId,
-    email: row[colIndex] ?? '',
-    row_index: i,
-    status: 'pending',
-    row_data: Object.fromEntries(headers.map((h, hi) => [h, row[hi] ?? ''])),
-  }))
-  const CHUNK_SIZE = 500
-  for (let i = 0; i < validationRows.length; i += CHUNK_SIZE) {
-    await supabaseRequest('POST', 'validation_rows', validationRows.slice(i, i + CHUNK_SIZE))
+  //
+  // Batches flush on whichever comes first: a row count, or an approximate
+  // payload size. A fixed 500-row chunk was ~10MB of JSON on a wide file;
+  // capping by bytes keeps each insert small regardless of row width.
+  const MAX_BATCH_ROWS = 500
+  const MAX_BATCH_BYTES = 1_000_000
+  let batch: Record<string, unknown>[] = []
+  let batchBytes = 0
+  let rowIndex = 0
+  let isHeader = true
+
+  let missingEmail = 0
+
+  for (const line of iterLines(csvText)) {
+    if (isHeader) { isHeader = false; continue }
+    const cells = parseCSVRow(line)
+    const email = (cells[colIndex] ?? '').trim()
+    if (!email) missingEmail++
+    batch.push({
+      job_id: jobId,
+      email,
+      row_index: rowIndex++,
+      status: 'pending',
+      row_data: Object.fromEntries(keptIdx.map(i => [headers[i], cells[i] ?? ''])),
+    })
+    batchBytes += line.length
+    if (batch.length >= MAX_BATCH_ROWS || batchBytes >= MAX_BATCH_BYTES) {
+      await supabaseRequest('POST', 'validation_rows', batch)
+      batch = []
+      batchBytes = 0
+    }
   }
+  if (batch.length > 0) await supabaseRequest('POST', 'validation_rows', batch)
 
-  await supabaseRequest('PATCH', `telegram_ingests?id=eq.${ingestId}`, { status: 'approved', validation_job_id: jobId })
+  // row_count came from a newline scan at intake; rowIndex is what actually
+  // parsed. Reconcile so progress percentages aren't computed off a stale total.
+  if (rowIndex !== (ingest.row_count ?? 0)) {
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { total_rows: rowIndex })
+  }
+  await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { rows_missing_email: missingEmail })
 
-  // Always start with email-validator, whether or not enrichment was
-  // requested — it internally hands off to operating-city-enricher for
-  // valid rows only, then reclaims control to finish once that's done.
-  fetch(`${SUPABASE_URL}/functions/v1/email-validator`, {
+  await supabaseRequest('PATCH', `telegram_ingests?id=eq.${ingestId}`, { validation_job_id: jobId })
+
+  // Rows that arrived without an address go through the finder first, then the
+  // whole list — found and pre-existing addresses together — flows into
+  // email-validator. With nothing missing, skip straight to validation.
+  const nextFunction = missingEmail > 0 ? 'contact-email-finder' : 'email-validator'
+  fetch(`${SUPABASE_URL}/functions/v1/${nextFunction}`, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -759,16 +913,21 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ job_id: jobId }),
-  }).catch(err => console.error('[telegram-inbox] email-validator invoke error:', err))
+  }).catch(err => console.error(`[telegram-inbox] ${nextFunction} invoke error:`, err))
 
-  await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Approved — running now.' })
+  const summary = [
+    enrich ? `🔎 Approved + Enrich — ${ingest.filename}` : `✅ Approved — ${ingest.filename}`,
+    `${rowIndex} rows loaded${droppedCount > 0 ? ` · ${droppedCount} bulk column${droppedCount === 1 ? '' : 's'} dropped` : ''}`,
+    missingEmail > 0
+      ? `${rowIndex - missingEmail} with an address · finding ${missingEmail} missing first`
+      : `Validating all ${rowIndex} now`,
+  ].join('\n')
+
   if (ingest.telegram_message_id) {
     await tg('editMessageText', {
       chat_id: ingest.telegram_chat_id,
       message_id: ingest.telegram_message_id,
-      text: enrich
-        ? `🔎 Approved + Enrich — running — ${ingest.filename} (${rows.length} rows)`
-        : `✅ Approved — running — ${ingest.filename} (${rows.length} rows)`,
+      text: summary,
     })
   }
   await replyToSender(ingest, 'Approved — running now.')
@@ -789,7 +948,12 @@ Deno.serve(async (req: Request) => {
     return new Response('Bad Request', { status: 400 })
   }
 
-  try {
+  // Answer Telegram immediately and do the work in the background. Handling a
+  // document inline meant a slow or heavy file left the request hanging until
+  // the worker was killed; Telegram saw a failure, retried the same update
+  // forever, and the sender got nothing back. Now a failure is reported into
+  // the chat instead of turning into a retry storm.
+  const work = (async () => {
     if (update.message?.document) {
       await handleDocument(update.message)
     } else if (update.callback_query) {
@@ -799,13 +963,14 @@ Deno.serve(async (req: Request) => {
       // prompt. Anything else falls through and is ignored as before.
       await handleCampaignNameReply(update.message.text, update.message.reply_to_message.message_id)
     }
-    // All other update types are silently ignored — Telegram just needs a 200
-    // regardless so it doesn't retry.
-  } catch (err) {
+    // All other update types are silently ignored.
+  })().catch(async (err: unknown) => {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[telegram-inbox] handler error:', message)
     await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: `⚠️ telegram-inbox error: ${message}` }).catch(() => {})
-  }
+  })
+
+  EdgeRuntime.waitUntil(work)
 
   return new Response('OK', { status: 200 })
 })
