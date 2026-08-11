@@ -54,13 +54,17 @@ async function supabaseRequest(method: string, path: string, body?: unknown): Pr
   return null
 }
 
-async function sendTelegram(message: string): Promise<void> {
+async function sendTelegram(message: string, replyMarkup?: unknown): Promise<void> {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return
   try {
     await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: message }),
+      body: JSON.stringify({
+        chat_id: TELEGRAM_CHAT_ID,
+        text: message,
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      }),
     })
   } catch {
     // Non-critical — ignore Telegram errors
@@ -577,6 +581,14 @@ async function processJob(jobId: string): Promise<void> {
 
   await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { instantly_status: 'done' })
 
+  await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
+    eta_seconds: 0,
+    eta_updated_at: new Date().toISOString(),
+  })
+
+  // The launch button is the end of the road: everything is in the campaign,
+  // so the only thing left is to start sending. telegram-inbox handles the tap
+  // and refuses to activate a campaign with no sequence written.
   await sendTelegram(
     [
       `📤 Instantly push complete — ${job.filename}`,
@@ -587,7 +599,12 @@ async function processJob(jobId: string): Promise<void> {
       `Errors: ${errors}`,
       ``,
       `Barriers — location: ${job.location_barrier ? 'ON' : 'OFF'}, company: ${job.company_barrier ? 'ON' : 'OFF'}${job.company_strict ? ' (strict names)' : ''}`,
+      ``,
+      `Ready to launch when your sequence is written.`,
     ].join('\n'),
+    pushed > 0
+      ? { inline_keyboard: [[{ text: '🚀 Launch campaign', callback_data: `camp_launch:${jobId}` }]] }
+      : undefined,
   )
 }
 

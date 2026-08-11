@@ -190,6 +190,53 @@ function countDataRows(bytes: Uint8Array): number {
   return Math.max(0, totalLines - 1) // minus the header
 }
 
+// ---- Pipeline ETA ----
+//
+// Every rate below is measured against this project's own history rather than
+// assumed, so the number quoted at approval is grounded:
+//   validate  1.63s/row  — mean gap between processed_at on 336 real rows
+//                          (1.1s MailTester rate-limit sleep + API latency)
+//   find      1.2s/row   — connector-os returned in 0.3-1.1s across samples,
+//                          plus the row PATCH
+//   enrich    5.0s/row   — 1s sleep + Perplexity + Haiku, seeded
+//   push      0.55s/row  — 0.25s pacing sleep + lead create
+// VALID_RATE is this workspace's own average: 2,114 valid of 4,367 rows across
+// 5 completed jobs. FIND_RATE is deliberately conservative.
+const SEC_PER_ROW_FIND = 1.2
+const SEC_PER_ROW_VALIDATE = 1.63
+const SEC_PER_ROW_ENRICH = 5.0
+const SEC_PER_ROW_PUSH = 0.55
+const VALID_RATE = 0.48
+const FIND_RATE = 0.5
+
+function formatDuration(seconds: number): string {
+  // Round to whole minutes FIRST, then split. Rounding the remainder
+  // separately produces "3h 60m".
+  const totalMin = Math.round(Math.max(0, seconds) / 60)
+  if (totalMin < 1) return `${Math.max(0, Math.round(seconds))}s`
+  const h = Math.floor(totalMin / 60)
+  const m = totalMin % 60
+  if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`
+  return `${m}m`
+}
+
+interface EtaInput {
+  rowsWithEmail: number
+  missingEmail: number
+  enrich: boolean
+}
+
+// Seconds from approval to the last lead landing in the campaign.
+function estimatePipelineSeconds(input: EtaInput): number {
+  const findSecs = input.missingEmail * SEC_PER_ROW_FIND
+  const toValidate = input.rowsWithEmail + input.missingEmail * FIND_RATE
+  const validateSecs = toValidate * SEC_PER_ROW_VALIDATE
+  const valid = toValidate * VALID_RATE
+  const enrichSecs = input.enrich ? valid * SEC_PER_ROW_ENRICH : 0
+  const pushSecs = valid * SEC_PER_ROW_PUSH
+  return findSecs + validateSecs + enrichSecs + pushSecs
+}
+
 // ---- Telegram update shape (only the fields we use) ----
 
 interface TelegramUpdate {
@@ -371,6 +418,64 @@ async function searchCampaigns(query: string): Promise<{ id: string; name: strin
   return (data.items ?? []).filter(c => c.status >= 0)
 }
 
+interface CampaignTemplate {
+  id: string
+  name: string
+  description: string | null
+  sequences: unknown
+}
+
+async function listTemplates(): Promise<CampaignTemplate[]> {
+  return (await supabaseRequest(
+    'GET',
+    'campaign_templates?select=id,name,description,sequences&order=name.asc',
+  )) as CampaignTemplate[]
+}
+
+// True when a campaign has no written sequence yet, which is the only case
+// where offering a template makes sense — never overwrite copy already there.
+async function campaignNeedsCopy(campaignId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${INSTANTLY_BASE_URL}/campaigns/${campaignId}`, {
+      headers: { 'Authorization': `Bearer ${INSTANTLY_API_KEY}` },
+    })
+    if (!res.ok) return false
+    const data = await res.json() as { sequences?: { steps?: { variants?: { body?: string }[] }[] }[] }
+    const steps = data.sequences?.[0]?.steps ?? []
+    if (steps.length === 0) return true
+    // A campaign created from the UI can carry one empty placeholder step.
+    return steps.every(s => (s.variants ?? []).every(v => !(v.body ?? '').trim()))
+  } catch {
+    return false
+  }
+}
+
+async function applyTemplate(campaignId: string, template: CampaignTemplate): Promise<void> {
+  const res = await fetch(`${INSTANTLY_BASE_URL}/campaigns/${campaignId}`, {
+    method: 'PATCH',
+    headers: {
+      'Authorization': `Bearer ${INSTANTLY_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ sequences: template.sequences }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Applying "${template.name}" failed (${res.status}): ${text.slice(0, 200)}`)
+  }
+}
+
+async function launchCampaign(campaignId: string): Promise<void> {
+  const res = await fetch(`${INSTANTLY_BASE_URL}/campaigns/${campaignId}/activate`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${INSTANTLY_API_KEY}` },
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Launch failed (${res.status}): ${text.slice(0, 200)}`)
+  }
+}
+
 function statusLabel(status: number): string {
   if (status === 0) return 'draft'
   if (status === 1) return 'active'
@@ -424,9 +529,28 @@ function barrierScreen(job: InstantlyJob): { text: string; reply_markup: unknown
   }
 }
 
+// Offered only when the chosen campaign has no copy yet — the point is to
+// unblock "I picked a fresh campaign and haven't written the sequence", not to
+// let a stray tap overwrite copy that already exists.
+async function templateRow(job: InstantlyJob): Promise<{ text: string; callback_data: string }[]> {
+  if (!job.instantly_campaign_id) return []
+  if (!(await campaignNeedsCopy(job.instantly_campaign_id))) return []
+  const templates = await listTemplates()
+  return templates.slice(0, 3).map((t, i) => ({
+    text: `📋 Use ${t.name}`,
+    callback_data: `camp_tpl:${job.id}:${i}`,
+  }))
+}
+
 async function showBarrierScreen(job: InstantlyJob, edit?: { chatId: number; messageId: number }): Promise<void> {
   await supabaseRequest('PATCH', `validation_jobs?id=eq.${job.id}`, { instantly_status: 'configuring' })
   const screen = barrierScreen(job)
+  const tplRow = await templateRow(job)
+  if (tplRow.length > 0) {
+    const markup = screen.reply_markup as { inline_keyboard: unknown[][] }
+    markup.inline_keyboard.splice(1, 0, tplRow)
+    screen.text += `\n\n⚠️ This campaign has no sequence written yet — apply a template or it will send nothing.`
+  }
   if (edit) {
     await tg('editMessageText', {
       chat_id: edit.chatId,
@@ -679,6 +803,63 @@ async function handlePushCallback(
     return
   }
 
+  if (action === 'camp_tpl') {
+    const templates = await listTemplates()
+    const template = templates[Number(extra)]
+    if (!template || !job.instantly_campaign_id) {
+      await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'That template expired.' })
+      return
+    }
+    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: `Applying ${template.name}…` })
+    try {
+      await applyTemplate(job.instantly_campaign_id, template)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: `⚠️ ${message}` })
+      return
+    }
+    await tg('sendMessage', {
+      chat_id: TELEGRAM_CHAT_ID,
+      text: `📋 Applied "${template.name}" to ${job.instantly_campaign_name}.\n${template.description ?? ''}`,
+    })
+    const refreshed = await getInstantlyJob(jobId)
+    if (refreshed) await showBarrierScreen(refreshed, edit)
+    return
+  }
+
+  if (action === 'camp_launch') {
+    if (!job.instantly_campaign_id) {
+      await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'No campaign on this job.' })
+      return
+    }
+    // Refuse to launch a campaign with no copy — activating an empty sequence
+    // burns the send window on nothing.
+    if (await campaignNeedsCopy(job.instantly_campaign_id)) {
+      await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'No sequence written.' })
+      await tg('sendMessage', {
+        chat_id: TELEGRAM_CHAT_ID,
+        text: `⚠️ ${job.instantly_campaign_name} has no sequence yet — write one or apply a template before launching.`,
+      })
+      return
+    }
+    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Launching…' })
+    try {
+      await launchCampaign(job.instantly_campaign_id)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: `⚠️ ${message}` })
+      return
+    }
+    if (edit) {
+      await tg('editMessageText', {
+        chat_id: edit.chatId,
+        message_id: edit.messageId,
+        text: `🚀 Launched — ${job.instantly_campaign_name} is now sending.`,
+      })
+    }
+    return
+  }
+
   if (action === 'push_go') {
     await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Pushing.' })
     await startPush(job)
@@ -724,7 +905,8 @@ async function handleEnrichDecision(action: 'enrich_confirm' | 'enrich_skip', jo
 }
 
 const PUSH_ACTIONS = new Set([
-  'camp_pick', 'bar_loc', 'bar_co', 'push_next', 'push_go', 'push_strict', 'push_std', 'push_cancel',
+  'camp_pick', 'camp_tpl', 'camp_launch',
+  'bar_loc', 'bar_co', 'push_next', 'push_go', 'push_strict', 'push_std', 'push_cancel',
 ])
 
 async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>): Promise<void> {
@@ -915,12 +1097,25 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
     body: JSON.stringify({ job_id: jobId }),
   }).catch(err => console.error(`[telegram-inbox] ${nextFunction} invoke error:`, err))
 
+  const etaSeconds = estimatePipelineSeconds({
+    rowsWithEmail: rowIndex - missingEmail,
+    missingEmail,
+    enrich,
+  })
+  await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
+    eta_seconds: Math.round(etaSeconds),
+    eta_updated_at: new Date().toISOString(),
+  })
+
   const summary = [
     enrich ? `🔎 Approved + Enrich — ${ingest.filename}` : `✅ Approved — ${ingest.filename}`,
     `${rowIndex} rows loaded${droppedCount > 0 ? ` · ${droppedCount} bulk column${droppedCount === 1 ? '' : 's'} dropped` : ''}`,
     missingEmail > 0
       ? `${rowIndex - missingEmail} with an address · finding ${missingEmail} missing first`
       : `Validating all ${rowIndex} now`,
+    ``,
+    `⏱ ~${formatDuration(etaSeconds)} until leads are in the campaign`,
+    `Done by ~${new Date(Date.now() + etaSeconds * 1000).toISOString().slice(11, 16)} UTC`,
   ].join('\n')
 
   if (ingest.telegram_message_id) {
