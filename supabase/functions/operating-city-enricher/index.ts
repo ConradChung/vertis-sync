@@ -28,11 +28,21 @@ const REST_HEADERS: Record<string, string> = {
   'Prefer': 'return=minimal',
 }
 
-async function supabaseRequest(method: string, path: string, body?: unknown): Promise<unknown> {
+async function supabaseRequest(
+  method: string,
+  path: string,
+  body?: unknown,
+  opts?: { returning?: boolean },
+): Promise<unknown> {
   const url = `${SUPABASE_URL}/rest/v1/${path}`
+  // returning=true makes a conditional PATCH usable as a claim: the response
+  // carries the rows that matched, so zero rows means someone else won.
+  const headers = opts?.returning
+    ? { ...REST_HEADERS, 'Prefer': 'return=representation' }
+    : REST_HEADERS
   const res = await fetch(url, {
     method,
-    headers: REST_HEADERS,
+    headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) {
@@ -42,6 +52,60 @@ async function supabaseRequest(method: string, path: string, body?: unknown): Pr
   const ct = res.headers.get('content-type') ?? ''
   if (ct.includes('application/json')) return res.json()
   return null
+}
+
+// Exact row count without fetching rows. PostgREST returns the total in
+// Content-Range when asked for count=exact, which is immune to the 1000-row
+// ceiling that silently truncates an unbounded select.
+async function countRows(path: string): Promise<number> {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}&limit=1`, {
+    method: 'GET',
+    headers: { ...REST_HEADERS, 'Prefer': 'count=exact', 'Range': '0-0' },
+  })
+  if (!res.ok) throw new Error(`count failed (${res.status}): ${await res.text()}`)
+  // Content-Range looks like "0-0/3279"; the part after the slash is the total.
+  const total = (res.headers.get('content-range') ?? '').split('/')[1]
+  return Number(total) || 0
+}
+
+// The self-reinvoke is where the chain can die silently: this invocation is
+// about to exit, so a rejected POST means nothing resumes. Await and retry.
+async function handOff(jobId: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/operating-city-enricher`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_SERVICE_ROLE_KEY,
+          'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ job_id: jobId }),
+      })
+      if (res.ok) return true
+      console.error(`[operating-city-enricher] hand-off attempt ${attempt + 1}: HTTP ${res.status}`)
+    } catch (err) {
+      console.error(`[operating-city-enricher] hand-off attempt ${attempt + 1} threw:`, err)
+    }
+    await new Promise(r => setTimeout(r, 1_500 * (attempt + 1)))
+  }
+  return false
+}
+
+// True when the owner (or a failure) has taken the job out of the runnable
+// set. Callers must exit WITHOUT self-reinvoking and without writing status.
+async function isHalted(jobId: string): Promise<boolean> {
+  try {
+    const rows = (await supabaseRequest(
+      'GET',
+      `validation_jobs?id=eq.${jobId}&select=status`,
+    )) as { status: string }[]
+    const status = rows?.[0]?.status
+    return status === 'cancelled' || status === 'failed'
+  } catch (err) {
+    console.error('[operating-city-enricher] halt check failed, continuing:', err)
+    return false
+  }
 }
 
 async function sendTelegram(message: string): Promise<void> {
@@ -199,7 +263,31 @@ async function processJob(jobId: string): Promise<void> {
   // Re-invoke self after 110s to stay within the edge function wall clock limit.
   const CHUNK_LIMIT_MS = 110_000
 
-  await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { status: 'processing' })
+  // Assert validation is actually finished. Enrichment used to be triggerable
+  // by a Telegram button that stayed tappable forever, so it could start while
+  // thousands of rows were still pending — spending Perplexity/Haiku credits on
+  // a partial list and racing the validator's own row writes. Any pending row
+  // means the validator is not done with this job.
+  const stillPending = (await supabaseRequest(
+    'GET',
+    `validation_rows?job_id=eq.${jobId}&status=eq.pending&select=id&limit=1`,
+  )) as { id: string }[]
+  if (stillPending && stillPending.length > 0) {
+    console.log(`[operating-city-enricher] Job ${jobId} still has pending validation rows — refusing to start.`)
+    return
+  }
+
+  // Conditional claim, not an unconditional stamp — see contact-email-finder.
+  const claimedJob = (await supabaseRequest(
+    'PATCH',
+    `validation_jobs?id=eq.${jobId}&status=in.(pending,processing)`,
+    { status: 'processing' },
+    { returning: true },
+  )) as ValidationJob[]
+  if (!claimedJob || claimedJob.length === 0) {
+    console.log(`[operating-city-enricher] Job ${jobId} is not runnable — exiting.`)
+    return
+  }
 
   const jobs = (await supabaseRequest(
     'GET',
@@ -233,16 +321,25 @@ async function processJob(jobId: string): Promise<void> {
   // Only rows with a valid email are ever eligible for enrichment (email-validator
   // flips them from 'skipped' to 'pending' before invoking this function) — use
   // that eligible count as the percentage denominator, not the raw CSV row count.
-  const eligibleRows = (await supabaseRequest(
-    'GET',
+  // Count via Content-Range, NOT by fetching rows. An unbounded PostgREST GET
+  // silently caps at 1000, so a 3,279-row job reported "200/1000" — progress
+  // hit a bogus 100% at row 1,000 and then went silent for the remaining
+  // 2,279. Ask the database for the count instead of measuring an array.
+  const enrichableCount = await countRows(
     `validation_rows?job_id=eq.${jobId}&status=eq.valid&select=id`,
-  )) as { id: string }[]
-  const enrichableCount = eligibleRows.length
+  )
 
   let enriched = job.enriched_rows
   let lastMilestonePct = enrichableCount > 0 ? Math.floor((enriched / enrichableCount) * 10) * 10 : 0
 
   while (true) {
+    // Cancellation is only observable here — there is no signal into a running
+    // worker, so a halt is picked up at the top of the next batch.
+    if (await isHalted(jobId)) {
+      console.log(`[operating-city-enricher] Job ${jobId} halted mid-run — exiting without re-invoking.`)
+      return
+    }
+
     const rows = (await supabaseRequest(
       'GET',
       `validation_rows?job_id=eq.${jobId}&enrichment_status=eq.pending&order=row_index.asc&limit=50&select=id,row_index,row_data`,
@@ -308,16 +405,13 @@ async function processJob(jobId: string): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, 1000))
 
       if (Date.now() - startTime > CHUNK_LIMIT_MS) {
-        fetch(`${SUPABASE_URL}/functions/v1/operating-city-enricher`, {
-          method: 'POST',
-          headers: {
-            'apikey': SUPABASE_SERVICE_ROLE_KEY,
-            'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ job_id: jobId }),
-        }).catch(err => console.error('[operating-city-enricher] Self re-invoke error:', err))
-        await new Promise(r => setTimeout(r, 3000))
+        const handedOff = await handOff(jobId)
+        if (!handedOff) {
+          await sendTelegram(
+            `⚠️ ${job.filename}: could not start the next enrichment chunk after 4 attempts.\n` +
+            `${enriched}/${enrichableCount} enriched. The stall watchdog will offer a Resume.`,
+          )
+        }
         return
       }
     }

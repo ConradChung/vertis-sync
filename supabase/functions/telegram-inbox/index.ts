@@ -948,26 +948,25 @@ async function handlePushCallback(
   }
 }
 
-async function handleEnrichDecision(action: 'enrich_confirm' | 'enrich_skip', jobId: string, callbackQueryId: string): Promise<void> {
-  if (action === 'enrich_skip') {
-    // Turning enrich off means email-validator's next pass skips the
-    // handoff check entirely and goes straight to building the CSV.
-    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { enrich: false })
-  } else {
-    await supabaseRequest(
-      'PATCH',
-      `validation_rows?job_id=eq.${jobId}&status=eq.valid&enrichment_status=eq.skipped`,
-      { enrichment_status: 'pending' },
-    )
-  }
+// The enrich decision used to live here as a second Telegram prompt fired by
+// email-validator once counts were known. It is gone: the choice is made once
+// at intake (Approve vs Approve + Enrich), and email-validator now chains into
+// the enricher itself. The old button was a standing hazard — Telegram keeps
+// buttons on old messages tappable forever and redelivers unacknowledged
+// callbacks, so "Enrich now" could fire while validation was still running.
 
-  await tg('answerCallbackQuery', {
-    callback_query_id: callbackQueryId,
-    text: action === 'enrich_skip' ? 'Skipping enrichment.' : 'Enriching now.',
-  })
+interface PipelineJob {
+  id: string
+  filename: string
+  total_rows: number
+  enrich: boolean
+  finder_status: string
+  watchdog_status: string
+  rows_missing_email: number | null
+}
 
-  const nextFunction = action === 'enrich_skip' ? 'email-validator' : 'operating-city-enricher'
-  fetch(`${SUPABASE_URL}/functions/v1/${nextFunction}`, {
+function invokeFunction(name: string, jobId: string): void {
+  fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -975,7 +974,167 @@ async function handleEnrichDecision(action: 'enrich_confirm' | 'enrich_skip', jo
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ job_id: jobId }),
-  }).catch(err => console.error(`[telegram-inbox] ${nextFunction} invoke error:`, err))
+  }).catch(err => console.error(`[telegram-inbox] ${name} invoke error:`, err))
+}
+
+// Quote the ETA and persist it. Called AFTER the finder decision, not at
+// approval: on a blank-heavy file the finder is most of the runtime, so a
+// number quoted before the choice is wrong by hours whichever way it goes.
+async function quoteEta(jobId: string, input: EtaInput): Promise<number> {
+  const seconds = estimatePipelineSeconds(input)
+  await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
+    eta_seconds: Math.round(seconds),
+    eta_updated_at: new Date().toISOString(),
+  })
+  return seconds
+}
+
+function etaLines(seconds: number): string[] {
+  return [
+    ``,
+    `⏱ ~${formatDuration(seconds)} until leads are in the campaign`,
+    `Done by ~${new Date(Date.now() + seconds * 1000).toISOString().slice(11, 16)} UTC`,
+  ]
+}
+
+// Ask whether to run the finder. Armed by setting finder_status to
+// 'awaiting_decision'; the callback claims that value, so exactly one tap wins.
+async function sendFinderPrompt(
+  jobId: string,
+  filename: string,
+  totalRows: number,
+  missingEmail: number,
+): Promise<void> {
+  const withEmail = totalRows - missingEmail
+  const extraSecs = missingEmail * SEC_PER_ROW_FIND
+  await tg('sendMessage', {
+    chat_id: TELEGRAM_CHAT_ID,
+    text:
+      `📥 ${filename}\n` +
+      `${totalRows} rows loaded — ${missingEmail} have no email address.\n\n` +
+      `Find the missing ones first, or validate only the ${withEmail} that already have one?`,
+    reply_markup: {
+      inline_keyboard: [[
+        { text: `🔍 Find them first (~${formatDuration(extraSecs)} extra)`, callback_data: `finder_go:${jobId}` },
+        { text: `⏭ Validate only ${withEmail}`, callback_data: `finder_skip:${jobId}` },
+      ]],
+    },
+  })
+}
+
+async function handleFinderDecision(
+  action: 'finder_go' | 'finder_skip',
+  jobId: string,
+  cb: NonNullable<TelegramUpdate['callback_query']>,
+): Promise<void> {
+  // Answer FIRST. Telegram redelivers a callback it never got an answer for,
+  // and it spins the button until this returns.
+  await tg('answerCallbackQuery', {
+    callback_query_id: cb.id,
+    text: action === 'finder_go' ? 'Finding missing addresses…' : 'Skipping the finder…',
+  })
+
+  // Atomic claim. A replay, a double-tap, or a tap on the *other* button all
+  // match zero rows here and return silently.
+  const claimed = (await supabaseRequest(
+    'PATCH',
+    `validation_jobs?id=eq.${jobId}&finder_status=eq.awaiting_decision`,
+    { finder_status: 'decided' },
+    { returning: true },
+  )) as PipelineJob[]
+  if (!claimed || claimed.length === 0) return
+
+  const job = claimed[0]
+  const missingEmail = job.rows_missing_email ?? 0
+  const withEmail = Math.max(0, job.total_rows - missingEmail)
+
+  let seconds: number
+  let decision: string
+
+  if (action === 'finder_go') {
+    seconds = await quoteEta(jobId, { rowsWithEmail: withEmail, missingEmail, enrich: job.enrich })
+    decision = `🔍 Finding ${missingEmail} missing addresses first, then validating everything.`
+    invokeFunction('contact-email-finder', jobId)
+  } else {
+    // Retire the blank rows so the validator's pending queue is exactly the
+    // rows that have an address. no_email is the same terminal state the
+    // finder uses when it comes up empty, so nothing downstream changes.
+    await supabaseRequest(
+      'PATCH',
+      `validation_rows?job_id=eq.${jobId}&status=eq.pending&email=eq.`,
+      { status: 'no_email', validation_result: { reason: 'skipped by owner' } },
+    )
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
+      find_emails: false,
+      emails_found: 0,
+      emails_not_found: missingEmail,
+      total_rows: withEmail,
+    })
+    seconds = await quoteEta(jobId, { rowsWithEmail: withEmail, missingEmail: 0, enrich: job.enrich })
+    decision = `⏭ Skipping the finder — validating the ${withEmail} rows that have an address.`
+    invokeFunction('email-validator', jobId)
+  }
+
+  // Strip the keyboard so the prompt can't be tapped again even visually.
+  if (cb.message) {
+    await tg('editMessageText', {
+      chat_id: cb.message.chat.id,
+      message_id: cb.message.message_id,
+      text: [`📥 ${job.filename}`, ``, decision, ...etaLines(seconds)].join('\n'),
+    })
+  }
+}
+
+// The watchdog no longer revives jobs on its own — it asks. This handler runs
+// the owner's answer, picking the right function for wherever the job stopped.
+async function handleWatchdogResume(
+  jobId: string,
+  cb: NonNullable<TelegramUpdate['callback_query']>,
+): Promise<void> {
+  await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Resuming…' })
+
+  const claimed = (await supabaseRequest(
+    'PATCH',
+    `validation_jobs?id=eq.${jobId}&watchdog_status=eq.awaiting`,
+    { watchdog_status: 'claimed' },
+    { returning: true },
+  )) as PipelineJob[]
+  if (!claimed || claimed.length === 0) return
+
+  const job = claimed[0]
+
+  // Where did it stop? Blank pending rows mean the finder never finished;
+  // any other pending row means validation did not; pending enrichment means
+  // the enricher did not. Otherwise the export is what is outstanding.
+  const blankPending = (await supabaseRequest(
+    'GET', `validation_rows?job_id=eq.${jobId}&status=eq.pending&email=eq.&select=id&limit=1`,
+  )) as { id: string }[]
+  const anyPending = (await supabaseRequest(
+    'GET', `validation_rows?job_id=eq.${jobId}&status=eq.pending&select=id&limit=1`,
+  )) as { id: string }[]
+  const enrichPending = (await supabaseRequest(
+    'GET', `validation_rows?job_id=eq.${jobId}&enrichment_status=eq.pending&select=id&limit=1`,
+  )) as { id: string }[]
+
+  const fn = blankPending.length > 0
+    ? 'contact-email-finder'
+    : anyPending.length > 0
+      ? 'email-validator'
+      : enrichPending.length > 0
+        ? 'operating-city-enricher'
+        : 'email-validator'
+
+  // Back to idle so a future stall on the same job can notify again.
+  await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { watchdog_status: 'idle' })
+  invokeFunction(fn, jobId)
+
+  if (cb.message) {
+    await tg('editMessageText', {
+      chat_id: cb.message.chat.id,
+      message_id: cb.message.message_id,
+      text: `▶️ Resumed — ${job.filename}\nRestarted at: ${fn}`,
+    })
+  }
 }
 
 const PUSH_ACTIONS = new Set([
@@ -986,8 +1145,13 @@ const PUSH_ACTIONS = new Set([
 async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>): Promise<void> {
   const [action, targetId, extra] = (cb.data ?? '').split(':')
 
-  if ((action === 'enrich_confirm' || action === 'enrich_skip') && targetId) {
-    await handleEnrichDecision(action, targetId, cb.id)
+  if ((action === 'finder_go' || action === 'finder_skip') && targetId) {
+    await handleFinderDecision(action, targetId, cb)
+    return
+  }
+
+  if (action === 'wd_resume' && targetId) {
+    await handleWatchdogResume(targetId, cb)
     return
   }
 
@@ -1157,40 +1321,38 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
 
   await supabaseRequest('PATCH', `telegram_ingests?id=eq.${ingestId}`, { validation_job_id: jobId })
 
-  // Rows that arrived without an address go through the finder first, then the
-  // whole list — found and pre-existing addresses together — flows into
-  // email-validator. With nothing missing, skip straight to validation.
-  const nextFunction = missingEmail > 0 ? 'contact-email-finder' : 'email-validator'
-  fetch(`${SUPABASE_URL}/functions/v1/${nextFunction}`, {
-    method: 'POST',
-    headers: {
-      'apikey': SUPABASE_SERVICE_ROLE_KEY,
-      'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ job_id: jobId }),
-  }).catch(err => console.error(`[telegram-inbox] ${nextFunction} invoke error:`, err))
-
-  const etaSeconds = estimatePipelineSeconds({
-    rowsWithEmail: rowIndex - missingEmail,
-    missingEmail,
-    enrich,
-  })
-  await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
-    eta_seconds: Math.round(etaSeconds),
-    eta_updated_at: new Date().toISOString(),
-  })
-
-  const summary = [
+  // Rows that arrived without an address used to go straight into the finder.
+  // That is no longer automatic: at ~12.8s/row measured it dominates the
+  // runtime on a blank-heavy file, and there was no way to say "skip it, I
+  // want the campaign out today". Ask instead, and quote the ETA after the
+  // answer — before it, the number is wrong by hours whichever branch is taken.
+  const summaryHead = [
     enrich ? `🔎 Approved + Enrich — ${ingest.filename}` : `✅ Approved — ${ingest.filename}`,
     `${rowIndex} rows loaded${droppedCount > 0 ? ` · ${droppedCount} bulk column${droppedCount === 1 ? '' : 's'} dropped` : ''}`,
-    missingEmail > 0
-      ? `${rowIndex - missingEmail} with an address · finding ${missingEmail} missing first`
-      : `Validating all ${rowIndex} now`,
-    ``,
-    `⏱ ~${formatDuration(etaSeconds)} until leads are in the campaign`,
-    `Done by ~${new Date(Date.now() + etaSeconds * 1000).toISOString().slice(11, 16)} UTC`,
-  ].join('\n')
+  ]
+
+  let summary: string
+
+  if (missingEmail > 0) {
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
+      finder_status: 'awaiting_decision',
+    })
+    await sendFinderPrompt(jobId, ingest.filename, rowIndex, missingEmail)
+    summary = [
+      ...summaryHead,
+      `${rowIndex - missingEmail} with an address · ${missingEmail} without`,
+      ``,
+      `⏸ Waiting on your answer: run the email finder, or validate only what has an address?`,
+    ].join('\n')
+  } else {
+    invokeFunction('email-validator', jobId)
+    const etaSeconds = await quoteEta(jobId, { rowsWithEmail: rowIndex, missingEmail: 0, enrich })
+    summary = [
+      ...summaryHead,
+      `Validating all ${rowIndex} now`,
+      ...etaLines(etaSeconds),
+    ].join('\n')
+  }
 
   if (ingest.telegram_message_id) {
     await tg('editMessageText', {
@@ -1199,7 +1361,10 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
       text: summary,
     })
   }
-  await replyToSender(ingest, 'Approved — running now.')
+  await replyToSender(
+    ingest,
+    missingEmail > 0 ? 'Approved — waiting on one decision before it runs.' : 'Approved — running now.',
+  )
 }
 
 Deno.serve(async (req: Request) => {

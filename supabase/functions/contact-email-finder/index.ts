@@ -30,10 +30,20 @@ const REST_HEADERS: Record<string, string> = {
   'Prefer': 'return=minimal',
 }
 
-async function supabaseRequest(method: string, path: string, body?: unknown): Promise<unknown> {
+async function supabaseRequest(
+  method: string,
+  path: string,
+  body?: unknown,
+  opts?: { returning?: boolean },
+): Promise<unknown> {
+  // returning=true makes a conditional PATCH usable as a claim: the response
+  // carries the rows that matched, so zero rows means someone else won.
+  const headers = opts?.returning
+    ? { ...REST_HEADERS, 'Prefer': 'return=representation' }
+    : REST_HEADERS
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     method,
-    headers: REST_HEADERS,
+    headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) {
@@ -42,6 +52,22 @@ async function supabaseRequest(method: string, path: string, body?: unknown): Pr
   }
   const ct = res.headers.get('content-type') ?? ''
   return ct.includes('application/json') ? res.json() : null
+}
+
+// True when the owner (or a failure) has taken the job out of the runnable
+// set. Callers must exit WITHOUT self-reinvoking and without writing status.
+async function isHalted(jobId: string): Promise<boolean> {
+  try {
+    const rows = (await supabaseRequest(
+      'GET',
+      `validation_jobs?id=eq.${jobId}&select=status`,
+    )) as { status: string }[]
+    const status = rows?.[0]?.status
+    return status === 'cancelled' || status === 'failed'
+  } catch (err) {
+    console.error('[contact-email-finder] halt check failed, continuing:', err)
+    return false
+  }
 }
 
 async function sendTelegram(message: string): Promise<void> {
@@ -191,7 +217,19 @@ async function processJob(jobId: string): Promise<void> {
     return
   }
 
-  await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { status: 'processing' })
+  // Conditional claim, not an unconditional stamp: an unconditional PATCH here
+  // overwrites a 'cancelled' the owner just set, which is why cancelling a job
+  // never actually stopped it.
+  const claimedJob = (await supabaseRequest(
+    'PATCH',
+    `validation_jobs?id=eq.${jobId}&status=in.(pending,processing)`,
+    { status: 'processing' },
+    { returning: true },
+  )) as ValidationJob[]
+  if (!claimedJob || claimedJob.length === 0) {
+    console.log(`[contact-email-finder] Job ${jobId} is not runnable — exiting.`)
+    return
+  }
 
   const jobs = (await supabaseRequest(
     'GET',
@@ -228,6 +266,13 @@ async function processJob(jobId: string): Promise<void> {
   }
 
   while (true) {
+    // Cancellation is only observable here — there is no signal into a running
+    // worker, so a halt is picked up at the top of the next batch.
+    if (await isHalted(jobId)) {
+      console.log(`[contact-email-finder] Job ${jobId} halted mid-run — exiting without re-invoking.`)
+      return
+    }
+
     const rows = (await supabaseRequest(
       'GET',
       `validation_rows?job_id=eq.${jobId}&status=eq.pending&email=eq.&order=row_index.asc&limit=50&select=id,row_index,row_data`,

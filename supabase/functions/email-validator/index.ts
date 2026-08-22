@@ -22,11 +22,18 @@ async function supabaseRequest(
   method: string,
   path: string,
   body?: unknown,
+  opts?: { returning?: boolean },
 ): Promise<unknown> {
   const url = `${SUPABASE_URL}/rest/v1/${path}`
+  // returning=true is what makes a conditional PATCH usable as a claim: the
+  // response carries the rows that actually matched, so "zero rows back" means
+  // someone else won the race.
+  const headers = opts?.returning
+    ? { ...REST_HEADERS, 'Prefer': 'return=representation' }
+    : REST_HEADERS
   const res = await fetch(url, {
     method,
-    headers: REST_HEADERS,
+    headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) {
@@ -65,7 +72,73 @@ interface ValidationJob {
   column_order: string[] | null
   icp_filter: boolean
   enrich: boolean
+  enrich_started: boolean
   instantly_status: string
+}
+
+// PostgREST silently truncates an unbounded GET at its max-rows ceiling (1000
+// here) and returns 200, so a large export looks complete while missing most
+// of its rows. Every multi-row read must page explicitly.
+// The caller's query must carry a stable `order=` or offset paging can repeat
+// or skip rows between pages.
+async function fetchAllPages(baseQuery: string, pageSize = 1000): Promise<ValidationRow[]> {
+  const all: ValidationRow[] = []
+  for (let offset = 0; ; offset += pageSize) {
+    const page = (await supabaseRequest(
+      'GET',
+      `${baseQuery}&limit=${pageSize}&offset=${offset}`,
+    )) as ValidationRow[]
+    if (!page || page.length === 0) break
+    all.push(...page)
+    if (page.length < pageSize) break
+  }
+  return all
+}
+
+// The 110s hand-off is the one point where the whole chain can die: this
+// invocation is about to exit, so if the POST is rejected nothing resumes and
+// the job stalls silently. On 2026-08-22 a platform 502 (8ms, no deployment_id)
+// did exactly that at 3,328/5,385 — the old code fired the request without
+// awaiting it and swallowed the failure into console.error. Await it, retry,
+// and if it still fails, say so rather than dying quietly.
+async function handOff(fnName: string, jobId: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/${fnName}`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_SERVICE_ROLE_KEY,
+          'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ job_id: jobId }),
+      })
+      if (res.ok) return true
+      console.error(`[${fnName}] hand-off attempt ${attempt + 1}: HTTP ${res.status}`)
+    } catch (err) {
+      console.error(`[${fnName}] hand-off attempt ${attempt + 1} threw:`, err)
+    }
+    await new Promise(r => setTimeout(r, 1_500 * (attempt + 1)))
+  }
+  return false
+}
+
+// True when the owner (or a failure) has taken the job out of the runnable
+// set. Callers must exit WITHOUT self-reinvoking and without writing status.
+async function isHalted(jobId: string): Promise<boolean> {
+  try {
+    const rows = (await supabaseRequest(
+      'GET',
+      `validation_jobs?id=eq.${jobId}&select=status`,
+    )) as { status: string }[]
+    const status = rows?.[0]?.status
+    return status === 'cancelled' || status === 'failed'
+  } catch (err) {
+    // A transient read failure must not look like a cancellation, or one blip
+    // silently stops a healthy run.
+    console.error('[email-validator] halt check failed, continuing:', err)
+    return false
+  }
 }
 
 function jobTitle(filename: string): string {
@@ -80,22 +153,66 @@ function isEmailFinderJob(filename: string): boolean {
   return filename.startsWith('hnwi-email-found') || filename.startsWith('ria-email-found')
 }
 
+// MailTester answers HTTP 200 even when the key is dead or out of quota. The
+// body is a shell: code '--', message 'Invalid Key', limit 0. `res.ok` is true
+// for it, so a plain "message !== Accepted" test would silently mark every
+// remaining row invalid. That has to abort the job instead.
+class MailTesterKeyError extends Error {}
+
+// The server declined to give a verdict — the mailbox was never actually
+// tested. These get retried; they are never written off as invalid.
+// Message values per https://mailtester.ninja/api/
+// Compared lowercased: the docs spell these "Mx Error"/"No Mx" but the live
+// API returns "MX Error"/"No MX", and an exact-case match silently files a
+// retryable row as invalid.
+const INCONCLUSIVE_MESSAGES = new Set([
+  'limited',
+  'timeout',
+  'spam block',
+  'mx error',
+])
+
+type Verdict = 'valid' | 'invalid' | 'inconclusive'
+
 async function validateEmail(
   email: string,
-): Promise<{ valid: boolean; result: Record<string, unknown> }> {
+): Promise<{ verdict: Verdict; result: Record<string, unknown> }> {
   try {
     const url =
       `https://happy.mailtester.ninja/ninja?email=${encodeURIComponent(email)}&key=${MAILTESTER_API_KEY}`
-    const res = await fetch(url)
+
+    // A 429 says "slow down", not "bad address". Back off and re-ask for the
+    // SAME row rather than spending one of its attempts — otherwise a burst of
+    // rate limiting quietly evicts good addresses from the list.
+    let res = await fetch(url)
+    for (let backoff = 0; res.status === 429 && backoff < 4; backoff++) {
+      await new Promise((r) => setTimeout(r, 2_000 * (backoff + 1)))
+      res = await fetch(url)
+    }
+
     if (!res.ok) {
-      return { valid: false, result: { error: `HTTP ${res.status}` } }
+      return { verdict: 'inconclusive', result: { error: `HTTP ${res.status}` } }
     }
     const data = await res.json() as Record<string, unknown>
-    const valid = String(data.message ?? '') === 'Accepted'
-    return { valid, result: data }
+    const message = String(data.message ?? '')
+
+    if (data.code === '--' || message === 'Invalid Key' || Number(data.limit) === 0) {
+      throw new MailTesterKeyError(
+        `MailTester rejected the key (code=${data.code}, message=${message}). ` +
+        `Job aborted before any row could be mis-marked invalid.`,
+      )
+    }
+
+    if (message === 'Accepted') return { verdict: 'valid', result: data }
+    if (INCONCLUSIVE_MESSAGES.has(message.toLowerCase())) {
+      return { verdict: 'inconclusive', result: data }
+    }
+    return { verdict: 'invalid', result: data }
   } catch (err: unknown) {
+    if (err instanceof MailTesterKeyError) throw err
+    // A network failure is not evidence the mailbox is bad either.
     const message = err instanceof Error ? err.message : String(err)
-    return { valid: false, result: { error: message } }
+    return { verdict: 'inconclusive', result: { error: message } }
   }
 }
 
@@ -121,17 +238,26 @@ async function processJob(jobId: string): Promise<void> {
   // Each re-invocation picks up remaining pending rows automatically.
   const CHUNK_LIMIT_MS = 110_000
 
-  // 1. Mark job as processing
-  await supabaseRequest(
+  // 1. Claim the job as processing — CONDITIONALLY. An unconditional PATCH
+  //    here is what made cancellation impossible: the owner sets 'cancelled',
+  //    the next self-reinvocation stamps 'processing' straight back over it,
+  //    and the run continues forever. Matching only pending/processing means a
+  //    cancelled or failed job can never be resurrected by its own chain.
+  const claimedJob = (await supabaseRequest(
     'PATCH',
-    `validation_jobs?id=eq.${jobId}`,
+    `validation_jobs?id=eq.${jobId}&status=in.(pending,processing)`,
     { status: 'processing' },
-  )
+    { returning: true },
+  )) as ValidationJob[]
+  if (!claimedJob || claimedJob.length === 0) {
+    console.log(`[email-validator] Job ${jobId} is not runnable (cancelled, failed or already finished) — exiting.`)
+    return
+  }
 
   // 2. Fetch job metadata
   const jobs = (await supabaseRequest(
     'GET',
-    `validation_jobs?id=eq.${jobId}&select=id,filename,total_rows,processed_rows,valid_count,invalid_count,source,column_order,icp_filter,enrich,instantly_status`,
+    `validation_jobs?id=eq.${jobId}&select=id,filename,total_rows,processed_rows,valid_count,invalid_count,source,column_order,icp_filter,enrich,enrich_started,instantly_status`,
   )) as ValidationJob[]
 
   if (!jobs || jobs.length === 0) {
@@ -147,33 +273,86 @@ async function processJob(jobId: string): Promise<void> {
     ? Math.floor((processed / totalRows) * 10) * 10
     : 0
 
-  // 3. Main processing loop — fetch 50 pending rows at a time
+  // Pro plan allows 11 emails / 10s (~1 per 909ms) — https://mailtester.ninja/api/
+  // Pace on CYCLE time rather than sleeping a flat interval on top of request
+  // latency: a ~1.5s request already satisfies the ceiling by itself, so the
+  // old unconditional 1100ms sleep was discarding roughly half the throughput.
+  // 1000ms = 10 requests per 10s, one under the plan's 11 — the margin matters
+  // because the ceiling is a sliding window, not an average.
+  const MIN_INTERVAL_MS = 1_000
+  const MAX_ATTEMPTS = 3
+
+  // 3. Main processing loop — 50 rows at a time. Once nothing is pending,
+  //    inconclusive rows get another attempt before they are given up on.
   while (true) {
-    const rows = (await supabaseRequest(
+    // Cancellation is only observable here. There is no signal into a running
+    // worker, so the owner's 'cancelled' is picked up at the top of each batch
+    // — worst case one batch (~50 rows) after the flip.
+    if (await isHalted(jobId)) {
+      console.log(`[email-validator] Job ${jobId} halted mid-run — exiting without re-invoking.`)
+      return
+    }
+
+    let rows = (await supabaseRequest(
       'GET',
       `validation_rows?job_id=eq.${jobId}&status=eq.pending&order=row_index.asc&limit=50`,
     )) as ValidationRow[]
+    let isRetry = false
+
+    if (!rows || rows.length === 0) {
+      // Retry pass. `attempts` is matched against a literal set because
+      // PostgREST compares a jsonb ->> extraction as text, so lt.3 would be a
+      // string comparison. Rows parked by an operator halt carry no
+      // `inconclusive` key, so they are never picked up here.
+      const retryable = Array.from({ length: MAX_ATTEMPTS - 1 }, (_, i) => i + 1).join(',')
+      rows = (await supabaseRequest(
+        'GET',
+        `validation_rows?job_id=eq.${jobId}&status=eq.error` +
+        `&validation_result->>inconclusive=eq.true` +
+        `&validation_result->>attempts=in.(${retryable})` +
+        `&order=row_index.asc&limit=50`,
+      )) as ValidationRow[]
+      isRetry = true
+    }
 
     if (!rows || rows.length === 0) break
 
     for (const row of rows) {
-      const { valid, result } = await validateEmail(row.email)
+      const cycleStart = Date.now()
+      const { verdict, result } = await validateEmail(row.email)
 
-      // Update the individual row
-      await supabaseRequest(
-        'PATCH',
-        `validation_rows?id=eq.${row.id}`,
-        {
-          status: valid ? 'valid' : 'invalid',
-          validation_result: result,
-          processed_at: new Date().toISOString(),
-        },
-      )
+      if (verdict === 'inconclusive') {
+        // Not a verdict. The mailbox was never tested, so it must not land in
+        // the invalid bucket and get dropped from the export.
+        const priorAttempts = isRetry
+          ? Number((row.validation_result as { attempts?: unknown } | null)?.attempts ?? 1)
+          : 0
+        await supabaseRequest(
+          'PATCH',
+          `validation_rows?id=eq.${row.id}`,
+          {
+            status: 'error',
+            validation_result: { ...result, inconclusive: true, attempts: priorAttempts + 1 },
+            processed_at: new Date().toISOString(),
+          },
+        )
+      } else {
+        await supabaseRequest(
+          'PATCH',
+          `validation_rows?id=eq.${row.id}`,
+          {
+            status: verdict,
+            validation_result: result,
+            processed_at: new Date().toISOString(),
+          },
+        )
+        if (verdict === 'valid') validCount++
+        else invalidCount++
+      }
 
-      // Update job counters
-      processed++
-      if (valid) validCount++
-      else invalidCount++
+      // A row counts as processed once, on its first attempt — a later retry
+      // resolves it but does not make it a new row.
+      if (!isRetry) processed++
 
       await supabaseRequest(
         'PATCH',
@@ -197,15 +376,76 @@ async function processJob(jobId: string): Promise<void> {
         }
       }
 
-      // MailTester rate limit: 1 req/sec — 1100ms keeps us safely under
-      await new Promise((resolve) => setTimeout(resolve, 1100))
+      // Top up to the documented interval only if the request itself was
+      // faster than it. Usually it wasn't, so this sleeps 0ms.
+      const cycleElapsed = Date.now() - cycleStart
+      if (cycleElapsed < MIN_INTERVAL_MS) {
+        await new Promise((resolve) => setTimeout(resolve, MIN_INTERVAL_MS - cycleElapsed))
+      }
 
       // Approaching wall clock limit — hand off to a fresh invocation and exit.
       // The next invocation resumes from remaining pending rows automatically.
       if (Date.now() - startTime > CHUNK_LIMIT_MS) {
-        fetch(
-          `${SUPABASE_URL}/functions/v1/email-validator`,
-          {
+        const handedOff = await handOff('email-validator', jobId)
+        if (!handedOff) {
+          await sendTelegram(
+            `⚠️ ${job.filename}: could not start the next validation chunk after 4 attempts.\n` +
+            `${processed}/${totalRows} done. The stall watchdog will offer a Resume in ~10 min.`,
+          )
+        }
+        return
+      }
+    }
+  }
+
+  // 3b. Enrichment is chained directly, not put behind a button. The decision
+  // was already made once at intake (Approve vs Approve + Enrich); re-asking
+  // here created a second, replayable decision point whose button could be
+  // tapped at any time — including while validation was still running, which
+  // is how one job ended up with 179 enriched rows and 4,164 still unvalidated.
+  //
+  // Reaching this line means the loop drained, so validation IS complete for
+  // this job. `enrich_started` is a one-way latch claimed atomically: the
+  // enricher chains back into this function when it finishes, and without the
+  // latch that second pass would re-arm enrichment and loop forever.
+  if (job.enrich && !job.enrich_started) {
+    const pendingEnrichment = (await supabaseRequest(
+      'GET',
+      `validation_rows?job_id=eq.${jobId}&status=eq.valid&enrichment_status=eq.skipped&select=id&limit=1`,
+    )) as { id: string }[]
+
+    if (pendingEnrichment.length > 0) {
+      const validShare = totalRows > 0 ? validCount / totalRows : 0
+
+      if (validShare < 0.10) {
+        // A mostly-dead list isn't worth Perplexity/Haiku credits. Say so and
+        // fall through to the export rather than silently spending.
+        await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { enrich_started: true })
+        await sendTelegram(
+          `⏭ Skipped enrichment — ${job.filename}\n` +
+          `Only ${validCount} of ${totalRows} rows validated (${(validShare * 100).toFixed(1)}%), ` +
+          `below the 10% floor. Building the CSV from what's there.`,
+        )
+      } else {
+        const latched = (await supabaseRequest(
+          'PATCH',
+          `validation_jobs?id=eq.${jobId}&enrich_started=is.false`,
+          { enrich_started: true },
+          { returning: true },
+        )) as ValidationJob[]
+
+        if (latched && latched.length > 0) {
+          await supabaseRequest(
+            'PATCH',
+            `validation_rows?job_id=eq.${jobId}&status=eq.valid&enrichment_status=eq.skipped`,
+            { enrichment_status: 'pending' },
+          )
+          await sendTelegram(
+            `✅ Validation complete — ${job.filename}\n` +
+            `${validCount} valid / ${invalidCount} invalid\n\n` +
+            `🔎 Enriching ${validCount} rows with operating-city research…`,
+          )
+          fetch(`${SUPABASE_URL}/functions/v1/operating-city-enricher`, {
             method: 'POST',
             headers: {
               'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -213,40 +453,11 @@ async function processJob(jobId: string): Promise<void> {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({ job_id: jobId }),
-          },
-        ).catch(err => console.error('[email-validator] Self re-invoke error:', err))
-        // Wait long enough for the runtime to send the request before this invocation exits
-        await new Promise(r => setTimeout(r, 3000))
-        return
+          }).catch(err => console.error('[email-validator] enricher invoke error:', err))
+          await new Promise(r => setTimeout(r, 3000))
+          return
+        }
       }
-    }
-  }
-
-  // 3b. If enrichment was requested, don't auto-run it — ask the owner to
-  // confirm now that real valid/invalid counts are known, so a mostly-dead
-  // list doesn't silently burn Perplexity/Haiku credits. telegram-inbox
-  // handles the enrich_confirm/enrich_skip button taps.
-  if (job.enrich) {
-    const pendingEnrichment = (await supabaseRequest(
-      'GET',
-      `validation_rows?job_id=eq.${jobId}&status=eq.valid&enrichment_status=eq.skipped&select=id&limit=1`,
-    )) as { id: string }[]
-    if (pendingEnrichment.length > 0) {
-      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: TELEGRAM_CHAT_ID,
-          text: `✅ Validation complete — ${job.filename}\n${validCount} valid / ${invalidCount} invalid\n\nEnrich the ${validCount} valid rows with operating city research?`,
-          reply_markup: {
-            inline_keyboard: [[
-              { text: '🔎 Enrich now', callback_data: `enrich_confirm:${jobId}` },
-              { text: '⏭ Skip enrichment', callback_data: `enrich_skip:${jobId}` },
-            ]],
-          },
-        }),
-      })
-      return
     }
   }
 
@@ -256,7 +467,7 @@ async function processJob(jobId: string): Promise<void> {
   const validRowsFilterQuery = job.icp_filter
     ? `validation_rows?job_id=eq.${jobId}&status=eq.valid&row_data->>icp_status=eq.confirmed&order=row_index.asc&select=email,row_data`
     : `validation_rows?job_id=eq.${jobId}&status=eq.valid&order=row_index.asc&select=email,row_data`
-  const validRows = (await supabaseRequest('GET', validRowsFilterQuery)) as ValidationRow[]
+  const validRows = await fetchAllPages(validRowsFilterQuery)
 
   let csvContent: string
 
@@ -400,6 +611,11 @@ Deno.serve(async (req: Request) => {
   const asyncWork = processJob(jobId).catch(async (err: unknown) => {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[email-validator] Job ${jobId} failed:`, message)
+    // A key failure is silent by nature — MailTester returns 200 for it — so
+    // it gets an explicit alert rather than just a row in the jobs table.
+    if (err instanceof MailTesterKeyError) {
+      await sendTelegram(`🔑 Validation halted — MailTester key problem.\n\n${message}`)
+    }
     try {
       await supabaseRequest(
         'PATCH',
