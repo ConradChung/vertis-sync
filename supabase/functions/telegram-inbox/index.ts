@@ -584,6 +584,52 @@ function barrierScreen(job: InstantlyJob): { text: string; reply_markup: unknown
   }
 }
 
+// Valid rows whose operating city never resolved. instantly-push blanks the
+// {{location}} variable for these, which does NOT leak a literal placeholder
+// (Instantly renders an absent variable as empty) but does leave a hole in the
+// sentence: "one partner in  to use...". Routing them to the no-location
+// campaign, whose copy never mentions a city, is the fix.
+//
+// The predicate mirrors isRealCity() in instantly-push: null, empty, UNKNOWN,
+// ERROR, N/A. Counted via Content-Range rather than measuring a fetched array,
+// because an unbounded select silently caps at 1000.
+async function countLocationlessValid(jobId: string): Promise<number> {
+  const query =
+    `validation_rows?job_id=eq.${jobId}&status=eq.valid` +
+    `&or=(row_data->>operating_city.is.null,` +
+    `row_data->>operating_city.eq.,` +
+    `row_data->>operating_city.ilike.unknown,` +
+    `row_data->>operating_city.ilike.error,` +
+    `row_data->>operating_city.ilike.n%2Fa)` +
+    `&select=id&limit=1`
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${query}`, {
+    headers: { ...REST_HEADERS, 'Prefer': 'count=exact', 'Range': '0-0' },
+  })
+  if (!res.ok) {
+    console.error(`[telegram-inbox] locationless count failed (${res.status})`)
+    return 0
+  }
+  const total = (res.headers.get('content-range') ?? '').split('/')[1]
+  return Number(total) || 0
+}
+
+// Offered only when there are rows that would actually be routed to it and no
+// sibling campaign exists yet. The handler for this has been live since
+// 2026-08-11 but nothing ever emitted the callback, so the whole no-location
+// split was unreachable from Telegram.
+function noLocationRow(
+  job: InstantlyJob,
+  locationless: number,
+): { text: string; callback_data: string }[] {
+  if (!job.instantly_campaign_id) return []
+  if (job.instantly_campaign_id_nolocation) return []
+  if (locationless === 0) return []
+  return [{
+    text: `🗺 Create no-location campaign (${locationless})`,
+    callback_data: `camp_nolo:${job.id}`,
+  }]
+}
+
 // Offered only when the chosen campaign has no copy yet — the point is to
 // unblock "I picked a fresh campaign and haven't written the sequence", not to
 // let a stray tap overwrite copy that already exists.
@@ -600,11 +646,29 @@ async function templateRow(job: InstantlyJob): Promise<{ text: string; callback_
 async function showBarrierScreen(job: InstantlyJob, edit?: { chatId: number; messageId: number }): Promise<void> {
   await supabaseRequest('PATCH', `validation_jobs?id=eq.${job.id}`, { instantly_status: 'configuring' })
   const screen = barrierScreen(job)
+  const markup = screen.reply_markup as { inline_keyboard: unknown[][] }
+
   const tplRow = await templateRow(job)
   if (tplRow.length > 0) {
-    const markup = screen.reply_markup as { inline_keyboard: unknown[][] }
     markup.inline_keyboard.splice(1, 0, tplRow)
     screen.text += `\n\n⚠️ This campaign has no sequence written yet — apply a template or it will send nothing.`
+  }
+
+  // Surface the location split. Without this the barrier screen said "Location:
+  // OFF — keep every row, blank out unknown cities" and gave no hint that a
+  // sibling campaign existed to handle exactly those rows.
+  const locationless = job.location_barrier ? 0 : await countLocationlessValid(job.id)
+  if (job.instantly_campaign_id_nolocation) {
+    screen.text += `\n\n🗺 No-location campaign: ${job.instantly_campaign_name_nolocation}` +
+                   `\n${locationless} lead${locationless === 1 ? '' : 's'} without a resolved city route there.`
+  } else {
+    const noloRow = noLocationRow(job, locationless)
+    if (noloRow.length > 0) {
+      markup.inline_keyboard.splice(1, 0, noloRow)
+      screen.text += `\n\n🗺 ${locationless} valid lead${locationless === 1 ? '' : 's'} have no resolved city.` +
+                     `\nThey'd send with a blank where the city goes. Create the sibling campaign to` +
+                     ` route them to copy that never mentions one.`
+    }
   }
   if (edit) {
     await tg('editMessageText', {
