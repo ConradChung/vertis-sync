@@ -10,7 +10,7 @@ Keeps the "Scaleport - Fall Mega" campaign (`ab55afe9-b632-4e8d-ac84-48873140c56
 | cron ticks `instantly-rotate-am` (13:00 UTC) and `instantly-rotate-pm` (01:00 UTC) | `supabase/migrations/20261008223419_instantly_rotation_schedule.sql` |
 | `rotation_dashboard()` aggregate RPC, anon-callable | `supabase/migrations/*_rotation_dashboard_rpc.sql` |
 | `instantly-rotate` edge function | `supabase/functions/instantly-rotate/index.ts` |
-| Dashboard | `dashboard/instantly-rotation.html` and the claude.ai artifact |
+| Dashboard | `public/dashboard/instantly-rotation.html`, served by the Next app on Vercel at `/dashboard/instantly-rotation.html` (behind the CRM login), and the claude.ai artifact |
 
 ## Lead states
 
@@ -38,4 +38,4 @@ From disk, never inline: `npx supabase functions deploy instantly-rotate --proje
 
 ## Dashboard
 
-Open `dashboard/instantly-rotation.html` in a browser; it reads `rotation_dashboard()` through PostgREST with the publishable key and polls every five minutes. Inside claude.ai the same page uses the Supabase connector instead. Only counts leave the database.
+Open `/dashboard/instantly-rotation.html` on the Vercel deployment (CRM login required) or the file itself in a browser; it reads `rotation_dashboard()` through PostgREST with the publishable key and polls every five minutes. Inside claude.ai the same page uses the Supabase connector instead. Only counts leave the database.
