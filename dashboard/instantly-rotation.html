@@ -1,0 +1,452 @@
+<title>Instantly Lead Rotation</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one column of panels, summary (slot meter + tiles) first, then lifecycle, health, schedule, runs. */
+:root {
+  --bg: #f4f5f7; --surface: #ffffff; --surface-2: #eceef2; --ink: #14171c; --ink-2: #4f5663; --muted: #848b98;
+  --line: #e2e5ea; --line-strong: #c9ced6; --accent: #2a78d6; --accent-soft: #dce9fa;
+  --good: #0ca30c; --warn: #fab219; --serious: #ec835a; --critical: #d03b3b; --good-text: #006300;
+  --s-queued: #2a78d6; --s-active: #eb6834; --s-completed: #1baf7a; --s-replied: #eda100; --s-bounced: #e87ba4; --s-unsubscribed: #008300; --s-skipped: #4a3aa7;
+  --track: #cde2fb;
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1114; --surface: #181b20; --surface-2: #22262d; --ink: #f2f3f5; --ink-2: #b9bec8; --muted: #858c99;
+  --line: #2a2f37; --line-strong: #3a404a; --accent: #3987e5; --accent-soft: #1b3254;
+  --good-text: #3fbf3f;
+  --s-queued: #3987e5; --s-active: #d95926; --s-completed: #199e70; --s-replied: #c98500; --s-bounced: #d55181; --s-unsubscribed: #008300; --s-skipped: #9085e9;
+  --track: #1b3254; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #0f1114; --surface: #181b20; --surface-2: #22262d; --ink: #f2f3f5; --ink-2: #b9bec8; --muted: #858c99;
+  --line: #2a2f37; --line-strong: #3a404a; --accent: #3987e5; --accent-soft: #1b3254;
+  --good-text: #3fbf3f;
+  --s-queued: #3987e5; --s-active: #d95926; --s-completed: #199e70; --s-replied: #c98500; --s-bounced: #d55181; --s-unsubscribed: #008300; --s-skipped: #9085e9;
+  --track: #1b3254; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 14px; line-height: 1.45; padding-inline: 16px; padding-block: 20px 48px; }
+.wrap { max-width: 1080px; margin: 0 auto; display: grid; gap: 16px; }
+h1, h2, h3 { margin: 0; text-wrap: balance; font-weight: 600; }
+h1 { font-size: 22px; letter-spacing: -0.01em; }
+h2 { font-size: 15px; }
+.eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 500; }
+.sub { color: var(--ink-2); }
+.mono { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; justify-content: space-between; }
+header .meta { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--ink-2); font-size: 13px; margin-top: 4px; }
+header .meta span { white-space: nowrap; }
+.toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+button { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+button:hover { background: var(--surface-2); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:disabled { opacity: 0.55; cursor: default; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); white-space: nowrap; }
+.pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.pill.live .dot { background: var(--good); }
+.pill.stale .dot { background: var(--warn); }
+.pill.off .dot { background: var(--critical); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; min-width: 0; }
+.panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.notice { border-radius: 8px; padding: 12px 14px; background: var(--surface-2); color: var(--ink-2); display: none; }
+.notice.show { display: block; }
+.notice strong { color: var(--ink); }
+.notice.bad { border-left: 3px solid var(--critical); }
+.notice.warn { border-left: 3px solid var(--warn); }
+.notice button { margin-top: 8px; }
+
+/* summary */
+.summary { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 2fr); gap: 16px; }
+@media (max-width: 760px) { .summary { grid-template-columns: 1fr; } }
+.hero-num { font-size: 52px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; margin-top: 6px; }
+.hero-num small { font-size: 18px; color: var(--muted); font-weight: 500; margin-left: 4px; }
+.meter { position: relative; height: 14px; border-radius: 7px; background: var(--track); margin-top: 14px; overflow: hidden; }
+.meter .fill { height: 100%; width: 0; background: var(--accent); border-radius: 7px; transition: width .4s ease; }
+.meter.warn .fill { background: var(--warn); }
+.meter.over .fill { background: var(--critical); }
+.meter .cap { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); opacity: .5; }
+.meter-labels { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.tile { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tile .label { font-size: 12px; color: var(--ink-2); }
+.tile .value { font-size: 26px; font-weight: 600; line-height: 1.15; }
+.tile .hint { font-size: 12px; color: var(--muted); }
+
+/* lifecycle bar */
+.stack { display: flex; height: 22px; border-radius: 4px; overflow: hidden; gap: 2px; background: var(--surface); margin-top: 10px; }
+.stack .seg { height: 100%; min-width: 0; flex: 0 0 auto; }
+.stack .seg:first-child { border-radius: 4px 0 0 4px; }
+.stack .seg:last-child { border-radius: 0 4px 4px 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 12px; }
+.legend .item { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; }
+.legend .sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.legend .n { color: var(--ink-2); }
+.legend .item.zero { color: var(--muted); }
+.legend .item.zero .n { color: var(--muted); }
+.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+
+/* checks */
+.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.checks li { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start; padding: 8px 0; border-top: 1px solid var(--line); }
+.checks li:first-child { border-top: 0; padding-top: 0; }
+.checks .ico { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 600; color: #fff; margin-top: 2px; }
+.ico.ok { background: var(--good); } .ico.warn { background: var(--warn); color: #1a1a19; } .ico.bad { background: var(--critical); } .ico.na { background: var(--muted); }
+.checks .t { font-weight: 500; }
+.checks .d { color: var(--ink-2); font-size: 13px; }
+
+/* table */
+.tablewrap { overflow-x: auto; margin-top: 4px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: top; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; }
+td.num, th.num { text-align: right; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+tr.err td { background: color-mix(in srgb, var(--critical) 8%, transparent); }
+td .errs { white-space: normal; color: var(--ink-2); font-size: 12px; max-width: 46ch; }
+.empty { color: var(--muted); padding: 18px 0; text-align: center; }
+
+/* chart */
+.chart { position: relative; margin-top: 8px; }
+.chart svg { display: block; width: 100%; height: auto; max-width: 100%; }
+.chart .grid line { stroke: var(--line); stroke-width: 1; }
+.chart .axis text { fill: var(--muted); font-size: 11px; font-family: var(--font-ui); }
+.chart .baseline { stroke: var(--line-strong); stroke-width: 1; }
+.tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--bg); font-size: 12px; padding: 6px 9px; border-radius: 6px; transform: translate(-50%, -110%); white-space: nowrap; display: none; }
+.hit:hover { opacity: .85; }
+.sched { display: grid; gap: 10px; }
+.sched .job { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.sched .job .name { font-weight: 500; }
+.sched .job .when { color: var(--ink-2); font-size: 13px; }
+.codes { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; margin-top: 10px; color: var(--ink-2); }
+.codes .mono { color: var(--ink); }
+footer { color: var(--muted); font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { .meter .fill { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">Northstar CRM · instantly-rotate</div>
+      <h1>Instantly Lead Rotation</h1>
+      <div class="meta">
+        <span>Campaign <strong>Scaleport - Fall Mega</strong></span>
+        <span>Cap <strong class="mono">1,000</strong> contacts</span>
+        <span>Send limit <strong class="mono">180</strong>/day across 6 inboxes</span>
+        <span>Reply grace <strong class="mono">7</strong> days</span>
+      </div>
+    </div>
+    <div class="toolbar">
+      <span id="conn" class="pill"><span class="dot"></span><span id="conn-text">Connecting…</span></span>
+      <button id="refresh" type="button" disabled>Refresh</button>
+    </div>
+  </header>
+
+  <div id="notice" class="notice"></div>
+
+  <section class="summary">
+    <div class="panel">
+      <div class="eyebrow">Instantly slots in use</div>
+      <div class="hero-num"><span id="slots-n">—</span><small>/ 1,000</small></div>
+      <div id="meter" class="meter"><div class="fill" id="meter-fill"></div><div class="cap" style="left:100%"></div></div>
+      <div class="meter-labels"><span id="slots-free">Free slots: —</span><span id="slots-src"></span></div>
+    </div>
+    <div class="tiles">
+      <div class="tile"><span class="label">Queued in bank</span><span class="value mono" id="t-queued">—</span><span class="hint">Never pushed, waiting for a slot</span></div>
+      <div class="tile"><span class="label">Active in sequence</span><span class="value mono" id="t-active">—</span><span class="hint" id="t-active-hint">Contacted, not yet finished</span></div>
+      <div class="tile"><span class="label">Finished</span><span class="value mono" id="t-done">—</span><span class="hint" id="t-done-hint">Completed, replied, bounced, unsubscribed, skipped</span></div>
+      <div class="tile"><span class="label">Bank runway</span><span class="value mono" id="t-runway">—</span><span class="hint" id="t-runway-hint">Days until the queue is empty at the recent push rate</span></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Lead lifecycle</h2><span class="sub mono" id="total">— leads in bank</span></div>
+    <div class="stack" id="stack"></div>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <section class="two">
+    <div class="panel">
+      <div class="panel-head"><h2>Health</h2></div>
+      <ul class="checks" id="checks"></ul>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Schedule</h2><span class="sub">pg_cron, UTC</span></div>
+      <div class="sched" id="sched"></div>
+      <div class="codes">
+        <span class="eyebrow" style="grid-column: 1 / -1; margin-top: 6px">Instantly status codes the rotator reads</span>
+        <span class="mono">1</span><span>active, kept (or trimmed if never contacted)</span>
+        <span class="mono">3</span><span>completed, archived and deleted</span>
+        <span class="mono">-1</span><span>bounced, archived and deleted</span>
+        <span class="mono">-2</span><span>unsubscribed, archived and deleted</span>
+        <span class="mono">-3</span><span>skipped, archived and deleted</span>
+        <span class="mono">reply</span><span>kept 7 days after first reply, then deleted</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Pushed and deleted per day</h2><span class="sub">last 30 days</span></div>
+    <div class="legend" id="chart-legend">
+      <span class="item"><span class="sw" style="background: var(--s-queued)"></span>Pushed into Instantly</span>
+      <span class="item"><span class="sw" style="background: var(--s-active)"></span>Deleted from Instantly</span>
+    </div>
+    <div class="chart" id="chart"><div class="empty">No rotation runs yet.</div><div class="tip" id="tip"></div></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Rotation runs</h2><span class="sub">most recent 30</span></div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Ran at</th><th>Mode</th><th class="num">Before</th><th class="num">Archived</th><th class="num">Deleted</th><th class="num">Pushed</th><th class="num">After</th><th>Errors</th></tr></thead>
+        <tbody id="runs"><tr><td colspan="8" class="empty">No rotation runs yet. The first scheduled tick writes a row here.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer id="foot">Reads lead_bank, rotation_runs and cron.job through your Supabase connector. Only counts leave the database; no lead emails are loaded into this page.</footer>
+</div>
+
+<script>
+(function () {
+  const SERVER = "Supabase";
+  const PROJECT = "rcfrumrbauwvyzfebxck";
+  const CAP = 1000;
+  const SEED_IN_INSTANTLY = 2212; // from the 2026-10-08 export used to seed lead_bank; replaced by the first rotation run
+  const STATES = ["queued", "active", "completed", "replied", "bounced", "unsubscribed", "skipped"];
+  const QUERY = `with s as (select state::text as state, count(*)::int as n from public.lead_bank group by state),
+act as (select count(*)::int as n, min(pushed_at) as oldest_pushed, max(pushed_at) as newest_pushed from public.lead_bank where state='active'),
+rep as (select count(*)::int as n, min(delete_after) as next_delete from public.lead_bank where state='replied'),
+runs as (select id, ran_at, in_instantly_before, archived, deleted, pushed, in_instantly_after, errors, note from public.rotation_runs order by ran_at desc limit 30),
+last as (select * from runs limit 1),
+daily as (select date_trunc('day', ran_at) as d, sum(pushed)::int as pushed, sum(deleted)::int as deleted from public.rotation_runs where ran_at > now() - interval '30 days' group by 1 order by 1),
+cron as (select j.jobname, j.schedule, j.active,
+  (select json_build_object('start', r.start_time, 'status', r.status, 'msg', left(r.return_message,200)) from cron.job_run_details r where r.jobid=j.jobid order by r.start_time desc limit 1) as last_run
+  from cron.job j where j.jobname like 'instantly-rotate%')
+select json_build_object('now', now(), 'states', (select json_object_agg(state, n) from s), 'total', (select sum(n) from s),
+  'active', (select row_to_json(act) from act), 'replied', (select row_to_json(rep) from rep), 'last_run', (select row_to_json(last) from last),
+  'runs', (select coalesce(json_agg(runs), '[]'::json) from runs), 'daily', (select coalesce(json_agg(daily), '[]'::json) from daily),
+  'cron', (select coalesce(json_agg(cron), '[]'::json) from cron)) as dash;`;
+
+  const $ = (id) => document.getElementById(id);
+  const fmt = (n) => (n == null ? "—" : Number(n).toLocaleString("en-US"));
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const dtf = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const fmtDate = (s) => (s ? dtf.format(new Date(s)) : "—");
+  const hoursAgo = (s, now) => (s ? (now - new Date(s).getTime()) / 36e5 : null);
+  const ago = (s, now) => { const h = hoursAgo(s, now); if (h == null) return "never"; if (h < 1) return Math.round(h * 60) + " min ago"; if (h < 48) return Math.round(h) + " h ago"; return Math.round(h / 24) + " days ago"; };
+
+  let mcp = null, lastGood = null, unsubscribe = null;
+
+  function setConn(cls, text) { const el = $("conn"); el.className = "pill " + cls; $("conn-text").textContent = text; }
+  function notice(kind, html, action) {
+    const el = $("notice"); el.className = "notice show " + (kind || "");
+    el.innerHTML = html;
+    if (action) { const b = document.createElement("button"); b.type = "button"; b.textContent = action.label; b.addEventListener("click", action.onClick); el.appendChild(b); }
+  }
+  function clearNotice() { const el = $("notice"); el.className = "notice"; el.innerHTML = ""; }
+
+  // The Supabase connector wraps the row set in a fenced text block; pull the JSON array out of it.
+  function extract(payload) {
+    if (Array.isArray(payload)) return payload[0]?.dash ?? null;
+    let text = typeof payload === "string" ? payload : (payload && typeof payload.result === "string" ? payload.result : null);
+    if (text == null && payload && typeof payload === "object") text = JSON.stringify(payload);
+    if (!text) return null;
+    const m = text.match(/<untrusted-data-[^>]*>([\s\S]*?)<\/untrusted-data-/);
+    const body = m ? m[1].trim() : text.trim();
+    try { const rows = JSON.parse(body); return Array.isArray(rows) ? rows[0]?.dash ?? null : rows.dash ?? null; } catch (e) { return null; }
+  }
+
+  function render(d, storedAt) {
+    const now = d.now ? new Date(d.now).getTime() : Date.now();
+    const states = Object.fromEntries(STATES.map((s) => [s, Number(d.states?.[s] ?? 0)]));
+    const total = STATES.reduce((a, s) => a + states[s], 0);
+    const last = d.last_run;
+    const runs = d.runs || [];
+
+    // Slots: the last run's "after" count is the truth; before any run, fall back to the seed export.
+    const inInstantly = last ? Number(last.in_instantly_after) : SEED_IN_INSTANTLY;
+    $("slots-n").textContent = fmt(inInstantly);
+    $("slots-src").textContent = last ? "from run " + fmtDate(last.ran_at) : "seed export, before the trim cutover";
+    const pct = Math.min(100, (inInstantly / CAP) * 100);
+    $("meter-fill").style.width = pct + "%";
+    $("meter").className = "meter " + (inInstantly > CAP ? "over" : inInstantly > CAP * 0.95 ? "warn" : "");
+    $("slots-free").textContent = inInstantly > CAP ? "Over cap by " + fmt(inInstantly - CAP) : "Free slots: " + fmt(CAP - inInstantly);
+
+    // Tiles
+    $("t-queued").textContent = fmt(states.queued);
+    $("t-active").textContent = fmt(states.active);
+    const oldest = d.active?.oldest_pushed;
+    $("t-active-hint").textContent = oldest ? "Oldest pushed " + ago(oldest, now) : "Contacted, not yet finished";
+    const done = states.completed + states.replied + states.bounced + states.unsubscribed + states.skipped;
+    $("t-done").textContent = fmt(done);
+    $("t-done-hint").textContent = states.replied + " replied · " + states.bounced + " bounced · " + states.completed + " completed";
+    const recent = runs.filter((r) => hoursAgo(r.ran_at, now) <= 24 * 7 && r.note !== "trim");
+    const pushedWeek = recent.reduce((a, r) => a + Number(r.pushed || 0), 0);
+    const days = recent.length ? Math.max(1, Math.ceil((now - new Date(recent[recent.length - 1].ran_at).getTime()) / 864e5)) : 0;
+    const rate = days ? pushedWeek / days : 0;
+    $("t-runway").textContent = rate > 0 ? Math.ceil(states.queued / rate) + " d" : "—";
+    $("t-runway-hint").textContent = rate > 0 ? Math.round(rate) + " leads/day pushed over the last " + days + " day" + (days > 1 ? "s" : "") : "Needs at least one rotate run to measure the push rate";
+
+    // Lifecycle stack + legend
+    $("total").textContent = fmt(total) + " leads in bank";
+    $("stack").innerHTML = STATES.filter((s) => states[s] > 0).map((s) => `<div class="seg hit" style="flex-basis:${(states[s] / total) * 100}%;background:var(--s-${s})" title="${s}: ${fmt(states[s])}"></div>`).join("");
+    $("legend").innerHTML = STATES.map((s) => `<span class="item${states[s] ? "" : " zero"}"><span class="sw" style="background:var(--s-${s})"></span>${s} <span class="n mono">${fmt(states[s])}</span></span>`).join("");
+
+    // Health checks
+    const checks = [];
+    const lastRotate = runs.find((r) => r.note !== "trim");
+    const h = lastRotate ? hoursAgo(lastRotate.ran_at, now) : null;
+    if (!runs.length) checks.push(["warn", "No rotation run recorded yet", "The function is deployed and scheduled but has not written a run. Secrets (INSTANTLY_API_KEY, SUPABASE_SERVICE_ROLE_KEY) are unverified until the first run lands."]);
+    else if (h > 14) checks.push(["bad", "Last rotate run was " + ago(lastRotate.ran_at, now), "Expected every 12 hours. Check cron job status below and the edge function logs."]);
+    else checks.push(["ok", "Last rotate run " + ago(lastRotate.ran_at, now), "On schedule (every 12 hours)."]);
+    const lastErrs = last ? (Array.isArray(last.errors) ? last.errors : []) : [];
+    const fatal = lastErrs.some((e) => String(e).startsWith("fatal:"));
+    if (fatal) checks.push(["bad", "Last run hit a fatal error", String(lastErrs.find((e) => String(e).startsWith("fatal:"))).slice(0, 160)]);
+    else if (lastErrs.length) checks.push(["warn", lastErrs.length + " per-lead error" + (lastErrs.length > 1 ? "s" : "") + " in the last run", "Usually a rejected push or delete. See the runs table."]);
+    else if (last) checks.push(["ok", "Last run finished clean", "No errors recorded."]);
+    const trimmed = runs.some((r) => r.note === "trim");
+    if (inInstantly > CAP) checks.push([trimmed ? "bad" : "warn", "Instantly holds " + fmt(inInstantly) + " contacts, over the " + fmt(CAP) + " cap", trimmed ? "Rotate mode cannot push until deletions free slots." : "Run the one-time trim cutover (?mode=trim) before the Growth plan downgrade takes effect."]);
+    else checks.push(["ok", "Under the contact cap", fmt(CAP - inInstantly) + " free slots."]);
+    const cron = d.cron || [];
+    const inactive = cron.filter((j) => !j.active);
+    const failedTick = cron.filter((j) => j.last_run && j.last_run.status && j.last_run.status !== "succeeded");
+    if (!cron.length) checks.push(["bad", "No cron job found", "Expected instantly-rotate-am and instantly-rotate-pm in cron.job."]);
+    else if (inactive.length) checks.push(["bad", inactive.map((j) => j.jobname).join(", ") + " inactive", "Re-enable in cron.job."]);
+    else if (failedTick.length) checks.push(["warn", "Last cron tick failed for " + failedTick.map((j) => j.jobname).join(", "), failedTick[0].last_run.msg || ""]);
+    else checks.push(["ok", cron.length + " cron jobs active", cron.map((j) => j.jobname).join(", ")]);
+    if (states.queued === 0) checks.push(["warn", "Bank is empty", "Nothing left to push. Load the next lead batch into lead_bank."]);
+    else if (rate > 0 && states.queued / rate < 7) checks.push(["warn", "Under a week of runway", "Queue the next batch soon."]);
+    const oh = oldest ? hoursAgo(oldest, now) / 24 : null;
+    if (oh != null && oh > 30) checks.push(["warn", "Oldest active lead was pushed " + Math.round(oh) + " days ago", "Instantly reports status 1 until the sequence finishes. If the campaign is paused these leads hold slots indefinitely."]);
+    if (d.replied?.n) checks.push(["ok", fmt(d.replied.n) + " replied lead" + (d.replied.n > 1 ? "s" : "") + " in grace", d.replied.next_delete ? "Next deletion after " + fmtDate(d.replied.next_delete) : ""]);
+    $("checks").innerHTML = checks.map(([k, t, dd]) => `<li><span class="ico ${k}">${k === "ok" ? "✓" : k === "bad" ? "!" : k === "warn" ? "!" : "·"}</span><div><div class="t">${esc(t)}</div><div class="d">${esc(dd)}</div></div></li>`).join("");
+
+    // Schedule
+    $("sched").innerHTML = cron.length ? cron.map((j) => {
+      const m = String(j.schedule).match(/^(\d+)\s+(\d+)\s/);
+      let local = "";
+      if (m) { const dt = new Date(); dt.setUTCHours(Number(m[2]), Number(m[1]), 0, 0); local = dt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) + " local"; }
+      const lr = j.last_run;
+      const lrText = lr ? (lr.status === "succeeded" ? "last tick ok " + ago(lr.start, now) : "last tick " + esc(lr.status || "?") + " " + ago(lr.start, now)) : "no tick yet";
+      return `<div class="job"><span class="name">${esc(j.jobname)}</span><span class="pill ${j.active ? "live" : "off"}"><span class="dot"></span>${j.active ? "active" : "inactive"}</span><span class="when"><span class="mono">${esc(j.schedule)}</span> UTC · ${local}</span><span class="when">${lrText}</span></div>`;
+    }).join("") : `<div class="empty">No instantly-rotate cron jobs found.</div>`;
+
+    // Runs table
+    $("runs").innerHTML = runs.length ? runs.map((r) => {
+      const errs = Array.isArray(r.errors) ? r.errors : [];
+      return `<tr class="${errs.length ? "err" : ""}"><td class="mono">${fmtDate(r.ran_at)}</td><td>${esc(r.note || "rotate")}</td><td class="num">${fmt(r.in_instantly_before)}</td><td class="num">${fmt(r.archived)}</td><td class="num">${fmt(r.deleted)}</td><td class="num">${fmt(r.pushed)}</td><td class="num">${fmt(r.in_instantly_after)}</td><td>${errs.length ? `<details><summary>${errs.length}</summary><div class="errs">${errs.map(esc).join("<br>")}</div></details>` : "0"}</td></tr>`;
+    }).join("") : `<tr><td colspan="8" class="empty">No rotation runs yet. The first scheduled tick writes a row here.</td></tr>`;
+
+    renderChart(d.daily || []);
+    $("foot").textContent = "Updated " + fmtDate(storedAt ? new Date(storedAt).toISOString() : new Date(now).toISOString()) + ". Reads lead_bank, rotation_runs and cron.job through your Supabase connector. Only counts leave the database; no lead emails are loaded into this page.";
+  }
+
+  function renderChart(daily) {
+    const host = $("chart"); const tip = $("tip");
+    if (!daily.length) { host.innerHTML = `<div class="empty">No rotation runs in the last 30 days.</div><div class="tip" id="tip"></div>`; return; }
+    const W = 900, H = 220, padL = 40, padR = 12, padT = 12, padB = 28;
+    const days = []; const end = new Date(); end.setUTCHours(0, 0, 0, 0);
+    for (let i = 29; i >= 0; i--) { const dd = new Date(end.getTime() - i * 864e5); days.push(dd.toISOString().slice(0, 10)); }
+    const byDay = Object.fromEntries(daily.map((r) => [String(r.d).slice(0, 10), r]));
+    const max = Math.max(1, ...daily.map((r) => Math.max(Number(r.pushed || 0), Number(r.deleted || 0))));
+    const niceMax = Math.ceil(max / 50) * 50 || 50;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const slot = plotW / 30, barW = Math.min(12, (slot - 6) / 2);
+    const y = (v) => padT + plotH - (v / niceMax) * plotH;
+    const ticks = [0, niceMax / 2, niceMax];
+    let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Pushed and deleted leads per day, last 30 days"><g class="grid">`;
+    ticks.forEach((t) => { svg += `<line x1="${padL}" x2="${W - padR}" y1="${y(t)}" y2="${y(t)}"></line>`; });
+    svg += `</g><g class="axis">`;
+    ticks.forEach((t) => { svg += `<text x="${padL - 6}" y="${y(t) + 4}" text-anchor="end">${fmt(t)}</text>`; });
+    days.forEach((dk, i) => { if (i % 5 === 0 || i === 29) { const d = new Date(dk + "T00:00:00Z"); svg += `<text x="${padL + i * slot + slot / 2}" y="${H - 8}" text-anchor="middle">${d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" })}</text>`; } });
+    svg += `</g>`;
+    days.forEach((dk, i) => {
+      const r = byDay[dk]; const p = Number(r?.pushed || 0), del = Number(r?.deleted || 0);
+      const x0 = padL + i * slot + (slot - (2 * barW + 2)) / 2;
+      const bar = (x, v, c) => v > 0 ? `<path class="hit" fill="var(--s-${c})" d="M${x},${y(0)} V${y(v) + 4} a4,4 0 0 1 4,-4 h${barW - 8} a4,4 0 0 1 4,4 V${y(0)} Z"></path>` : "";
+      svg += `<g data-day="${dk}" data-p="${p}" data-d="${del}">${bar(x0, p, "queued")}${bar(x0 + barW + 2, del, "active")}<rect x="${padL + i * slot}" y="${padT}" width="${slot}" height="${plotH}" fill="transparent"></rect></g>`;
+    });
+    svg += `<line class="baseline" x1="${padL}" x2="${W - padR}" y1="${y(0)}" y2="${y(0)}"></line></svg>`;
+    host.innerHTML = svg + `<div class="tip" id="tip"></div>`;
+    const t2 = $("tip");
+    host.querySelectorAll("g[data-day]").forEach((g) => {
+      g.addEventListener("mousemove", (ev) => {
+        const b = host.getBoundingClientRect();
+        t2.style.display = "block"; t2.style.left = (ev.clientX - b.left) + "px"; t2.style.top = (ev.clientY - b.top) + "px";
+        t2.textContent = g.dataset.day + " · pushed " + g.dataset.p + " · deleted " + g.dataset.d;
+      });
+      g.addEventListener("mouseleave", () => { t2.style.display = "none"; });
+    });
+  }
+
+  function handle(ev) {
+    if (ev.type === "data") {
+      const r = ev.result; const d = extract(r.payload);
+      if (!d) { notice("warn", "<strong>Could not read the query result.</strong> The Supabase connector answered, but not with the expected row shape."); return; }
+      lastGood = d; clearNotice();
+      const storedAt = r.cache?.storedAt;
+      setConn(r.cache && !r.cache.revalidating && Date.now() - storedAt > 10 * 60e3 ? "stale" : "live", storedAt ? "Live · cached " + ago(new Date(storedAt).toISOString(), Date.now()) : "Live");
+      render(d, storedAt);
+      return;
+    }
+    const e = ev.error || {}; const code = e.code || "upstream_error";
+    switch (code) {
+      case "needs_reauth": setConn("off", "Reconnect Supabase"); notice("bad", "<strong>Supabase connector needs reconnecting.</strong> Reconnect it in claude.ai Settings → Connectors, then refresh."); break;
+      case "server_not_connected": case "selection_required": case "server_not_found":
+        setConn("off", "No Supabase connector"); notice("bad", "<strong>Add the Supabase connector</strong> in claude.ai Settings → Connectors to see live rotation data."); break;
+      case "not_in_manifest": case "blocked_by_policy": case "not_granted":
+        setConn("off", "Not allowed"); notice("bad", "<strong>This page is not allowed to query Supabase for you.</strong> Allow the Supabase connector for this artifact in its Permissions menu."); break;
+      case "approval_required":
+        setConn("stale", "Needs approval"); notice("warn", "<strong>Supabase needs your approval for this query.</strong>", { label: "Run query once", onClick: runOnce }); break;
+      case "tool_error":
+        setConn("off", "Query failed"); notice("bad", "<strong>The query failed in Supabase.</strong> " + esc(e.message || "")); break;
+      case "server_unavailable": case "rate_limited":
+        setConn("stale", "Supabase unreachable"); notice("warn", "<strong>Supabase did not answer.</strong> Showing the last good data; it will retry on the next refresh."); break;
+      default:
+        setConn("stale", "Error"); notice("warn", "<strong>Live data failed.</strong> " + esc(e.message || code));
+    }
+  }
+
+  async function runOnce() {
+    if (!mcp) return;
+    try { const r = await mcp.callTool(SERVER, "execute_sql", { project_id: PROJECT, query: QUERY }); handle({ type: "data", result: r }); }
+    catch (e) { handle({ type: "error", error: e }); }
+  }
+
+  // Outside claude.ai (the file opened from the vertis-sync repo), read the aggregate-only RPC with the publishable key.
+  const REST_URL = "https://rcfrumrbauwvyzfebxck.supabase.co/rest/v1/rpc/rotation_dashboard";
+  const PUBLISHABLE_KEY = "sb_publishable_1m8MgIanvkdF8ZxwK3WCwQ_DppMxQDU";
+  async function fetchRest() {
+    setConn("stale", "Loading…");
+    try {
+      const r = await fetch(REST_URL, { method: "POST", headers: { apikey: PUBLISHABLE_KEY, Authorization: "Bearer " + PUBLISHABLE_KEY, "Content-Type": "application/json" }, body: "{}" });
+      if (!r.ok) throw new Error("HTTP " + r.status + " " + (await r.text()).slice(0, 160));
+      const d = await r.json();
+      if (!d || typeof d !== "object") throw new Error("unexpected response shape");
+      lastGood = d; clearNotice(); setConn("live", "Live · Supabase REST"); render(d, Date.now());
+    } catch (e) {
+      setConn("off", "Supabase unreachable");
+      if (!lastGood) {
+        notice("warn", "<strong>Could not reach Supabase.</strong> " + esc(e.message || e) + " Figures below are the seed export from 2026-10-08.");
+        render({ now: null, states: { queued: 2095, active: 112, bounced: 5 }, total: 2212, active: { n: 112, oldest_pushed: "2026-08-23T18:03:43Z" }, replied: { n: 0 }, last_run: null, runs: [], daily: [], cron: [] }, null);
+      } else notice("warn", "<strong>Refresh failed.</strong> Showing the last good data. " + esc(e.message || e));
+    }
+  }
+
+  async function boot() {
+    mcp = await (window.claude?.use ? window.claude.use("mcp") : Promise.resolve(null));
+    if (!mcp) {
+      $("refresh").disabled = false;
+      $("refresh").addEventListener("click", fetchRest);
+      await fetchRest();
+      setInterval(() => { if (!document.hidden) fetchRest(); }, 300e3);
+      return;
+    }
+    $("refresh").disabled = false;
+    $("refresh").addEventListener("click", async () => { $("refresh").disabled = true; try { await mcp.invalidate(SERVER, "execute_sql"); } catch (e) {} setTimeout(() => { $("refresh").disabled = false; }, 1500); });
+    unsubscribe = mcp.watchTool(SERVER, "execute_sql", { project_id: PROJECT, query: QUERY }, handle, { cache: { staleTime: 60e3, gcTime: 3600e3 }, refetchInterval: 300e3 });
+  }
+  boot();
+})();
+</script>
