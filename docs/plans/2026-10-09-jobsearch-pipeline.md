@@ -22,7 +22,7 @@ Design reference: `docs/plans/2026-10-09-jobsearch-pipeline-design.md`
 ## Task 1: Migration
 
 **Files:**
-- Create: `supabase/migrations/20261009120000_jobsearch_pipeline.sql`
+- Create: `supabase/migrations/20261009233717_jobsearch_pipeline.sql`
 
 **Step 1: Write the migration**
 
@@ -111,12 +111,12 @@ Docker is not available on this machine, so `supabase db reset` cannot run local
 
 **Step 3: Verify**
 
-`select table_name, count(*) from information_schema.columns where table_name in ('job_batches','job_batch_companies','job_contacts') group by 1;` → 25 / 25 / 20. `select id from storage.buckets where id='leadsfriday-results';` → one row. `select tgname from pg_trigger where tgrelid='job_batches'::regclass;` includes `set_job_batches_updated_at`.
+`select table_name, count(*) from information_schema.columns where table_name in ('job_batches','job_batch_companies','job_contacts') group by 1;` → 21 / 23 / 19. `select id from storage.buckets where id='leadsfriday-results';` → one row. `select tgname from pg_trigger where tgrelid='job_batches'::regclass;` includes `set_job_batches_updated_at`.
 
 **Step 4: Commit**
 
 ```bash
-git add supabase/migrations/20261009120000_jobsearch_pipeline.sql
+git add supabase/migrations/20261009233717_jobsearch_pipeline.sql
 git commit -m "feat(jobsearch): job_batches, job_batch_companies, job_contacts + leadsfriday-results bucket"
 ```
 

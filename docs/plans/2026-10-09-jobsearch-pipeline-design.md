@@ -97,7 +97,7 @@ The `order` phase claims `status resolving → ordered` *before* calling Leadsfr
 
 ## Database Changes
 
-Migration `supabase/migrations/20261009120000_jobsearch_pipeline.sql` (the spec names it `20261009_jobsearch_pipeline.sql`; the repo's migrations all carry 14-digit versions and the CLI orders by that string, so this one does too).
+Migration `supabase/migrations/20261009233717_jobsearch_pipeline.sql` (the spec names it `20261009_jobsearch_pipeline.sql`; the repo's migrations all carry 14-digit versions and the CLI orders by that string, so this one does too).
 
 Three tables, as in the spec:
 
