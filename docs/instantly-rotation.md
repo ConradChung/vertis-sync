@@ -1,6 +1,6 @@
 # Instantly lead rotation
 
-Keeps the "Scaleport - Fall Mega" campaign (`ab55afe9-b632-4e8d-ac84-48873140c56e`) under the 1,000 uploaded-contact cap of the Instantly Growth plan by deleting finished leads and pushing queued ones from a Supabase lead bank. Instantly's cap counts contacts stored at one time, active or paused, and deleting frees a slot within about five minutes, so rotation by deletion is valid.
+Keeps the "Scaleport - Fall Mega" campaign (`869d73b3-5bf3-4f1c-ba8c-43ac6d0f529d`) under the 1,000 uploaded-contact cap of the Instantly Growth plan by deleting finished leads and pushing queued ones from a Supabase lead bank. Instantly's cap counts contacts stored at one time, active or paused, and deleting frees a slot within about five minutes, so rotation by deletion is valid.
 
 ## Pieces
 
