@@ -1041,6 +1041,20 @@ function invokeFunction(name: string, jobId: string): void {
   }).catch(err => console.error(`[telegram-inbox] ${name} invoke error:`, err))
 }
 
+// Same as invokeFunction, for the job search pipeline whose workers key on a
+// batch rather than a validation job.
+function invokeBatchFunction(name: string, batchId: string): void {
+  fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_SERVICE_ROLE_KEY,
+      'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ batch_id: batchId }),
+  }).catch(err => console.error(`[telegram-inbox] ${name} invoke error:`, err))
+}
+
 // Quote the ETA and persist it. Called AFTER the finder decision, not at
 // approval: on a blank-heavy file the finder is most of the runtime, so a
 // number quoted before the choice is wrong by hours whichever way it goes.
@@ -1201,6 +1215,103 @@ async function handleWatchdogResume(
   }
 }
 
+// ---- Job search pipeline gates ----
+//
+// Two gates (review -> pull, ranked -> write) plus the watchdog's Resume, all
+// answered with the same shape as every other button here: acknowledge the tap,
+// claim the slot atomically, strip the keyboard, invoke. A claim that returns
+// zero rows means a double-tap, a Telegram redelivery, or the dashboard got
+// there first — return silently, the tap was already answered.
+
+interface JobBatchRow {
+  id: string
+  batch_date: string
+  status: string
+}
+
+const JOBS_ACTIONS = new Set(['jobs_pull', 'jobs_skip', 'jobs_write', 'jobs_discard', 'jobs_resume'])
+
+function formatBatchDate(iso: string): string {
+  return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+}
+
+async function handleJobsCallback(
+  action: string,
+  batchId: string,
+  cb: NonNullable<TelegramUpdate['callback_query']>,
+): Promise<void> {
+  const ack: Record<string, string> = {
+    jobs_pull: 'Pulling contacts…',
+    jobs_skip: 'Skipping this week.',
+    jobs_write: 'Writing to gtm…',
+    jobs_discard: 'Discarding.',
+    jobs_resume: 'Resuming…',
+  }
+  await tg('answerCallbackQuery', { callback_query_id: cb.id, text: ack[action] })
+
+  let filter: string
+  let patch: Record<string, unknown>
+  switch (action) {
+    case 'jobs_pull':
+      filter = 'review_status=eq.awaiting&status=eq.awaiting_review'
+      patch = { review_status: 'claimed', status: 'approved' }
+      break
+    case 'jobs_skip':
+      filter = 'review_status=eq.awaiting&status=eq.awaiting_review'
+      patch = { review_status: 'claimed', status: 'skipped' }
+      break
+    case 'jobs_write':
+      filter = 'write_status=eq.awaiting&status=eq.ranked'
+      patch = { write_status: 'claimed' }
+      break
+    case 'jobs_discard':
+      filter = 'write_status=eq.awaiting&status=eq.ranked'
+      patch = { write_status: 'claimed', status: 'discarded' }
+      break
+    default: // jobs_resume
+      filter = 'watchdog_status=eq.awaiting'
+      patch = { watchdog_status: 'claimed' }
+  }
+
+  const claimed = (await supabaseRequest(
+    'PATCH',
+    `job_batches?id=eq.${batchId}&${filter}&select=id,batch_date,status`,
+    patch,
+    { returning: true },
+  )) as JobBatchRow[]
+  if (!claimed || claimed.length === 0) return
+  const batch = claimed[0]
+  const when = formatBatchDate(batch.batch_date)
+
+  let text: string
+  switch (action) {
+    case 'jobs_pull': text = `✅ Reviewed — pulling contacts for batch ${when}`; break
+    case 'jobs_skip': text = `⏭ Skipped this week (batch ${when})`; break
+    case 'jobs_write': text = `✍️ Writing batch ${when} to gtm…`; break
+    case 'jobs_discard': text = `🗑 Discarded batch ${when}`; break
+    default: text = `▶️ Resumed — batch ${when} at ${batch.status}`
+  }
+  if (cb.message) {
+    await tg('editMessageText', {
+      chat_id: cb.message.chat.id,
+      message_id: cb.message.message_id,
+      text,
+      disable_web_page_preview: true,
+    })
+  }
+
+  if (action === 'jobs_pull') {
+    invokeBatchFunction('jobsearch-puller', batchId)
+  } else if (action === 'jobs_write') {
+    invokeBatchFunction('jobsearch-sheet-writer', batchId)
+  } else if (action === 'jobs_resume') {
+    // Back to idle so a future stall on the same batch can notify again. The
+    // puller derives the phase from status, so no mode flag is needed.
+    await supabaseRequest('PATCH', `job_batches?id=eq.${batchId}`, { watchdog_status: 'idle' })
+    invokeBatchFunction('jobsearch-puller', batchId)
+  }
+}
+
 const PUSH_ACTIONS = new Set([
   'camp_pick', 'camp_tpl', 'camp_launch', 'camp_nolo',
   'bar_loc', 'bar_co', 'push_next', 'push_go', 'push_strict', 'push_std', 'push_cancel',
@@ -1216,6 +1327,11 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
 
   if (action === 'wd_resume' && targetId) {
     await handleWatchdogResume(targetId, cb)
+    return
+  }
+
+  if (JOBS_ACTIONS.has(action) && targetId) {
+    await handleJobsCallback(action, targetId, cb)
     return
   }
 
