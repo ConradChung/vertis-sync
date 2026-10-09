@@ -284,6 +284,28 @@ Commit `chore(jobsearch): deploy the new functions; document secrets and service
 
 ---
 
+## Leadsfriday CSV → `job_contacts` mapping
+
+Implemented as `LEADSFRIDAY_COLUMNS` in `supabase/functions/_shared/jobsearch/pure.ts`. Header names are matched after lowercasing and collapsing spaces/underscores; the first non-empty candidate wins. Every original column is kept in `job_contacts.raw`.
+
+| `job_contacts` | accepted headers (in order) |
+|---|---|
+| `first_name` | First Name, firstname, given name |
+| `last_name` | Last Name, lastname, surname, family name |
+| `title` | Title, Job Title, position, headline |
+| `email` | Email, Work Email, email address, business email (lowercased; blank → NULL) |
+| `linkedin_url` | Person Linkedin Url, Linkedin Url, linkedin, linkedin profile, profile url |
+| `company_name` | Company, Company Name, Company Name for Emails, organization, organization name, account name |
+| `website` | Website, Company Website, organization website, domain, company domain |
+| `seniority` | Seniority, seniority level |
+| `department` | Departments, department |
+| `location` | Location / Person Location, else `City, State, Country` joined |
+| `corporate_phone` | Corporate Phone, Company Phone, organization phone, phone, work phone |
+
+**Pending the first real run:** the rank phase logs the actual header row (`[jobsearch-puller] rank: CSV header = …`). Compare it against this table, prune the unused aliases, and update both the table and `LEADSFRIDAY_COLUMNS`.
+
+---
+
 ## Task 12: Verification
 
 1. `npx -y deno test supabase/functions/_shared/jobsearch/` → all pass.
