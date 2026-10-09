@@ -280,3 +280,28 @@ export function mapLeadsfridayRow(record: Record<string, string>): ContactFields
     corporate_phone: pick(rec, LEADSFRIDAY_COLUMNS.corporate_phone),
   }
 }
+
+// ---- Sheet date cells -----------------------------------------------------
+
+// Jobs Final.added_on is written as an ISO string, but a cell someone retyped
+// may come back as a locale-formatted date or (with UNFORMATTED_VALUE) as a
+// Sheets serial number. Accept all three when matching a batch_date.
+export function sameSheetDate(cell: string | number | null | undefined, isoDate: string): boolean {
+  if (cell === null || cell === undefined) return false
+  const s = String(cell).trim()
+  if (!s) return false
+  if (s === isoDate) return true
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const serial = Number(s)
+    if (serial > 20000 && serial < 80000) {
+      const ms = Date.UTC(1899, 11, 30) + Math.round(serial) * 86_400_000
+      return new Date(ms).toISOString().slice(0, 10) === isoDate
+    }
+    return false
+  }
+  const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` === isoDate
+  const t = Date.parse(s)
+  if (Number.isNaN(t)) return false
+  return new Date(t).toISOString().slice(0, 10) === isoDate
+}

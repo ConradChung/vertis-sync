@@ -11,6 +11,7 @@ import {
   parseCsv,
   rankContacts,
   rowToRecord,
+  sameSheetDate,
   toCsv,
 } from './pure.ts'
 
@@ -163,4 +164,16 @@ Deno.test('mapLeadsfridayRow tolerates snake_case headers and blanks email to nu
 
 Deno.test('toCsv quotes what needs quoting', () => {
   assertEquals(toCsv(['a', 'b'], [['x, y', 'say "hi"'], ['plain', '']]), 'a,b\r\n"x, y","say ""hi"""\r\nplain,\r\n')
+})
+
+Deno.test('sameSheetDate matches ISO strings, serials and parseable dates', () => {
+  assert(sameSheetDate('2026-10-12', '2026-10-12'))
+  assert(sameSheetDate(' 2026-10-12 ', '2026-10-12'))
+  assert(sameSheetDate('2026-10-12T00:00:00', '2026-10-12'))
+  assert(sameSheetDate(46307, '2026-10-12')) // Sheets serial for 2026-10-12
+  assert(sameSheetDate('46307', '2026-10-12'))
+  assert(!sameSheetDate('2026-10-05', '2026-10-12'))
+  assert(!sameSheetDate('', '2026-10-12'))
+  assert(!sameSheetDate(null, '2026-10-12'))
+  assert(!sameSheetDate('not a date', '2026-10-12'))
 })
