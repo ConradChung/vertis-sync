@@ -11,7 +11,7 @@ import { createClient } from '@/lib/supabase/server'
 
 const BATCH_COLUMNS =
   'id, batch_date, status, review_status, write_status, watchdog_status, companies_added, companies_pulled, ' +
-  'companies_unresolved, contacts_total, contacts_kept, apollo_url, leadsfriday_order_id, leadsfriday_status, ' +
+  'companies_unresolved, contacts_total, contacts_kept, apollo_url, leadsfriday_order_id, leadsfriday_status, fill_rounds, force_order, ' +
   'result_storage_path, error, created_at, updated_at'
 
 export async function GET(request: NextRequest) {
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
         supabase.from('job_batches').select(BATCH_COLUMNS).eq('id', id).single(),
         supabase
           .from('job_batch_companies')
-          .select('id, company_name, domain, job_title, job_link, job_poster_name, employees, apollo_org_id, resolve_status, exclude_reason')
+          .select('id, company_name, domain, job_title, job_link, job_poster_name, employees, apollo_org_id, resolve_status, exclude_reason, fit_tier')
           .eq('batch_id', id)
           .order('resolve_status', { ascending: true })
           .order('company_name', { ascending: true })

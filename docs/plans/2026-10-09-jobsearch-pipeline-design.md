@@ -208,3 +208,22 @@ Set with `supabase secrets set …`. No Vercel env vars are added: the dashboard
 - Leadsfriday row with no matching company: still stored, `company_id` null, role/rank computed on its own company name; it is kept only if it ranks.
 - `gtm` already has a kept contact's email: skipped on write, so re-running the writer is safe.
 - Watchdog fires while a puller invocation is genuinely slow: Resume runs the puller again for the same status; `gate` and `order` are claim-protected, `resolve` and `rank` are idempotent per row, `poll` is harmless to duplicate.
+
+
+---
+
+## Revision 2 (2026-10-09, evening): fill every order to the minimum
+
+The first real order was refused: Leadsfriday's minimum is **500 contacts per order**. A batch can therefore no longer mean "this scrape's rows". The owner's direction: never waste volume, run as often as every other day, pull everything from the last 365 days, and widen the net when strict titles run out.
+
+**Pool, not batch rows.** The gate draws from the whole eligible pool in `Jobs Final`: not in `gtm`, not "Not a Right Fit", not already taken by a live batch, and with `postedAt` or `added_on` inside `lookback_days` (default 365; undated rows are kept). Rows are tiered by title — 1 strict GTM-engineer regex, 2 GTM-adjacent (founding AE/BDR, RevOps, GTM ops/strategy, sales/solutions engineer, growth, bizops, partnerships, SDR), 3 everything else — and taken tier 1 first, newest first. `supabase/functions/_shared/jobsearch/pool.ts`.
+
+**Fill rounds.** `gate` takes `ceil((34 − resolved − pending) × 1.25)` companies (34 = 500 / 15), resolves them in Apollo, and if fewer than 34 resolved runs `fill_more` rounds (max 8) until the pool is dry. Then it orders `max(500, resolved × 15)` contacts, capped at 60 companies per Apollo URL. If the pool is dry below 34, the batch parks as **`waiting_fill`** with a Telegram offering **Order anyway** (`jobs_order_now`, sets `force_order`) and **Abort**.
+
+**Auto top-up.** `jobsearch_refill_tick()` (pg_cron, hourly) POSTs `{batch_id, phase:'refill'}` for every `waiting_fill` batch. A new scrape's `jobsearch-notify` call, when another batch is still `awaiting_review` or `waiting_fill`, marks the new batch **`merged`** (`merged_into`), adds its count to the open one, and either refreshes the open prompt or triggers a refill immediately. So any scrape cadence (weekly, every other day, daily) stacks into one order at a time.
+
+**Abort.** `jobs_abort` from Telegram (after the pull tap, on the fill message, on the order receipt, on the watchdog prompt) or the dashboard moves any working or parked batch to `discarded`. The puller re-checks status before every Apollo call and every poll sleep.
+
+**Cost messages.** Gate 1 states the eligible pool by tier and that the next order is 500+ contacts. The 💳 receipt after ordering reports contacts requested, credits deducted and the new balance. Apollo 401/402/403 or a credit/plan-limit body fails the batch with a Telegram; Leadsfriday 401/403 likewise.
+
+**Scheduled-task changes (outside this repo).** Cadence every other day; lookback 365 days; widen the scrape's own filters (company size, GTM-adjacent titles) since the pipeline only ever sees what the scrape writes to `Jobs Final`. The insert/POST contract is unchanged.

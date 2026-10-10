@@ -3,11 +3,15 @@
 // runs ONE phase under a 110 s budget, PATCHes job_batches as it goes (that
 // updated_at is the watchdog's heartbeat) and self-invokes with the next phase.
 //
-//   gate     approved  -> resolving   read Jobs Final, select the batch's rows,
-//                                     exclude what gtm already has, insert companies
-//   resolve  resolving                Apollo: domain -> organization_id, <=20/invocation,
-//                                     then build the people-search URL
-//   order    resolving -> ordered     Leadsfriday: place the export order
+//   gate      approved     -> resolving  first fill round: read Jobs Final, build the
+//                                        eligible pool (strict GTM titles, then adjacent,
+//                                        then everything), take enough companies for a
+//                                        500-contact order, insert them as pending
+//   fill_more resolving                  another fill round after Apollo misses
+//   refill    waiting_fill -> resolving  the hourly cron / a new scrape tops up a parked batch
+//   resolve   resolving                  Apollo: domain -> organization_id, <=20/invocation;
+//                                        then order, fill more, or park as waiting_fill
+//   order     resolving    -> ordered    Leadsfriday: place the export order (>= 500 contacts)
 //   poll     ordered   -> delivered   Leadsfriday: wait, then store the CSV in Storage
 //   rank     delivered -> ranked      parse, join, role + rank, Gate 2 prompt
 //
@@ -22,8 +26,6 @@ import {
   assignRole,
   buildApolloUrl,
   type ContactFields,
-  headerIndex,
-  isGtmTitle,
   mapLeadsfridayRow,
   normalizeCompanyName,
   normalizeDomain,
@@ -32,8 +34,15 @@ import {
   rankContacts,
   type Role,
   rowToRecord,
-  sameSheetDate,
 } from '../_shared/jobsearch/pure.ts'
+import {
+  classifyPool,
+  companiesNeeded,
+  companiesToTake,
+  contactCountFor,
+  LEADSFRIDAY_MIN_CONTACTS,
+  type Pool,
+} from '../_shared/jobsearch/pool.ts'
 import { getAccessToken, readRange } from '../_shared/jobsearch/sheets.ts'
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
@@ -56,8 +65,9 @@ const RESOLVE_BATCH = 20                // Apollo calls per invocation
 const POLL_SLEEP_MS = 60_000
 const POLL_GIVE_UP_MS = 6 * 3600_000
 const KEEP_TOP = 5
-const CONTACTS_PER_COMPANY = 15         // ~13 observed; Leadsfriday contact_count
-const MIN_CONTACT_COUNT = 500       // Leadsfriday rejects anything smaller (400 "Contact count must be at least 500")
+const MAX_FILL_ROUNDS = 8               // gate + fill_more passes before we park
+// Statuses whose companies are spoken for: another batch must not take them.
+const LIVE_STATUSES = 'approved,resolving,waiting_fill,ordered,delivered,ranked,written'
 
 const REST_HEADERS: Record<string, string> = {
   'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -109,13 +119,14 @@ function sendTelegram(text: string, reply_markup?: unknown): Promise<unknown> {
 
 // ---- Types ----------------------------------------------------------------
 
-type Phase = 'gate' | 'resolve' | 'order' | 'poll' | 'rank'
+type Phase = 'gate' | 'fill_more' | 'refill' | 'resolve' | 'order' | 'poll' | 'rank'
 
 interface Payload {
   batch_id: string
   phase?: Phase
   ordered_at?: string   // ISO; carried through poll self-invokes so the 6 h clock survives heartbeats
   rate_limited?: boolean // set when the previous resolve invocation hit Apollo 429; a second one fails loudly
+  pool_left?: number     // eligible companies the last fill round did NOT take (0 = pool exhausted)
 }
 
 interface JobBatch {
@@ -129,6 +140,9 @@ interface JobBatch {
   leadsfriday_order_id: number | null
   leadsfriday_status: string | null
   result_storage_path: string | null
+  lookback_days: number
+  fill_rounds: number
+  force_order: boolean
   updated_at: string
 }
 
@@ -144,6 +158,7 @@ interface Company {
 
 const PHASE_FOR_STATUS: Record<string, Phase> = {
   approved: 'gate',
+  waiting_fill: 'refill',
   resolving: 'resolve',
   ordered: 'poll',
   delivered: 'rank',
@@ -151,6 +166,8 @@ const PHASE_FOR_STATUS: Record<string, Phase> = {
 
 const STATUS_FOR_PHASE: Record<Phase, string> = {
   gate: 'approved',
+  refill: 'waiting_fill',
+  fill_more: 'resolving',
   resolve: 'resolving',
   order: 'resolving',
   poll: 'ordered',
@@ -174,7 +191,7 @@ function selfInvoke(payload: Payload): void {
 async function loadBatch(batchId: string): Promise<JobBatch> {
   const rows = (await supabaseRequest(
     'GET',
-    `job_batches?id=eq.${batchId}&select=id,batch_date,status,companies_added,companies_pulled,companies_unresolved,apollo_url,leadsfriday_order_id,leadsfriday_status,result_storage_path,updated_at&limit=1`,
+    `job_batches?id=eq.${batchId}&select=id,batch_date,status,companies_added,companies_pulled,companies_unresolved,apollo_url,leadsfriday_order_id,leadsfriday_status,result_storage_path,lookback_days,fill_rounds,force_order,updated_at&limit=1`,
   )) as JobBatch[]
   if (!rows?.[0]) throw new Error(`job batch ${batchId} not found`)
   return rows[0]
@@ -241,38 +258,48 @@ function toInt(v: string | undefined): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-// ---- Phase: gate ----------------------------------------------------------
+// ---- Fill rounds: gate / fill_more / refill ------------------------------
 
-async function phaseGate(batch: JobBatch): Promise<void> {
-  if (!(await claimStatus(batch.id, 'approved', { status: 'resolving' }))) {
-    console.log('[jobsearch-puller] gate: batch no longer approved, skipping')
-    return
+interface TakenRow { domain: string | null; company_name: string }
+
+// Companies spoken for by any live batch (including this one).
+async function loadTaken(batchId: string): Promise<{ domains: Set<string>; names: Set<string> }> {
+  const others = (await supabaseRequest(
+    'GET',
+    `job_batch_companies?select=domain,company_name,job_batches!inner(status)` +
+    `&job_batches.status=in.(${LIVE_STATUSES})&resolve_status=in.(pending,resolved)&limit=5000`,
+  )) as TakenRow[]
+  const mine = (await supabaseRequest(
+    'GET', `job_batch_companies?batch_id=eq.${batchId}&select=domain,company_name&limit=1000`,
+  )) as TakenRow[]
+  const domains = new Set<string>()
+  const names = new Set<string>()
+  for (const r of [...(others ?? []), ...(mine ?? [])]) {
+    if (r.domain) domains.add(r.domain)
+    const n = normalizeCompanyName(r.company_name)
+    if (n) names.add(n)
   }
+  return { domains, names }
+}
 
+async function companyCounts(batchId: string): Promise<{ resolved: number; pending: number; unresolved: number }> {
+  const rows = (await supabaseRequest(
+    'GET', `job_batch_companies?batch_id=eq.${batchId}&select=resolve_status&limit=1000`,
+  )) as { resolve_status: string }[]
+  const c = { resolved: 0, pending: 0, unresolved: 0 }
+  for (const r of rows ?? []) {
+    if (r.resolve_status === 'resolved') c.resolved++
+    else if (r.resolve_status === 'pending') c.pending++
+    else if (r.resolve_status === 'unresolved') c.unresolved++
+  }
+  return c
+}
+
+async function buildPool(batch: JobBatch): Promise<Pool> {
   const token = await sheetsToken()
   const grid = await readRange(token, JOBSEARCH_SHEET_ID, "'Jobs Final'!A1:ZZ")
   if (grid.length < 2) throw new Error('Jobs Final has no data rows')
-  const headers = grid[0]
 
-  // Column lookups by name, read at run time. Required columns throw with the name.
-  const col = {
-    company: headerIndex(headers, 'companyName'),
-    title: headerIndex(headers, 'title'),
-    link: headerIndex(headers, 'link'),
-    status: headerIndex(headers, 'status'),
-    website: headerIndex(headers, 'companyWebsite'),
-    addedOn: headerIndex(headers, 'added_on'),
-  }
-  const opt = (name: string) => optionalHeaderIndex(headers, name)
-  const o = {
-    posterName: opt('jobPosterName'), posterTitle: opt('jobPosterTitle'), posterUrl: opt('jobPosterProfileUrl'),
-    salary: opt('salaryText'), postedAt: opt('postedAt'), employees: opt('companyEmployeesCount'),
-    industries: opt('industries'), location: opt('location'), otherTitles: opt('other_titles'),
-    nPostings: opt('n_postings'), funding: opt('fundingStage'), yc: opt('ycBatch'),
-  }
-  const cell = (row: string[], i: number): string | null => (i >= 0 && row[i] !== undefined && row[i] !== '' ? String(row[i]) : null)
-
-  // What gtm already has, by normalized name and by domain.
   const gtm = await readRange(token, JOBSEARCH_SHEET_ID, 'gtm!A1:ZZ')
   const gtmNames = new Set<string>()
   const gtmDomains = new Set<string>()
@@ -287,69 +314,112 @@ async function phaseGate(batch: JobBatch): Promise<void> {
       }
     }
   }
+  const taken = await loadTaken(batch.id)
+  return classifyPool(grid[0], grid.slice(1), {
+    batchDate: batch.batch_date,
+    lookbackDays: batch.lookback_days ?? 365,
+    gtmNames,
+    gtmDomains,
+    takenDomains: taken.domains,
+    takenNames: taken.names,
+  })
+}
 
-  type NewCompany = Record<string, unknown> & { resolve_status: string; _key: string }
-  const byKey = new Map<string, NewCompany>()
+function poolLine(pool: Pool): string {
+  return `tier 1 strict GTM ${pool.byTier[1]} · tier 2 adjacent ${pool.byTier[2]} · tier 3 other ${pool.byTier[3]}`
+}
 
-  for (const row of grid.slice(1)) {
-    if (!sameSheetDate(row[col.addedOn], batch.batch_date)) continue
-    const name = (row[col.company] ?? '').trim()
-    if (!name) continue
-    const title = row[col.title] ?? ''
-    const status = (row[col.status] ?? '').trim().toLowerCase()
-    const website = cell(row, col.website)
-    const domain = website ? normalizeDomain(website) || null : null
-    const normName = normalizeCompanyName(name)
+// One fill round. `mode` decides the claim; the work is the same.
+async function fillRound(batch: JobBatch, mode: 'gate' | 'fill_more' | 'refill'): Promise<void> {
+  if (mode === 'gate' && !(await claimStatus(batch.id, 'approved', { status: 'resolving' }))) {
+    console.log('[jobsearch-puller] gate: batch no longer approved, skipping'); return
+  }
+  if (mode === 'refill' && !(await claimStatus(batch.id, 'waiting_fill', { status: 'resolving' }))) {
+    console.log('[jobsearch-puller] refill: batch no longer waiting_fill, skipping'); return
+  }
+  if (mode === 'fill_more' && !(await stillInStatus(batch.id, 'resolving'))) return
 
-    let exclude: string | null = null
-    if (status === 'not a right fit') exclude = 'not_a_right_fit'
-    else if (!isGtmTitle(title)) exclude = 'title_mismatch'
-    else if ((domain && gtmDomains.has(domain)) || (normName && gtmNames.has(normName))) exclude = 'already_in_gtm'
+  const pool = await buildPool(batch)
+  const counts = await companyCounts(batch.id)
+  const take = companiesToTake(counts.resolved, counts.pending)
+  const chosen = pool.eligible.slice(0, take)
+  const poolLeft = Math.max(0, pool.eligible.length - chosen.length)
 
-    const key = domain ?? `name:${normName}`
-    const record: NewCompany = {
-      _key: key,
-      batch_id: batch.id,
-      company_name: name,
-      website,
-      domain,
-      job_title: title || null,
-      job_link: cell(row, col.link),
-      job_poster_name: cell(row, o.posterName),
-      job_poster_title: cell(row, o.posterTitle),
-      job_poster_url: cell(row, o.posterUrl),
-      salary_text: cell(row, o.salary),
-      posted_at: cell(row, o.postedAt),
-      employees: toInt(cell(row, o.employees) ?? undefined),
-      industries: cell(row, o.industries),
-      location: cell(row, o.location),
-      other_titles: cell(row, o.otherTitles),
-      n_postings: cell(row, o.nPostings),
-      funding_stage: cell(row, o.funding),
-      yc_batch: cell(row, o.yc),
-      resolve_status: exclude ? 'excluded' : 'pending',
-      exclude_reason: exclude,
-    }
-
-    // Same company twice in one batch: keep the first, unless the later one
-    // is included and the earlier was excluded.
-    const prev = byKey.get(key)
-    if (!prev || (prev.resolve_status === 'excluded' && !exclude)) byKey.set(key, record)
+  const cell = (rec: Record<string, string>, name: string): string | null => {
+    const v = rec[name]
+    return v !== undefined && v !== '' ? String(v) : null
+  }
+  const inserts = chosen.map(r => ({
+    batch_id: batch.id,
+    company_name: r.company_name,
+    website: r.website,
+    domain: r.domain,
+    job_title: r.title || null,
+    job_link: cell(r.record, 'link'),
+    job_poster_name: cell(r.record, 'jobPosterName'),
+    job_poster_title: cell(r.record, 'jobPosterTitle'),
+    job_poster_url: cell(r.record, 'jobPosterProfileUrl'),
+    salary_text: cell(r.record, 'salaryText'),
+    posted_at: r.posted_at ?? cell(r.record, 'postedAt'),
+    employees: toInt(cell(r.record, 'companyEmployeesCount') ?? undefined),
+    industries: cell(r.record, 'industries'),
+    location: cell(r.record, 'location'),
+    other_titles: cell(r.record, 'other_titles'),
+    n_postings: cell(r.record, 'n_postings'),
+    funding_stage: cell(r.record, 'fundingStage'),
+    yc_batch: cell(r.record, 'ycBatch'),
+    fit_tier: r.tier,
+    resolve_status: 'pending',
+  }))
+  if (inserts.length > 0) {
+    await supabaseRequest('POST', 'job_batch_companies', inserts, { prefer: 'return=minimal,resolution=ignore-duplicates' })
   }
 
-  const companies = Array.from(byKey.values()).map(({ _key, ...rest }) => rest)
-  if (companies.length > 0) {
-    await supabaseRequest('POST', 'job_batch_companies', companies, { prefer: 'return=minimal,resolution=ignore-duplicates' })
-  }
-  const pulled = companies.filter(c => c.resolve_status === 'pending').length
-  await heartbeat(batch.id, { companies_pulled: pulled })
+  const after = await companyCounts(batch.id)
+  await heartbeat(batch.id, {
+    companies_pulled: after.resolved + after.pending + after.unresolved,
+    companies_added: Math.max(batch.companies_added, pool.newRows),
+    fill_rounds: (batch.fill_rounds ?? 0) + 1,
+  })
 
-  console.log(`[jobsearch-puller] gate: ${companies.length} rows for ${batch.batch_date}, ${pulled} to resolve`)
-  if (pulled === 0) {
-    await failBatch(batch.id, 'resolving', 'gate', 'no companies to order: every row for this batch was excluded or missing')
+  const tiers = { 1: 0, 2: 0, 3: 0 } as Record<1 | 2 | 3, number>
+  for (const r of chosen) tiers[r.tier]++
+  console.log(`[jobsearch-puller] ${mode}: pool ${poolLine(pool)}; took ${chosen.length} (t1 ${tiers[1]}, t2 ${tiers[2]}, t3 ${tiers[3]}); ${poolLeft} left`)
+
+  if (mode === 'gate') {
+    await sendTelegram(
+      `🔎 Filling batch ${formatBatchDate(batch.batch_date)}\n` +
+      `Eligible pool (not in gtm, last ${batch.lookback_days ?? 365} days): ${poolLine(pool)}.\n` +
+      `Taking ${chosen.length} companies this round (strict ${tiers[1]}, adjacent ${tiers[2]}, other ${tiers[3]}); ` +
+      `target ${companiesNeeded()} resolved for a ${LEADSFRIDAY_MIN_CONTACTS}-contact order.`,
+      { inline_keyboard: [[{ text: '⛔ Abort batch', callback_data: `jobs_abort:${batch.id}` }]] },
+    )
+  }
+
+  if (after.pending === 0 && after.resolved === 0) {
+    // Nothing to resolve and nothing taken: pool is empty right now.
+    await parkWaitingFill(batch, after.resolved, poolLeft)
     return
   }
-  selfInvoke({ batch_id: batch.id, phase: 'resolve' })
+  selfInvoke({ batch_id: batch.id, phase: 'resolve', pool_left: poolLeft })
+}
+
+async function parkWaitingFill(batch: JobBatch, resolved: number, poolLeft: number): Promise<void> {
+  if (!(await claimStatus(batch.id, 'resolving', { status: 'waiting_fill' }))) return
+  const need = companiesNeeded()
+  await sendTelegram(
+    `⏳ Batch ${formatBatchDate(batch.batch_date)} is waiting to fill\n` +
+    `${resolved} ${resolved === 1 ? 'company' : 'companies'} resolved (~${resolved * 15} contacts); ` +
+    `Leadsfriday needs ${LEADSFRIDAY_MIN_CONTACTS} (${need} companies).\n` +
+    `Eligible pool left: ${poolLeft}. New scrapes top this batch up automatically (checked hourly).\n\n` +
+    `Order anyway places a ${LEADSFRIDAY_MIN_CONTACTS}-contact order for the ${resolved} resolved now.`,
+    {
+      inline_keyboard: [[
+        { text: `💳 Order anyway (${LEADSFRIDAY_MIN_CONTACTS} min)`, callback_data: `jobs_order_now:${batch.id}` },
+        { text: '⛔ Abort', callback_data: `jobs_abort:${batch.id}` },
+      ]],
+    },
+  )
 }
 
 // ---- Phase: resolve -------------------------------------------------------
@@ -390,12 +460,13 @@ async function apolloOrgId(name: string, domain: string): Promise<string | null 
   return data.account?.organization_id ?? data.account?.organization?.id ?? null
 }
 
-async function phaseResolve(batch: JobBatch, startedAt: number, rateLimitedBefore = false): Promise<void> {
+async function phaseResolve(batch: JobBatch, payload: Payload, startedAt: number): Promise<void> {
   if (!APOLLO_API_KEY) throw new Error('APOLLO_API_KEY secret is not set')
+  const rateLimitedBefore = payload.rate_limited === true
 
   const pending = (await supabaseRequest(
     'GET',
-    `job_batch_companies?batch_id=eq.${batch.id}&resolve_status=eq.pending&select=id,company_name,website,domain&order=created_at&limit=${RESOLVE_BATCH}`,
+    `job_batch_companies?batch_id=eq.${batch.id}&resolve_status=eq.pending&select=id,company_name,website,domain&order=fit_tier,created_at&limit=${RESOLVE_BATCH}`,
   )) as Company[]
 
   let rateLimited = false
@@ -427,24 +498,35 @@ async function phaseResolve(batch: JobBatch, startedAt: number, rateLimitedBefor
   if (!(await stillInStatus(batch.id, 'resolving'))) return
   await heartbeat(batch.id)
 
-  const remaining = (await supabaseRequest(
-    'GET', `job_batch_companies?batch_id=eq.${batch.id}&resolve_status=eq.pending&select=id&limit=1`,
-  )) as { id: string }[]
-  if (remaining.length > 0) {
+  const counts = await companyCounts(batch.id)
+  if (counts.pending > 0) {
     if (rateLimited) await new Promise(r => setTimeout(r, 30_000))
-    selfInvoke({ batch_id: batch.id, phase: 'resolve', rate_limited: rateLimited || undefined })
+    selfInvoke({ batch_id: batch.id, phase: 'resolve', rate_limited: rateLimited || undefined, pool_left: payload.pool_left })
     return
   }
 
-  // Everything is decided. Build the search URL from the resolved org ids.
-  const resolved = (await supabaseRequest(
-    'GET',
-    `job_batch_companies?batch_id=eq.${batch.id}&resolve_status=eq.resolved&select=id,apollo_org_id&order=created_at&limit=500`,
-  )) as Company[]
-  if (resolved.length === 0) {
-    await failBatch(batch.id, 'resolving', 'resolve', 'no companies to order: Apollo resolved none of the websites')
+  // Everything taken so far is decided. Enough for an order?
+  const need = companiesNeeded()
+  const fresh = await loadBatch(batch.id)
+  if (counts.resolved < need && !fresh.force_order) {
+    const poolLeft = payload.pool_left ?? 1 // unknown -> assume there may be more
+    if (poolLeft > 0 && (fresh.fill_rounds ?? 0) < MAX_FILL_ROUNDS) {
+      console.log(`[jobsearch-puller] resolve: ${counts.resolved}/${need} resolved, filling more (${poolLeft} left in pool)`)
+      selfInvoke({ batch_id: batch.id, phase: 'fill_more' })
+      return
+    }
+    if (counts.resolved === 0) {
+      await failBatch(batch.id, 'resolving', 'resolve', 'no companies to order: nothing eligible resolved in Apollo')
+      return
+    }
+    await parkWaitingFill(fresh, counts.resolved, poolLeft)
     return
   }
+
+  const resolved = (await supabaseRequest(
+    'GET',
+    `job_batch_companies?batch_id=eq.${batch.id}&resolve_status=eq.resolved&select=id,apollo_org_id&order=fit_tier,created_at&limit=500`,
+  )) as Company[]
   const overflow = resolved.slice(APOLLO_MAX_ORGS)
   for (const c of overflow) {
     await supabaseRequest('PATCH', `job_batch_companies?id=eq.${c.id}`, { resolve_status: 'unresolved', exclude_reason: 'batch_cap' })
@@ -452,12 +534,8 @@ async function phaseResolve(batch: JobBatch, startedAt: number, rateLimitedBefor
   const kept = resolved.slice(0, APOLLO_MAX_ORGS)
   const url = buildApolloUrl(kept.map(c => c.apollo_org_id!))
 
-  const unresolvedCount = ((await supabaseRequest(
-    'GET', `job_batch_companies?batch_id=eq.${batch.id}&resolve_status=eq.unresolved&select=id&limit=500`,
-  )) as { id: string }[]).length
-
-  await heartbeat(batch.id, { apollo_url: url, companies_unresolved: unresolvedCount })
-  console.log(`[jobsearch-puller] resolve: ${kept.length} resolved, ${unresolvedCount} unresolved`)
+  await heartbeat(batch.id, { apollo_url: url, companies_unresolved: counts.unresolved + overflow.length })
+  console.log(`[jobsearch-puller] resolve: ${kept.length} resolved, ${counts.unresolved} unresolved${fresh.force_order ? ' (forced order)' : ''}`)
   selfInvoke({ batch_id: batch.id, phase: 'order' })
 }
 
@@ -479,7 +557,7 @@ async function phaseOrder(batch: JobBatch): Promise<void> {
   const resolvedCount = ((await supabaseRequest(
     'GET', `job_batch_companies?batch_id=eq.${batch.id}&resolve_status=eq.resolved&select=id&limit=500`,
   )) as { id: string }[]).length
-  const contactCount = Math.max(MIN_CONTACT_COUNT, Math.ceil(resolvedCount * CONTACTS_PER_COMPANY))
+  const contactCount = contactCountFor(resolvedCount)
 
   // Claim BEFORE paying. A replayed invocation finds zero rows and places no
   // second order. If the call below fails the batch goes to failed with the
@@ -744,8 +822,10 @@ async function run(payload: Payload): Promise<void> {
 
   try {
     switch (phase) {
-      case 'gate': await phaseGate(batch); break
-      case 'resolve': await phaseResolve(batch, startedAt, payload.rate_limited === true); break
+      case 'gate': await fillRound(batch, 'gate'); break
+      case 'fill_more': await fillRound(batch, 'fill_more'); break
+      case 'refill': await fillRound(batch, 'refill'); break
+      case 'resolve': await phaseResolve(batch, payload, startedAt); break
       case 'order': await phaseOrder(batch); break
       case 'poll': await phasePoll(batch, payload, startedAt); break
       case 'rank': await phaseRank(batch); break
@@ -754,7 +834,7 @@ async function run(payload: Payload): Promise<void> {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[jobsearch-puller] ${phase} failed:`, message)
     const current = await loadBatch(batch.id).catch(() => null)
-    if (current && !['failed', 'written', 'discarded', 'skipped'].includes(current.status)) {
+    if (current && !['failed', 'written', 'discarded', 'skipped', 'merged'].includes(current.status)) {
       await failBatch(batch.id, current.status, phase, message)
     }
   }

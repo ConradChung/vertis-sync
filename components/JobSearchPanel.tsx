@@ -15,6 +15,7 @@ const JOBS_FINAL_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit#
 const GTM_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit#gid=1642822363`
 
 const WORKING = new Set(['approved', 'resolving', 'ordered', 'delivered'])
+const ABORTABLE = new Set(['approved', 'resolving', 'waiting_fill', 'ordered', 'delivered'])
 
 interface Batch {
   id: string
@@ -47,6 +48,7 @@ interface Company {
   apollo_org_id: string | null
   resolve_status: string
   exclude_reason: string | null
+  fit_tier: number | null
 }
 
 interface Contact {
@@ -68,12 +70,14 @@ interface Detail {
   contacts: Contact[]
 }
 
-type Action = 'pull' | 'skip' | 'write' | 'discard' | 'resume' | 'abort'
+type Action = 'pull' | 'skip' | 'write' | 'discard' | 'resume' | 'abort' | 'order_now'
 
 const STATUS_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
   awaiting_review: { bg: 'rgba(245,158,11,0.15)', fg: '#f59e0b', label: 'Awaiting review' },
   approved: { bg: 'rgba(94,106,210,0.15)', fg: '#8b93e8', label: 'Approved' },
   resolving: { bg: 'rgba(94,106,210,0.15)', fg: '#8b93e8', label: 'Resolving' },
+  waiting_fill: { bg: 'rgba(245,158,11,0.15)', fg: '#f59e0b', label: 'Waiting to fill' },
+  merged: { bg: 'rgba(120,120,120,0.15)', fg: '#9ca3af', label: 'Merged' },
   ordered: { bg: 'rgba(94,106,210,0.15)', fg: '#8b93e8', label: 'Ordered' },
   delivered: { bg: 'rgba(94,106,210,0.15)', fg: '#8b93e8', label: 'Delivered' },
   ranked: { bg: 'rgba(245,158,11,0.15)', fg: '#f59e0b', label: 'Ready to write' },
@@ -336,7 +340,10 @@ function BatchRows({
               <ActionButton label="Resume" onClick={() => onAct('resume')} busy={isBusy('resume')} />
             )}
             {working && !canResume && <Loader2 size={13} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />}
-            {working && (
+            {b.status === 'waiting_fill' && (
+              <ActionButton label="Order anyway (500 min)" onClick={() => onAct('order_now')} busy={isBusy('order_now')} />
+            )}
+            {ABORTABLE.has(b.status) && (
               <ActionButton label="Abort" onClick={() => onAct('abort')} busy={isBusy('abort')} danger />
             )}
           </div>
@@ -382,6 +389,7 @@ function BatchDetail({ batch, detail }: { batch: Batch; detail: Detail }) {
                 <div className="min-w-0">
                   <span style={{ color: 'var(--text-primary)' }}>{c.company_name}</span>
                   {c.domain && <span className="ml-1.5" style={{ color: 'var(--text-tertiary)' }}>{c.domain}</span>}
+                  {c.fit_tier && c.fit_tier > 1 && <span className="ml-1.5 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>tier {c.fit_tier}</span>}
                   {c.job_title && <div className="truncate" style={{ color: 'var(--text-secondary)' }}>{c.job_title}</div>}
                 </div>
                 <span

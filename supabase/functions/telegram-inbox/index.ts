@@ -1230,10 +1230,10 @@ interface JobBatchRow {
   leadsfriday_order_id: number | null
 }
 
-const JOBS_ACTIONS = new Set(['jobs_pull', 'jobs_skip', 'jobs_write', 'jobs_discard', 'jobs_resume', 'jobs_abort'])
+const JOBS_ACTIONS = new Set(['jobs_pull', 'jobs_skip', 'jobs_write', 'jobs_discard', 'jobs_resume', 'jobs_abort', 'jobs_order_now'])
 
-// Statuses in which the puller is (or may be) working and an abort means something.
-const JOBS_WORKING = 'approved,resolving,ordered,delivered'
+// Statuses in which the puller is (or may be) working or parked, and an abort means something.
+const JOBS_WORKING = 'approved,resolving,waiting_fill,ordered,delivered'
 
 function formatBatchDate(iso: string): string {
   return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
@@ -1251,6 +1251,7 @@ async function handleJobsCallback(
     jobs_discard: 'Discarding.',
     jobs_resume: 'Resuming…',
     jobs_abort: 'Aborting…',
+    jobs_order_now: 'Ordering…',
   }
   await tg('answerCallbackQuery', { callback_query_id: cb.id, text: ack[action] })
 
@@ -1278,6 +1279,12 @@ async function handleJobsCallback(
       filter = `status=in.(${JOBS_WORKING})`
       patch = { status: 'discarded', error: 'aborted by owner', watchdog_status: 'idle' }
       break
+    case 'jobs_order_now':
+      // Below the 500 minimum: order for what resolved anyway. The puller's
+      // resolve phase sees force_order and goes straight to order.
+      filter = 'status=eq.waiting_fill'
+      patch = { status: 'resolving', force_order: true }
+      break
     default: // jobs_resume
       filter = 'watchdog_status=eq.awaiting'
       patch = { watchdog_status: 'claimed' }
@@ -1304,6 +1311,10 @@ async function handleJobsCallback(
     case 'jobs_skip': text = `⏭ Skipped this week (batch ${when})`; break
     case 'jobs_write': text = `✍️ Writing batch ${when} to gtm…`; break
     case 'jobs_discard': text = `🗑 Discarded batch ${when}`; break
+    case 'jobs_order_now':
+      text = `💳 Ordering now for batch ${when} (500-contact minimum)`
+      reply_markup = { inline_keyboard: [[{ text: '⛔ Abort batch', callback_data: `jobs_abort:${batchId}` }]] }
+      break
     case 'jobs_abort':
       text = `⛔ Aborted batch ${when}` +
         (batch.leadsfriday_order_id
@@ -1328,6 +1339,8 @@ async function handleJobsCallback(
     invokeBatchFunction('jobsearch-puller', batchId)
   } else if (action === 'jobs_write') {
     invokeBatchFunction('jobsearch-sheet-writer', batchId)
+  } else if (action === 'jobs_order_now') {
+    invokeBatchFunction('jobsearch-puller', batchId)
   } else if (action === 'jobs_resume') {
     // Back to idle so a future stall on the same batch can notify again. The
     // puller derives the phase from status, so no mode flag is needed.

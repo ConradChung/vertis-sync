@@ -84,6 +84,7 @@ interface Company {
   n_postings: string | null
   funding_stage: string | null
   yc_batch: string | null
+  fit_tier: number | null
 }
 
 interface Contact {
@@ -127,7 +128,7 @@ export function gtmRecord(c: Contact, company: Company | undefined): Record<stri
     openRole: company?.job_title ?? '',
     otherRoles: company?.other_titles ?? '',
     nPostings: company?.n_postings ?? '',
-    roleFitTier: '1',
+    roleFitTier: String(company?.fit_tier ?? 1),
     salary: company?.salary_text ?? '',
     postedAt: company?.posted_at ?? '',
     fundingStage: company?.funding_stage ?? '',
@@ -176,7 +177,7 @@ async function write(batchId: string): Promise<{ written: number; skipped: numbe
   const companies = (await supabaseRequest(
     'GET',
     `job_batch_companies?batch_id=eq.${batchId}` +
-    `&select=id,company_name,domain,job_title,job_link,salary_text,posted_at,employees,industries,other_titles,n_postings,funding_stage,yc_batch&limit=500`,
+    `&select=id,company_name,domain,job_title,job_link,salary_text,posted_at,employees,industries,other_titles,n_postings,funding_stage,yc_batch,fit_tier&limit=500`,
   )) as Company[]
   const companyById = new Map(companies.map(c => [c.id, c]))
   const companyByDomain = new Map(companies.filter(c => c.domain).map(c => [c.domain!, c]))
