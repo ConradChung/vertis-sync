@@ -133,6 +133,13 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 These routes proxy to Instantly.ai and keep the API key secure on the server.
 
+### Job search pipeline
+
+- `GET /api/jobsearch/batches` - Latest job-search batches (`?id=` adds that batch's companies and kept contacts)
+- `POST /api/jobsearch/batches/{id}/action` - `{ action: pull | skip | write | discard | resume }`; the dashboard copy of the Telegram buttons, same atomic claims
+
+Design and runbook: `docs/plans/2026-10-09-jobsearch-pipeline-design.md`.
+
 ## Database Schema
 
 ### Tables
@@ -166,6 +173,32 @@ Make sure to set these in your hosting platform:
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `INSTANTLY_API_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY` (server-side routes that claim pipeline state and invoke edge functions)
+
+### Supabase edge-function secrets
+
+Set with `supabase secrets set NAME=value --project-ref rcfrumrbauwvyzfebxck`. Never commit values; `.env.example` lists the names.
+
+| Secret | Used by | Purpose |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | all pipelines | Owner notifications and gate buttons |
+| `TELEGRAM_WEBHOOK_SECRET` | `telegram-inbox` | Verifies inbound webhook calls |
+| `MAILTESTER_API_KEY` | `email-validator` | Email validation |
+| `APIFY_API_TOKEN` | HNWI pipeline | Apify actor runs |
+| `INSTANTLY_API_KEY` | `instantly-*` | Instantly campaigns and leads |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | job search | Full JSON key of the service account the sheet is shared with |
+| `JOBSEARCH_SHEET_ID` | job search | Spreadsheet id (default `1wjvpjyX2g7UUkjgeOXRtPEb7-s4MQfmPOgikalpthcs`) |
+| `APOLLO_API_KEY` | job search | `POST /v1/accounts` to map a website to an Apollo organization id |
+| `LEADSFRIDAY_API_TOKEN` | job search | Leadsfriday Apollo-scraper orders |
+
+#### One-time Google service account for the job search pipeline
+
+1. Google Cloud Console → IAM & Admin → Service Accounts → **Create service account** (any name, e.g. `jobsearch-sheets`). No roles needed.
+2. Open it → **Keys** → Add key → Create new key → JSON. Download the file.
+3. Open the spreadsheet → Share → add the account's `client_email` as **Editor**.
+4. `supabase secrets set GOOGLE_SERVICE_ACCOUNT_JSON="$(cat path/to/key.json)" --project-ref rcfrumrbauwvyzfebxck`
+
+The functions sign a JWT with the key and call the Sheets REST API directly; no Google SDK is involved.
 
 ## Development Notes
 

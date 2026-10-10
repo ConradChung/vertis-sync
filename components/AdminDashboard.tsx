@@ -16,11 +16,13 @@ import {
   Layers,
   Search,
   Settings,
+  BriefcaseBusiness,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Sidebar, SidebarBody, useSidebar } from '@/components/ui/sidebar'
 import CampaignAnalytics from '@/components/CampaignAnalytics'
 import EmailValidator from '@/components/EmailValidator'
+import JobSearchPanel from '@/components/JobSearchPanel'
 import ClientNextSteps from '@/components/ClientNextSteps'
 import CopywriterAgent from '@/components/CopywriterAgent'
 import ClayPromptGenerator from '@/components/ClayPromptGenerator'
@@ -45,7 +47,7 @@ interface Campaign {
   status: string
 }
 
-type Section = 'clients' | 'campaigns' | 'onboarding' | 'onboarding-data' | 'email-validator' | 'copywriter' | 'clay-prompts' | 'market-research' | 'settings'
+type Section = 'clients' | 'campaigns' | 'onboarding' | 'onboarding-data' | 'email-validator' | 'job-search' | 'copywriter' | 'clay-prompts' | 'market-research' | 'settings'
 
 // ── Sidebar sub-components ──
 
@@ -333,6 +335,7 @@ export default function AdminDashboard() {
                 { id: 'onboarding', label: 'Client Next Steps', icon: <ClipboardList size={18} /> },
                 { id: 'onboarding-data', label: 'Onboarding Data', icon: <Database size={18} /> },
                 { id: 'email-validator', label: 'Email Validator', icon: <Mail size={18} /> },
+                { id: 'job-search', label: 'Job Search', icon: <BriefcaseBusiness size={18} /> },
               ] as { id: Section; label: string; icon: React.ReactNode }[]).map(item => (
                 <NavItem key={item.id} icon={item.icon} label={item.label}
                   active={activeSection === item.id} onClick={() => navigate(item.id)} />
@@ -691,6 +694,13 @@ export default function AdminDashboard() {
                   ))}
                 </div>
               )}
+            </motion.div>
+          )}
+
+          {/* ── Job Search ── */}
+          {activeSection === 'job-search' && (
+            <motion.div key="job-search" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
+              <JobSearchPanel />
             </motion.div>
           )}
 

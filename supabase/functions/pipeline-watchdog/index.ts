@@ -147,11 +147,95 @@ async function checkForStalls(): Promise<{ scanned: number; notified: string[] }
   return { scanned: jobs?.length ?? 0, notified }
 }
 
+// ---- Job search batches ----
+//
+// Same contract as above, for job_batches: notify, never revive. The puller
+// PATCHes the batch row as it works (and once a minute while polling
+// Leadsfriday), so updated_at is the heartbeat. 15 minutes rather than 10
+// because a resolve or rank invocation can legitimately run close to the
+// 110 s budget several times in a row before touching the row.
+
+const JOB_STALL_MINUTES = 15
+const JOB_WORKING_STATUSES = 'approved,resolving,ordered,delivered'
+
+interface JobBatch {
+  id: string
+  batch_date: string
+  status: string
+  updated_at: string
+}
+
+function formatBatchDate(iso: string): string {
+  return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+}
+
+async function checkJobBatchStalls(): Promise<{ scanned: number; notified: string[] }> {
+  const nowMs = Date.now()
+  const stallCutoff = new Date(nowMs - JOB_STALL_MINUTES * 60_000).toISOString()
+  const renotifyCutoff = new Date(nowMs - RENOTIFY_HOURS * 3600_000).toISOString()
+
+  const batches = (await supabaseRequest(
+    'GET',
+    `job_batches?status=in.(${JOB_WORKING_STATUSES})` +
+    `&watchdog_status=eq.idle` +
+    `&updated_at=lt.${stallCutoff}` +
+    `&or=(watchdog_notified_at.is.null,watchdog_notified_at.lt.${renotifyCutoff})` +
+    `&select=id,batch_date,status,updated_at` +
+    `&limit=50`,
+  )) as JobBatch[]
+
+  const notified: string[] = []
+  for (const batch of batches ?? []) {
+    const idleMinutes = Math.floor((nowMs - new Date(batch.updated_at).getTime()) / 60_000)
+
+    // Claim the slot before sending so two overlapping ticks cannot produce
+    // two prompts. (The claim itself bumps updated_at through the trigger;
+    // the next tick is gated by watchdog_status, not by the heartbeat.)
+    const claimed = (await supabaseRequest(
+      'PATCH',
+      `job_batches?id=eq.${batch.id}&watchdog_status=eq.idle`,
+      { watchdog_status: 'awaiting', watchdog_notified_at: new Date().toISOString() },
+      { returning: true },
+    )) as JobBatch[]
+    if (!claimed || claimed.length === 0) continue
+
+    if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: TELEGRAM_CHAT_ID,
+          text:
+            `⚠️ Job batch ${formatBatchDate(batch.batch_date)} stalled at ${batch.status}\n` +
+            `No heartbeat in ${idleMinutes} minutes.\n\nResume?`,
+          reply_markup: {
+            inline_keyboard: [[
+              { text: '▶️ Resume', callback_data: `jobs_resume:${batch.id}` },
+            ]],
+          },
+        }),
+      })
+    }
+    notified.push(batch.id)
+  }
+
+  return { scanned: batches?.length ?? 0, notified }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
   try {
     const result = await checkForStalls()
-    return new Response(JSON.stringify({ ok: true, ...result }), {
+    // The job search scan runs after and independently: a failure there is
+    // reported but never hides the validation result.
+    let job_batches: { scanned: number; notified: string[] } | { error: string }
+    try {
+      job_batches = await checkJobBatchStalls()
+    } catch (err: unknown) {
+      job_batches = { error: err instanceof Error ? err.message : String(err) }
+      console.error('[pipeline-watchdog] job_batches scan failed:', job_batches.error)
+    }
+    return new Response(JSON.stringify({ ok: true, ...result, job_batches }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     })
