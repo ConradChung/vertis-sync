@@ -71,13 +71,21 @@ export function formatBatchDate(iso: string): string {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).replace(',', '')
 }
 
+// Mirrors the puller's order sizing (15 contacts per company, never below 50)
+// so the approval tap is an informed one. Apollo lookups cost nothing.
+const CONTACTS_PER_COMPANY = 15
+const MIN_CONTACT_COUNT = 50
+
 function gateOneText(batch: JobBatch): string {
   const link = sheetTabLink(JOBSEARCH_SHEET_ID, JOBS_FINAL_GID)
   const n = batch.companies_added
+  const projected = Math.max(MIN_CONTACT_COUNT, n * CONTACTS_PER_COMPANY)
   return (
     `🧭 Job scrape — ${formatBatchDate(batch.batch_date)}\n` +
     `${n} new GTM-engineer ${n === 1 ? 'company' : 'companies'} added to Jobs Final.\n` +
     `Review the sheet, mark rejects "Not a Right Fit", then tap.\n\n` +
+    `💳 Projected cost if all ${n} pass: up to ${projected} Leadsfriday contacts ` +
+    `(${CONTACTS_PER_COMPANY}/company, min ${MIN_CONTACT_COUNT}). Apollo lookups are free.\n\n` +
     link
   )
 }

@@ -115,6 +115,7 @@ interface Payload {
   batch_id: string
   phase?: Phase
   ordered_at?: string   // ISO; carried through poll self-invokes so the 6 h clock survives heartbeats
+  rate_limited?: boolean // set when the previous resolve invocation hit Apollo 429; a second one fails loudly
 }
 
 interface JobBatch {
@@ -351,25 +352,38 @@ interface ApolloAccountResponse {
 }
 
 // Returns the org id, null when Apollo has no match, 'rate_limited' on 429.
+// Anything that means "your account cannot do this" (bad key, no credits, plan
+// limit) throws, which fails the whole batch and tells the owner in Telegram —
+// the alternative is silently marking every company unresolved.
+const APOLLO_CREDIT_RE = /credit|insufficient|plan limit|upgrade your plan|quota|not allowed on your plan/i
+
 async function apolloOrgId(name: string, domain: string): Promise<string | null | 'rate_limited'> {
   const res = await fetch('https://api.apollo.io/api/v1/accounts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', 'x-api-key': APOLLO_API_KEY },
     body: JSON.stringify({ name, domain }),
   })
-  if (res.status === 401 || res.status === 403) {
-    throw new Error(`Apollo rejected the request (${res.status}) — check the APOLLO_API_KEY secret`)
+  if (res.status === 401) {
+    throw new Error('Apollo rejected the request (401) — check the APOLLO_API_KEY secret')
+  }
+  if (res.status === 402 || res.status === 403) {
+    const body = (await res.text()).slice(0, 300)
+    throw new Error(`Apollo refused (${res.status}) — out of credits or plan limit reached. ${body}`)
   }
   if (res.status === 429) return 'rate_limited'
   if (!res.ok) {
-    console.warn(`[jobsearch-puller] Apollo ${res.status} for ${domain}: ${(await res.text()).slice(0, 200)}`)
+    const body = (await res.text()).slice(0, 300)
+    if (APOLLO_CREDIT_RE.test(body)) {
+      throw new Error(`Apollo refused (${res.status}) — out of credits or plan limit reached. ${body}`)
+    }
+    console.warn(`[jobsearch-puller] Apollo ${res.status} for ${domain}: ${body}`)
     return null
   }
   const data = await res.json() as ApolloAccountResponse
   return data.account?.organization_id ?? data.account?.organization?.id ?? null
 }
 
-async function phaseResolve(batch: JobBatch, startedAt: number): Promise<void> {
+async function phaseResolve(batch: JobBatch, startedAt: number, rateLimitedBefore = false): Promise<void> {
   if (!APOLLO_API_KEY) throw new Error('APOLLO_API_KEY secret is not set')
 
   const pending = (await supabaseRequest(
@@ -385,8 +399,18 @@ async function phaseResolve(batch: JobBatch, startedAt: number): Promise<void> {
         { resolve_status: 'unresolved', exclude_reason: 'no_domain' })
       continue
     }
-    const orgId = await apolloOrgId(c.company_name, c.domain)
-    if (orgId === 'rate_limited') { rateLimited = true; break }
+    let orgId = await apolloOrgId(c.company_name, c.domain)
+    if (orgId === 'rate_limited') {
+      await new Promise(r => setTimeout(r, 20_000))
+      orgId = await apolloOrgId(c.company_name, c.domain)
+      if (orgId === 'rate_limited') {
+        if (rateLimitedBefore) {
+          throw new Error('Apollo keeps returning 429 (rate or plan limit). Resume the batch later from Telegram or the dashboard.')
+        }
+        rateLimited = true
+        break
+      }
+    }
     await supabaseRequest('PATCH', `job_batch_companies?id=eq.${c.id}&resolve_status=eq.pending`,
       orgId
         ? { resolve_status: 'resolved', apollo_org_id: orgId }
@@ -398,8 +422,8 @@ async function phaseResolve(batch: JobBatch, startedAt: number): Promise<void> {
     'GET', `job_batch_companies?batch_id=eq.${batch.id}&resolve_status=eq.pending&select=id&limit=1`,
   )) as { id: string }[]
   if (remaining.length > 0) {
-    if (rateLimited) await new Promise(r => setTimeout(r, 10_000))
-    selfInvoke({ batch_id: batch.id, phase: 'resolve' })
+    if (rateLimited) await new Promise(r => setTimeout(r, 30_000))
+    selfInvoke({ batch_id: batch.id, phase: 'resolve', rate_limited: rateLimited || undefined })
     return
   }
 
@@ -468,7 +492,10 @@ async function phaseOrder(batch: JobBatch): Promise<void> {
     headers: { 'Authorization': `Bearer ${LEADSFRIDAY_API_TOKEN}` },
     body: form,
   })
-  if (res.status === 403) { await failBatch(batch.id, 'ordered', 'order', 'insufficient credits'); return }
+  if (res.status === 403) {
+    await failBatch(batch.id, 'ordered', 'order', `Leadsfriday: insufficient credits for ${contactCount} contacts — top up, then Resume the batch`)
+    return
+  }
   if (res.status === 401) { await failBatch(batch.id, 'ordered', 'order', 'Leadsfriday rejected the token (401) — check the LEADSFRIDAY_API_TOKEN secret'); return }
   if (!res.ok) {
     await failBatch(batch.id, 'ordered', 'order', `Leadsfriday ${res.status}: ${(await res.text()).slice(0, 300)}`)
@@ -480,6 +507,16 @@ async function phaseOrder(batch: JobBatch): Promise<void> {
   const orderedAt = new Date().toISOString()
   await heartbeat(batch.id, { leadsfriday_order_id: order.order_id, leadsfriday_status: order.status ?? 'pending' })
   console.log(`[jobsearch-puller] order: #${order.order_id} for ${contactCount} contacts (${order.credits_deducted ?? '?'} credits)`)
+
+  // Cost report the moment money moves. Apollo's account lookups are free.
+  const deducted = order.credits_deducted !== undefined ? `${order.credits_deducted} credits deducted` : 'credits deducted: not reported'
+  const balance = order.new_balance !== undefined ? ` · balance ${order.new_balance}` : ''
+  await sendTelegram(
+    `💳 Leadsfriday order #${order.order_id} — batch ${formatBatchDate(batch.batch_date)}\n` +
+    `${contactCount} contacts requested across ${resolvedCount} ${resolvedCount === 1 ? 'company' : 'companies'} (verified emails)\n` +
+    `${deducted}${balance}\n` +
+    `Apollo: ${resolvedCount} org lookups, free.`,
+  )
   selfInvoke({ batch_id: batch.id, phase: 'poll', ordered_at: orderedAt })
 }
 
@@ -696,7 +733,7 @@ async function run(payload: Payload): Promise<void> {
   try {
     switch (phase) {
       case 'gate': await phaseGate(batch); break
-      case 'resolve': await phaseResolve(batch, startedAt); break
+      case 'resolve': await phaseResolve(batch, startedAt, payload.rate_limited === true); break
       case 'order': await phaseOrder(batch); break
       case 'poll': await phasePoll(batch, payload, startedAt); break
       case 'rank': await phaseRank(batch); break
