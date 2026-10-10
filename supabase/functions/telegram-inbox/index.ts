@@ -1349,6 +1349,159 @@ async function handleJobsCallback(
   }
 }
 
+// ---- Apollo link -> Leadsfriday -> CSV pipeline ----
+//
+// The owner pastes an Apollo people-search URL (or a Leadsfriday order id /
+// status URL for an order placed on their site). Owner's chat only: this spends
+// credits. The leadsfriday-order function places the order, waits, pulls the
+// CSV and creates the same telegram_ingests prompt a dropped file gets.
+
+const APOLLO_PEOPLE_URL_RE = /https?:\/\/app\.apollo\.io\/#\/people\?\S+/i
+const LEADSFRIDAY_ORDER_RE = /(?:leadsfriday\.com\/api\/export-apollo\/(\d+)|^\s*lf\s+#?(\d+)\s*$)/i
+const LFO_COUNT_OPTIONS = [500, 1000, 2000, 5000]
+const LFO_ACTIONS = new Set(['lfo_count', 'lfo_cancel', 'lfo_abort'])
+
+interface ApolloOrderRow {
+  id: string
+  status: string
+  contact_count: number | null
+  leadsfriday_order_id: number | null
+}
+
+function invokeOrderFunction(orderId: string): void {
+  fetch(`${SUPABASE_URL}/functions/v1/leadsfriday-order`, {
+    method: 'POST',
+    headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order_id: orderId }),
+  }).catch(err => console.error('[telegram-inbox] leadsfriday-order invoke error:', err))
+}
+
+// Returns true when the text was an Apollo link or a Leadsfriday order reference.
+async function handleApolloOrPasteText(message: NonNullable<TelegramUpdate['message']>): Promise<boolean> {
+  const text = message.text ?? ''
+  const apollo = text.match(APOLLO_PEOPLE_URL_RE)
+  const lf = text.match(LEADSFRIDAY_ORDER_RE)
+  if (!apollo && !lf) return false
+
+  if (String(message.chat.id) !== TELEGRAM_CHAT_ID) {
+    await tg('sendMessage', { chat_id: message.chat.id, text: 'Only the owner can place Leadsfriday orders from this bot.' })
+    return true
+  }
+
+  if (apollo) {
+    const url = apollo[0]
+    const rows = (await supabaseRequest('POST', 'apollo_orders', { apollo_url: url, status: 'awaiting_count' }, { returning: true })) as ApolloOrderRow[]
+    const order = rows[0]
+    const sent = await tg('sendMessage', {
+      chat_id: TELEGRAM_CHAT_ID,
+      text:
+        `🔗 Apollo search received.\n` +
+        `How many contacts should Leadsfriday export? Minimum 500; emails are verified. ` +
+        `Credits are deducted when the order is placed, and the receipt shows the exact amount and your balance.`,
+      reply_markup: {
+        inline_keyboard: [
+          LFO_COUNT_OPTIONS.map(n => ({ text: String(n), callback_data: `lfo_count:${order.id}:${n}` })),
+          [{ text: '❌ Cancel', callback_data: `lfo_cancel:${order.id}` }],
+        ],
+      },
+      disable_web_page_preview: true,
+    })
+    const mid = (sent.result as { message_id?: number } | undefined)?.message_id
+    if (mid) await supabaseRequest('PATCH', `apollo_orders?id=eq.${order.id}`, { telegram_message_id: mid })
+    return true
+  }
+
+  // Leadsfriday order placed elsewhere: track it from `ordered`.
+  const lfId = Number(lf![1] ?? lf![2])
+  const existing = (await supabaseRequest(
+    'GET', `apollo_orders?leadsfriday_order_id=eq.${lfId}&select=id,status&limit=1`,
+  )) as ApolloOrderRow[]
+  if (existing?.length && !['failed', 'cancelled'].includes(existing[0].status)) {
+    await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: `Already tracking Leadsfriday order #${lfId} (${existing[0].status}).` })
+    return true
+  }
+  const rows = (await supabaseRequest('POST', 'apollo_orders', {
+    status: 'ordered', count_status: 'claimed', leadsfriday_order_id: lfId, leadsfriday_status: 'pending',
+  }, { returning: true })) as ApolloOrderRow[]
+  const order = rows[0]
+  const sent = await tg('sendMessage', {
+    chat_id: TELEGRAM_CHAT_ID,
+    text: `👀 Tracking Leadsfriday order #${lfId}. I'll pull the CSV when it's delivered and send the Approve / Deny prompt.`,
+    reply_markup: { inline_keyboard: [[{ text: '⛔ Stop tracking', callback_data: `lfo_abort:${order.id}` }]] },
+  })
+  const mid = (sent.result as { message_id?: number } | undefined)?.message_id
+  if (mid) await supabaseRequest('PATCH', `apollo_orders?id=eq.${order.id}`, { telegram_message_id: mid })
+  invokeOrderFunction(order.id)
+  return true
+}
+
+async function handleLfoCallback(
+  action: string,
+  orderId: string,
+  extra: string | undefined,
+  cb: NonNullable<TelegramUpdate['callback_query']>,
+): Promise<void> {
+  if (action === 'lfo_count') {
+    const count = Number(extra)
+    if (!LFO_COUNT_OPTIONS.includes(count)) {
+      await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'That option expired.' })
+      return
+    }
+    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: `Ordering ${count}…` })
+    const claimed = (await supabaseRequest(
+      'PATCH',
+      `apollo_orders?id=eq.${orderId}&count_status=eq.awaiting&status=eq.awaiting_count`,
+      { count_status: 'claimed', status: 'ordering', contact_count: count },
+      { returning: true },
+    )) as ApolloOrderRow[]
+    if (!claimed?.length) return
+    if (cb.message) {
+      await tg('editMessageText', {
+        chat_id: cb.message.chat.id, message_id: cb.message.message_id,
+        text: `💳 Placing a Leadsfriday order for ${count} contacts…`,
+        reply_markup: { inline_keyboard: [[{ text: '⛔ Stop tracking', callback_data: `lfo_abort:${orderId}` }]] },
+      })
+    }
+    invokeOrderFunction(orderId)
+    return
+  }
+
+  if (action === 'lfo_cancel') {
+    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Cancelled.' })
+    const claimed = (await supabaseRequest(
+      'PATCH',
+      `apollo_orders?id=eq.${orderId}&count_status=eq.awaiting&status=eq.awaiting_count`,
+      { count_status: 'claimed', status: 'cancelled' },
+      { returning: true },
+    )) as ApolloOrderRow[]
+    if (!claimed?.length) return
+    if (cb.message) {
+      await tg('editMessageText', { chat_id: cb.message.chat.id, message_id: cb.message.message_id, text: '❌ Cancelled — no order placed.' })
+    }
+    return
+  }
+
+  // lfo_abort: stop tracking. Before the order is placed nothing is spent;
+  // after, the credits are gone and the CSV is simply not pulled.
+  await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Stopping…' })
+  const claimed = (await supabaseRequest(
+    'PATCH',
+    `apollo_orders?id=eq.${orderId}&status=in.(awaiting_count,ordering,ordered)`,
+    { status: 'cancelled', error: 'stopped by owner' },
+    { returning: true },
+  )) as ApolloOrderRow[]
+  if (!claimed?.length) return
+  const o = claimed[0]
+  if (cb.message) {
+    await tg('editMessageText', {
+      chat_id: cb.message.chat.id, message_id: cb.message.message_id,
+      text: o.leadsfriday_order_id
+        ? `⛔ Stopped tracking Leadsfriday order #${o.leadsfriday_order_id}. Credits already spent are not refunded; paste \`lf ${o.leadsfriday_order_id}\` to track it again.`
+        : '⛔ Stopped — no order was placed.',
+    })
+  }
+}
+
 const PUSH_ACTIONS = new Set([
   'camp_pick', 'camp_tpl', 'camp_launch', 'camp_nolo',
   'bar_loc', 'bar_co', 'push_next', 'push_go', 'push_strict', 'push_std', 'push_cancel',
@@ -1369,6 +1522,11 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
 
   if (JOBS_ACTIONS.has(action) && targetId) {
     await handleJobsCallback(action, targetId, cb)
+    return
+  }
+
+  if (LFO_ACTIONS.has(action) && targetId) {
+    await handleLfoCallback(action, targetId, extra, cb)
     return
   }
 
@@ -1610,9 +1768,12 @@ Deno.serve(async (req: Request) => {
     } else if (update.callback_query) {
       await handleCallback(update.callback_query)
     } else if (update.message?.text && update.message.reply_to_message) {
-      // The only plain text we act on is a reply to the Instantly campaign
-      // prompt. Anything else falls through and is ignored as before.
+      // A reply to the Instantly campaign prompt names the campaign.
       await handleCampaignNameReply(update.message.text, update.message.reply_to_message.message_id)
+    } else if (update.message?.text) {
+      // An Apollo people-search link or a Leadsfriday order reference starts a
+      // Leadsfriday export that feeds the CSV pipeline. Anything else is ignored.
+      await handleApolloOrPasteText(update.message)
     }
     // All other update types are silently ignored.
   })().catch(async (err: unknown) => {

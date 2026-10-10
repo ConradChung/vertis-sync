@@ -227,3 +227,16 @@ The first real order was refused: Leadsfriday's minimum is **500 contacts per or
 **Cost messages.** Gate 1 states the eligible pool by tier and that the next order is 500+ contacts. The 💳 receipt after ordering reports contacts requested, credits deducted and the new balance. Apollo 401/402/403 or a credit/plan-limit body fails the batch with a Telegram; Leadsfriday 401/403 likewise.
 
 **Scheduled-task changes (outside this repo).** Cadence every other day; lookback 365 days; widen the scrape's own filters (company size, GTM-adjacent titles) since the pipeline only ever sees what the scrape writes to `Jobs Final`. The insert/POST contract is unchanged.
+
+
+---
+
+## Revision 3 (2026-10-09, late): Apollo link → Leadsfriday → the CSV pipeline
+
+A second intake for the existing CSV approval pipeline, so the owner never downloads an Apollo export by hand.
+
+**Intake (telegram-inbox).** A plain-text message in the owner's chat that contains an `app.apollo.io/#/people?…` URL creates an `apollo_orders` row (`awaiting_count`) and asks for a contact count with buttons 500 / 1000 / 2000 / 5000 / Cancel (`lfo_count:<id>:<n>`, `lfo_cancel:<id>`). The count tap claims `count_status` and invokes `leadsfriday-order`. A Leadsfriday status URL or `lf <order id>` instead creates the row already `ordered` and starts tracking an order placed on their website (there is no list endpoint to discover those automatically; `GET /api/export-apollo/` is 405). Other chats are refused: this spends credits.
+
+**Worker (`leadsfriday-order`).** `order` claims `ordering → ordered` before paying, places the export (`verify_emails=yes`), stores `credits_deducted` / `new_balance`, and sends a 💳 receipt with a **Stop tracking** button (`lfo_abort`). `poll` checks every 60 s under the 110 s budget, self-invoking, for up to 12 hours. On delivery it fetches the CSV at once, stores it at `raw-uploads/leadsfriday/<id>.csv`, detects the email column the way `handleDocument` does, inserts a `telegram_ingests` row (sender "Leadsfriday (Apollo link)") and sends the identical Approve / Approve + Enrich / Deny prompt. From there the existing pipeline owns the file: validation, enrichment, the Instantly push flow, all unchanged. `apollo_orders.status` ends at `ingested` with `ingest_id` set.
+
+**Failure paths.** Leadsfriday 403 → `failed`, "insufficient credits", Telegram. 401 → names the secret. Cancelled or 12 h without delivery → `failed` + Telegram. Stop tracking before the order is placed costs nothing; after, it just stops the pull and says so.
