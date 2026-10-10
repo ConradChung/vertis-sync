@@ -211,6 +211,7 @@ async function checkJobBatchStalls(): Promise<{ scanned: number; notified: strin
           reply_markup: {
             inline_keyboard: [[
               { text: '▶️ Resume', callback_data: `jobs_resume:${batch.id}` },
+              { text: '⛔ Abort', callback_data: `jobs_abort:${batch.id}` },
             ]],
           },
         }),

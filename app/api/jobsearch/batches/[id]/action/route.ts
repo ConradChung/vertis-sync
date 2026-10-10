@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from 'next/server'
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
 
-type Action = 'pull' | 'skip' | 'write' | 'discard' | 'resume'
+type Action = 'pull' | 'skip' | 'write' | 'discard' | 'resume' | 'abort'
 
 const CLAIMS: Record<Action, { filter: string; patch: Record<string, unknown>; invoke?: string }> = {
   pull: {
@@ -38,6 +38,10 @@ const CLAIMS: Record<Action, { filter: string; patch: Record<string, unknown>; i
     patch: { watchdog_status: 'claimed' },
     invoke: 'jobsearch-puller',
   },
+  abort: {
+    filter: 'status=in.(approved,resolving,ordered,delivered)',
+    patch: { status: 'discarded', error: 'aborted by owner', watchdog_status: 'idle' },
+  },
 }
 
 function restHeaders(prefer = 'return=representation'): Record<string, string> {
@@ -59,7 +63,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     const body = (await request.json()) as { action?: string }
     if (!body.action || !(body.action in CLAIMS)) {
-      return NextResponse.json({ error: 'action must be one of pull, skip, write, discard, resume' }, { status: 400 })
+      return NextResponse.json({ error: 'action must be one of pull, skip, write, discard, resume, abort' }, { status: 400 })
     }
     action = body.action as Action
   } catch {

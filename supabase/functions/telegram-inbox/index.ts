@@ -1227,9 +1227,13 @@ interface JobBatchRow {
   id: string
   batch_date: string
   status: string
+  leadsfriday_order_id: number | null
 }
 
-const JOBS_ACTIONS = new Set(['jobs_pull', 'jobs_skip', 'jobs_write', 'jobs_discard', 'jobs_resume'])
+const JOBS_ACTIONS = new Set(['jobs_pull', 'jobs_skip', 'jobs_write', 'jobs_discard', 'jobs_resume', 'jobs_abort'])
+
+// Statuses in which the puller is (or may be) working and an abort means something.
+const JOBS_WORKING = 'approved,resolving,ordered,delivered'
 
 function formatBatchDate(iso: string): string {
   return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
@@ -1246,6 +1250,7 @@ async function handleJobsCallback(
     jobs_write: 'Writing to gtm…',
     jobs_discard: 'Discarding.',
     jobs_resume: 'Resuming…',
+    jobs_abort: 'Aborting…',
   }
   await tg('answerCallbackQuery', { callback_query_id: cb.id, text: ack[action] })
 
@@ -1268,6 +1273,11 @@ async function handleJobsCallback(
       filter = 'write_status=eq.awaiting&status=eq.ranked'
       patch = { write_status: 'claimed', status: 'discarded' }
       break
+    case 'jobs_abort':
+      // Any working status; the puller re-checks status between steps and stops.
+      filter = `status=in.(${JOBS_WORKING})`
+      patch = { status: 'discarded', error: 'aborted by owner', watchdog_status: 'idle' }
+      break
     default: // jobs_resume
       filter = 'watchdog_status=eq.awaiting'
       patch = { watchdog_status: 'claimed' }
@@ -1275,7 +1285,7 @@ async function handleJobsCallback(
 
   const claimed = (await supabaseRequest(
     'PATCH',
-    `job_batches?id=eq.${batchId}&${filter}&select=id,batch_date,status`,
+    `job_batches?id=eq.${batchId}&${filter}&select=id,batch_date,status,leadsfriday_order_id`,
     patch,
     { returning: true },
   )) as JobBatchRow[]
@@ -1284,18 +1294,32 @@ async function handleJobsCallback(
   const when = formatBatchDate(batch.batch_date)
 
   let text: string
+  let reply_markup: unknown = undefined
   switch (action) {
-    case 'jobs_pull': text = `✅ Reviewed — pulling contacts for batch ${when}`; break
+    case 'jobs_pull':
+      text = `✅ Reviewed — pulling contacts for batch ${when}`
+      // The pipeline is now spending time (and soon credits); offer the brake.
+      reply_markup = { inline_keyboard: [[{ text: '⛔ Abort batch', callback_data: `jobs_abort:${batchId}` }]] }
+      break
     case 'jobs_skip': text = `⏭ Skipped this week (batch ${when})`; break
     case 'jobs_write': text = `✍️ Writing batch ${when} to gtm…`; break
     case 'jobs_discard': text = `🗑 Discarded batch ${when}`; break
-    default: text = `▶️ Resumed — batch ${when} at ${batch.status}`
+    case 'jobs_abort':
+      text = `⛔ Aborted batch ${when}` +
+        (batch.leadsfriday_order_id
+          ? `\nLeadsfriday order #${batch.leadsfriday_order_id} was already placed; those credits are spent.`
+          : '\nNo Leadsfriday order had been placed.')
+      break
+    default:
+      text = `▶️ Resumed — batch ${when} at ${batch.status}`
+      reply_markup = { inline_keyboard: [[{ text: '⛔ Abort batch', callback_data: `jobs_abort:${batchId}` }]] }
   }
   if (cb.message) {
     await tg('editMessageText', {
       chat_id: cb.message.chat.id,
       message_id: cb.message.message_id,
       text,
+      reply_markup,
       disable_web_page_preview: true,
     })
   }

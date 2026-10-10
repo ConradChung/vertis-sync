@@ -68,7 +68,7 @@ interface Detail {
   contacts: Contact[]
 }
 
-type Action = 'pull' | 'skip' | 'write' | 'discard' | 'resume'
+type Action = 'pull' | 'skip' | 'write' | 'discard' | 'resume' | 'abort'
 
 const STATUS_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
   awaiting_review: { bg: 'rgba(245,158,11,0.15)', fg: '#f59e0b', label: 'Awaiting review' },
@@ -336,6 +336,9 @@ function BatchRows({
               <ActionButton label="Resume" onClick={() => onAct('resume')} busy={isBusy('resume')} />
             )}
             {working && !canResume && <Loader2 size={13} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />}
+            {working && (
+              <ActionButton label="Abort" onClick={() => onAct('abort')} busy={isBusy('abort')} danger />
+            )}
           </div>
         </td>
       </tr>

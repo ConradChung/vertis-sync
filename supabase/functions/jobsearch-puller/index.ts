@@ -57,7 +57,7 @@ const POLL_SLEEP_MS = 60_000
 const POLL_GIVE_UP_MS = 6 * 3600_000
 const KEEP_TOP = 5
 const CONTACTS_PER_COMPANY = 15         // ~13 observed; Leadsfriday contact_count
-const MIN_CONTACT_COUNT = 50
+const MIN_CONTACT_COUNT = 500       // Leadsfriday rejects anything smaller (400 "Contact count must be at least 500")
 
 const REST_HEADERS: Record<string, string> = {
   'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -197,6 +197,13 @@ async function claimStatus(batchId: string, from: string, patch: Record<string, 
 
 function formatBatchDate(iso: string): string {
   return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+}
+
+// The owner can abort from Telegram or the dashboard at any time. Long loops
+// re-check the row so an abort takes effect within one step, not one phase.
+async function stillInStatus(batchId: string, status: string): Promise<boolean> {
+  const rows = (await supabaseRequest('GET', `job_batches?id=eq.${batchId}&select=status&limit=1`)) as { status: string }[]
+  return rows?.[0]?.status === status
 }
 
 async function sheetsToken(): Promise<string> {
@@ -394,6 +401,7 @@ async function phaseResolve(batch: JobBatch, startedAt: number, rateLimitedBefor
   let rateLimited = false
   for (const c of pending) {
     if (Date.now() - startedAt > CHUNK_LIMIT_MS - 10_000) break
+    if (!(await stillInStatus(batch.id, 'resolving'))) { console.log('[jobsearch-puller] resolve: batch left resolving (aborted?), stopping'); return }
     if (!c.domain) {
       await supabaseRequest('PATCH', `job_batch_companies?id=eq.${c.id}&resolve_status=eq.pending`,
         { resolve_status: 'unresolved', exclude_reason: 'no_domain' })
@@ -416,6 +424,7 @@ async function phaseResolve(batch: JobBatch, startedAt: number, rateLimitedBefor
         ? { resolve_status: 'resolved', apollo_org_id: orgId }
         : { resolve_status: 'unresolved', exclude_reason: 'apollo_no_match' })
   }
+  if (!(await stillInStatus(batch.id, 'resolving'))) return
   await heartbeat(batch.id)
 
   const remaining = (await supabaseRequest(
@@ -515,7 +524,9 @@ async function phaseOrder(batch: JobBatch): Promise<void> {
     `💳 Leadsfriday order #${order.order_id} — batch ${formatBatchDate(batch.batch_date)}\n` +
     `${contactCount} contacts requested across ${resolvedCount} ${resolvedCount === 1 ? 'company' : 'companies'} (verified emails)\n` +
     `${deducted}${balance}\n` +
-    `Apollo: ${resolvedCount} org lookups, free.`,
+    `Apollo: ${resolvedCount} org lookups, free.\n\n` +
+    `Abort stops the pipeline here; Leadsfriday credits already spent are not refunded.`,
+    { inline_keyboard: [[{ text: '⛔ Abort batch', callback_data: `jobs_abort:${batch.id}` }]] },
   )
   selfInvoke({ batch_id: batch.id, phase: 'poll', ordered_at: orderedAt })
 }
@@ -567,6 +578,7 @@ async function phasePoll(batch: JobBatch, payload: Payload, startedAt: number): 
       return
     }
 
+    if (!(await stillInStatus(batch.id, 'ordered'))) { console.log('[jobsearch-puller] poll: batch left ordered (aborted?), stopping'); return }
     await heartbeat(batch.id, { leadsfriday_status: st.status })
 
     if (Date.now() - new Date(orderedAt).getTime() > POLL_GIVE_UP_MS) {

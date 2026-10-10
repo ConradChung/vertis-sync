@@ -133,7 +133,7 @@ Phase worker as described above. Each invocation loads the batch, runs one phase
 
 Apollo resolution uses `POST https://api.apollo.io/api/v1/accounts {name, domain}` and reads `organization_id` from the created account. A 401/403 is a hard failure of the whole batch (Telegram names the secret). The people-search URL is the template verified by hand on 2026-10-09; at most 60 `organizationIds[]` per URL, extra companies are marked `unresolved` with reason `batch_cap` and reported in the Gate 2 message (splitting into a second Leadsfriday order is deferred until a batch actually exceeds 60).
 
-Leadsfriday: `POST /api/export-apollo/` multipart with `contact_count = max(50, resolved × 15)`, `verify_emails=yes`. `GET /api/export-apollo/{order_id}/` until `delivered`; the `download_url` expires, so the CSV is fetched and uploaded to Storage in the same invocation.
+Leadsfriday: `POST /api/export-apollo/` multipart with `contact_count = max(500, resolved × 15)`, `verify_emails=yes`. `GET /api/export-apollo/{order_id}/` until `delivered`; the `download_url` expires, so the CSV is fetched and uploaded to Storage in the same invocation.
 
 Ranking: `role` by title in priority `job_poster` (name match to the company's `job_poster_name`) → `recruiter` → `sales_leader` → `founder` → `other`; `rank` within company = role priority, then has-email first, then seniority; `kept = rank ≤ 5`.
 

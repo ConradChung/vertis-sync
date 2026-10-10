@@ -74,7 +74,7 @@ export function formatBatchDate(iso: string): string {
 // Mirrors the puller's order sizing (15 contacts per company, never below 50)
 // so the approval tap is an informed one. Apollo lookups cost nothing.
 const CONTACTS_PER_COMPANY = 15
-const MIN_CONTACT_COUNT = 50
+const MIN_CONTACT_COUNT = 500 // Leadsfriday's hard minimum per order
 
 function gateOneText(batch: JobBatch): string {
   const link = sheetTabLink(JOBSEARCH_SHEET_ID, JOBS_FINAL_GID)
@@ -84,8 +84,9 @@ function gateOneText(batch: JobBatch): string {
     `🧭 Job scrape — ${formatBatchDate(batch.batch_date)}\n` +
     `${n} new GTM-engineer ${n === 1 ? 'company' : 'companies'} added to Jobs Final.\n` +
     `Review the sheet, mark rejects "Not a Right Fit", then tap.\n\n` +
-    `💳 Projected cost if all ${n} pass: up to ${projected} Leadsfriday contacts ` +
-    `(${CONTACTS_PER_COMPANY}/company, min ${MIN_CONTACT_COUNT}). Apollo lookups are free.\n\n` +
+    `💳 Projected cost if all ${n} pass: ${projected} Leadsfriday contacts ` +
+    `(${CONTACTS_PER_COMPANY}/company; Leadsfriday's minimum order is ${MIN_CONTACT_COUNT}). Apollo lookups are free.\n` +
+    `You can abort after approving — a button follows every step until the order is placed.\n\n` +
     link
   )
 }
