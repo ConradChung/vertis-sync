@@ -20,7 +20,11 @@ const API = "https://api.instantly.ai/api/v2";
 const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
 async function ik(path: string, init: RequestInit = {}, tries = 0): Promise<any> {
-  const r = await fetch(API + path, { ...init, headers: { Authorization: `Bearer ${IK}`, "Content-Type": "application/json", ...(init.headers ?? {}) } });
+  // Only send a JSON content-type when there is a body: Instantly's server rejects a body-less DELETE
+  // that carries the header with 400 FST_ERR_CTP_EMPTY_JSON_BODY, which is what blocked every slot release.
+  const headers: Record<string, string> = { Authorization: `Bearer ${IK}`, ...(init.headers as Record<string, string> ?? {}) };
+  if (init.body != null) headers["Content-Type"] = "application/json";
+  const r = await fetch(API + path, { ...init, headers });
   if (r.status === 429 && tries < 5) { await new Promise((s) => setTimeout(s, 2000 * (tries + 1))); return ik(path, init, tries + 1); }
   if (!r.ok) throw new Error(`${init.method ?? "GET"} ${path} -> ${r.status} ${(await r.text()).slice(0, 200)}`);
   return r.status === 204 ? null : r.json();
