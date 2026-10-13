@@ -1359,7 +1359,8 @@ async function handleJobsCallback(
 const APOLLO_PEOPLE_URL_RE = /https?:\/\/app\.apollo\.io\/#\/people\?\S+/i
 const LEADSFRIDAY_ORDER_RE = /(?:leadsfriday\.com\/api\/export-apollo\/(\d+)|^\s*lf\s+#?(\d+)\s*$)/i
 const LFO_COUNT_OPTIONS = [500, 1000, 2000, 5000]
-const LFO_ACTIONS = new Set(['lfo_count', 'lfo_cancel', 'lfo_abort'])
+const LFO_ACTIONS = new Set(['lfo_count', 'lfo_custom', 'lfo_cancel', 'lfo_abort'])
+const LFO_MIN = 500
 
 interface ApolloOrderRow {
   id: string
@@ -1374,6 +1375,63 @@ function invokeOrderFunction(orderId: string): void {
     headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ order_id: orderId }),
   }).catch(err => console.error('[telegram-inbox] leadsfriday-order invoke error:', err))
+}
+
+function lfoCountKeyboard(orderId: string) {
+  return {
+    inline_keyboard: [
+      LFO_COUNT_OPTIONS.map(n => ({ text: String(n), callback_data: `lfo_count:${orderId}:${n}` })),
+      [
+        { text: '✏️ Custom…', callback_data: `lfo_custom:${orderId}` },
+        { text: '❌ Cancel', callback_data: `lfo_cancel:${orderId}` },
+      ],
+    ],
+  }
+}
+
+// Claims the count slot and starts the order. Shared by the preset buttons and
+// the typed custom amount. Returns false when another tap/reply already won.
+async function placeLfoOrder(orderId: string, count: number, edit?: { chatId: number; messageId: number }): Promise<boolean> {
+  const claimed = (await supabaseRequest(
+    'PATCH',
+    `apollo_orders?id=eq.${orderId}&count_status=eq.awaiting&status=eq.awaiting_count`,
+    { count_status: 'claimed', status: 'ordering', contact_count: count },
+    { returning: true },
+  )) as ApolloOrderRow[]
+  if (!claimed?.length) return false
+  if (edit) {
+    await tg('editMessageText', {
+      chat_id: edit.chatId, message_id: edit.messageId,
+      text: `💳 Placing a Leadsfriday order for ${count.toLocaleString('en-US')} contacts…`,
+      reply_markup: { inline_keyboard: [[{ text: '⛔ Stop tracking', callback_data: `lfo_abort:${orderId}` }]] },
+    })
+  }
+  invokeOrderFunction(orderId)
+  return true
+}
+
+// A reply to the count prompt with a number. Returns true when the reply was
+// for an open Apollo order (handled, or rejected with a message).
+async function handleLfoCountReply(text: string, replyToMessageId: number, chatId: number): Promise<boolean> {
+  const rows = (await supabaseRequest(
+    'GET',
+    `apollo_orders?telegram_message_id=eq.${replyToMessageId}&status=eq.awaiting_count&select=id,status,contact_count,leadsfriday_order_id&limit=1`,
+  )) as ApolloOrderRow[]
+  const order = rows?.[0]
+  if (!order) return false
+
+  const count = parseInt(text.replace(/[,\s]/g, ''), 10)
+  if (!Number.isFinite(count)) {
+    await tg('sendMessage', { chat_id: chatId, text: `Reply with just a number, e.g. 750 (minimum ${LFO_MIN}).` })
+    return true
+  }
+  if (count < LFO_MIN) {
+    await tg('sendMessage', { chat_id: chatId, text: `Leadsfriday's minimum is ${LFO_MIN} contacts. Reply with ${LFO_MIN} or more.` })
+    return true
+  }
+  const ok = await placeLfoOrder(order.id, count, { chatId, messageId: replyToMessageId })
+  if (!ok) await tg('sendMessage', { chat_id: chatId, text: 'That order was already placed or cancelled.' })
+  return true
 }
 
 // Returns true when the text was an Apollo link or a Leadsfriday order reference.
@@ -1398,12 +1456,7 @@ async function handleApolloOrPasteText(message: NonNullable<TelegramUpdate['mess
         `🔗 Apollo search received.\n` +
         `How many contacts should Leadsfriday export? Minimum 500; emails are verified. ` +
         `Credits are deducted when the order is placed, and the receipt shows the exact amount and your balance.`,
-      reply_markup: {
-        inline_keyboard: [
-          LFO_COUNT_OPTIONS.map(n => ({ text: String(n), callback_data: `lfo_count:${order.id}:${n}` })),
-          [{ text: '❌ Cancel', callback_data: `lfo_cancel:${order.id}` }],
-        ],
-      },
+      reply_markup: lfoCountKeyboard(order.id),
       disable_web_page_preview: true,
     })
     const mid = (sent.result as { message_id?: number } | undefined)?.message_id
@@ -1448,21 +1501,23 @@ async function handleLfoCallback(
       return
     }
     await tg('answerCallbackQuery', { callback_query_id: cb.id, text: `Ordering ${count}…` })
-    const claimed = (await supabaseRequest(
-      'PATCH',
-      `apollo_orders?id=eq.${orderId}&count_status=eq.awaiting&status=eq.awaiting_count`,
-      { count_status: 'claimed', status: 'ordering', contact_count: count },
-      { returning: true },
-    )) as ApolloOrderRow[]
-    if (!claimed?.length) return
+    await placeLfoOrder(orderId, count, cb.message ? { chatId: cb.message.chat.id, messageId: cb.message.message_id } : undefined)
+    return
+  }
+
+  if (action === 'lfo_custom') {
+    await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'Reply with a number.' })
     if (cb.message) {
+      // Same message, so the reply lands on the row's telegram_message_id.
       await tg('editMessageText', {
         chat_id: cb.message.chat.id, message_id: cb.message.message_id,
-        text: `💳 Placing a Leadsfriday order for ${count} contacts…`,
-        reply_markup: { inline_keyboard: [[{ text: '⛔ Stop tracking', callback_data: `lfo_abort:${orderId}` }]] },
+        text:
+          `🔗 Apollo search received.\n` +
+          `↩️ Reply to THIS message with the number of contacts you want (minimum ${LFO_MIN}), e.g. 750.\n` +
+          `Or pick a preset below.`,
+        reply_markup: lfoCountKeyboard(orderId),
       })
     }
-    invokeOrderFunction(orderId)
     return
   }
 
@@ -1768,8 +1823,10 @@ Deno.serve(async (req: Request) => {
     } else if (update.callback_query) {
       await handleCallback(update.callback_query)
     } else if (update.message?.text && update.message.reply_to_message) {
-      // A reply to the Instantly campaign prompt names the campaign.
-      await handleCampaignNameReply(update.message.text, update.message.reply_to_message.message_id)
+      // A reply to the Apollo count prompt is a custom contact count; a reply
+      // to the Instantly campaign prompt names the campaign.
+      const handled = await handleLfoCountReply(update.message.text, update.message.reply_to_message.message_id, update.message.chat.id)
+      if (!handled) await handleCampaignNameReply(update.message.text, update.message.reply_to_message.message_id)
     } else if (update.message?.text) {
       // An Apollo people-search link or a Leadsfriday order reference starts a
       // Leadsfriday export that feeds the CSV pipeline. Anything else is ignored.
