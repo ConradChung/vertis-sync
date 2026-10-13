@@ -1434,12 +1434,35 @@ async function handleLfoCountReply(text: string, replyToMessageId: number, chatI
   return true
 }
 
-// Returns true when the text was an Apollo link or a Leadsfriday order reference.
+// A bare number from the owner while a count prompt is open is the count.
+// Telegram's reply gesture is easy to miss on mobile; this makes it optional.
+async function handleBareCount(text: string, chatId: number): Promise<boolean> {
+  if (String(chatId) !== TELEGRAM_CHAT_ID) return false
+  if (!/^\s*\d[\d,\s]*\s*$/.test(text)) return false
+  const rows = (await supabaseRequest(
+    'GET',
+    `apollo_orders?status=eq.awaiting_count&count_status=eq.awaiting&select=id,status,contact_count,leadsfriday_order_id,telegram_message_id&order=created_at.desc&limit=1`,
+  )) as (ApolloOrderRow & { telegram_message_id: number | null })[]
+  const order = rows?.[0]
+  if (!order) return false
+  const count = parseInt(text.replace(/[,\s]/g, ''), 10)
+  if (count < LFO_MIN) {
+    await tg('sendMessage', { chat_id: chatId, text: `Leadsfriday's minimum is ${LFO_MIN} contacts. Send ${LFO_MIN} or more.` })
+    return true
+  }
+  const edit = order.telegram_message_id ? { chatId, messageId: order.telegram_message_id } : undefined
+  const ok = await placeLfoOrder(order.id, count, edit)
+  if (!ok) await tg('sendMessage', { chat_id: chatId, text: 'That order was already placed or cancelled.' })
+  return true
+}
+
+// Returns true when the text was an Apollo link, a Leadsfriday order reference,
+// or a bare count for an open prompt.
 async function handleApolloOrPasteText(message: NonNullable<TelegramUpdate['message']>): Promise<boolean> {
   const text = message.text ?? ''
   const apollo = text.match(APOLLO_PEOPLE_URL_RE)
   const lf = text.match(LEADSFRIDAY_ORDER_RE)
-  if (!apollo && !lf) return false
+  if (!apollo && !lf) return handleBareCount(text, message.chat.id)
 
   if (String(message.chat.id) !== TELEGRAM_CHAT_ID) {
     await tg('sendMessage', { chat_id: message.chat.id, text: 'Only the owner can place Leadsfriday orders from this bot.' })
