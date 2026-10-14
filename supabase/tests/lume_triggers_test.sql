@@ -1,27 +1,52 @@
 -- supabase/tests/lume_triggers_test.sql
 -- Runs against a database that already holds pipeline rows, so every count is
--- scoped to the seeded ids (source_id) or a throwaway campaign id. job_batches
--- dates are in 2099 because batch_date is unique and live scrapes land every
--- other day. Everything rolls back.
+-- scoped to the seeded ids (source_id / body->>'target_id') or a throwaway
+-- campaign id. job_batches dates are in 2099 because batch_date is unique and
+-- live scrapes land every other day. Everything rolls back, including the two
+-- vault secrets created below and the pg_net queue rows they cause (the pg_net
+-- worker only sends committed rows).
+--
+-- The final "writer survives" proof takes ACCESS EXCLUSIVE on events until
+-- rollback. It is skipped unless the session sets
+--   set local lume.allow_destructive_tests = 'on';
+-- and must not be enabled against prod while a validation is in flight.
 begin;
-select plan(55);
+select plan(63);
 
 -- structure ------------------------------------------------------------------
 select has_function('public', 'lume_event_on_change', 'lume_event_on_change() exists');
 select has_function('public', 'lume_gate_opened', 'lume_gate_opened() exists');
 select has_function('public', 'lume_gate_kind', 'lume_gate_kind() exists');
-select ok((select proconfig @> array['search_path=public, pg_catalog'] from pg_proc where proname = 'lume_event_on_change'),
-          'lume_event_on_change() pins search_path');
-select ok((select proconfig @> array['search_path=public, pg_catalog'] from pg_proc where proname = 'lume_gate_opened'),
-          'lume_gate_opened() pins search_path');
-select ok((select proconfig @> array['search_path=public, pg_catalog'] from pg_proc where proname = 'lume_gate_kind'),
-          'lume_gate_kind() pins search_path');
+select ok((select proconfig @> array['search_path=pg_catalog, public'] from pg_proc where proname = 'lume_event_on_change'),
+          'lume_event_on_change() pins search_path, catalog first');
+select ok((select proconfig @> array['search_path=pg_catalog, public'] from pg_proc where proname = 'lume_gate_opened'),
+          'lume_gate_opened() pins search_path, catalog first');
+select ok((select proconfig @> array['search_path=pg_catalog, public'] from pg_proc where proname = 'lume_gate_kind'),
+          'lume_gate_kind() pins search_path, catalog first');
+select ok((select proconfig @> array['lock_timeout=1s'] from pg_proc where proname = 'lume_event_on_change'),
+          'lume_event_on_change() gives up on a blocked insert after 1s');
+select ok((select proconfig @> array['lock_timeout=1s'] from pg_proc where proname = 'lume_gate_opened'),
+          'lume_gate_opened() gives up on a blocked call after 1s');
 select ok(not has_function_privilege('anon', 'lume_event_on_change()', 'execute'), 'anon cannot execute lume_event_on_change()');
 select ok(not has_function_privilege('authenticated', 'lume_gate_opened()', 'execute'), 'authenticated cannot execute lume_gate_opened()');
 select has_trigger('public', 'validation_jobs', 'lume_events_validation_jobs', 'validation_jobs has the events trigger');
 select has_trigger('public', 'validation_jobs', 'lume_gate_validation_jobs', 'validation_jobs has the gate trigger');
 select has_trigger('public', 'lead_bank', 'lume_events_lead_bank', 'lead_bank has the events trigger');
 select has_trigger('public', 'rotation_runs', 'lume_events_rotation_runs', 'rotation_runs has the events trigger');
+
+-- gate hook without secrets: a gate opens, nothing is queued -----------------
+-- (the live vault has no lume_* secrets until Lume is deployed; if it does,
+-- this case is what a deployed system would skip, and the assertion below
+-- still holds because the ingest is scoped by target_id)
+insert into telegram_ingests (id, telegram_chat_id, sender_chat_id, filename, storage_path, row_count, status)
+  values ('00000000-0000-0000-0000-000000000303', '1', '1', 'trig.csv', 'telegram/trig.csv', 10, 'awaiting_approval');
+select is((select count(*)::int from net.http_request_queue
+           where convert_from(body, 'utf8')::jsonb->>'target_id' = '00000000-0000-0000-0000-000000000303'),
+          0, 'without lume secrets in the vault an opened gate queues no hook request');
+
+-- secrets for the rest of the transaction (rolled back with everything else)
+select vault.create_secret('https://lume.test', 'lume_url');
+select vault.create_secret('s3cret', 'lume_hook_secret');
 
 -- validation_jobs ------------------------------------------------------------
 insert into validation_jobs (id, filename, total_rows, status)
@@ -47,11 +72,27 @@ select is((select (payload->>'from') || '>' || (payload->>'to') from events wher
 select is((select title from events where type = 'validation_jobs.status' and source_id = '00000000-0000-0000-0000-000000000301'),
           'validation_jobs status: pending → processing', 'title reads table column: from → to');
 
+-- the finder gate opens: one event and one real pg_net request
 update validation_jobs set finder_status = 'awaiting_decision' where id = '00000000-0000-0000-0000-000000000301';
 select is((select count(*)::int from events where type = 'validation_jobs.finder_status' and source_id = '00000000-0000-0000-0000-000000000301'),
           1, 'finder_status change writes a second event');
 select is((select count(*)::int from events where source = 'validation_jobs' and source_id = '00000000-0000-0000-0000-000000000301'),
           3, 'three events so far: inserted, status, finder_status');
+select is((select count(*)::int from net.http_request_queue
+           where convert_from(body, 'utf8')::jsonb->>'target_id' = '00000000-0000-0000-0000-000000000301'),
+          1, 'the finder gate queues exactly one hook request');
+select is((select url from net.http_request_queue
+           where convert_from(body, 'utf8')::jsonb->>'target_id' = '00000000-0000-0000-0000-000000000301'),
+          'https://lume.test/api/hooks/gate-opened', 'the hook posts to lume_url/api/hooks/gate-opened');
+select is((select headers->>'X-Lume-Hook-Secret' from net.http_request_queue
+           where convert_from(body, 'utf8')::jsonb->>'target_id' = '00000000-0000-0000-0000-000000000301'),
+          's3cret', 'the hook carries lume_hook_secret');
+select is((select convert_from(body, 'utf8')::jsonb->>'kind' from net.http_request_queue
+           where convert_from(body, 'utf8')::jsonb->>'target_id' = '00000000-0000-0000-0000-000000000301'),
+          'finder_decision', 'the hook body names the gate kind');
+select is((select convert_from(body, 'utf8')::jsonb->>'target_table' from net.http_request_queue
+           where convert_from(body, 'utf8')::jsonb->>'target_id' = '00000000-0000-0000-0000-000000000301'),
+          'validation_jobs', 'the hook body names the target table');
 
 -- the writers are the service role; firing must survive the API-role revoke
 set local role service_role;
@@ -60,18 +101,20 @@ reset role;
 select is((select count(*)::int from events where type = 'validation_jobs.enrich_started' and source_id = '00000000-0000-0000-0000-000000000301'),
           1, 'a service_role write still fires the trigger after the API-role revoke');
 
--- one PATCH touching two watched columns: one event per changed column
+-- one PATCH touching two watched columns: one event per changed column, but
+-- one hook (campaign_choice outranks stall)
 update validation_jobs set instantly_status = 'awaiting_campaign', watchdog_status = 'awaiting'
   where id = '00000000-0000-0000-0000-000000000301';
 select is((select string_agg(type, ',' order by id) from events where source = 'validation_jobs' and source_id = '00000000-0000-0000-0000-000000000301'),
           'validation_jobs.inserted,validation_jobs.status,validation_jobs.finder_status,validation_jobs.enrich_started,validation_jobs.instantly_status,validation_jobs.watchdog_status',
           'one event per changed watched column, in column order');
+select is((select string_agg(convert_from(body, 'utf8')::jsonb->>'kind', ',' order by id) from net.http_request_queue
+           where convert_from(body, 'utf8')::jsonb->>'target_id' = '00000000-0000-0000-0000-000000000301'),
+          'finder_decision,campaign_choice', 'a change opening two gates at once queues one hook, highest precedence first');
 select is((select payload->'row'->>'filename' from events where type = 'validation_jobs.status' and source_id = '00000000-0000-0000-0000-000000000301'),
           'trig-a.csv', 'update events carry the full row under payload.row');
 
--- telegram_ingests -----------------------------------------------------------
-insert into telegram_ingests (id, telegram_chat_id, sender_chat_id, filename, storage_path, row_count, status)
-  values ('00000000-0000-0000-0000-000000000303', '1', '1', 'trig.csv', 'telegram/trig.csv', 10, 'awaiting_approval');
+-- telegram_ingests (row seeded above) ----------------------------------------
 select is((select title from events where type = 'telegram_ingests.inserted' and source_id = '00000000-0000-0000-0000-000000000303'),
           'trig.csv', 'inserting an ingest writes telegram_ingests.inserted titled by filename');
 select lives_ok($$insert into telegram_ingests (id, telegram_chat_id, sender_chat_id, filename, storage_path, row_count, sender_platform)
@@ -130,10 +173,6 @@ update lead_bank set first_name = 'Trigger' where campaign_id = 'lume-triggers-t
 select is((select count(*)::int from events where source = 'lead_bank' and campaign_id = 'lume-triggers-test'),
           1, 'a lead_bank update that leaves state alone writes nothing');
 
--- gate hook: without lume_url / lume_hook_secret in the vault it stays silent
-select is((select count(*)::int from net.http_request_queue where url like '%/api/hooks/gate-opened%'),
-          0, 'gate-opened hook queues no request while the vault has no lume secrets');
-
 -- gate kinds: the pure function behind lume_gate_opened() ---------------------
 select is(lume_gate_kind('telegram_ingests', 'INSERT', '{"status":"awaiting_approval"}', '{}'), 'ingest_approval', 'new ingest → ingest_approval');
 select is(lume_gate_kind('telegram_ingests', 'UPDATE', '{"status":"approved"}', '{"status":"awaiting_approval"}'), null::text, 'approving an ingest opens no gate');
@@ -159,14 +198,30 @@ select is(lume_gate_kind('pending_actions', 'INSERT', '{"status":"awaiting"}', '
 select is(lume_gate_kind('pending_actions', 'UPDATE', '{"status":"approved"}', '{"status":"awaiting"}'), null::text, 'deciding a pending action opens no gate');
 
 -- safety: a failing events insert must never abort the writer ----------------
--- Last, because the ALTER holds an exclusive lock on events until rollback.
-alter table events add constraint lume_test_boom check (type <> 'validation_jobs.status') not valid;
-select lives_ok($$update validation_jobs set status = 'completed' where id = '00000000-0000-0000-0000-000000000301'$$,
-  'the status update succeeds although the events insert fails');
-select is((select status from validation_jobs where id = '00000000-0000-0000-0000-000000000301'), 'completed', 'and the new status landed');
-select is((select count(*)::int from events where type = 'validation_jobs.status' and source_id = '00000000-0000-0000-0000-000000000301'),
-          1, 'the failed event row is simply absent');
-alter table events drop constraint lume_test_boom;
+-- Destructive: the ALTER holds ACCESS EXCLUSIVE on events until rollback, so
+-- any validation in flight would stall on its events inserts for the rest of
+-- this transaction. Skipped unless lume.allow_destructive_tests = on.
+do $$ begin
+  if current_setting('lume.allow_destructive_tests', true) = 'on' then
+    alter table events add constraint lume_test_boom check (type <> 'validation_jobs.status') not valid;
+  end if;
+end $$;
+select case when current_setting('lume.allow_destructive_tests', true) is distinct from 'on'
+  then skip('destructive proof only runs off-prod (set local lume.allow_destructive_tests = on)')
+  else lives_ok($$update validation_jobs set status = 'completed' where id = '00000000-0000-0000-0000-000000000301'$$,
+                'the status update succeeds although the events insert fails') end;
+select case when current_setting('lume.allow_destructive_tests', true) is distinct from 'on'
+  then skip('destructive proof only runs off-prod')
+  else is((select status from validation_jobs where id = '00000000-0000-0000-0000-000000000301'), 'completed', 'and the new status landed') end;
+select case when current_setting('lume.allow_destructive_tests', true) is distinct from 'on'
+  then skip('destructive proof only runs off-prod')
+  else is((select count(*)::int from events where type = 'validation_jobs.status' and source_id = '00000000-0000-0000-0000-000000000301'),
+          1, 'the failed event row is simply absent') end;
+do $$ begin
+  if current_setting('lume.allow_destructive_tests', true) = 'on' then
+    alter table events drop constraint lume_test_boom;
+  end if;
+end $$;
 
 select * from finish();
 rollback;

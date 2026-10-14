@@ -2,7 +2,7 @@
 -- Runs against a database that already holds pipeline rows, so every count is
 -- scoped to the seeded ids. Everything rolls back.
 begin;
-select plan(33);
+select plan(34);
 
 -- one row per gate kind ------------------------------------------------------
 insert into telegram_ingests (id, telegram_chat_id, sender_chat_id, filename, storage_path, row_count, status)
@@ -78,9 +78,11 @@ select ok(exists (select 1 from json_array_elements(lume_scheduled_jobs()) e whe
           'lume_scheduled_jobs() lists the pipeline-watchdog cron job');
 select ok(not exists (select 1 from json_array_elements(lume_scheduled_jobs()) e where e->>'target' like '%eyJ%'),
           'no scheduled job target carries a JWT');
-select ok(coalesce((select bool_and(e->>'target' like '%Bearer <redacted>%') from json_array_elements(lume_scheduled_jobs()) e
-                    where e->>'name' like 'instantly-rotate-%'), true),
-          'instantly-rotate commands show the redaction marker');
+select case when exists (select 1 from cron.job where jobname like 'instantly-rotate-%')
+  then ok((select bool_and(e->>'target' like '%Bearer <redacted>%') from json_array_elements(lume_scheduled_jobs()) e
+           where e->>'name' like 'instantly-rotate-%'),
+          'instantly-rotate commands show the redaction marker')
+  else skip('no instantly-rotate cron rows on this database') end;
 -- an external schedule whose target carries a key=value JWT is masked too
 insert into lume_external_schedules (name, cron, target, runner)
   values ('lume-views-test-redact', '0 0 * * *', 'https://x.example/run?apikey=eyJabc.def.ghi', 'other');
@@ -91,6 +93,8 @@ select ok((select e->>'target' like '%<redacted>%' and e->>'target' not like '%e
 -- overview: pending_gates is a number and counts at least the seeded gates (8 + push_review + its hidden twin's action + fill + stall)
 select is(json_typeof(lume_overview()->'pending_gates'), 'number', 'lume_overview().pending_gates is a number');
 select ok((lume_overview()->>'pending_gates')::int >= 12, 'lume_overview().pending_gates covers the seeded gates');
+-- canary for silent trigger failures: present even when events is empty (json null)
+select ok(lume_overview()->'events_last_at' is not null, 'lume_overview() exposes events_last_at');
 
 -- grants: views and functions are for the service role only
 select ok(not has_table_privilege('anon', 'lume_gates', 'select'), 'anon cannot read lume_gates');
