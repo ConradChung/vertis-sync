@@ -138,7 +138,7 @@ Decisions go through `POST /api/gates/decide { callback_data }` → `telegram-in
 
 `agent_runs` drives orb state: `running` → thinking, a tool executing → acting, `needs_approval` → amber ring, `done`/`failed` → idle. Voice input via Web Speech API (Chrome), transcript in the glass sheet. The reference `orb.tsx` (react-three-fiber + drei `MeshTransmissionMaterial`) is mounted as-is in the top bar.
 
-Agent: `@anthropic-ai/sdk` Tool Runner (`client.beta.messages.toolRunner` + `betaZodTool`), model `claude-sonnet-5-5` (the spec names Sonnet), adaptive thinking (default), streaming to the sheet over SSE. Tools are thin `fetch()` wrappers over Lume's own `/api/*` routes with an internal bearer, never Supabase or Instantly directly:
+Agent: `@anthropic-ai/sdk` Tool Runner (`client.beta.messages.toolRunner` + `betaZodTool`), model `claude-opus-5-5` (owner decision 2026-10-14; the spec said Sonnet), adaptive thinking (default), streaming to the sheet over SSE. Tools are thin `fetch()` wrappers over Lume's own `/api/*` routes with an internal bearer, never Supabase or Instantly directly:
 
 | Tier | Tools | Behaviour |
 |---|---|---|
@@ -240,6 +240,6 @@ Deep-link format: `https://<LUME_URL>/validate?gate=<kind>:<target_id>` and `htt
 
 1. **Entrypoint vs copied claims** — the design uses one additive entrypoint on `telegram-inbox` for all gates. The alternative is to copy the PATCH filters into Lume routes (as the jobsearch route does) and only call the entrypoint for `approve*`. Recommendation: entrypoint everywhere.
 2. **Triggers vs helper inserts for `events`** — triggers touch no function code; the prompt allowed helper inserts. Recommendation: triggers.
-3. **Model for the orb agent** — the spec says Sonnet (`claude-sonnet-5-5`). Opus 5.5 is the SDK default and would be the pick if plan quality on multi-step actions matters more than cost.
+3. **Model for the orb agent** — decided: `claude-opus-5-5` (owner, 2026-10-14). Decisions 1, 2, 4, 5 accepted as recommended.
 4. **Lume-side Telegram token on Vercel** — needed for deep-link pings and decision notes. The alternative routes every ping through `telegram-inbox`; more edge code, fewer places with the token.
 5. **Assigning to non-rotation Instantly campaigns** — v1 queues them in `lead_bank` and says so; generalising `instantly-rotate` per campaign is a separate change to a function the prompt says not to touch.
