@@ -1,0 +1,190 @@
+{
+  "batches": [
+    {
+      "name": "Kaspen \u00b7 Oct 13 pull",
+      "count": "2,400",
+      "source": "Apify",
+      "sample": "96% pass \u00b7 10% sample",
+      "sampleVerdicts": [
+        "9 auto-pass",
+        "1 needs review",
+        "0 auto-fail"
+      ],
+      "leads": [
+        {
+          "name": "Avery Stone",
+          "company": "Monument Residential",
+          "email": "avery@monumentres.com",
+          "icp": "High fit",
+          "verdict": "Auto-pass",
+          "reason": "Multi-family operator \u00b7 84 properties"
+        },
+        {
+          "name": "Theo Martin",
+          "company": "Blue Oak Living",
+          "email": "theo@blueoak.co",
+          "icp": "Review",
+          "verdict": "Needs review",
+          "reason": "Title mismatch: Director, Resident Ops"
+        },
+        {
+          "name": "Samira Okafor",
+          "company": "Parkline Group",
+          "email": "samira@parkline.com",
+          "icp": "High fit",
+          "verdict": "Auto-pass",
+          "reason": "GTM engineer \u00b7 120 communities"
+        },
+        {
+          "name": "Noah Williams",
+          "company": "Redwood Communities",
+          "email": "noah@redwoodco.com",
+          "icp": "High fit",
+          "verdict": "Auto-pass",
+          "reason": "VP Growth \u00b7 63 properties"
+        },
+        {
+          "name": "Leila Haddad",
+          "company": "Oak & Main",
+          "email": "leila@oakmain.com",
+          "icp": "Review",
+          "verdict": "Needs review",
+          "reason": "Holding company, operator unclear"
+        },
+        {
+          "name": "Marcus Reed",
+          "company": "Fieldstone Living",
+          "email": "marcus@fieldstone.com",
+          "icp": "High fit",
+          "verdict": "Auto-pass",
+          "reason": "Revenue leader \u00b7 48 properties"
+        },
+        {
+          "name": "Amelia Grant",
+          "company": "Bayside Residential",
+          "email": "amelia@bayside.com",
+          "icp": "Low fit",
+          "verdict": "Auto-fail",
+          "reason": "Brokerage, not property operator"
+        },
+        {
+          "name": "Ravi Shah",
+          "company": "Evergreen Homes",
+          "email": "ravi@evergreen.com",
+          "icp": "High fit",
+          "verdict": "Auto-pass",
+          "reason": "COO \u00b7 52 communities"
+        },
+        {
+          "name": "Sofia Morales",
+          "company": "Hearthside Mgmt",
+          "email": "sofia@hearthside.com",
+          "icp": "Review",
+          "verdict": "Needs review",
+          "reason": "Personal email domain"
+        },
+        {
+          "name": "Caleb Nguyen",
+          "company": "Mosaic Property Co",
+          "email": "caleb@mosaicproperty.com",
+          "icp": "High fit",
+          "verdict": "Auto-pass",
+          "reason": "Growth operator \u00b7 71 buildings"
+        }
+      ]
+    },
+    {
+      "name": "Recruiter \u00b7 Oct 13 candidates",
+      "count": "186",
+      "source": "Apollo",
+      "sample": "91% pass \u00b7 10% sample",
+      "sampleVerdicts": [
+        "7 auto-pass",
+        "2 needs review",
+        "1 auto-fail"
+      ],
+      "leads": [
+        {
+          "name": "Avery Stone",
+          "company": "Monument Residential",
+          "email": "avery@monumentres.com",
+          "icp": "High fit",
+          "verdict": "Auto-pass",
+          "reason": "Multi-family operator \u00b7 84 properties"
+        },
+        {
+          "name": "Theo Martin",
+          "company": "Blue Oak Living",
+          "email": "theo@blueoak.co",
+          "icp": "Review",
+          "verdict": "Needs review",
+          "reason": "Title mismatch: Director, Resident Ops"
+        },
+        {
+          "name": "Samira Okafor",
+          "company": "Parkline Group",
+          "email": "samira@parkline.com",
+          "icp": "High fit",
+          "verdict": "Auto-pass",
+          "reason": "GTM engineer \u00b7 120 communities"
+        },
+        {
+          "name": "Noah Williams",
+          "company": "Redwood Communities",
+          "email": "noah@redwoodco.com",
+          "icp": "High fit",
+          "verdict": "Auto-pass",
+          "reason": "VP Growth \u00b7 63 properties"
+        },
+        {
+          "name": "Leila Haddad",
+          "company": "Oak & Main",
+          "email": "leila@oakmain.com",
+          "icp": "Review",
+          "verdict": "Needs review",
+          "reason": "Holding company, operator unclear"
+        },
+        {
+          "name": "Marcus Reed",
+          "company": "Fieldstone Living",
+          "email": "marcus@fieldstone.com",
+          "icp": "High fit",
+          "verdict": "Auto-pass",
+          "reason": "Revenue leader \u00b7 48 properties"
+        },
+        {
+          "name": "Amelia Grant",
+          "company": "Bayside Residential",
+          "email": "amelia@bayside.com",
+          "icp": "Low fit",
+          "verdict": "Auto-fail",
+          "reason": "Brokerage, not property operator"
+        },
+        {
+          "name": "Ravi Shah",
+          "company": "Evergreen Homes",
+          "email": "ravi@evergreen.com",
+          "icp": "High fit",
+          "verdict": "Auto-pass",
+          "reason": "COO \u00b7 52 communities"
+        },
+        {
+          "name": "Sofia Morales",
+          "company": "Hearthside Mgmt",
+          "email": "sofia@hearthside.com",
+          "icp": "Review",
+          "verdict": "Needs review",
+          "reason": "Personal email domain"
+        },
+        {
+          "name": "Caleb Nguyen",
+          "company": "Mosaic Property Co",
+          "email": "caleb@mosaicproperty.com",
+          "icp": "High fit",
+          "verdict": "Auto-pass",
+          "reason": "Growth operator \u00b7 71 buildings"
+        }
+      ]
+    }
+  ]
+}

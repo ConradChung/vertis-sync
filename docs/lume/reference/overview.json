@@ -1,0 +1,196 @@
+{
+  "kpis": [
+    {
+      "label": "Sent today",
+      "value": "684",
+      "delta": "+8.4% vs avg",
+      "tone": "violet",
+      "data": [
+        42,
+        55,
+        48,
+        62,
+        58,
+        71,
+        76
+      ]
+    },
+    {
+      "label": "Replies today",
+      "value": "7",
+      "delta": "+2 from yesterday",
+      "tone": "green",
+      "data": [
+        2,
+        3,
+        2,
+        5,
+        4,
+        6,
+        7
+      ]
+    },
+    {
+      "label": "Pending approvals",
+      "value": "18",
+      "delta": "Needs attention",
+      "tone": "amber",
+      "data": [
+        12,
+        14,
+        11,
+        16,
+        15,
+        19,
+        18
+      ]
+    },
+    {
+      "label": "Open opportunities",
+      "value": "2 \u00b7 $14.8k",
+      "delta": "+1 this week",
+      "tone": "cyan",
+      "data": [
+        4,
+        5,
+        5,
+        7,
+        8,
+        9,
+        12
+      ]
+    }
+  ],
+  "replies": [
+    {
+      "campaign": "Recruiter",
+      "name": "Maya Chen",
+      "company": "Northstar Property Group",
+      "text": "We are hiring a GTM engineer and this looks relevant. Can you share the role brief?",
+      "time": "2m ago",
+      "initials": "MC",
+      "color": "#22c55e"
+    },
+    {
+      "campaign": "Kaspen",
+      "name": "Jordan Bell",
+      "company": "Harborline Management",
+      "text": "Open to a quick chat next Tuesday. We manage 38 communities across the Southeast.",
+      "time": "14m ago",
+      "initials": "JB",
+      "color": "#8b5cf6"
+    },
+    {
+      "campaign": "Recruiter",
+      "name": "Priya Nair",
+      "company": "Cedarstone Living",
+      "text": "Could you send over the benchmark deck? The timing around our Q4 planning is perfect.",
+      "time": "29m ago",
+      "initials": "PN",
+      "color": "#22c55e"
+    },
+    {
+      "campaign": "Kaspen",
+      "name": "Elliot Park",
+      "company": "Juniper Residential",
+      "text": "We have 42 communities and this workflow is on our roadmap. Happy to compare notes.",
+      "time": "41m ago",
+      "initials": "EP",
+      "color": "#8b5cf6"
+    }
+  ],
+  "campaigns": [
+    {
+      "name": "Kaspen",
+      "rate": "4.8%",
+      "delta": "+0.9%",
+      "tone": "green",
+      "data": [
+        25,
+        32,
+        29,
+        38,
+        42,
+        48,
+        53
+      ]
+    },
+    {
+      "name": "Recruiter",
+      "rate": "3.2%",
+      "delta": "+0.4%",
+      "tone": "green",
+      "data": [
+        24,
+        26,
+        25,
+        28,
+        29,
+        31,
+        32
+      ]
+    },
+    {
+      "name": "Muse",
+      "rate": "\u2014",
+      "delta": "queue-based",
+      "tone": "cyan",
+      "data": [
+        20,
+        20,
+        22,
+        22,
+        25,
+        25,
+        27
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "kaspen@outlook.com",
+      "warmup": "92%",
+      "bounce": "0.4%",
+      "cap": "500",
+      "status": "Healthy"
+    },
+    {
+      "name": "kaspen \u00b7 LinkedIn",
+      "warmup": "\u2014",
+      "bounce": "\u2014",
+      "cap": "40",
+      "status": "Healthy"
+    },
+    {
+      "name": "recruiter@outlook.com",
+      "warmup": "71%",
+      "bounce": "1.2%",
+      "cap": "150",
+      "status": "Warming"
+    },
+    {
+      "name": "old-inbox@kaspen.io",
+      "warmup": "38%",
+      "bounce": "4.8%",
+      "cap": "0",
+      "status": "Burned"
+    }
+  ],
+  "runs": [
+    {
+      "name": "Kaspen \u00b7 Email sequence",
+      "time": "in 8m 42s",
+      "meta": "500 daily cap \u00b7 08:30 PT"
+    },
+    {
+      "name": "Recruiter \u00b7 Candidate batch",
+      "time": "in 1h 18m",
+      "meta": "150 daily cap \u00b7 10:00 PT"
+    },
+    {
+      "name": "Muse \u00b7 Apply queue review",
+      "time": "tomorrow",
+      "meta": "24 companies \u00b7 09:00 PT"
+    }
+  ]
+}
