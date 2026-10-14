@@ -2,7 +2,7 @@
 -- Runs against a database that already holds pipeline rows, so every count is
 -- scoped to the seeded ids. Everything rolls back.
 begin;
-select plan(22);
+select plan(32);
 
 -- one row per gate kind ------------------------------------------------------
 insert into telegram_ingests (id, telegram_chat_id, sender_chat_id, filename, storage_path, row_count, status)
@@ -17,6 +17,19 @@ insert into job_batches (id, batch_date, status) values ('00000000-0000-0000-000
 insert into job_batches (id, batch_date, status, write_status) values ('00000000-0000-0000-0000-000000000006','2099-01-02','ranked','awaiting');
 insert into apollo_orders (id, apollo_url) values ('00000000-0000-0000-0000-000000000007','https://app.apollo.io/#/people?x=1');
 insert into pending_actions (id, kind) values ('00000000-0000-0000-0000-000000000008','assign_leads');
+-- push_review, plain
+insert into validation_jobs (id, filename, total_rows, status, instantly_status)
+  values ('00000000-0000-0000-0000-00000000000b','e.csv',5,'completed','configuring');
+-- push_review with an awaiting push action for the same job: hidden behind the lume_action card
+insert into validation_jobs (id, filename, total_rows, status, instantly_status)
+  values ('00000000-0000-0000-0000-00000000000c','f.csv',5,'completed','configuring');
+insert into pending_actions (id, kind, payload)
+  values ('00000000-0000-0000-0000-00000000000d','push_to_instantly','{"job_id":"00000000-0000-0000-0000-00000000000c"}');
+insert into job_batches (id, batch_date, status) values ('00000000-0000-0000-0000-00000000000e','2099-01-03','waiting_fill');
+insert into job_batches (id, batch_date, status, watchdog_status) values ('00000000-0000-0000-0000-00000000000f','2099-01-04','resolving','awaiting');
+-- a finished job with a stale watchdog flag is not a stall
+insert into validation_jobs (id, filename, total_rows, status, watchdog_status)
+  values ('00000000-0000-0000-0000-000000000010','g.csv',5,'completed','awaiting');
 
 select is((select count(*)::int from lume_gates where target_id in (
   '00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002',
@@ -31,6 +44,14 @@ select is((select kind from lume_gates where target_id='00000000-0000-0000-0000-
 select is((select kind from lume_gates where target_id='00000000-0000-0000-0000-000000000006'), 'jobs_write', 'gate 2');
 select is((select actions[1] from lume_gates where target_id='00000000-0000-0000-0000-000000000007'), 'lfo_count', 'lfo actions');
 select is((select kind from lume_gates where target_id='00000000-0000-0000-0000-000000000008'), 'lume_action', 'pending action gate');
+select is((select kind from lume_gates where target_id='00000000-0000-0000-0000-00000000000b'), 'push_review', 'push review gate');
+select is((select count(*)::int from lume_gates where target_id='00000000-0000-0000-0000-00000000000c'), 0,
+          'push_review is hidden while a push action for the job awaits confirmation');
+select is((select kind from lume_gates where target_id='00000000-0000-0000-0000-00000000000d'), 'lume_action', 'the awaiting push action is the card instead');
+select is((select kind from lume_gates where target_id='00000000-0000-0000-0000-00000000000e'), 'jobs_fill', 'jobs fill gate');
+select is((select kind from lume_gates where target_id='00000000-0000-0000-0000-00000000000f'), 'jobs_stall', 'jobs stall gate');
+select is((select count(*)::int from lume_gates where target_id='00000000-0000-0000-0000-000000000010'), 0,
+          'a completed job with watchdog_status=awaiting is not a stall');
 
 -- orders: 1 ingest + 1 apollo order + 2 batches + 3 jobs (source defaults to csv -> dashboard_job)
 select is((select count(*)::int from lume_orders where id in (
@@ -52,9 +73,18 @@ select is((select origin from lume_lead_bank where lower(email) = 'lume.dup@exam
 select is((select origin || ':' || first_name || ':' || company_name from lume_lead_bank where email = 'lume.new@example.com'),
           'validation_rows:New:Beta', 'un-banked valid row appears from validation_rows with snake_case keys read');
 
--- scheduled jobs reach cron.job through the definer function
+-- scheduled jobs reach cron.job through the definer function, with tokens redacted
 select ok(exists (select 1 from json_array_elements(lume_scheduled_jobs()) e where e->>'name' = 'pipeline-watchdog'),
           'lume_scheduled_jobs() lists the pipeline-watchdog cron job');
+select ok(not exists (select 1 from json_array_elements(lume_scheduled_jobs()) e where e->>'target' like '%eyJ%'),
+          'no scheduled job target carries a JWT');
+select ok((select bool_and(e->>'target' like '%Bearer <redacted>%') from json_array_elements(lume_scheduled_jobs()) e
+           where e->>'name' like 'instantly-rotate-%'),
+          'instantly-rotate commands show the redaction marker');
+
+-- overview: pending_gates is a number and counts at least the seeded gates (8 + push_review + its hidden twin's action + fill + stall)
+select is(json_typeof(lume_overview()->'pending_gates'), 'number', 'lume_overview().pending_gates is a number');
+select ok((lume_overview()->>'pending_gates')::int >= 12, 'lume_overview().pending_gates covers the seeded gates');
 
 -- grants: views and functions are for the service role only
 select ok(not has_table_privilege('anon', 'lume_gates', 'select'), 'anon cannot read lume_gates');

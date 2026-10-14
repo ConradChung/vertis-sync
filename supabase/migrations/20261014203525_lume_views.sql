@@ -119,7 +119,9 @@ union all
   join validation_jobs j on j.id = r.job_id
   where r.status = 'valid' and r.instantly_status = 'skipped' and j.status = 'completed'
     and not exists (select 1 from lead_bank l where lower(l.email) = lower(r.email));
--- The not-exists above probes lead_bank by lower(email); give it an index (2.2k rows, additive).
+-- The not-exists above compares lower(email). At 2.2k rows the planner uses a
+-- hash anti-join and does not need this; the index is there for when lead_bank
+-- grows. Additive, on an existing table.
 create index if not exists lead_bank_lower_email_idx on lead_bank (lower(email));
 
 -- The views are owned by postgres and are not security_invoker, so a grant to
