@@ -2,7 +2,7 @@
 -- Runs against a database that already holds pipeline rows, so every count is
 -- scoped to the seeded ids. Everything rolls back.
 begin;
-select plan(32);
+select plan(33);
 
 -- one row per gate kind ------------------------------------------------------
 insert into telegram_ingests (id, telegram_chat_id, sender_chat_id, filename, storage_path, row_count, status)
@@ -78,9 +78,15 @@ select ok(exists (select 1 from json_array_elements(lume_scheduled_jobs()) e whe
           'lume_scheduled_jobs() lists the pipeline-watchdog cron job');
 select ok(not exists (select 1 from json_array_elements(lume_scheduled_jobs()) e where e->>'target' like '%eyJ%'),
           'no scheduled job target carries a JWT');
-select ok((select bool_and(e->>'target' like '%Bearer <redacted>%') from json_array_elements(lume_scheduled_jobs()) e
-           where e->>'name' like 'instantly-rotate-%'),
+select ok(coalesce((select bool_and(e->>'target' like '%Bearer <redacted>%') from json_array_elements(lume_scheduled_jobs()) e
+                    where e->>'name' like 'instantly-rotate-%'), true),
           'instantly-rotate commands show the redaction marker');
+-- an external schedule whose target carries a key=value JWT is masked too
+insert into lume_external_schedules (name, cron, target, runner)
+  values ('lume-views-test-redact', '0 0 * * *', 'https://x.example/run?apikey=eyJabc.def.ghi', 'other');
+select ok((select e->>'target' like '%<redacted>%' and e->>'target' not like '%eyJ%'
+           from json_array_elements(lume_scheduled_jobs()) e where e->>'name' = 'lume-views-test-redact'),
+          'apikey=<jwt> in an external schedule target is redacted');
 
 -- overview: pending_gates is a number and counts at least the seeded gates (8 + push_review + its hidden twin's action + fill + stall)
 select is(json_typeof(lume_overview()->'pending_gates'), 'number', 'lume_overview().pending_gates is a number');
