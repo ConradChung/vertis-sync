@@ -154,9 +154,9 @@ A confirmed action executes exactly what the UI button would have done (same exe
 
 ```sql
 events (id bigserial, type text, source text, source_id text, campaign_id text,
-        lead_email text, title text, payload jsonb, created_at timestamptz)
+        lead_email text, title text, payload jsonb, webhook_id text unique-when-set, created_at timestamptz)
 pending_actions (id uuid, kind text, payload jsonb, risk text default 'high',
-        status text awaiting|approved|rejected|executed|failed|expired,
+        status text awaiting|approved|rejected|executing|executed|failed|expired, executed_at timestamptz,
         claim_status text awaiting|claimed,           -- the atomic-claim slot
         requested_by text user|agent, agent_run_id uuid, telegram_message_id bigint,
         decided_via text lume|telegram, decided_at, result jsonb, error text, created_at)
@@ -176,8 +176,8 @@ Views / functions: `lume_gates`, `lume_orders`, `lume_lead_bank`, `lume_schedule
 Triggers: `lume_event_on_change()` on the six pipeline tables; `lume_gate_opened()` (pg_net POST) on `telegram_ingests`, `validation_jobs`, `job_batches`, `apollo_orders`, `pending_actions`.
 Constraint change: `telegram_ingests.sender_platform` check gains `'lume'`.
 Realtime: `events`, `pending_actions`, `agent_runs` added to `supabase_realtime`.
-RLS: on for all new tables; `authenticated` may `select` on `events`, `pending_actions`, `agent_runs` (the one allowed user, for Realtime); all writes through the service role.
-Vault: `lume_url`, `lume_hook_secret` (used by the trigger and the cron tick).
+RLS: on for all new tables; `authenticated` may `select` on `events`, `pending_actions`, `agent_runs` only when `lume_is_owner()` is true (JWT email = vault `lume_owner_email`; this project also issues JWTs to CRM client accounts, so `using (true)` would leak). All writes through the service role.
+Vault: `lume_url`, `lume_hook_secret` (used by the trigger and the cron tick), `lume_owner_email` (read by `lume_is_owner()`).
 
 ---
 
@@ -186,7 +186,7 @@ Vault: `lume_url`, `lume_hook_secret` (used by the trigger and the cron tick).
 | File | Change | Why additive |
 |---|---|---|
 | `supabase/functions/telegram-inbox/index.ts` | new branch in `Deno.serve`: `X-Lume-Secret` header → `handleLumeAction()`; `tg()` skips `answerCallbackQuery` with an empty id; `lfo_count` accepts any `n ≥ 500` when `origin='lume'`; new `lume_ok:` / `lume_no:` callbacks → claim `pending_actions` and POST `/api/actions/<id>/execute`; a `🖥 decided in Lume` note after a Lume-originated action | new header path and new callback prefixes; every existing branch and message is byte-identical |
-| `supabase/migrations/2026101400000[1-4]_lume_*.sql` | new tables, views, triggers, cron, the `sender_platform` constraint | no existing column or row changes; the constraint only widens |
+| `supabase/migrations/<ledger-version>_lume_*.sql` (versions are assigned by `apply_migration`; e.g. `20261014102012_lume_core.sql`) | new tables, views, triggers, cron, the `sender_platform` constraint | no existing column or row changes; the constraint only widens |
 | `.env.example` | names of the new secrets + the five missing existing ones | comments only |
 | `.github/workflows/deploy-functions.yml` | none | `telegram-inbox` is already deployed from disk |
 | `CLAUDE.md` | new file with a Lume section | — |
@@ -201,6 +201,7 @@ Not changed: `email-validator`, `contact-email-finder`, `operating-city-enricher
 |---|---|---|
 | `LUME_ACTION_SECRET` | edge secret + Vercel (lume) | Lume → `telegram-inbox` entrypoint, and `telegram-inbox` → Lume `/api/actions/*/execute` |
 | `LUME_HOOK_SECRET` | vault (`lume_hook_secret`) + Vercel | DB triggers / cron → Lume hooks |
+| owner email | vault (`lume_owner_email`) | `lume_is_owner()` for the browser-side read policies |
 | `LUME_URL` | edge secret + vault (`lume_url`) | where `telegram-inbox` and pg_net POST |
 | `LUME_ALLOWED_EMAIL` | Vercel | the one magic-link login |
 | `LUME_INTERNAL_SECRET` | Vercel | agent tools → Lume's own routes |
@@ -227,7 +228,7 @@ Deep-link format: `https://<LUME_URL>/validate?gate=<kind>:<target_id>` and `htt
 - Rotation tick with Lume down: pg_net POST fails silently; the rule's `next_run_at` is not advanced, so the next tick retries. A rule that errors inside Lume writes `last_result.error`, pings Telegram, and does not create an action.
 - Pending action approved from both Lume and Telegram: `claim_status` claim, one executes.
 - Pending action older than 24 h: the rotation tick route also expires stale actions (`status='expired'`) and notes it in `events`.
-- Instantly webhook replay: `events` has a unique partial index on `(type, payload->>'id')` for webhook events.
+- Instantly webhook replay: `events.webhook_id` carries the provider's event id with a unique partial index, so the route upserts with `onConflict: 'webhook_id', ignoreDuplicates: true`.
 
 ## Testing
 
