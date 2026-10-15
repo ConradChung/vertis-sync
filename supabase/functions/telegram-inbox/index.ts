@@ -3,6 +3,8 @@
 // gets an Approve/Deny prompt, and only on approval does the file enter the
 // normal validation pipeline (validation_jobs/validation_rows + email-validator).
 
+import { LUME_MIN_COUNT, parseLumeAction, secretsMatch } from '../_shared/lume/action.ts'
+
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
@@ -12,6 +14,10 @@ const TELEGRAM_CHAT_ID = Deno.env.get('TELEGRAM_CHAT_ID')!
 const TELEGRAM_WEBHOOK_SECRET = Deno.env.get('TELEGRAM_WEBHOOK_SECRET')!
 const SLACK_BOT_TOKEN = Deno.env.get('SLACK_BOT_TOKEN') ?? ''
 const INSTANTLY_API_KEY = Deno.env.get('INSTANTLY_API_KEY') ?? ''
+// Lume dashboard: shared secret for its POSTs into this function, and its base
+// URL for the pending_actions executor. Both empty = Lume path closed / skipped.
+const LUME_ACTION_SECRET = Deno.env.get('LUME_ACTION_SECRET') ?? ''
+const LUME_URL = Deno.env.get('LUME_URL') ?? ''
 
 const TG_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`
 const INSTANTLY_BASE_URL = 'https://api.instantly.ai/api/v2'
@@ -47,6 +53,8 @@ async function supabaseRequest(
 }
 
 async function tg(method: string, body: unknown): Promise<Record<string, unknown>> {
+  // A synthetic callback from Lume has no callback_query_id to answer.
+  if (method === 'answerCallbackQuery' && !(body as { callback_query_id?: string }).callback_query_id) return {}
   const res = await fetch(`${TG_API}/${method}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1519,7 +1527,9 @@ async function handleLfoCallback(
 ): Promise<void> {
   if (action === 'lfo_count') {
     const count = Number(extra)
-    if (!LFO_COUNT_OPTIONS.includes(count)) {
+    // Lume sends any count the owner typed (≥ 500); Telegram only has presets.
+    const fromLume = cb.id === ''
+    if (!LFO_COUNT_OPTIONS.includes(count) && !(fromLume && count >= LUME_MIN_COUNT)) {
       await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'That option expired.' })
       return
     }
@@ -1585,6 +1595,64 @@ const PUSH_ACTIONS = new Set([
   'bar_loc', 'bar_co', 'push_next', 'push_go', 'push_strict', 'push_std', 'push_cancel',
 ])
 
+// ---- Lume pending actions (high-risk approvals) ----
+// Same shape as every other gate: claim the slot, then act. Executing lives in
+// Lume (/api/actions/<id>/execute) so one executor serves the click, the agent
+// and this button. decided_via records which surface won the claim.
+const LUME_ACTIONS = new Set(['lume_ok', 'lume_no'])
+
+interface PendingActionRow {
+  id: string
+  kind: string
+  telegram_message_id: number | null
+}
+
+async function handleLumeActionCallback(
+  action: string,
+  actionId: string,
+  cb: NonNullable<TelegramUpdate['callback_query']>,
+): Promise<void> {
+  const fromLume = cb.id === ''
+  await tg('answerCallbackQuery', { callback_query_id: cb.id, text: action === 'lume_ok' ? 'Approving…' : 'Rejecting.' })
+
+  const claimed = (await supabaseRequest(
+    'PATCH',
+    `pending_actions?id=eq.${actionId}&claim_status=eq.awaiting&status=eq.awaiting&select=id,kind,telegram_message_id`,
+    {
+      claim_status: 'claimed',
+      status: action === 'lume_ok' ? 'approved' : 'rejected',
+      decided_via: fromLume ? 'lume' : 'telegram',
+      decided_at: new Date().toISOString(),
+    },
+    { returning: true },
+  )) as PendingActionRow[]
+  if (!claimed?.length) return
+  const row = claimed[0]
+
+  // Strip the keyboard: on the tapped message, or on the stored prompt when the
+  // decision came from Lume and there is no message on the synthetic callback.
+  const edit = cb.message
+    ? { chatId: cb.message.chat.id, messageId: cb.message.message_id }
+    : row.telegram_message_id
+      ? { chatId: Number(TELEGRAM_CHAT_ID), messageId: row.telegram_message_id }
+      : undefined
+  if (edit) {
+    await tg('editMessageText', {
+      chat_id: edit.chatId,
+      message_id: edit.messageId,
+      text: `${action === 'lume_ok' ? '✅ Approved' : '❌ Rejected'} — ${row.kind} (from ${fromLume ? 'Lume' : 'Telegram'})`,
+    })
+  }
+
+  if (action === 'lume_ok' && LUME_URL) {
+    fetch(`${LUME_URL}/api/actions/${actionId}/execute`, {
+      method: 'POST',
+      headers: { 'X-Lume-Secret': LUME_ACTION_SECRET, 'Content-Type': 'application/json' },
+      body: '{}',
+    }).catch(err => console.error('[telegram-inbox] lume execute error:', err))
+  }
+}
+
 async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>): Promise<void> {
   const [action, targetId, extra] = (cb.data ?? '').split(':')
 
@@ -1610,6 +1678,11 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
 
   if (PUSH_ACTIONS.has(action) && targetId) {
     await handlePushCallback(action, targetId, extra, cb)
+    return
+  }
+
+  if (LUME_ACTIONS.has(action) && targetId) {
+    await handleLumeActionCallback(action, targetId, cb)
     return
   }
 
@@ -1822,6 +1895,45 @@ async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>)
 
 Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
+
+  // Lume's second way in: the dashboard taps the same buttons. Shared secret,
+  // then the exact handler a Telegram tap would run, with a synthetic callback
+  // (no id to answer, no message to edit unless the row stored one).
+  //
+  // Unlike the webhook branch this is awaited, not handed to waitUntil: Lume
+  // shows a spinner until the claim (and, for approve, the row load) is done,
+  // and needs the outcome in the response. The edge runtime's wall-clock limit
+  // (~150 s) bounds it; an approve of a very large CSV that outruns that is
+  // killed mid-load, which is the same failure the Telegram path would have —
+  // not engineered around here.
+  const lumeSecret = req.headers.get('X-Lume-Secret')
+  if (lumeSecret !== null) {
+    if (!(await secretsMatch(lumeSecret, LUME_ACTION_SECRET))) return new Response('Unauthorized', { status: 401 })
+    let body: { callback_data?: string }
+    try { body = await req.json() } catch { return new Response('Bad Request', { status: 400 }) }
+    const parsed = parseLumeAction(body?.callback_data ?? '')
+    if (!parsed) {
+      return new Response(JSON.stringify({ ok: false, error: 'bad callback_data' }), {
+        status: 400, headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    try {
+      await handleCallback({ id: '', from: { id: 0 }, data: body.callback_data })
+      await tg('sendMessage', {
+        chat_id: TELEGRAM_CHAT_ID,
+        text: `🖥 ${parsed.action} on ${parsed.targetId.slice(0, 8)} — decided in Lume`,
+      })
+      return new Response(JSON.stringify({ ok: true, action: parsed.action, target_id: parsed.targetId }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('[telegram-inbox] lume action error:', message)
+      return new Response(JSON.stringify({ ok: false, error: message }), {
+        status: 500, headers: { 'Content-Type': 'application/json' },
+      })
+    }
+  }
 
   const secret = req.headers.get('X-Telegram-Bot-Api-Secret-Token')
   if (secret !== TELEGRAM_WEBHOOK_SECRET) {
