@@ -38,6 +38,9 @@ export function parseLumeAction(data: string): LumeAction | null {
   // At most action:target:extra. A 4th segment is not a button we ever emit.
   if (parts.length > 3) return null
   const [action, targetId, extra] = parts
+  // 'approve:<id>:' is not a button we emit either; a present-but-empty extra
+  // is a malformed string, not "no extra".
+  if (parts.length === 3 && extra === '') return null
   if (!action || !targetId || !/^[0-9a-f-]{36}$/i.test(targetId)) return null
   if (!LUME_ALLOWED_ACTIONS.has(action)) return null
   if (action === 'lfo_count') {

@@ -1551,6 +1551,8 @@ async function handleLfoCallback(
       await placeLfoOrder(orderId, count, mid ? { chatId: Number(TELEGRAM_CHAT_ID), messageId: mid } : undefined)
       return
     }
+    // cb.message is always set here, so the ternary below is dead. The line is
+    // kept byte-for-byte on purpose: the Lume change is insertions-only.
     await placeLfoOrder(orderId, count, cb.message ? { chatId: cb.message.chat.id, messageId: cb.message.message_id } : undefined)
     return
   }
@@ -1700,10 +1702,19 @@ async function lumeGateKinds(targetId: string): Promise<string[]> {
   return (rows ?? []).map(r => r.kind)
 }
 
+// Heuristic, not proof: a Telegram tap landing between the before-read and the
+// claim can make this say `true` for a Lume request that actually lost the
+// race. It costs two extra REST reads per Lume action (before + after).
 function lumeGateChanged(before: string[], after: string[]): boolean {
   if (before.length > 0 && after.length === 0) return true
   return before.join(',') !== after.join(',')
 }
+
+// These act on states lume_gates does not list (a launch, an abort of a
+// running batch or order, a cancel from the barrier screen), so the gate-set
+// comparison cannot see them. For these `claimed` is null: not observable;
+// trust the handler's own chat messages.
+const GATELESS_ACTIONS = new Set(['camp_launch', 'jobs_abort', 'lfo_abort', 'push_cancel'])
 
 // The decision note carries the same brake the Telegram message would when the
 // action just started something that spends time or credits.
@@ -1983,12 +1994,24 @@ Deno.serve(async (req: Request) => {
     }
     const id8 = parsed.targetId.slice(0, 8)
     try {
-      const before = await lumeGateKinds(parsed.targetId)
+      const gateless = GATELESS_ACTIONS.has(parsed.action)
+      const before = gateless ? [] : await lumeGateKinds(parsed.targetId)
       await handleCallback({ id: '', from: { id: 0 }, data: body.callback_data })
-      const after = await lumeGateKinds(parsed.targetId)
-      const claimed = lumeGateChanged(before, after)
-      console.log('[lume]', parsed.action, parsed.targetId, claimed ? 'claimed' : 'no-op')
-      if (claimed) {
+      // claimed: true = the gate set changed, false = nothing moved (no-op),
+      // null = not observable (gateless action, or the after-read failed — the
+      // action is already committed by then, so a read failure must not become
+      // a 500 that tells Lume it did not happen).
+      let claimed: boolean | null = null
+      if (!gateless) {
+        try {
+          const after = await lumeGateKinds(parsed.targetId)
+          claimed = lumeGateChanged(before, after)
+        } catch (err) {
+          console.error(`[telegram-inbox] lume after-read failed (${parsed.action} ${parsed.targetId}):`, err instanceof Error ? err.message : String(err))
+        }
+      }
+      console.log('[lume]', parsed.action, parsed.targetId, claimed === null ? 'unobservable' : claimed ? 'claimed' : 'no-op')
+      if (claimed !== false) {
         await tg('sendMessage', {
           chat_id: TELEGRAM_CHAT_ID,
           text: `🖥 ${parsed.action} on ${id8} — decided in Lume`,

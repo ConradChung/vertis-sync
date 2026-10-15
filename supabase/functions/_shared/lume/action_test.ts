@@ -77,6 +77,12 @@ Deno.test('allowlist is exactly the Lume set, and every member is a dispatcher p
   }
 })
 
+Deno.test('a trailing empty segment is rejected, an absent one is fine', () => {
+  assertEquals(parseLumeAction(`approve:${ID}:`), null)
+  assertEquals(parseLumeAction(`lfo_count:${ID}:`), null)
+  assertEquals(parseLumeAction(`approve:${ID}`), { action: 'approve', targetId: ID, extra: undefined })
+})
+
 Deno.test('secretsMatch: equal secrets match, anything else does not', async () => {
   assert(await secretsMatch('abc123', 'abc123'))
   assert(!(await secretsMatch('abc124', 'abc123')))
