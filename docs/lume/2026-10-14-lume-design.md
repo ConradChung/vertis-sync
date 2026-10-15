@@ -222,7 +222,7 @@ Deep-link format: `https://<LUME_URL>/validate?gate=<kind>:<target_id>` and `htt
 
 ## Error handling / edge cases
 
-- Lume tap vs Telegram tap: same claim, zero rows → Lume shows "already handled" and refreshes; Telegram's `answerCallbackQuery` already said so on its side.
+- Lume tap vs Telegram tap: same claim, zero rows → the entrypoint sees the gate unchanged in `lume_gates`, returns `claimed:false` and posts no chat note; Lume shows "already handled" and refreshes; Telegram's `answerCallbackQuery` already said so on its side.
 - Entrypoint unreachable: Lume shows the error, nothing was claimed, the Telegram button still works.
 - Gate-opened hook fails (Lume down): the trigger's `net.http_post` is fire-and-forget; the original Telegram prompt was already sent by the pipeline, so the owner still has a button. No retry queue in v1.
 - Rotation tick with Lume down: pg_net POST fails silently; the rule's `next_run_at` is not advanced, so the next tick retries. A rule that errors inside Lume writes `last_result.error`, pings Telegram, and does not create an action.
