@@ -4,17 +4,22 @@ import { isOwner } from '@/lib/auth/isOwner'
 import { isPublicPath } from '@/lib/auth/publicPaths'
 
 /**
- * Single-user gate.
+ * Single-user gate. `lib/auth/publicPaths.ts` is the single source of what
+ * passes without a session; `config.matcher` below only trims framework
+ * assets so the function never runs for them.
  *
- *  - public paths (login, auth callback, shared-secret API entrypoints, static
- *    assets) pass through; the API ones verify their own `X-Lume-*` secret.
- *  - no session on anything else → redirect to /login
- *  - a session whose email is not LUME_ALLOWED_EMAIL → 403, rewritten to
- *    /forbidden so the URL stays put and nothing about the app leaks.
+ *  - public paths (login, forbidden, auth callback, magic-link, shared-secret
+ *    API entrypoints, static files) pass through; the API ones verify their
+ *    own `X-Lume-*` secret in the handler.
+ *  - API routes: no session → 401 JSON, wrong account → 403 JSON.
+ *  - pages: no session → redirect /login; wrong account → redirect /forbidden
+ *    (a redirect, not a rewrite: Next drops a custom status on rewrites, so
+ *    the URL changes and the 403 intent is carried by the page itself).
  */
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
   const isAuthPage = pathname === '/login' || pathname.startsWith('/auth/')
+  const isApi = pathname.startsWith('/api/')
 
   // Shared-secret and static routes never need a session refresh.
   if (isPublicPath(pathname) && !isAuthPage) {
@@ -27,35 +32,33 @@ export async function middleware(request: NextRequest) {
   if (isAuthPage) {
     // Already signed in as the owner: skip the login form.
     if (pathname === '/login' && user && owner) {
-      const url = request.nextUrl.clone()
-      url.pathname = '/overview'
-      url.search = ''
-      return redirectWithCookies(url, response)
+      return redirectTo('/overview', request, response)
     }
     return response
   }
 
   if (!user) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/login'
-    url.search = ''
-    return redirectWithCookies(url, response)
+    return isApi ? jsonError('unauthenticated', 401, response) : redirectTo('/login', request, response)
   }
 
   if (!owner) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/forbidden'
-    url.search = ''
-    const forbidden = NextResponse.rewrite(url, { request, status: 403 })
-    copyCookies(response, forbidden)
-    return forbidden
+    return isApi ? jsonError('forbidden', 403, response) : redirectTo('/forbidden', request, response)
   }
 
   return response
 }
 
-function redirectWithCookies(url: URL, from: NextResponse) {
+function redirectTo(pathname: string, request: NextRequest, from: NextResponse) {
+  const url = request.nextUrl.clone()
+  url.pathname = pathname
+  url.search = ''
   const to = NextResponse.redirect(url)
+  copyCookies(from, to)
+  return to
+}
+
+function jsonError(error: string, status: 401 | 403, from: NextResponse) {
+  const to = NextResponse.json({ error }, { status })
   copyCookies(from, to)
   return to
 }
@@ -66,12 +69,6 @@ function copyCookies(from: NextResponse, to: NextResponse) {
 }
 
 export const config = {
-  matcher: [
-    /*
-     * Everything except:
-     * - _next/static, _next/image (framework assets)
-     * - favicon.ico and image files
-     */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
-  ],
+  // Framework assets only; every other exemption lives in lib/auth/publicPaths.ts.
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 }

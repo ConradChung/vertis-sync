@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server'
 import type { EmailOtpType } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
+import { requestOrigin } from '@/lib/http/origin'
+
+/** Fixed error codes; the login page maps them to copy. Never leak messages into the URL. */
+export type CallbackError = 'missing_code' | 'exchange_failed' | 'expired'
 
 /**
  * Magic-link landing. Supabase redirects here with either a PKCE `code`
@@ -12,24 +16,25 @@ import { createClient } from '@/lib/supabase/server'
  * http://localhost:3000 and the Vercel deployment.
  */
 export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url)
+  const { searchParams } = new URL(request.url)
+  const origin = requestOrigin(request)
   const code = searchParams.get('code')
   const tokenHash = searchParams.get('token_hash')
   const type = searchParams.get('type') as EmailOtpType | null
 
+  const fail = (reason: CallbackError) => NextResponse.redirect(`${origin}/login?error=${reason}`)
+
+  if (!code && !(tokenHash && type)) return fail('missing_code')
+
   const supabase = await createClient()
+  const { error } = code
+    ? await supabase.auth.exchangeCodeForSession(code)
+    : await supabase.auth.verifyOtp({ token_hash: tokenHash!, type: type! })
 
-  if (code) {
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
-    if (!error) return NextResponse.redirect(`${origin}/overview`)
-    return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(error.message)}`)
-  }
+  if (!error) return NextResponse.redirect(`${origin}/overview`)
 
-  if (tokenHash && type) {
-    const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
-    if (!error) return NextResponse.redirect(`${origin}/overview`)
-    return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(error.message)}`)
-  }
-
-  return NextResponse.redirect(`${origin}/login?error=missing_code`)
+  console.warn('[auth/callback] failed:', error.code ?? error.status, error.message)
+  const expired =
+    error.code === 'otp_expired' || /expired|invalid/i.test(error.message)
+  return fail(expired ? 'expired' : 'exchange_failed')
 }

@@ -6,11 +6,46 @@ Next.js app inside this repo; see `docs/lume/2026-10-14-lume-design.md`.
 ## Deploy
 
 In the Vercel project settings, set **Root Directory** to `lume`. `vercel.json`
-here declares the framework; crons are added by later tasks.
+here declares the framework; `crons` is filled by later tasks.
 
-Environment variable names are listed in `.env.example`. Supabase Auth → URL
-Configuration must allowlist `<origin>/auth/callback` for `http://localhost:3000`
-and the Vercel URL before the magic link can land.
+Environment variable names are listed in `.env.example`.
+
+## Auth (one account)
+
+- Magic link only. `POST /api/auth/magic-link` checks the email against
+  `LUME_ALLOWED_EMAIL` and calls Supabase only for the owner, with
+  `shouldCreateUser: false`. Every caller gets `{ ok: true }`, so the endpoint
+  cannot be used to discover the owner's address.
+- **The owner's auth user must already exist.** One-time setup: create the user
+  in the Supabase dashboard (Authentication → Users → Add user, the allowed
+  email), or run a single sign-in with `shouldCreateUser: true` once and switch
+  it back.
+- Supabase Auth → URL Configuration must allowlist `<origin>/auth/callback` for
+  `http://localhost:3000` and the Vercel URL before the link can land.
+- Middleware: pages redirect to `/login` (no session) or `/forbidden` (wrong
+  account); `/api/*` gets `401` / `403` JSON instead. `lib/auth/publicPaths.ts`
+  is the single list of what passes without a session.
+
+## Design system notes
+
+- shadcn CLI 4 `base-nova` preset = **Base UI primitives**, not Radix. Compose
+  with the `render` prop (`<Button render={<Link href=… />}>`); there is no
+  `asChild`.
+- Tokens: `accent` is the translucent hover/selected tint. The solid brand
+  violet is `brand` (alias) or `violet`; `primary` is the same violet for
+  buttons. Text is `fg`, `fg-70`, `fg-46`, `fg-24`.
+- `.glass` for elevated panels, `.surface` for tables. `GlassCard` is
+  hand-written (the glasscn registry was unreachable) and composes with
+  shadcn's `CardHeader` / `CardContent`.
+- Shimmer bars use `.anim-shimmer`, never `.shimmer` (shadcn owns that name for
+  a text-clip effect).
+- **Reduced motion rule for new components:** `<MotionConfig reducedMotion="user">`
+  wraps the app, so `motion` components snap instead of animating. Purely
+  decorative infinite motion (BorderBeam, orb breathe, feed slide-in) must
+  render nothing or stand still under `useReducedMotion()` / the
+  `prefers-reduced-motion` media query. Use the `.anim-*` classes for CSS
+  animation so the global rule in `globals.css` can switch them off. Re-adding
+  `border-beam` from the Magic UI registry will overwrite its gate; re-apply it.
 
 ## Develop
 

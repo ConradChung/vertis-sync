@@ -50,6 +50,7 @@
   --color-surface: var(--surface);
   --color-line: var(--line);
   --color-violet: var(--violet);
+  --color-brand: var(--violet); /* solid brand violet; `accent` is the hover tint */
   --color-violet-soft: var(--violet-soft);
   --color-green: var(--green);
   --color-amber: var(--amber);
@@ -83,7 +84,8 @@
   --ease-glass: cubic-bezier(0.2, 0.8, 0.2, 1);
   --animate-feed-in: feed-in 0.45s var(--ease-glass) both;
   --animate-rise: rise 0.25s var(--ease-glass) both;
-  --animate-shimmer: shimmer 1.3s linear infinite;
+  /* `anim-shimmer`, not `shimmer`: shadcn/tailwind.css owns a text-clip `shimmer` utility. */
+  --animate-anim-shimmer: bar-shimmer 1.3s linear infinite;
 }
 
 /* ------------------------------------------------------------------ */
@@ -300,10 +302,10 @@
   .anim-rise {
     animation: rise 0.25s var(--ease-glass) both;
   }
-  .shimmer {
+  .anim-shimmer {
     background: linear-gradient(90deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
     background-size: 200% 100%;
-    animation: shimmer 1.3s linear infinite;
+    animation: bar-shimmer 1.3s linear infinite;
     border-radius: 5px;
   }
 }
@@ -333,8 +335,10 @@
   }
 }
 
-/* Reduced motion: the OS setting, or `html.reduce-motion` /
-   `html[data-reduced-motion="true"]` set from JS (motion's useReducedMotion). */
+/* Reduced motion. Lume's own animations are switched off outright; the
+   catch-all below collapses anything else (tw-animate, third-party, future
+   components) to a single near-instant frame. JS motion is handled by
+   <MotionConfig reducedMotion="user"> in app/layout.tsx. */
 @media (prefers-reduced-motion: reduce) {
   .backdrop,
   .orb-canvas,
@@ -342,23 +346,16 @@
   .orbit-ring,
   .anim-feed,
   .anim-rise,
-  .shimmer {
+  .anim-shimmer {
     animation: none !important;
   }
-}
-html.reduce-motion .backdrop,
-html.reduce-motion .orb-canvas,
-html.reduce-motion .orbit-ring,
-html.reduce-motion .anim-feed,
-html.reduce-motion .anim-rise,
-html.reduce-motion .shimmer,
-html[data-reduced-motion="true"] .backdrop,
-html[data-reduced-motion="true"] .orb-canvas,
-html[data-reduced-motion="true"] .orbit-ring,
-html[data-reduced-motion="true"] .anim-feed,
-html[data-reduced-motion="true"] .anim-rise,
-html[data-reduced-motion="true"] .shimmer {
-  animation: none !important;
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Responsive shell */
@@ -447,7 +444,7 @@ html[data-reduced-motion="true"] .shimmer {
     transform: translateY(0);
   }
 }
-@keyframes shimmer {
+@keyframes bar-shimmer {
   to {
     background-position: -200% 0;
   }

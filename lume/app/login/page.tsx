@@ -4,9 +4,15 @@ import { Suspense, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { createClient } from '@/lib/supabase/client'
 
 type Status = 'idle' | 'sending' | 'sent' | 'error'
+
+/** Copy for the fixed codes `/auth/callback` can return. */
+const CALLBACK_ERRORS: Record<string, string> = {
+  missing_code: 'That link was incomplete. Request a new one.',
+  expired: 'That link has expired or was already used. Request a new one.',
+  exchange_failed: 'Sign-in could not be completed. Request a new link.',
+}
 
 export default function LoginPage() {
   return (
@@ -26,39 +32,38 @@ export default function LoginPage() {
 
 function LoginForm() {
   const searchParams = useSearchParams()
-  const callbackError = searchParams.get('error')
+  const code = searchParams.get('error')
+  const callbackMessage = code ? (CALLBACK_ERRORS[code] ?? CALLBACK_ERRORS.exchange_failed) : null
 
   const [email, setEmail] = useState('')
-  const [status, setStatus] = useState<Status>(callbackError ? 'error' : 'idle')
-  const [message, setMessage] = useState<string | null>(
-    callbackError === 'missing_code'
-      ? 'That link was incomplete. Request a new one.'
-      : callbackError
-  )
+  const [status, setStatus] = useState<Status>(callbackMessage ? 'error' : 'idle')
+  const [message, setMessage] = useState<string | null>(callbackMessage)
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setStatus('sending')
     setMessage(null)
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
-    })
-    if (error) {
+    try {
+      // The route decides whether anything is sent; the response is the same either way.
+      const res = await fetch('/api/auth/magic-link', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      })
+      if (!res.ok) throw new Error(String(res.status))
+      setStatus('sent')
+    } catch {
       setStatus('error')
-      setMessage(error.message)
-      return
+      setMessage('Could not reach the server. Try again.')
     }
-    setStatus('sent')
   }
 
   return (
     <>
       {status === 'sent' ? (
         <div className="mt-6 rounded-control border border-green/30 bg-green/10 p-3 text-sm text-fg-70" role="status">
-          Check <span className="font-mono text-fg">{email.trim()}</span> for a sign-in link. It expires in an
-          hour.
+          If <span className="font-mono text-fg">{email.trim()}</span> is the owner&apos;s address, a sign-in
+          link is on its way. It expires in an hour.
         </div>
       ) : (
         <form onSubmit={onSubmit} className="mt-6 flex flex-col gap-3">

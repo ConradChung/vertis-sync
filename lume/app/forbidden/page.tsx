@@ -4,8 +4,10 @@ import { SignOutButton } from '@/components/auth/SignOutButton'
 export const metadata: Metadata = { title: 'Forbidden' }
 
 /**
- * Rendered by the middleware rewrite (status 403) when a valid session does
- * not belong to LUME_ALLOWED_EMAIL. Reachable directly too (200).
+ * The middleware redirects here (307) when a valid session does not belong to
+ * LUME_ALLOWED_EMAIL. It is a redirect rather than a 403 rewrite because Next
+ * drops a custom status on rewrites; the page itself serves 200 and is public
+ * so a signed-out visitor can read it too. API routes get 403 JSON instead.
  */
 export default function ForbiddenPage() {
   return (
