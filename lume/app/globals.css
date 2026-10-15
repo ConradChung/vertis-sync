@@ -1,0 +1,454 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ------------------------------------------------------------------ */
+/* Tokens → Tailwind                                                   */
+/* Lume is dark-only. Raw values live on :root; this block exposes them */
+/* as utilities: bg-panel, text-violet, text-fg-46, font-mono,          */
+/* rounded-panel, border-line, and the shadcn semantic set.             */
+/* ------------------------------------------------------------------ */
+@theme inline {
+  /* shadcn semantic palette (mapped onto Lume values in :root) */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Lume palette (DESIGN.md) */
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-surface: var(--surface);
+  --color-line: var(--line);
+  --color-violet: var(--violet);
+  --color-violet-soft: var(--violet-soft);
+  --color-green: var(--green);
+  --color-amber: var(--amber);
+  --color-red: var(--red);
+  --color-cyan: var(--cyan);
+
+  /* Text: white at 100 / 70 / 46 / 24 % */
+  --color-fg: var(--fg);
+  --color-fg-70: var(--fg-70);
+  --color-fg-46: var(--fg-46);
+  --color-fg-24: var(--fg-24);
+
+  /* Type */
+  --font-sans: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SF Mono", monospace;
+  --font-heading: var(--font-sans);
+
+  /* Radius: 10 px controls, 16–20 px panels (shadcn scale derives from --radius) */
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-control: var(--radius);
+  --radius-panel: var(--radius-panel);
+  --radius-panel-lg: var(--radius-panel-lg);
+
+  /* Motion */
+  --ease-glass: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-feed-in: feed-in 0.45s var(--ease-glass) both;
+  --animate-rise: rise 0.25s var(--ease-glass) both;
+  --animate-shimmer: shimmer 1.3s linear infinite;
+}
+
+/* ------------------------------------------------------------------ */
+/* Raw tokens (dark only)                                              */
+/* ------------------------------------------------------------------ */
+:root {
+  color-scheme: dark;
+
+  /* Lume */
+  --bg: #070711;
+  --panel: rgba(20, 19, 35, 0.76);
+  --surface: rgba(15, 15, 25, 0.94);
+  --line: rgba(255, 255, 255, 0.1);
+  --violet: #8b5cf6;
+  --violet-soft: #c4b5fd;
+  --green: #22c55e;
+  --amber: #f59e0b;
+  --red: #f43f5e;
+  --cyan: #06b6d4;
+  --fg: #ffffff;
+  --fg-70: rgba(255, 255, 255, 0.7);
+  --fg-46: rgba(255, 255, 255, 0.46);
+  --fg-24: rgba(255, 255, 255, 0.24);
+
+  --radius: 10px;
+  --radius-panel: 16px;
+  --radius-panel-lg: 20px;
+  --topbar-h: 76px;
+
+  /* shadcn semantic → Lume */
+  --background: var(--bg);
+  --foreground: var(--fg);
+  --card: var(--panel);
+  --card-foreground: var(--fg);
+  --popover: rgba(20, 19, 35, 0.97);
+  --popover-foreground: var(--fg);
+  --primary: var(--violet);
+  --primary-foreground: #ffffff;
+  --secondary: rgba(255, 255, 255, 0.06);
+  --secondary-foreground: rgba(255, 255, 255, 0.75);
+  --muted: rgba(255, 255, 255, 0.06);
+  --muted-foreground: var(--fg-46);
+  /* accent = the hover/selected tint (prototype's rgba(139,92,246,.16)); brand violet is `primary` / `violet` */
+  --accent: rgba(139, 92, 246, 0.16);
+  --accent-foreground: #ddd0ff;
+  --destructive: var(--red);
+  --border: var(--line);
+  --input: rgba(255, 255, 255, 0.12);
+  --ring: rgba(139, 92, 246, 0.6);
+  --chart-1: var(--violet);
+  --chart-2: var(--green);
+  --chart-3: var(--amber);
+  --chart-4: var(--cyan);
+  --chart-5: var(--red);
+  --sidebar: var(--panel);
+  --sidebar-foreground: var(--fg);
+  --sidebar-primary: var(--violet);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--ring);
+}
+
+/* ------------------------------------------------------------------ */
+/* Base                                                                */
+/* ------------------------------------------------------------------ */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground;
+    min-height: 100dvh;
+    font-size: 14px;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: rgba(139, 92, 246, 0.35);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Recipes                                                             */
+/* ------------------------------------------------------------------ */
+@layer components {
+  /* Glass — exactly per DESIGN.md. Elevated layers only; tables use .surface. */
+  .glass {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.035));
+    -webkit-backdrop-filter: blur(22px);
+    backdrop-filter: blur(22px);
+    border: 1px solid rgba(255, 255, 255, 0.11);
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.11);
+  }
+
+  /* Reading surface — 94 % opaque for table contrast. */
+  .surface {
+    background: var(--surface);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  /* Fixed top bar: a darker glass so tabs stay legible over any backdrop. */
+  .topbar {
+    background: rgba(8, 7, 17, 0.72);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  }
+
+  /* Mesh-gradient backdrop (slow ~60 s drift). Sits behind everything. */
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-color: var(--bg);
+    background-image:
+      radial-gradient(ellipse at 72% -5%, rgba(123, 78, 220, 0.42), transparent 35%),
+      radial-gradient(ellipse at 8% 74%, rgba(30, 92, 170, 0.34), transparent 42%),
+      linear-gradient(120deg, #080817, #17102a 48%, #060711);
+    background-size:
+      180% 180%,
+      180% 180%,
+      100% 100%;
+    animation: mesh-drift 60s ease-in-out infinite alternate;
+  }
+
+  /* Page scaffold */
+  .shell {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: calc(var(--topbar-h) + 34px) 32px 60px;
+  }
+  .brand {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -1px;
+    line-height: 1;
+    color: var(--fg);
+    text-decoration: none;
+  }
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--fg-46);
+  }
+  .page-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  /* Orb (from the reference revision pass) */
+  .orb-button {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+  .orb-placeholder {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 32% 26%, #c4b5fd, #8b5cf6 42%, #31206b 76%);
+    opacity: 0.6;
+  }
+  .orb-canvas {
+    position: relative;
+    display: grid;
+    place-items: center;
+    filter: drop-shadow(0 0 15px rgba(139, 92, 246, 0.48));
+    animation: orb-breathe 4s ease-in-out infinite;
+  }
+  .orb-canvas canvas {
+    width: 100% !important;
+    height: 100% !important;
+  }
+  .orb-canvas.needs-approval {
+    filter: drop-shadow(0 0 15px rgba(245, 158, 11, 0.55));
+    animation: orb-bounce 2.4s ease-in-out infinite;
+  }
+  .orb-canvas.needs-approval::before {
+    content: "";
+    position: absolute;
+    inset: -6px;
+    border: 1px solid rgba(245, 158, 11, 0.75);
+    border-radius: 50%;
+  }
+  .orbit-ring {
+    position: absolute;
+    inset: -11px;
+    border: 1px solid rgba(139, 92, 246, 0.7);
+    border-radius: 50%;
+    transform: rotate(-18deg) skewX(-22deg);
+    animation: orbit-spin 2.8s linear infinite;
+  }
+
+  /* Feed / sheet motion hooks. Put these on items instead of raw keyframes so
+     reduced-motion can switch them all off in one place. */
+  .anim-feed {
+    animation: feed-in 0.45s var(--ease-glass) both;
+  }
+  .anim-rise {
+    animation: rise 0.25s var(--ease-glass) both;
+  }
+  .shimmer {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
+    background-size: 200% 100%;
+    animation: shimmer 1.3s linear infinite;
+    border-radius: 5px;
+  }
+}
+
+/* Solid fallbacks: no backdrop-filter support, or the user asked for less transparency. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass {
+    background: rgba(20, 19, 35, 0.94);
+  }
+  .topbar {
+    background: rgba(8, 7, 17, 0.96);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass {
+    background: rgba(20, 19, 35, 0.96);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .topbar {
+    background: rgba(8, 7, 17, 0.98);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .backdrop {
+    background-image: linear-gradient(120deg, #080817, #120d22 48%, #060711);
+  }
+}
+
+/* Reduced motion: the OS setting, or `html.reduce-motion` /
+   `html[data-reduced-motion="true"]` set from JS (motion's useReducedMotion). */
+@media (prefers-reduced-motion: reduce) {
+  .backdrop,
+  .orb-canvas,
+  .orb-canvas.needs-approval,
+  .orbit-ring,
+  .anim-feed,
+  .anim-rise,
+  .shimmer {
+    animation: none !important;
+  }
+}
+html.reduce-motion .backdrop,
+html.reduce-motion .orb-canvas,
+html.reduce-motion .orbit-ring,
+html.reduce-motion .anim-feed,
+html.reduce-motion .anim-rise,
+html.reduce-motion .shimmer,
+html[data-reduced-motion="true"] .backdrop,
+html[data-reduced-motion="true"] .orb-canvas,
+html[data-reduced-motion="true"] .orbit-ring,
+html[data-reduced-motion="true"] .anim-feed,
+html[data-reduced-motion="true"] .anim-rise,
+html[data-reduced-motion="true"] .shimmer {
+  animation: none !important;
+}
+
+/* Responsive shell */
+@media (max-width: 1000px) {
+  .shell {
+    padding: calc(var(--topbar-h) + 24px) 18px 48px;
+  }
+}
+@media (max-width: 640px) {
+  :root {
+    --topbar-h: 108px;
+  }
+  .topbar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 64px;
+    padding: 12px 14px;
+  }
+  .topbar .nav {
+    order: 3;
+    flex-basis: 100%;
+    overflow: auto;
+  }
+  .page-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+}
+
+/* Keyframes */
+@keyframes mesh-drift {
+  from {
+    background-position:
+      0% 0%,
+      100% 100%,
+      0 0;
+  }
+  to {
+    background-position:
+      100% 10%,
+      0% 80%,
+      0 0;
+  }
+}
+@keyframes orb-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+@keyframes orb-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+@keyframes orbit-spin {
+  to {
+    transform: rotate(342deg) skewX(-22deg);
+  }
+}
+@keyframes feed-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(-7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}

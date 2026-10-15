@@ -12,6 +12,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "lume/**", // second Next app with its own ESLint config (see lume/eslint.config.mjs)
   ]),
 ]);
 
