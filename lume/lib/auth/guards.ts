@@ -3,23 +3,38 @@ import type { User } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { isOwner } from '@/lib/auth/isOwner'
 import { secretMatches } from '@/lib/auth/secret'
+import { internalBearerMatches } from '@/lib/auth/internalBearer'
 
 export { secretMatches }
 
 type Pass<T> = { ok: true } & T
 type Fail = { ok: false; response: NextResponse }
 
+export type OwnerAuth =
+  | Pass<{ via: 'session'; user: User }>
+  | Pass<{ via: 'internal'; user: null }>
+
 /**
- * For route handlers behind the owner's session.
+ * For route handlers behind the owner.
  *
- * Reads the session through the cookie-backed server client and checks the
- * email against `LUME_ALLOWED_EMAIL`. 401 when there is no session, 403 when
- * the session belongs to someone else. Call before touching the service role:
+ * Two ways in:
+ *  1. `Authorization: Bearer ${LUME_INTERNAL_SECRET}` (constant-time) — the
+ *     agent's tool wrappers calling routes server-to-server. Only checked when
+ *     the request is passed in; browsers never send this header.
+ *  2. The owner's cookie session, read through the server client and checked
+ *     against `LUME_ALLOWED_EMAIL`.
  *
- *   const auth = await requireOwner()
+ * 401 when neither is present, 403 when the session belongs to someone else.
+ * Call before touching the service role:
+ *
+ *   const auth = await requireOwner(req)
  *   if (!auth.ok) return auth.response
  */
-export async function requireOwner(): Promise<Pass<{ user: User }> | Fail> {
+export async function requireOwner(req?: Request): Promise<OwnerAuth | Fail> {
+  if (req && internalBearerMatches(req.headers.get('authorization'), process.env.LUME_INTERNAL_SECRET)) {
+    return { ok: true, via: 'internal', user: null }
+  }
+
   const supabase = await createClient()
   const {
     data: { user },
@@ -31,7 +46,7 @@ export async function requireOwner(): Promise<Pass<{ user: User }> | Fail> {
   if (!isOwner(user.email, process.env.LUME_ALLOWED_EMAIL)) {
     return { ok: false, response: NextResponse.json({ error: 'forbidden' }, { status: 403 }) }
   }
-  return { ok: true, user }
+  return { ok: true, via: 'session', user }
 }
 
 /**

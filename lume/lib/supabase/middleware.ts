@@ -37,9 +37,11 @@ export async function updateSession(
   } = await supabase.auth.getUser()
 
   // No valid user but stale auth cookies: clear them so the next login is clean.
+  // Skip `*-code-verifier`: it is set by signInWithOtp before the magic link
+  // lands and must survive the signed-out /auth/callback hop that exchanges it.
   if (!user) {
     for (const c of request.cookies.getAll()) {
-      if (c.name.startsWith('sb-') && c.name.includes('auth-token')) {
+      if (c.name.startsWith('sb-') && c.name.includes('auth-token') && !c.name.includes('code-verifier')) {
         response.cookies.set(c.name, '', { maxAge: 0, path: '/' })
       }
     }

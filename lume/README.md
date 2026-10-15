@@ -25,6 +25,26 @@ Environment variable names are listed in `.env.example`.
 - Middleware: pages redirect to `/login` (no session) or `/forbidden` (wrong
   account); `/api/*` gets `401` / `403` JSON instead. `lib/auth/publicPaths.ts`
   is the single list of what passes without a session.
+- Server-to-server: `/api/*` also accepts `Authorization: Bearer
+  ${LUME_INTERNAL_SECRET}` (the agent's tool wrappers, Task 14). The middleware
+  only checks the header's shape (`lib/auth/bearer.ts`, Edge-safe); the route's
+  `requireOwner(req)` does the constant-time comparison.
+
+## Data layer
+
+- `lib/db/service.ts` (server-only) wraps the service-role client: `lume_gates`
+  / `lume_orders` / `lume_lead_bank` views, `lume_overview()` /
+  `lume_scheduled_jobs()` RPCs, `events` writes. Row types are hand-written in
+  `lib/db/types.ts`; pure query/message/action logic lives in sibling files
+  (`leadBankQuery.ts`, `telegram.messages.ts`, `pipeline.actions.ts`) so it is
+  unit-tested without `server-only`.
+- Gate decisions go through `lib/adapters/pipeline.ts` → the `telegram-inbox`
+  entrypoint; Lume never copies the conditional-PATCH claims.
+- `lib/adapters/telegram.ts` no-ops with a `[telegram] not configured` warning
+  when `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` are unset.
+- Screens use SWR hooks in `hooks/` that revalidate on Realtime inserts
+  (`useRealtimeInvalidate`).
+- Live read check: `LUME_SMOKE=1 npm run smoke:db` (row counts only).
 
 ## Design system notes
 

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
 import { isOwner } from '@/lib/auth/isOwner'
 import { isPublicPath } from '@/lib/auth/publicPaths'
+import { hasBearerToken } from '@/lib/auth/bearer'
 
 /**
  * Single-user gate. `lib/auth/publicPaths.ts` is the single source of what
@@ -23,6 +24,14 @@ export async function middleware(request: NextRequest) {
 
   // Shared-secret and static routes never need a session refresh.
   if (isPublicPath(pathname) && !isAuthPage) {
+    return NextResponse.next({ request })
+  }
+
+  // Server-to-server callers (the agent's tool wrappers) authenticate with
+  // `Authorization: Bearer ${LUME_INTERNAL_SECRET}`, which the route's
+  // `requireOwner(req)` verifies in constant time. The middleware only checks
+  // the header's shape: a wrong token still gets a 401, from the handler.
+  if (isApi && hasBearerToken(request.headers.get('authorization'))) {
     return NextResponse.next({ request })
   }
 

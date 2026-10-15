@@ -1,0 +1,268 @@
+/**
+ * Row types for what Lume reads and writes in Supabase.
+ *
+ * Hand-written from the SQL in supabase/migrations/20261014*_lume_*.sql
+ * (views: lume_views + lume_views_fixes; tables: lume_core + lume_core_fixes;
+ * RPCs: lume_triggers_fixes). Keep them honest to the SQL.
+ *
+ * TODO(later): regenerate with
+ *   supabase gen types typescript --project-id rcfrumrbauwvyzfebxck --schema public > lume/lib/db/database.types.ts
+ * and derive these from `Database['public']`. Views and `returns json` RPCs
+ * come back loosely typed from the generator, so the view/RPC shapes below
+ * would still be the source of truth for the UI.
+ */
+
+// ---------------------------------------------------------------------------
+// Gates (view lume_gates)
+
+export const GATE_KINDS = [
+  'ingest_approval',
+  'finder_decision',
+  'campaign_choice',
+  'push_review',
+  'stall',
+  'jobs_review',
+  'jobs_fill',
+  'jobs_write',
+  'jobs_stall',
+  'lfo_count',
+  'lume_action',
+] as const
+export type GateKind = (typeof GATE_KINDS)[number]
+
+/** Tables `lume_gate_opened()` fires for; `target_table` in the hook body. */
+export const GATE_TARGET_TABLES = [
+  'telegram_ingests',
+  'validation_jobs',
+  'job_batches',
+  'apollo_orders',
+  'pending_actions',
+] as const
+export type GateTargetTable = (typeof GATE_TARGET_TABLES)[number]
+
+/** Button actions each gate kind offers, exactly as the view's `actions` column. */
+export const GATE_ACTIONS: Record<GateKind, readonly string[]> = {
+  ingest_approval: ['approve', 'approve_enrich', 'deny'], // ['deny'] alone when no email column was detected
+  finder_decision: ['finder_go', 'finder_skip'],
+  campaign_choice: ['pick_campaign', 'push_cancel'],
+  push_review: ['bar_loc', 'bar_co', 'push_strict', 'push_std', 'push_go', 'push_cancel'],
+  stall: ['wd_resume'],
+  jobs_review: ['jobs_pull', 'jobs_skip'],
+  jobs_fill: ['jobs_order_now', 'jobs_abort'],
+  jobs_write: ['jobs_write', 'jobs_discard'],
+  jobs_stall: ['jobs_resume', 'jobs_abort'],
+  lfo_count: ['lfo_count', 'lfo_cancel'],
+  lume_action: ['lume_ok', 'lume_no'],
+}
+
+export type Json = string | number | boolean | null | { [key: string]: Json } | Json[]
+
+export interface GateRow {
+  kind: GateKind
+  target_table: GateTargetTable
+  target_id: string
+  title: string | null
+  subtitle: string | null
+  actions: string[]
+  counts: Record<string, Json>
+  telegram_message_id: number | null
+  created_at: string
+}
+
+// ---------------------------------------------------------------------------
+// Orders (view lume_orders)
+
+export type OrderKind = 'ingest' | 'apollo_order' | 'job_batch' | 'dashboard_job'
+
+export interface OrderRow {
+  kind: OrderKind
+  id: string
+  source: string | null
+  summary: string | null
+  row_count: number | null
+  status: string | null
+  cost_usd: number | null
+  created_by: string | null
+  validation_job_id: string | null
+  created_at: string
+}
+
+// ---------------------------------------------------------------------------
+// Lead bank (view lume_lead_bank)
+
+export type LeadBankOrigin = 'lead_bank' | 'validation_rows'
+
+export interface LeadBankRow {
+  origin: LeadBankOrigin
+  id: string
+  email: string | null
+  first_name: string | null
+  last_name: string | null
+  company_name: string | null
+  city: string | null
+  icp_status: string | null
+  campaign_id: string | null
+  state: string | null // 'queued' for lead_bank rows, 'unassigned' for validation rows
+  created_at: string | null
+}
+
+// ---------------------------------------------------------------------------
+// RPCs
+
+/** One element of `lume_scheduled_jobs()`. */
+export interface ScheduledJob {
+  name: string
+  cron: string
+  runner: 'pg_cron' | 'claude' | 'vercel' | 'other' | 'rotation_rule' | string
+  active: boolean
+  target: string | null
+  last_status: string | null
+  last_run_at: string | null
+}
+
+/** `lume_overview()` result. */
+export interface Overview {
+  now: string
+  pending_gates: number
+  replies_today: number
+  bounces_24h: number
+  active_jobs: number
+  lead_bank_queued: number
+  events_last_at: string | null
+  recent_events: EventRow[]
+}
+
+/** What `GET /api/overview` returns: the RPC plus the scheduled jobs. */
+export interface OverviewResponse extends Overview {
+  scheduled_jobs: ScheduledJob[]
+}
+
+// ---------------------------------------------------------------------------
+// Tables
+
+export interface EventRow {
+  id: number
+  type: string
+  source: string | null
+  source_id: string | null
+  campaign_id: string | null
+  lead_email: string | null
+  title: string
+  payload: Record<string, Json>
+  webhook_id: string | null
+  created_at: string
+}
+
+export type EventInsert = {
+  type: string
+  source: string
+  title: string
+  source_id?: string | null
+  campaign_id?: string | null
+  lead_email?: string | null
+  payload?: Record<string, Json>
+  webhook_id?: string | null
+}
+
+export type PendingActionKind =
+  | 'push_to_instantly'
+  | 'launch_campaign'
+  | 'assign_leads'
+  | 'activate_rule'
+  | 'send_reply'
+  | 'pause_campaign'
+  | 'resume_campaign'
+  | 'create_campaign'
+  | 'decide_gate'
+  | 'delete_rule'
+
+export type PendingActionStatus =
+  | 'awaiting'
+  | 'approved'
+  | 'executing'
+  | 'executed'
+  | 'rejected'
+  | 'failed'
+  | 'expired'
+
+export interface PendingActionRow {
+  id: string
+  kind: PendingActionKind
+  payload: Record<string, Json>
+  risk: 'high'
+  status: PendingActionStatus
+  claim_status: 'awaiting' | 'claimed'
+  requested_by: 'user' | 'agent' | 'rule'
+  agent_run_id: string | null
+  rule_id: string | null
+  telegram_message_id: number | null
+  decided_via: 'lume' | 'telegram' | null
+  decided_at: string | null
+  executed_at: string | null
+  result: Record<string, Json> | null
+  error: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentRunRow {
+  id: string
+  prompt: string
+  status: 'running' | 'needs_approval' | 'done' | 'failed'
+  plan: Json | null
+  tool_calls: Json[]
+  approval_action_id: string | null
+  outcome: string | null
+  model: string | null
+  usage: Record<string, Json> | null
+  created_at: string
+  finished_at: string | null
+}
+
+export interface RotationRuleFilter {
+  source?: string
+  icp_status?: string
+  city?: string
+  since?: string
+}
+
+export interface RotationRuleRow {
+  id: string
+  name: string
+  campaign_id: string // soft reference to lume_campaigns.external_id
+  filter: RotationRuleFilter
+  daily_cap: number
+  order_by: 'newest' | 'oldest'
+  cron: string
+  active: boolean
+  next_run_at: string | null
+  last_run_at: string | null
+  last_result: Record<string, Json> | null
+  created_at: string
+}
+
+export interface LumeCampaignRow {
+  id: string
+  family: 'kaspen' | 'recruiter' | 'muse' | 'other'
+  name: string
+  external_id: string | null
+  sender_type: 'instantly' | 'gmail' | 'muse'
+  status: string // draft|active|paused|completed|manual|unknown
+  capacity_per_day: number | null
+  opportunity_value_usd: number | null
+  instantly: Record<string, Json> | null
+  synced_at: string | null
+  created_at: string
+}
+
+export interface LumeExternalScheduleRow {
+  id: string
+  name: string
+  cron: string
+  target: string
+  runner: 'claude' | 'vercel' | 'other'
+  last_status: string | null
+  last_run_at: string | null
+  notes: string | null
+  created_at: string
+}
