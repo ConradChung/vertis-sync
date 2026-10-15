@@ -3,7 +3,7 @@
 // gets an Approve/Deny prompt, and only on approval does the file enter the
 // normal validation pipeline (validation_jobs/validation_rows + email-validator).
 
-import { LUME_MIN_COUNT, parseLumeAction, secretsMatch } from '../_shared/lume/action.ts'
+import { LUME_MIN_COUNT, LUME_MAX_COUNT, parseLumeAction, secretsMatch } from '../_shared/lume/action.ts'
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 
@@ -262,6 +262,13 @@ interface TelegramUpdate {
     data?: string
     message?: { message_id: number; chat: { id: number } }
   }
+}
+
+// An empty callback id is the Lume marker: the dashboard's POST runs the same
+// handler with a synthetic callback that Telegram never issued, so there is no
+// id to answer and (usually) no message to edit.
+function isLumeCallback(cb: NonNullable<TelegramUpdate['callback_query']>): boolean {
+  return cb.id === ''
 }
 
 interface TelegramIngest {
@@ -1527,13 +1534,23 @@ async function handleLfoCallback(
 ): Promise<void> {
   if (action === 'lfo_count') {
     const count = Number(extra)
-    // Lume sends any count the owner typed (≥ 500); Telegram only has presets.
-    const fromLume = cb.id === ''
-    if (!LFO_COUNT_OPTIONS.includes(count) && !(fromLume && count >= LUME_MIN_COUNT)) {
+    // Lume sends any count the owner typed (500..50000); Telegram only has presets.
+    const fromLume = isLumeCallback(cb)
+    if (!LFO_COUNT_OPTIONS.includes(count) && !(fromLume && count >= LUME_MIN_COUNT && count <= LUME_MAX_COUNT)) {
       await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'That option expired.' })
       return
     }
     await tg('answerCallbackQuery', { callback_query_id: cb.id, text: `Ordering ${count}…` })
+    if (!cb.message) {
+      // No message on the callback (Lume): strip the keyboard from the stored
+      // count prompt instead, so the stale Telegram buttons can't be tapped.
+      const rows = (await supabaseRequest(
+        'GET', `apollo_orders?id=eq.${orderId}&select=telegram_message_id&limit=1`,
+      )) as { telegram_message_id: number | null }[]
+      const mid = rows?.[0]?.telegram_message_id
+      await placeLfoOrder(orderId, count, mid ? { chatId: Number(TELEGRAM_CHAT_ID), messageId: mid } : undefined)
+      return
+    }
     await placeLfoOrder(orderId, count, cb.message ? { chatId: cb.message.chat.id, messageId: cb.message.message_id } : undefined)
     return
   }
@@ -1612,7 +1629,7 @@ async function handleLumeActionCallback(
   actionId: string,
   cb: NonNullable<TelegramUpdate['callback_query']>,
 ): Promise<void> {
-  const fromLume = cb.id === ''
+  const fromLume = isLumeCallback(cb)
   await tg('answerCallbackQuery', { callback_query_id: cb.id, text: action === 'lume_ok' ? 'Approving…' : 'Rejecting.' })
 
   const claimed = (await supabaseRequest(
@@ -1644,13 +1661,60 @@ async function handleLumeActionCallback(
     })
   }
 
-  if (action === 'lume_ok' && LUME_URL) {
+  if (action !== 'lume_ok') return
+
+  if (!LUME_URL) {
+    // The row is now `approved` with nothing to run it. Say so, loudly, rather
+    // than leave it stuck where only a DB query would find it.
+    console.warn(`[telegram-inbox] lume_ok ${actionId} (${row.kind}) approved but LUME_URL is not set`)
+    await tg('sendMessage', {
+      chat_id: TELEGRAM_CHAT_ID,
+      text: `⚠️ Approved but LUME_URL is not set — nothing executed (${row.kind} ${actionId.slice(0, 8)})`,
+    })
+    return
+  }
+
+  // Executing lives in Lume. Fire it under waitUntil so the request can return
+  // while the executor runs, and so a non-2xx is logged instead of swallowed.
+  EdgeRuntime.waitUntil(
     fetch(`${LUME_URL}/api/actions/${actionId}/execute`, {
       method: 'POST',
       headers: { 'X-Lume-Secret': LUME_ACTION_SECRET, 'Content-Type': 'application/json' },
       body: '{}',
-    }).catch(err => console.error('[telegram-inbox] lume execute error:', err))
+    })
+      .then(r => { if (!r.ok) throw new Error(`execute ${r.status}`) })
+      .catch(err => console.error(`[telegram-inbox] lume execute error (${actionId}):`, err)),
+  )
+}
+
+// ---- Lume entrypoint helpers ----
+
+// The open gates for one target, by kind, as lume_gates sees them. Read before
+// and after the handler: if the set changed, the tap actually claimed
+// something; if not, it was a no-op (already decided, wrong state, unknown id)
+// and the chat should not be told a decision was made.
+async function lumeGateKinds(targetId: string): Promise<string[]> {
+  const rows = (await supabaseRequest(
+    'GET', `lume_gates?target_id=eq.${targetId}&select=kind&order=kind.asc`,
+  )) as { kind: string }[]
+  return (rows ?? []).map(r => r.kind)
+}
+
+function lumeGateChanged(before: string[], after: string[]): boolean {
+  if (before.length > 0 && after.length === 0) return true
+  return before.join(',') !== after.join(',')
+}
+
+// The decision note carries the same brake the Telegram message would when the
+// action just started something that spends time or credits.
+function lumeBrakeKeyboard(action: string, targetId: string): unknown {
+  if (action === 'jobs_pull' || action === 'jobs_order_now' || action === 'jobs_resume') {
+    return { inline_keyboard: [[{ text: '⛔ Abort batch', callback_data: `jobs_abort:${targetId}` }]] }
   }
+  if (action === 'lfo_count') {
+    return { inline_keyboard: [[{ text: '⛔ Stop tracking', callback_data: `lfo_abort:${targetId}` }]] }
+  }
+  return undefined
 }
 
 async function handleCallback(cb: NonNullable<TelegramUpdate['callback_query']>): Promise<void> {
@@ -1917,19 +1981,35 @@ Deno.serve(async (req: Request) => {
         status: 400, headers: { 'Content-Type': 'application/json' },
       })
     }
+    const id8 = parsed.targetId.slice(0, 8)
     try {
+      const before = await lumeGateKinds(parsed.targetId)
       await handleCallback({ id: '', from: { id: 0 }, data: body.callback_data })
+      const after = await lumeGateKinds(parsed.targetId)
+      const claimed = lumeGateChanged(before, after)
+      console.log('[lume]', parsed.action, parsed.targetId, claimed ? 'claimed' : 'no-op')
+      if (claimed) {
+        await tg('sendMessage', {
+          chat_id: TELEGRAM_CHAT_ID,
+          text: `🖥 ${parsed.action} on ${id8} — decided in Lume`,
+          reply_markup: lumeBrakeKeyboard(parsed.action, parsed.targetId),
+        })
+      }
+      return new Response(
+        JSON.stringify({ ok: true, claimed, action: parsed.action, target_id: parsed.targetId }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      )
+    } catch (err) {
+      // Full detail to the logs; a generic line to the chat and to Lume. The
+      // raw message can carry a REST URL or a response body — not for a
+      // notification channel or a browser.
+      const message = err instanceof Error ? err.message : String(err)
+      console.error(`[telegram-inbox] lume action error (${parsed.action} ${parsed.targetId}):`, message)
       await tg('sendMessage', {
         chat_id: TELEGRAM_CHAT_ID,
-        text: `🖥 ${parsed.action} on ${parsed.targetId.slice(0, 8)} — decided in Lume`,
-      })
-      return new Response(JSON.stringify({ ok: true, action: parsed.action, target_id: parsed.targetId }), {
-        status: 200, headers: { 'Content-Type': 'application/json' },
-      })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      console.error('[telegram-inbox] lume action error:', message)
-      return new Response(JSON.stringify({ ok: false, error: message }), {
+        text: `⚠️ telegram-inbox (Lume) error on ${parsed.action} ${id8}`,
+      }).catch(() => {})
+      return new Response(JSON.stringify({ ok: false, error: 'handler failed' }), {
         status: 500, headers: { 'Content-Type': 'application/json' },
       })
     }

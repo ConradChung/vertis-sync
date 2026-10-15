@@ -7,21 +7,26 @@
 // shared secret without leaking its length or prefix through timing.
 
 export const LUME_MIN_COUNT = 500
+// Leadsfriday's practical ceiling for one export; above this a typo (an extra
+// zero) would place a very expensive order with no second prompt.
+export const LUME_MAX_COUNT = 50000
 
-// Every callback prefix handleCallback dispatches. Anything else is rejected
-// before it can reach the dispatcher's "Unrecognized action" fallback.
+// Only what Lume actually sends. The barrier / preview screens (bar_loc,
+// bar_co, push_strict, push_std, camp_pick, camp_tpl, camp_nolo) stay local to
+// Lume, which PATCHes those columns itself like /api/instantly/push does;
+// lfo_custom and push_next are Telegram-only navigation. Anything not listed
+// here is rejected before it can reach the dispatcher.
 export const LUME_ALLOWED_ACTIONS: ReadonlySet<string> = new Set([
-  // finder prompt + watchdog resume
-  'finder_go', 'finder_skip', 'wd_resume',
-  // JOBS_ACTIONS
-  'jobs_pull', 'jobs_skip', 'jobs_write', 'jobs_discard', 'jobs_resume', 'jobs_abort', 'jobs_order_now',
-  // LFO_ACTIONS
-  'lfo_count', 'lfo_custom', 'lfo_cancel', 'lfo_abort',
-  // PUSH_ACTIONS
-  'camp_pick', 'camp_tpl', 'camp_launch', 'camp_nolo',
-  'bar_loc', 'bar_co', 'push_next', 'push_go', 'push_strict', 'push_std', 'push_cancel',
   // CSV ingest approval
   'approve', 'approve_enrich', 'deny',
+  // finder prompt + watchdog resume
+  'finder_go', 'finder_skip', 'wd_resume',
+  // job search gates
+  'jobs_pull', 'jobs_skip', 'jobs_write', 'jobs_discard', 'jobs_resume', 'jobs_abort', 'jobs_order_now',
+  // Apollo -> Leadsfriday order
+  'lfo_count', 'lfo_cancel', 'lfo_abort',
+  // Instantly push (final step only) and launch
+  'push_go', 'push_cancel', 'camp_launch',
   // pending_actions (high-risk approvals)
   'lume_ok', 'lume_no',
 ])
@@ -29,12 +34,19 @@ export const LUME_ALLOWED_ACTIONS: ReadonlySet<string> = new Set([
 export interface LumeAction { action: string; targetId: string; extra?: string }
 
 export function parseLumeAction(data: string): LumeAction | null {
-  const [action, targetId, extra] = data.split(':')
+  const parts = data.split(':')
+  // At most action:target:extra. A 4th segment is not a button we ever emit.
+  if (parts.length > 3) return null
+  const [action, targetId, extra] = parts
   if (!action || !targetId || !/^[0-9a-f-]{36}$/i.test(targetId)) return null
   if (!LUME_ALLOWED_ACTIONS.has(action)) return null
-  // `!(n >= min)` rather than `n < min`: Number('abc') is NaN, and NaN fails
-  // every comparison, so a plain `<` would let a non-numeric count through.
-  if (action === 'lfo_count' && (!extra || !(Number(extra) >= LUME_MIN_COUNT))) return null
+  if (action === 'lfo_count') {
+    // Digits only: rejects ' 750 ', '1e9', '0x300', '-500', 'Infinity' before
+    // Number() can reinterpret them. Then a safe integer inside the bounds.
+    if (!extra || !/^\d+$/.test(extra)) return null
+    const n = Number(extra)
+    if (!Number.isSafeInteger(n) || n < LUME_MIN_COUNT || n > LUME_MAX_COUNT) return null
+  }
   return { action, targetId, extra }
 }
 
