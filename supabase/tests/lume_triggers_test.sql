@@ -6,12 +6,23 @@
 -- vault secrets created below and the pg_net queue rows they cause (the pg_net
 -- worker only sends committed rows).
 --
+-- The gate-hook assertions create lume_url / lume_hook_secret for the length
+-- of the transaction. Once the live vault holds them (a deployed Lume), the
+-- ingest below still queues a request, but to the live URL, so the negative
+-- case and the url/secret assertions are skipped rather than failed; the plan
+-- count never changes.
+--
 -- The final "writer survives" proof takes ACCESS EXCLUSIVE on events until
--- rollback. It is skipped unless the session sets
---   set local lume.allow_destructive_tests = 'on';
--- and must not be enabled against prod while a validation is in flight.
+-- rollback. It is skipped unless lume.allow_destructive_tests = on, which
+-- pg_prove cannot inject as `set local`; pass it through libpq instead:
+--   PGOPTIONS="-c lume.allow_destructive_tests=on" supabase test db
+-- Never enable it against prod while a validation is in flight.
 begin;
 select plan(63);
+
+-- the vault state has to be snapshotted before this file adds its own secrets
+create temp table lume_trig_t as
+  select exists (select 1 from vault.secrets where name in ('lume_url', 'lume_hook_secret')) as live_secrets;
 
 -- structure ------------------------------------------------------------------
 select has_function('public', 'lume_event_on_change', 'lume_event_on_change() exists');
@@ -35,18 +46,20 @@ select has_trigger('public', 'lead_bank', 'lume_events_lead_bank', 'lead_bank ha
 select has_trigger('public', 'rotation_runs', 'lume_events_rotation_runs', 'rotation_runs has the events trigger');
 
 -- gate hook without secrets: a gate opens, nothing is queued -----------------
--- (the live vault has no lume_* secrets until Lume is deployed; if it does,
--- this case is what a deployed system would skip, and the assertion below
--- still holds because the ingest is scoped by target_id)
+-- (skipped once the live vault has lume secrets: the ingest then does queue
+-- a request, to the live URL, which rolls back with everything else)
 insert into telegram_ingests (id, telegram_chat_id, sender_chat_id, filename, storage_path, row_count, status)
   values ('00000000-0000-0000-0000-000000000303', '1', '1', 'trig.csv', 'telegram/trig.csv', 10, 'awaiting_approval');
-select is((select count(*)::int from net.http_request_queue
+select case when (select live_secrets from lume_trig_t)
+  then skip('live vault already has lume secrets')
+  else is((select count(*)::int from net.http_request_queue
            where convert_from(body, 'utf8')::jsonb->>'target_id' = '00000000-0000-0000-0000-000000000303'),
-          0, 'without lume secrets in the vault an opened gate queues no hook request');
+          0, 'without lume secrets in the vault an opened gate queues no hook request') end;
 
--- secrets for the rest of the transaction (rolled back with everything else)
-select vault.create_secret('https://lume.test', 'lume_url');
-select vault.create_secret('s3cret', 'lume_hook_secret');
+-- secrets for the rest of the transaction (rolled back with everything else);
+-- only created when the live vault has neither, so the file never collides
+select vault.create_secret('https://lume.test', 'lume_url') where not (select live_secrets from lume_trig_t);
+select vault.create_secret('s3cret', 'lume_hook_secret') where not (select live_secrets from lume_trig_t);
 
 -- validation_jobs ------------------------------------------------------------
 insert into validation_jobs (id, filename, total_rows, status)
@@ -81,12 +94,14 @@ select is((select count(*)::int from events where source = 'validation_jobs' and
 select is((select count(*)::int from net.http_request_queue
            where convert_from(body, 'utf8')::jsonb->>'target_id' = '00000000-0000-0000-0000-000000000301'),
           1, 'the finder gate queues exactly one hook request');
-select is((select url from net.http_request_queue
+select case when (select live_secrets from lume_trig_t) then skip('live vault already has lume secrets')
+  else is((select url from net.http_request_queue
            where convert_from(body, 'utf8')::jsonb->>'target_id' = '00000000-0000-0000-0000-000000000301'),
-          'https://lume.test/api/hooks/gate-opened', 'the hook posts to lume_url/api/hooks/gate-opened');
-select is((select headers->>'X-Lume-Hook-Secret' from net.http_request_queue
+          'https://lume.test/api/hooks/gate-opened', 'the hook posts to lume_url/api/hooks/gate-opened') end;
+select case when (select live_secrets from lume_trig_t) then skip('live vault already has lume secrets')
+  else is((select headers->>'X-Lume-Hook-Secret' from net.http_request_queue
            where convert_from(body, 'utf8')::jsonb->>'target_id' = '00000000-0000-0000-0000-000000000301'),
-          's3cret', 'the hook carries lume_hook_secret');
+          's3cret', 'the hook carries lume_hook_secret') end;
 select is((select convert_from(body, 'utf8')::jsonb->>'kind' from net.http_request_queue
            where convert_from(body, 'utf8')::jsonb->>'target_id' = '00000000-0000-0000-0000-000000000301'),
           'finder_decision', 'the hook body names the gate kind');
@@ -207,7 +222,7 @@ do $$ begin
   end if;
 end $$;
 select case when current_setting('lume.allow_destructive_tests', true) is distinct from 'on'
-  then skip('destructive proof only runs off-prod (set local lume.allow_destructive_tests = on)')
+  then skip('destructive proof only runs off-prod (PGOPTIONS="-c lume.allow_destructive_tests=on")')
   else lives_ok($$update validation_jobs set status = 'completed' where id = '00000000-0000-0000-0000-000000000301'$$,
                 'the status update succeeds although the events insert fails') end;
 select case when current_setting('lume.allow_destructive_tests', true) is distinct from 'on'

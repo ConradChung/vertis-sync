@@ -1,6 +1,6 @@
 -- supabase/tests/lume_core_test.sql
 begin;
-select plan(24);
+select plan(29);
 
 -- structure
 select has_table('public', 'events', 'events exists');
@@ -23,6 +23,21 @@ select ok((select relrowsecurity from pg_class where relname='rotation_rules'), 
 select ok((select relrowsecurity from pg_class where relname='lume_campaigns'), 'lume_campaigns has RLS on');
 select ok((select relrowsecurity from pg_class where relname='lume_external_schedules'), 'lume_external_schedules has RLS on');
 select policies_are('public', 'events', array['events_auth_read'], 'events has only the owner read policy');
+
+-- lume_is_owner(): the policies' gate
+select ok((select proconfig @> array['search_path=pg_catalog, public'] from pg_proc where proname = 'lume_is_owner' and pronamespace = 'public'::regnamespace),
+          'lume_is_owner() pins search_path, catalog first');
+select ok(has_function_privilege('authenticated', 'lume_is_owner()', 'execute'), 'authenticated can execute lume_is_owner()');
+select ok(not has_function_privilege('anon', 'lume_is_owner()', 'execute'), 'anon cannot execute lume_is_owner()');
+-- every lume function pins the catalog first, so a public object can never shadow one
+select is((select count(*)::int from pg_proc p
+            where p.pronamespace = 'public'::regnamespace and p.proname like 'lume\_%'
+              and exists (select 1 from unnest(p.proconfig) c where c like 'search_path=public,%')),
+          0, 'no lume_* function puts public before pg_catalog in search_path');
+select is((select count(*)::int from pg_proc p
+            where p.pronamespace = 'public'::regnamespace and p.proname like 'lume\_%'
+              and not exists (select 1 from unnest(p.proconfig) c where c like 'search_path=%')),
+          0, 'every lume_* function pins a search_path');
 
 -- behaviour: check constraints
 select throws_ok($$insert into pending_actions (kind) values ('nope')$$, '23514', null, 'pending_actions.kind rejects unknown kinds');
