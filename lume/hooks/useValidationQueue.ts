@@ -6,6 +6,8 @@ import { useRealtimeInvalidate, type RealtimeChange } from '@/hooks/useRealtimeI
 import type { GateRow } from '@/lib/db/types'
 
 const PIPELINE_PREFIXES = ['validation_jobs.', 'telegram_ingests.', 'job_batches.', 'apollo_orders.', 'lume.']
+/** Lume events that never open or close a gate. */
+const IGNORED_TYPES = new Set(['lume.row_edit', 'lume.barriers'])
 
 /**
  * Gates open and close on status changes of the pipeline tables (the DB
@@ -17,6 +19,7 @@ export function validationRelevant({ table, record }: RealtimeChange): boolean {
   if (table === 'pending_actions') return true
   if (table !== 'events') return false
   const type = typeof record.type === 'string' ? record.type : ''
+  if (IGNORED_TYPES.has(type)) return false
   return PIPELINE_PREFIXES.some((p) => type.startsWith(p))
 }
 

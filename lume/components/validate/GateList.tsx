@@ -13,11 +13,11 @@ export interface GateListProps {
   onAction: (gate: GateRow, spec: ButtonSpec, count?: number) => void
   onCountOpenChange?: (key: string, open: boolean) => void
   onFocusGate: (key: string) => void
-  registerCard?: (key: string, el: HTMLDivElement | null) => void
+  blockedFor?: (gate: GateRow) => Readonly<Record<string, string>> | undefined
 }
 
 /** Open gates grouped by kind, each group headed by its label and count. */
-export function GateList({ gates, focusedKey, busyKeys, countOpenKey, onAction, onCountOpenChange, onFocusGate, registerCard }: GateListProps) {
+export function GateList({ gates, focusedKey, busyKeys, countOpenKey, onAction, onCountOpenChange, onFocusGate, blockedFor }: GateListProps) {
   return (
     <div className="flex flex-col gap-5">
       {groupByKind(gates).map((group) => (
@@ -41,7 +41,7 @@ export function GateList({ gates, focusedKey, busyKeys, countOpenKey, onAction, 
                   onAction={(spec, count) => onAction(g, spec, count)}
                   onCountOpenChange={(open) => onCountOpenChange?.(key, open)}
                   onFocusCard={() => onFocusGate(key)}
-                  cardRef={(el) => registerCard?.(key, el)}
+                  blocked={blockedFor?.(g)}
                 />
               )
             })}

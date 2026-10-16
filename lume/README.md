@@ -74,8 +74,12 @@ Environment variable names are listed in `.env.example`.
   `POST /api/actions` (`lib/actions/create.ts`, one awaiting action per kind
   per job). Campaign pick, barriers and names mode are Lume-local conditional
   PATCHes on `/api/gates/campaign/[jobId]` (GET = `instantly-push` preview).
-  Per-lead rows: `/api/jobs/[id]/rows` (pending rows editable). Pure logic in
-  `lib/validate/*`.
+  Per-lead rows: `/api/jobs/[id]/rows`; edits only while the job waits at the
+  finder prompt (`finder_status='awaiting_decision'`, validator not started)
+  and only on `pending` rows. The push confirmation payload snapshots the
+  campaign, barriers, names mode and eligible count; barriers are locked
+  while it awaits. Hotkeys A/R never fire Confirm/Cancel or spending actions.
+  Pure logic in `lib/validate/*`.
 - Live read check: `LUME_SMOKE=1 npm run smoke:db` (row counts only).
 
 ## Design system notes

@@ -13,6 +13,13 @@ import type { EventInsert, Json } from '@/lib/db/types'
 
 export const MAX_STRING = 2048
 
+/**
+ * Instantly bodies are a few KB; anything this big is not a webhook. Lives
+ * here, not in the route: a route module may only export handlers and
+ * route-segment config (`next build` rejects any other export).
+ */
+export const WEBHOOK_MAX_BODY_BYTES = 128 * 1024
+
 const TYPE_MAP: Record<string, string> = {
   reply_received: 'reply',
   lead_interested: 'interested',

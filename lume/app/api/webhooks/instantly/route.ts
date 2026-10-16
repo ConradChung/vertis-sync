@@ -1,12 +1,9 @@
 import { NextResponse } from 'next/server'
 import { requireSecret } from '@/lib/auth/guards'
-import { mapInstantlyWebhook } from '@/lib/adapters/instantlyWebhook'
+import { mapInstantlyWebhook, WEBHOOK_MAX_BODY_BYTES } from '@/lib/adapters/instantlyWebhook'
 import { logEvent } from '@/lib/db/service'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { readBodyCapped } from '@/lib/http/readBody'
-
-/** Instantly bodies are a few KB; anything this big is not a webhook. */
-export const MAX_BODY_BYTES = 128 * 1024
 
 /**
  * Instantly webhook → `events`. Public to the middleware; authenticated here
@@ -19,7 +16,7 @@ export async function POST(req: Request) {
   const auth = requireSecret(req, { query: 'secret' }, 'INSTANTLY_WEBHOOK_SECRET')
   if (!auth.ok) return auth.response
 
-  const read = await readBodyCapped(req, MAX_BODY_BYTES)
+  const read = await readBodyCapped(req, WEBHOOK_MAX_BODY_BYTES)
   if (!read.ok) return NextResponse.json({ error: 'payload_too_large' }, { status: 413 })
   let body: unknown
   try {

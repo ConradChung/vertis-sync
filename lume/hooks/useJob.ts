@@ -25,6 +25,8 @@ export interface RowsPage {
   total: number
   page: number
   pageSize: number
+  editable: boolean
+  edit_block_reason: string | null
 }
 
 export function useJobRows(id: string | null, page: number) {

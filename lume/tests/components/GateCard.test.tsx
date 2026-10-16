@@ -84,6 +84,15 @@ describe('GateCard', () => {
     expect(onAction).toHaveBeenCalledWith(expect.objectContaining({ needsCount: true }), 1500)
   })
 
+  it('a blocked action is disabled with its reason (Push these with 0 eligible)', () => {
+    render(
+      <GateCard gate={gate('push_review')} focused busy={false} onAction={() => {}} blocked={{ push_to_instantly: 'Nothing to push' }} />
+    )
+    expect((screen.getByRole('button', { name: 'Push these' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Cancel push' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByText('Nothing to push')).toBeTruthy()
+  })
+
   it('lume_action links to the action page', () => {
     render(<GateCard gate={gate('lume_action', { target_table: 'pending_actions' })} focused busy={false} onAction={() => {}} />)
     expect(screen.getByRole('link', { name: /Details/ }).getAttribute('href')).toBe(`/actions/${ID}`)

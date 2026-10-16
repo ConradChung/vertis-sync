@@ -75,23 +75,27 @@ describe('buttonsFor', () => {
 })
 
 describe('hotkeyTarget', () => {
-  it('approve = first approve-like button', () => {
+  it('approve = first keyboard-safe approve-like button', () => {
     expect(hotkeyTarget(BUTTON_SPECS.ingest_approval, 'approve')?.action).toBe('approve')
-    expect(hotkeyTarget(BUTTON_SPECS.jobs_fill, 'approve')?.action).toBe('jobs_order_now')
+    expect(hotkeyTarget(BUTTON_SPECS.jobs_review, 'approve')?.action).toBe('jobs_pull')
     expect(hotkeyTarget(BUTTON_SPECS.push_review, 'approve')?.mode).toBe('create_action')
+    expect(hotkeyTarget(BUTTON_SPECS.campaign_choice, 'approve')?.mode).toBe('panel')
   })
   it('reject = first reject-like button', () => {
     expect(hotkeyTarget(BUTTON_SPECS.ingest_approval, 'reject')?.action).toBe('deny')
     expect(hotkeyTarget(BUTTON_SPECS.jobs_stall, 'reject')?.action).toBe('jobs_abort')
     expect(hotkeyTarget(BUTTON_SPECS.stall, 'reject')).toBeUndefined()
   })
-  it('lfo_count: A never spends on a preset; it targets the custom count', () => {
-    const t = hotkeyTarget(BUTTON_SPECS.lfo_count, 'approve')
-    expect(t?.needsCount).toBe(true)
-    expect(t?.count).toBeUndefined()
+  it('spending actions are click-only', () => {
+    expect(hotkeyTarget(BUTTON_SPECS.jobs_fill, 'approve')).toBeUndefined()
+    expect(hotkeyTarget(BUTTON_SPECS.finder_decision, 'approve')).toBeUndefined()
+    expect(hotkeyTarget(BUTTON_SPECS.lfo_count, 'approve')).toBeUndefined()
+    // approve_enrich is never reached by A (plain approve comes first, and it is excluded anyway).
+    expect(hotkeyTarget(BUTTON_SPECS.ingest_approval.filter((s) => s.action !== 'approve'), 'approve')).toBeUndefined()
   })
-  it('campaign_choice: A opens the campaign picker panel', () => {
-    expect(hotkeyTarget(BUTTON_SPECS.campaign_choice, 'approve')?.mode).toBe('panel')
+  it('pending-action Confirm/Cancel are click-only', () => {
+    expect(hotkeyTarget(BUTTON_SPECS.lume_action, 'approve')).toBeUndefined()
+    expect(hotkeyTarget(BUTTON_SPECS.lume_action, 'reject')).toBeUndefined()
   })
 })
 
@@ -109,6 +113,10 @@ describe('validationRelevant', () => {
   })
   it('every pending_actions change counts', () => {
     expect(validationRelevant({ table: 'pending_actions', eventType: 'UPDATE', record: {} })).toBe(true)
+  })
+  it('row edits and barrier changes do not refetch the queue', () => {
+    expect(validationRelevant(ev('lume.row_edit'))).toBe(false)
+    expect(validationRelevant(ev('lume.barriers'))).toBe(false)
   })
 })
 

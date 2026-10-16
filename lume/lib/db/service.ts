@@ -322,9 +322,39 @@ export interface JobRowsPage {
   pageSize: number
 }
 
+/**
+ * Rows may be edited only while the job is parked on the owner at the finder
+ * prompt (`finder_status='awaiting_decision'`): the validator has not been
+ * invoked yet. Once it runs it reads pending rows in batches and writes
+ * verdicts by id, so an edit then could pair a new email with the old
+ * email's verdict. (email-validator itself is deliberately untouched.)
+ */
+export const ROW_EDIT_FINDER_STATUS = 'awaiting_decision'
+export const ROW_EDIT_BLOCKED_REASON =
+  'Rows can be edited only while the job waits at the email-finder prompt, before the validator starts.'
+
+interface JobEditInfo {
+  finder_status: string | null
+  email_column: string | null
+  column_order: unknown
+}
+
+async function getJobEditInfo(jobId: string): Promise<JobEditInfo | null> {
+  const sb = createServiceClient()
+  const res = await sb.from('validation_jobs').select('finder_status,email_column,column_order').eq('id', jobId).maybeSingle()
+  if (res.error) throw new DbError('getJobEditInfo', res.error)
+  return (res.data as JobEditInfo | null) ?? null
+}
+
+const columnsOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+
 /** 100 rows per page, `order=row_index`; `page` is 0-based. */
 export async function getJobRows(jobId: string, page: number): Promise<JobRowsPage> {
   const sb = createServiceClient()
+  const job = await getJobEditInfo(jobId)
+  const columns = columnsOf(job?.column_order)
+  const editable = job?.finder_status === ROW_EDIT_FINDER_STATUS
+  const edit = { editable, edit_block_reason: editable ? null : ROW_EDIT_BLOCKED_REASON }
   const p = Math.max(0, Math.floor(page))
   const from = p * ROWS_PAGE_SIZE
   const res = await sb
@@ -338,28 +368,30 @@ export async function getJobRows(jobId: string, page: number): Promise<JobRowsPa
     if (res.error.code === RANGE_NOT_SATISFIABLE) {
       const c = await sb.from('validation_rows').select('id', { count: 'exact', head: true }).eq('job_id', jobId)
       if (c.error) throw new DbError('getJobRows.count', c.error)
-      return { rows: [], total: c.count ?? 0, page: p, pageSize: ROWS_PAGE_SIZE }
+      return { rows: [], total: c.count ?? 0, page: p, pageSize: ROWS_PAGE_SIZE, ...edit }
     }
     throw new DbError('getJobRows', res.error)
   }
   return {
-    rows: ((res.data ?? []) as RawValidationRow[]).map(toRowView),
+    rows: ((res.data ?? []) as RawValidationRow[]).map((r) => toRowView(r, columns)),
     total: res.count ?? 0,
     page: p,
     pageSize: ROWS_PAGE_SIZE,
+    ...edit,
   }
 }
 
 export type RowEditResult =
   | { ok: true; row: ValidationRowView; emailChanged: boolean; fields: string[] }
-  | { ok: false; reason: 'not_found' | 'not_pending' }
+  | { ok: false; reason: 'not_found' | 'not_pending' | 'job_running' }
 
 /**
- * Edit a row the validator has not reached yet. Conditional on
- * `status='pending'` at write time, so a row the validator claims between our
- * read and write is refused (409), never overwritten. `row_data` keys are
- * merged, not replaced. A new email is also written to the job's email column
- * inside `row_data` when that column exists there (the CSV export reads it).
+ * Edit a row before the validator can see it. Two guards:
+ *  - job level: only while `finder_status='awaiting_decision'` (validator not
+ *    invoked) → otherwise `job_running` (409);
+ *  - row level: the update is conditional on `status='pending'`.
+ * `row_data` keys are merged, not replaced. A new email is also written to
+ * the job's email column inside `row_data` when that column exists there.
  */
 export async function updatePendingRow(
   jobId: string,
@@ -367,6 +399,10 @@ export async function updatePendingRow(
   edit: { email?: string; row_data_patch?: Record<string, string | null> }
 ): Promise<RowEditResult> {
   const sb = createServiceClient()
+  const job = await getJobEditInfo(jobId)
+  if (!job) return { ok: false, reason: 'not_found' }
+  if (job.finder_status !== ROW_EDIT_FINDER_STATUS) return { ok: false, reason: 'job_running' }
+
   const cur = await sb
     .from('validation_rows')
     .select('id,status,email,row_data')
@@ -380,12 +416,8 @@ export async function updatePendingRow(
 
   const patch: Record<string, string | null> = { ...(edit.row_data_patch ?? {}) }
   const emailChanged = edit.email !== undefined && edit.email !== row.email
-  if (emailChanged) {
-    const job = await sb.from('validation_jobs').select('email_column').eq('id', jobId).maybeSingle()
-    if (job.error) throw new DbError('updatePendingRow.job', job.error)
-    const col = (job.data as { email_column?: string | null } | null)?.email_column
-    if (col && row.row_data && col in row.row_data) patch[col] = edit.email!
-  }
+  const col = job.email_column
+  if (emailChanged && col && row.row_data && col in row.row_data) patch[col] = edit.email!
   const update: Record<string, unknown> = { row_data: mergeRowData(row.row_data, patch) }
   if (emailChanged) update.email = edit.email
 
@@ -399,7 +431,12 @@ export async function updatePendingRow(
   if (res.error) throw new DbError('updatePendingRow', res.error)
   const updated = (res.data ?? []) as RawValidationRow[]
   if (updated.length === 0) return { ok: false, reason: 'not_pending' }
-  return { ok: true, row: toRowView(updated[0]), emailChanged, fields: Object.keys(edit.row_data_patch ?? {}) }
+  return {
+    ok: true,
+    row: toRowView(updated[0], columnsOf(job.column_order)),
+    emailChanged,
+    fields: Object.keys(edit.row_data_patch ?? {}),
+  }
 }
 
 export const CAMPAIGN_CHOICE_STATUSES = ['awaiting_campaign', 'choosing_campaign'] as const
@@ -434,8 +471,15 @@ export interface BarrierPatch {
   company_strict?: boolean
 }
 
-/** Barrier / names-mode toggles, only while the push is being configured. `false` → 409. */
-export async function setBarriers(jobId: string, patch: BarrierPatch): Promise<boolean> {
+export type BarrierResult = 'ok' | 'moved' | 'push_awaiting_confirmation'
+
+/**
+ * Barrier / names-mode toggles, only while the push is being configured
+ * (`moved` → 409). Refused while a push_to_instantly confirmation is
+ * awaiting: the owner is confirming a snapshot of these settings.
+ */
+export async function setBarriers(jobId: string, patch: BarrierPatch): Promise<BarrierResult> {
+  if (await findAwaitingAction('push_to_instantly', jobId)) return 'push_awaiting_confirmation'
   const sb = createServiceClient()
   const res = await sb
     .from('validation_jobs')
@@ -444,7 +488,7 @@ export async function setBarriers(jobId: string, patch: BarrierPatch): Promise<b
     .in('instantly_status', [...PUSH_REVIEW_STATUSES])
     .select('id')
   if (res.error) throw new DbError('setBarriers', res.error)
-  return (res.data ?? []).length > 0
+  return (res.data ?? []).length > 0 ? 'ok' : 'moved'
 }
 
 // ---------------------------------------------------------------------------
@@ -494,11 +538,12 @@ export async function getPushJob(jobId: string): Promise<{
   location_barrier: boolean | null
   company_barrier: boolean | null
   company_strict: boolean | null
+  instantly_pushed: number | null
 } | null> {
   const sb = createServiceClient()
   const res = await sb
     .from('validation_jobs')
-    .select('id,filename,valid_count,instantly_status,instantly_campaign_id,instantly_campaign_name,location_barrier,company_barrier,company_strict')
+    .select('id,filename,valid_count,instantly_status,instantly_campaign_id,instantly_campaign_name,location_barrier,company_barrier,company_strict,instantly_pushed')
     .eq('id', jobId)
     .maybeSingle()
   if (res.error) throw new DbError('getPushJob', res.error)

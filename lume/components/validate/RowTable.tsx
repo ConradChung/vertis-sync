@@ -44,6 +44,7 @@ export function RowTable({ jobId, editRequest = 0 }: { jobId: string; editReques
     if (editRequest === lastRequest.current) return
     lastRequest.current = editRequest
     if (!data) return
+    if (!data.editable) return void toast.info('Editing is off for this job', { description: data.edit_block_reason ?? undefined })
     const first = data.rows.find((r) => r.status === 'pending')
     if (first) setEditing(first.id)
     else toast.info('No pending rows on this page', { description: 'Only rows the validator has not reached can be edited.' })
@@ -67,6 +68,9 @@ export function RowTable({ jobId, editRequest = 0 }: { jobId: string; editReques
           Next
         </Button>
       </SectionTitle>
+      {data && !data.editable && data.edit_block_reason && (
+        <p className="px-[18px] pb-2 text-[11px] text-fg-46">Editing off — {data.edit_block_reason}</p>
+      )}
       {!data && error ? (
         <p className="flex items-center gap-3 px-[18px] pb-[18px] text-[12px] text-fg-70" role="alert">
           Couldn&apos;t load rows.
@@ -124,7 +128,7 @@ export function RowTable({ jobId, editRequest = 0 }: { jobId: string; editReques
                     <td className="px-3 py-2.5 text-fg-46">{r.enrichment_status ?? ''}</td>
                     <td className="px-3 py-2.5 text-fg-46">{r.instantly_status ?? ''}</td>
                     <td className="px-3 py-2.5 pr-[18px] text-right">
-                      {r.status === 'pending' && (
+                      {r.status === 'pending' && data.editable && (
                         <Button size="icon-xs" variant="ghost" aria-label={`Edit row ${r.row_index}`} onClick={() => setEditing(r.id)}>
                           <Pencil />
                         </Button>
@@ -165,6 +169,8 @@ function RowEditor({ jobId, row, onDone }: { jobId: string; row: ValidationRowVi
     const r = await sendJson(`/api/jobs/${jobId}/rows`, body, { method: 'PATCH' })
     setSaving(false)
     if (r.status === 200) toast.success(`Row ${row.row_index} saved`)
+    else if (r.status === 409 && (r.body as { error?: string } | null)?.error === 'job_running')
+      toast.info('The validator has started — rows are locked')
     else if (r.status === 409) toast.info('That row was already validated — refreshed')
     else if (r.status === 400) return void toast.error('Check the email address')
     else toast.error("Couldn't save the row")

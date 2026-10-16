@@ -19,7 +19,8 @@ import { parseJsonBody, uuidParam } from '@/lib/http/json'
  *         awaits a campaign (conditional PATCH → 409 otherwise); moves it to
  *         `configuring` (the barrier screen)
  *   PATCH { location_barrier?, company_barrier?, company_strict? } → only
- *         while `configuring|reviewing_company` (409 otherwise)
+ *         while `configuring|reviewing_company` (409 otherwise) and no push
+ *         confirmation is awaiting (409 push_awaiting_confirmation)
  *
  * Nothing here pushes to Instantly. "Push these" is a pending action.
  */
@@ -102,7 +103,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (!body.ok) return body.response
   try {
     const saved = await setBarriers(jobId, body.data)
-    if (!saved) return NextResponse.json({ error: 'already_handled' }, { status: 409 })
+    if (saved === 'push_awaiting_confirmation') return NextResponse.json({ error: saved }, { status: 409 })
+    if (saved !== 'ok') return NextResponse.json({ error: 'already_handled' }, { status: 409 })
   } catch (err) {
     return dbErrorResponse(err, 'api/gates/campaign')
   }

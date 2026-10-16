@@ -1,5 +1,5 @@
 import 'server-only'
-import { findAwaitingAction, insertPendingAction, setActionMessageId } from '@/lib/db/service'
+import { findAwaitingAction, insertPendingAction, isDbError, setActionMessageId } from '@/lib/db/service'
 import { sendActionPrompt } from '@/lib/adapters/telegram'
 import type { Json, PendingActionKind, PendingActionRow } from '@/lib/db/types'
 
@@ -11,7 +11,9 @@ import type { Json, PendingActionKind, PendingActionRow } from '@/lib/db/types'
  * The payload must carry `job_id` (lowercase uuid, as the DB prints it — the
  * `lume_gates` push_review anti-join compares `payload->>'job_id'` to
  * `id::text`) and a human `summary`. A second awaiting action of the same
- * kind for the same job is refused with `DuplicateActionError`.
+ * kind for the same job is refused with `DuplicateActionError` — checked
+ * first, and backed by the unique partial index
+ * `pending_actions_one_awaiting_idx` (23505 → the same error).
  *
  * Telegram unconfigured: the row is still created; the prompt is skipped
  * (the adapter logs it) and `telegram_message_id` stays null.
@@ -57,13 +59,23 @@ export async function createAction(
   const existing = await findAwaitingAction(kind, jobId)
   if (existing) throw new DuplicateActionError(existing.id)
 
-  const row = await insertPendingAction({
-    kind,
-    payload,
-    requested_by: requestedBy,
-    agent_run_id: meta.agentRunId ?? null,
-    rule_id: meta.ruleId ?? null,
-  })
+  let row: PendingActionRow
+  try {
+    row = await insertPendingAction({
+      kind,
+      payload,
+      requested_by: requestedBy,
+      agent_run_id: meta.agentRunId ?? null,
+      rule_id: meta.ruleId ?? null,
+    })
+  } catch (err) {
+    // pending_actions_one_awaiting_idx: a concurrent request won the race.
+    if (isDbError(err) && err.code === '23505') {
+      const winner = await findAwaitingAction(kind, jobId).catch(() => null)
+      throw new DuplicateActionError(winner?.id ?? '')
+    }
+    throw err
+  }
 
   const sent = await sendActionPrompt(row)
   if (sent.ok && sent.messageId !== null) {

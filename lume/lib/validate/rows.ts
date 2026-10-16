@@ -54,11 +54,23 @@ function pick(data: Record<string, unknown>, keys: readonly string[]): { key: st
   return { key: present ?? keys[0], value: null }
 }
 
-export function toRowView(r: RawValidationRow): ValidationRowView {
+/**
+ * Candidate keys for a name field: the job's own CSV header (from
+ * `column_order`) when one matches a standard key case-insensitively, then
+ * the standard keys.
+ */
+export function nameKeysFor(field: NameField, columns: readonly string[] = []): string[] {
+  const std = NAME_KEYS[field] as readonly string[]
+  const wanted = new Set(std.map((k) => k.toLowerCase()))
+  const fromJob = columns.filter((c) => wanted.has(c.trim().toLowerCase()))
+  return [...new Set([...fromJob, ...std])]
+}
+
+export function toRowView(r: RawValidationRow, columns: readonly string[] = []): ValidationRowView {
   const data = r.row_data ?? {}
-  const first = pick(data, NAME_KEYS.first_name)
-  const last = pick(data, NAME_KEYS.last_name)
-  const company = pick(data, NAME_KEYS.company_name)
+  const first = pick(data, nameKeysFor('first_name', columns))
+  const last = pick(data, nameKeysFor('last_name', columns))
+  const company = pick(data, nameKeysFor('company_name', columns))
   return {
     id: r.id,
     row_index: r.row_index,

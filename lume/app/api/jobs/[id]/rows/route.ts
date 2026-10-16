@@ -8,8 +8,9 @@ import { parseJsonBody, UUID_RE, uuidParam } from '@/lib/http/json'
 /**
  * Per-lead rows of a validation job.
  *   GET   ?page=0 → 100 rows, `order=row_index`
- *   PATCH { row_id, email?, row_data_patch? } → only rows still `pending`
- *         (conditional update; 409 otherwise); `row_data` keys are merged.
+ *   PATCH { row_id, email?, row_data_patch? } → only while the job waits at
+ *         the finder prompt (409 job_running) and only rows still `pending`
+ *         (conditional update; 409 not_pending); `row_data` keys are merged.
  */
 
 type Ctx = { params: Promise<{ id: string }> }
@@ -59,7 +60,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (!result.ok) {
     return result.reason === 'not_found'
       ? NextResponse.json({ error: 'not_found' }, { status: 404 })
-      : NextResponse.json({ error: 'not_pending' }, { status: 409 })
+      : NextResponse.json({ error: result.reason }, { status: 409 })
   }
 
   try {

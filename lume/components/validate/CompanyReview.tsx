@@ -29,7 +29,9 @@ export function CompanyReview({ jobId }: { jobId: string }) {
     setSaving(true)
     const r = await sendJson(`/api/gates/campaign/${jobId}`, { company_strict: next }, { method: 'PATCH' })
     setSaving(false)
-    if (r.status === 409) toast.info('Already handled — refreshed')
+    if (r.status === 409 && (r.body as { error?: string } | null)?.error === 'push_awaiting_confirmation')
+      toast.info('A push confirmation is waiting — settings are locked')
+    else if (r.status === 409) toast.info('Already handled — refreshed')
     else if (r.status !== 200) toast.error("Couldn't change the names mode")
     void mutate(jobKey(jobId))
     void mutate(previewKey(jobId))
@@ -46,7 +48,7 @@ export function CompanyReview({ jobId }: { jobId: string }) {
   return (
     <GlassCard className="gap-0 py-0" aria-label="Company names" aria-busy={isValidating || undefined}>
       <SectionTitle title="Company names">
-        <div role="radiogroup" aria-label="Names mode" className="flex gap-1 rounded-[8px] bg-white/5 p-0.5">
+        <div role="group" aria-label="Names mode" className="flex gap-1 rounded-[8px] bg-white/5 p-0.5">
           {[
             { v: false, label: 'Standard' },
             { v: true, label: 'Stricter' },
@@ -54,8 +56,7 @@ export function CompanyReview({ jobId }: { jobId: string }) {
             <button
               key={o.label}
               type="button"
-              role="radio"
-              aria-checked={strict === o.v}
+              aria-pressed={strict === o.v}
               disabled={saving || !job}
               onClick={() => void setStrict(o.v)}
               className={cn(

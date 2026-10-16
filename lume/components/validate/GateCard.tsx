@@ -38,6 +38,8 @@ export interface GateCardProps {
   onCountOpenChange?: (open: boolean) => void
   onFocusCard?: () => void
   cardRef?: Ref<HTMLDivElement>
+  /** action → reason; the button is disabled and the reason shown. */
+  blocked?: Readonly<Record<string, string>>
 }
 
 /**
@@ -45,7 +47,7 @@ export interface GateCardProps {
  * message offers. Roving tabindex: only the focused card is in the tab order
  * (J/K move it); its accessible name is read when focus lands.
  */
-export function GateCard({ gate, focused, busy, countOpen, onAction, onCountOpenChange, onFocusCard, cardRef }: GateCardProps) {
+export function GateCard({ gate, focused, busy, countOpen, onAction, onCountOpenChange, onFocusCard, cardRef, blocked }: GateCardProps) {
   const specs = buttonsFor(gate)
   const chips = countChips(gate.counts)
   const titleId = useId()
@@ -106,7 +108,8 @@ export function GateCard({ gate, focused, busy, countOpen, onAction, onCountOpen
             key={`${s.action}:${s.count ?? s.label}`}
             size="sm"
             variant={s.tone === 'reject' ? 'destructive' : i === firstApprove ? 'default' : 'secondary'}
-            disabled={busy}
+            disabled={busy || Boolean(blocked?.[s.action])}
+            title={blocked?.[s.action]}
             data-tone={s.tone}
             onClick={() => (s.needsCount ? onCountOpenChange?.(!countOpen) : onAction(s))}
             aria-expanded={s.needsCount ? Boolean(countOpen) : undefined}
@@ -120,6 +123,10 @@ export function GateCard({ gate, focused, busy, countOpen, onAction, onCountOpen
           </Link>
         )}
       </div>
+
+      {blocked && Object.values(blocked).length > 0 && (
+        <p className="text-[11px] text-fg-46">{Object.values(blocked).join(' · ')}</p>
+      )}
 
       {gate.kind === 'lfo_count' && countOpen && (
         <form

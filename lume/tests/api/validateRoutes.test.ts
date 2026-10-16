@@ -19,7 +19,7 @@ const svc = vi.hoisted(() => ({
 vi.mock('@/lib/db/service', () => ({
   ...Object.fromEntries(Object.keys(svc).map((k) => [k, (...a: unknown[]) => svc[k as keyof typeof svc](...a)])),
   PUSH_REVIEW_STATUSES: ['configuring', 'reviewing_company'],
-  isDbError: () => false,
+  isDbError: (e: unknown) => e instanceof Error && 'code' in e,
 }))
 
 const decide = vi.fn()
@@ -32,6 +32,9 @@ vi.mock('@/lib/adapters/instantly', () => ({
   listCampaigns: () => listCampaigns(),
   InstantlyError: class extends Error {},
 }))
+
+const getPushPreview = vi.fn()
+vi.mock('@/lib/adapters/instantlyPush', () => ({ getPushPreview: (...a: unknown[]) => getPushPreview(...a) }))
 
 const sendActionPrompt = vi.fn()
 vi.mock('@/lib/adapters/telegram', () => ({ sendActionPrompt: (...a: unknown[]) => sendActionPrompt(...a) }))
@@ -53,6 +56,8 @@ beforeEach(() => {
   decide.mockReset()
   listCampaigns.mockReset()
   sendActionPrompt.mockReset()
+  getPushPreview.mockReset()
+  getPushPreview.mockResolvedValue({ ok: true, preview: { ok: true, eligible: 20, filtered: 4 } })
   instantlyConfigured = true
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
@@ -149,9 +154,13 @@ describe('/api/gates/campaign/[jobId]', () => {
   })
 
   it('PATCH barriers: 409 outside configuring, 400 on unknown keys', async () => {
-    svc.setBarriers.mockResolvedValue(false)
+    svc.setBarriers.mockResolvedValue('moved')
     const res = await barriersPATCH(post(`/api/gates/campaign/${JOB}`, { location_barrier: true }, 'PATCH'), params('jobId', JOB))
     expect(res.status).toBe(409)
+    svc.setBarriers.mockResolvedValue('push_awaiting_confirmation')
+    const locked = await barriersPATCH(post(`/api/gates/campaign/${JOB}`, { company_strict: true }, 'PATCH'), params('jobId', JOB))
+    expect(locked.status).toBe(409)
+    expect(await locked.json()).toEqual({ error: 'push_awaiting_confirmation' })
     const bad = await barriersPATCH(post(`/api/gates/campaign/${JOB}`, { instantly_status: 'pushing' }, 'PATCH'), params('jobId', JOB))
     expect(bad.status).toBe(400)
   })
@@ -164,6 +173,13 @@ describe('/api/jobs/[id]/rows', () => {
     expect(res.status).toBe(409)
     expect(svc.updatePendingRow).toHaveBeenCalledWith(JOB, ROW, { email: 'a@x.com', row_data_patch: undefined })
     expect(svc.logEvent).not.toHaveBeenCalled()
+  })
+
+  it('PATCH 409 job_running once the validator may be running', async () => {
+    svc.updatePendingRow.mockResolvedValue({ ok: false, reason: 'job_running' })
+    const res = await rowsPATCH(post(`/api/jobs/${JOB}/rows`, { row_id: ROW, email: 'a@x.com' }, 'PATCH'), params('id', JOB))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'job_running' })
   })
 
   it('PATCH 200 logs lume.row_edit without the email value', async () => {
@@ -207,6 +223,7 @@ describe('POST /api/actions', () => {
     location_barrier: false,
     company_barrier: true,
     company_strict: false,
+    instantly_pushed: null,
   }
 
   it('409 duplicate when an awaiting action of the same kind exists for the job', async () => {
@@ -228,7 +245,15 @@ describe('POST /api/actions', () => {
     expect(res.status).toBe(201)
     const inserted = svc.insertPendingAction.mock.calls[0][0]
     expect(inserted).toMatchObject({ kind: 'push_to_instantly', requested_by: 'user', payload: { job_id: JOB } })
-    expect(inserted.payload.summary).toContain('24 valid leads from apify.csv → Kaspen R3')
+    expect(inserted.payload).toMatchObject({
+      job_id: JOB,
+      campaign_id: 'c1',
+      location_barrier: false,
+      company_barrier: true,
+      company_strict: false,
+      eligible: 20,
+    })
+    expect(inserted.payload.summary).toContain('Push 20 leads from apify.csv → Kaspen R3 (4 filtered')
     expect(inserted.payload.summary).not.toContain('lies')
     expect(svc.setActionMessageId).toHaveBeenCalledWith('a1', 99)
   })
@@ -247,6 +272,36 @@ describe('POST /api/actions', () => {
     svc.getPushJob.mockResolvedValue({ ...job, instantly_status: 'pushing' })
     const res = await actionsPOST(post('/api/actions', { kind: 'push_to_instantly', payload: { job_id: JOB } }))
     expect(res.status).toBe(409)
+  })
+
+  it('409 nothing_to_push when the preview has 0 eligible', async () => {
+    svc.getPushJob.mockResolvedValue(job)
+    getPushPreview.mockResolvedValue({ ok: true, preview: { ok: true, eligible: 0, filtered: 24 } })
+    const res = await actionsPOST(post('/api/actions', { kind: 'push_to_instantly', payload: { job_id: JOB } }))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'nothing_to_push' })
+    expect(svc.insertPendingAction).not.toHaveBeenCalled()
+  })
+
+  it('a unique-index violation (23505) is a duplicate, not a 500', async () => {
+    svc.getPushJob.mockResolvedValue(job)
+    svc.findAwaitingAction.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'winner' })
+    svc.insertPendingAction.mockRejectedValue(Object.assign(new Error('dup'), { code: '23505' }))
+    const res = await actionsPOST(post('/api/actions', { kind: 'push_to_instantly', payload: { job_id: JOB } }))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'duplicate', existing_id: 'winner' })
+  })
+
+  it('launch_campaign needs instantly_status done and pushed > 0', async () => {
+    svc.getPushJob.mockResolvedValue({ ...job, instantly_status: 'configuring', instantly_pushed: 0 })
+    expect((await actionsPOST(post('/api/actions', { kind: 'launch_campaign', payload: { job_id: JOB } }))).status).toBe(409)
+    svc.getPushJob.mockResolvedValue({ ...job, instantly_status: 'done', instantly_pushed: 0 })
+    expect((await actionsPOST(post('/api/actions', { kind: 'launch_campaign', payload: { job_id: JOB } }))).status).toBe(409)
+    svc.getPushJob.mockResolvedValue({ ...job, instantly_status: 'done', instantly_pushed: 12 })
+    svc.findAwaitingAction.mockResolvedValue(null)
+    svc.insertPendingAction.mockImplementation(async (r: Record<string, unknown>) => ({ id: 'a2', ...r }))
+    sendActionPrompt.mockResolvedValue({ ok: false, skipped: true })
+    expect((await actionsPOST(post('/api/actions', { kind: 'launch_campaign', payload: { job_id: JOB } }))).status).toBe(201)
   })
 
   it('400 for kinds this task does not accept', async () => {

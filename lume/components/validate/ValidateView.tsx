@@ -15,6 +15,7 @@ import { buildCallbackData } from '@/lib/adapters/pipeline.actions'
 import type { GateRow } from '@/lib/db/types'
 import { buttonsFor, countChips, groupByKind, hotkeyTarget, KIND_LABEL, type ButtonSpec } from '@/lib/validate/actions'
 import { sendJson } from '@/lib/validate/client'
+import { usePushPreview } from '@/hooks/useJob'
 import { clientOutcome } from '@/lib/validate/decideResult'
 import { gateKey, parseGateParam } from '@/lib/validate/deepLink'
 import { keyIntent, moveFocus } from '@/lib/validate/keyboard'
@@ -47,7 +48,12 @@ export function ValidateView({ gates, error, onRefresh, deepLink }: ValidateView
   const [pickerTick, setPickerTick] = useState(0)
   const [editTick, setEditTick] = useState(0)
   const [notice, setNotice] = useState<string | null>(null)
-  const cards = useRef(new Map<string, HTMLDivElement>())
+  const [announce, setAnnounce] = useState('')
+  const listRef = useRef<HTMLDivElement>(null)
+  /** A/R/E act only after the owner put focus on a card (click, Tab, J/K, deep link). */
+  const explicitFocus = useRef(false)
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([])
+  useEffect(() => () => timers.current.forEach(clearTimeout), [])
 
   // The focused gate; when it closes, focus stays at the same position.
   let focusIdx = focusedKey ? keys.indexOf(focusedKey) : -1
@@ -55,16 +61,42 @@ export function ValidateView({ gates, error, onRefresh, deepLink }: ValidateView
   if (focusIdx >= 0) lastIndex.current = focusIdx
   const focused = focusIdx >= 0 ? ordered[focusIdx] : undefined
   const effectiveKey = focused ? gateKey(focused) : null
+  const pushPreview = usePushPreview(focused?.kind === 'push_review' ? focused.target_id : null).data?.preview
+  const blockedFor = (g: GateRow) =>
+    g.kind === 'push_review' && focused && gateKey(g) === effectiveKey && pushPreview && pushPreview.eligible === 0
+      ? { push_to_instantly: 'Nothing to push — the preview shows 0 eligible leads.' }
+      : undefined
 
   const focusCard = useCallback((key: string, scroll: ScrollLogicalPosition = 'nearest') => {
+    explicitFocus.current = true
     setFocusedKey(key)
     requestAnimationFrame(() => {
-      const el = cards.current.get(key)
+      // Looked up in the DOM at focus time: callback refs churn on re-render.
+      const el = listRef.current?.querySelector<HTMLElement>(`[data-gate="${key}"]`)
       if (!el) return
       el.focus({ preventScroll: true })
       el.scrollIntoView({ block: scroll, behavior: 'smooth' })
     })
   }, [])
+
+  // The focused gate closed: move focus to the card now at its position (if
+  // focus was in the list) and say so politely.
+  const prevKeys = useRef<string[]>([])
+  useEffect(() => {
+    const prev = prevKeys.current
+    prevKeys.current = keys
+    if (!focusedKey || !prev.includes(focusedKey) || keys.includes(focusedKey)) return
+    const remaining = keys.length
+    setAnnounce(`Gate closed, ${remaining} remaining`)
+    // The closed card took focus with it: the active element is now body (or,
+    // in some engines, the detached card itself).
+    const active = document.activeElement
+    const inList = !active || !active.isConnected || active === document.body || Boolean(listRef.current?.contains(active))
+    if (!remaining) return setFocusedKey(null)
+    const next = keys[Math.min(prev.indexOf(focusedKey), remaining - 1)]
+    if (inList && explicitFocus.current) focusCard(next)
+    else setFocusedKey(next)
+  }, [keys, focusedKey, focusCard])
 
   // Deep link: once per value, after the first load.
   const handledLink = useRef<string | null | undefined>(undefined)
@@ -123,8 +155,7 @@ export function ValidateView({ gates, error, onRefresh, deepLink }: ValidateView
           else if (outcome === 'already_handled') toast.info('Already handled — refreshed')
           else if (outcome === 'pending') {
             toast.info('Still working — will refresh')
-            setTimeout(onRefresh, 15_000)
-            setTimeout(onRefresh, 60_000)
+            timers.current.push(setTimeout(onRefresh, 15_000), setTimeout(onRefresh, 60_000))
           } else if (err === 'pipeline_not_configured') toast.error('Pipeline entrypoint not configured', { description: 'Set LUME_ACTION_SECRET.' })
           else toast.error("Couldn't reach the pipeline", { description: 'Nothing was claimed — the Telegram button still works.' })
           if (spec.needsCount && outcome !== 'error') setCountOpenKey(null)
@@ -132,6 +163,7 @@ export function ValidateView({ gates, error, onRefresh, deepLink }: ValidateView
           const r = await sendJson<{ error?: string }>('/api/actions', { kind: spec.actionKind, payload: { job_id: gate.target_id } })
           if (r.status === 201) toast.success('Confirmation requested', { description: 'Confirm it here or in Telegram — nothing is pushed until then.' })
           else if (r.status === 409 && r.body?.error === 'duplicate') toast.info('A confirmation is already waiting for this job')
+          else if (r.status === 409 && r.body?.error === 'nothing_to_push') toast.info('Nothing to push — every lead is filtered out')
           else if (r.status === 409) toast.info('This job is no longer ready to push — refreshed')
           else toast.error("Couldn't request the confirmation")
         } else if (spec.mode === 'action_decide') {
@@ -169,13 +201,19 @@ export function ValidateView({ gates, error, onRefresh, deepLink }: ValidateView
       if (t?.closest('[role="dialog"],[role="menu"],[role="listbox"]')) return
       const s = stateRef.current
       if (!s.keys.length) return
-      e.preventDefault()
+      const active = document.activeElement
+      const inList = Boolean(active && listRef.current?.contains(active))
       if (intent === 'next' || intent === 'prev') {
-        const i = moveFocus(s.focusIdx, s.keys.length, intent)
+        // From the page body or inside the list; never from another widget.
+        if (!inList && active && active !== document.body) return
+        e.preventDefault()
+        const i = explicitFocus.current ? moveFocus(s.focusIdx, s.keys.length, intent) : 0
         if (i >= 0) s.focusCard(s.keys[i])
         return
       }
-      if (!s.focused) return
+      // A/R/E: only on a card the owner focused, with focus still in the list.
+      if (!explicitFocus.current || !inList || !s.focused) return
+      e.preventDefault()
       if (intent === 'edit') {
         if (s.focused.target_table === 'validation_jobs') setEditTick((x) => x + 1)
         else toast.info('No lead rows behind this gate')
@@ -220,6 +258,9 @@ export function ValidateView({ gates, error, onRefresh, deepLink }: ValidateView
           </button>
         </p>
       )}
+      <p className="sr-only" role="status" aria-live="polite">
+        {announce}
+      </p>
       {gates.length === 0 ? (
         <GlassCard className="items-center gap-2 py-12 text-center">
           <p className="text-[15px] font-semibold text-fg">Nothing waiting on you</p>
@@ -228,19 +269,21 @@ export function ValidateView({ gates, error, onRefresh, deepLink }: ValidateView
       ) : (
         <>
           <div className="grid items-start gap-4 lg:grid-cols-[1.25fr_1fr]">
+            <div ref={listRef}>
             <GateList
               gates={gates}
+              blockedFor={blockedFor}
               focusedKey={effectiveKey}
               busyKeys={busy}
               countOpenKey={countOpenKey}
               onAction={(g, s, c) => void run(g, s, c)}
               onCountOpenChange={(k, open) => setCountOpenKey(open ? k : null)}
-              onFocusGate={setFocusedKey}
-              registerCard={(k, el) => {
-                if (el) cards.current.set(k, el)
-                else cards.current.delete(k)
+              onFocusGate={(k) => {
+                explicitFocus.current = true
+                setFocusedKey(k)
               }}
             />
+            </div>
             {focused && (
               <div className="flex flex-col gap-4 lg:sticky lg:top-[96px]" aria-label="Gate detail">
                 {isJob ? <JobProgress jobId={focused.target_id} /> : <GateFacts gate={focused} />}

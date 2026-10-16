@@ -93,13 +93,22 @@ export function buttonsFor(gate: Pick<GateRow, 'kind' | 'actions'>): readonly Bu
 }
 
 /**
- * What `A` / `R` press. Approve skips fixed-count presets (a keystroke never
- * orders contacts) and falls back to the custom-count button, which only
- * opens the count input.
+ * Actions that spend money or credits (contacts ordered, enrichment, the
+ * email finder). They need a click; no keystroke ever fires them.
+ */
+export const SPENDING_ACTIONS: ReadonlySet<string> = new Set(['jobs_order_now', 'approve_enrich', 'finder_go', 'lfo_count'])
+
+const keyboardSafe = (s: ButtonSpec) => s.mode !== 'action_decide' && !SPENDING_ACTIONS.has(s.action)
+
+/**
+ * What `A` / `R` press: the first approve-like / reject-like button that is
+ * keyboard-safe. Pending-action Confirm/Cancel and spending actions return
+ * nothing (click only), so e.g. A on a Leadsfriday count or a below-minimum
+ * batch does nothing.
  */
 export function hotkeyTarget(specs: readonly ButtonSpec[], which: 'approve' | 'reject'): ButtonSpec | undefined {
-  if (which === 'reject') return specs.find((s) => s.tone === 'reject')
-  return specs.find((s) => s.tone === 'approve' && s.count === undefined) ?? specs.find((s) => s.needsCount)
+  const tone = which === 'reject' ? 'reject' : 'approve'
+  return specs.find((s) => s.tone === tone && keyboardSafe(s))
 }
 
 export interface GateGroup {
