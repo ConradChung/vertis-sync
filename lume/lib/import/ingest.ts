@@ -42,6 +42,8 @@ export interface IngestMeta {
   source: 'csv' | 'apify'
   /** Free-text origin for the event feed (dataset id, actor id, file name). */
   detail?: string
+  /** The route's shared deadline (covers the upload). */
+  signal?: AbortSignal
 }
 
 export interface IngestResult {
@@ -66,35 +68,52 @@ async function feed(type: string, title: string, sourceId: string, payload: Reco
   }
 }
 
+/**
+ * Upload the bytes, then ingest them (Apify: the CSV is generated here). An
+ * ingest row that cannot be written removes the upload again.
+ */
 export async function createIngest(csvBytes: Uint8Array, filename: string, meta: IngestMeta): Promise<IngestResult> {
-  // Header and row count straight off the bytes, exactly as telegram-inbox
-  // reads them (the header is not BOM-stripped there either, so detection
-  // names the same column the approval step will look up).
-  const headers = parseCSVRow(headerFromBytes(csvBytes))
-  const rowCount = countDataRows(csvBytes)
-  const detectedColumn = detectedEmailColumn(headers)
-
   const storagePath = `lume/${crypto.randomUUID()}.csv`
-  await uploadCsv(storagePath, csvBytes)
-
-  const chatId = ownerChatId()
-  let ingest: TelegramIngestRow
+  await uploadCsv(storagePath, csvBytes, meta.signal)
   try {
-    ingest = await insertIngest({
-      sender_platform: 'lume',
-      telegram_chat_id: chatId,
-      sender_chat_id: chatId,
-      sender_name: LUME_SENDER_NAME,
-      filename,
-      storage_path: storagePath,
-      row_count: rowCount,
-      detected_email_column: detectedColumn,
-      status: 'awaiting_approval',
-    })
+    return await createIngestForStoredObject(storagePath, filename, csvBytes, countDataRows(csvBytes), meta)
   } catch (err) {
+    // Only the insert throws (the prompt, message id and feed never do).
     await removeObject(storagePath)
     throw err
   }
+}
+
+/**
+ * Ingest an object already in `raw-uploads` (the browser's signed upload, or
+ * `createIngest`'s own). `headerBytes` needs only the first line; `rowCount`
+ * is telegram-inbox's newline count over the whole file.
+ */
+export async function createIngestForStoredObject(
+  storagePath: string,
+  filename: string,
+  headerBytes: Uint8Array,
+  rowCount: number,
+  meta: IngestMeta
+): Promise<IngestResult> {
+  // Header straight off the bytes, exactly as telegram-inbox reads it (not
+  // BOM-stripped there either, so detection names the same column the
+  // approval step will look up).
+  const headers = parseCSVRow(headerFromBytes(headerBytes))
+  const detectedColumn = detectedEmailColumn(headers)
+
+  const chatId = ownerChatId()
+  let ingest = await insertIngest({
+    sender_platform: 'lume',
+    telegram_chat_id: chatId,
+    sender_chat_id: chatId,
+    sender_name: LUME_SENDER_NAME,
+    filename,
+    storage_path: storagePath,
+    row_count: rowCount,
+    detected_email_column: detectedColumn,
+    status: 'awaiting_approval',
+  })
 
   const sent = await sendMessage(ingestPromptText({ filename, rowCount, detectedColumn }), {
     replyMarkup: ingestKeyboard(ingest.id, detectedColumn),

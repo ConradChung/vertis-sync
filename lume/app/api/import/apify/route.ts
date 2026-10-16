@@ -15,6 +15,8 @@ import { createIngest } from '@/lib/import/ingest'
  */
 
 export const maxDuration = 120
+/** One deadline for both Apify GETs and the Storage upload, inside maxDuration. */
+const DEADLINE_MS = 105_000
 
 // Apify ids: dataset ids are 17 alphanumerics; actor ids are an id or
 // `username~name` / `username/name`.
@@ -37,17 +39,21 @@ export async function POST(req: Request) {
   if (!isApifyConfigured()) return NextResponse.json({ error: 'apify_not_configured' }, { status: 503 })
 
   const { dataset_id, actor_id } = body.data
+  const deadline = AbortSignal.timeout(DEADLINE_MS)
   let datasetId: string
   let items: Record<string, unknown>[]
   let truncated: boolean
+  let skipped: number
   try {
-    datasetId = dataset_id ?? (await lastSucceededDatasetId(actor_id!))
-    ;({ items, truncated } = await datasetItems(datasetId))
+    datasetId = dataset_id ?? (await lastSucceededDatasetId(actor_id!, deadline))
+    ;({ items, truncated, skipped } = await datasetItems(datasetId, deadline))
   } catch (err) {
     if (err instanceof ApifyError) {
       if (err.code === 'not_found' || err.code === 'no_succeeded_run') {
         return NextResponse.json({ error: err.code }, { status: 404 })
       }
+      if (err.code === 'timeout') return NextResponse.json({ error: 'apify_timeout' }, { status: 504 })
+      if (err.code === 'too_large') return NextResponse.json({ error: 'too_large' }, { status: 413 })
       if (err.code === 'not_configured') return NextResponse.json({ error: 'apify_not_configured' }, { status: 503 })
       console.error(`[api/import/apify] ${err.message}`)
       return NextResponse.json({ error: 'apify_error' }, { status: 502 })
@@ -63,9 +69,14 @@ export async function POST(req: Request) {
     const result = await createIngest(bytes, `apify-${datasetId}.csv`, {
       source: 'apify',
       detail: actor_id ? `actor ${actor_id} → dataset ${datasetId}` : `dataset ${datasetId}`,
+      signal: deadline,
     })
-    return NextResponse.json({ ...ingestBody(result), dataset_id: datasetId, items: items.length, truncated })
+    return NextResponse.json({ ...ingestBody(result), dataset_id: datasetId, items: items.length, truncated, skipped })
   } catch (err) {
+    if (deadline.aborted) {
+      console.error('[api/import/apify] deadline passed during upload')
+      return NextResponse.json({ error: 'apify_timeout' }, { status: 504 })
+    }
     return intakeErrorResponse(err, 'api/import/apify')
   }
 }

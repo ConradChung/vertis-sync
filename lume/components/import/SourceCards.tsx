@@ -94,9 +94,10 @@ function ApifyCard({ onCreated }: SourceCardsProps) {
     const a = await pullApify(mode === 'dataset' ? { dataset_id: id } : { actor_id: id })
     if (a.status === 200 && a.body?.ok) {
       const cap = a.body.truncated ? ' (capped at 20,000 items)' : ''
+      const skipped = a.body.skipped ? ` ${a.body.skipped.toLocaleString('en-US')} non-object items skipped.` : ''
       setStatus({
         state: 'done',
-        text: `${a.body.row_count.toLocaleString('en-US')} rows${cap}. ${promptLine(a.body.telegram)}`,
+        text: `${a.body.row_count.toLocaleString('en-US')} rows${cap}.${skipped} ${promptLine(a.body.telegram)}`,
         gate: a.body.gate,
       })
       setValue('')
@@ -253,13 +254,18 @@ function CsvCard({ onCreated }: SourceCardsProps) {
           e.preventDefault()
           if (!busy) setOver(true)
         }}
-        onDragLeave={() => setOver(false)}
+        onDragLeave={(e) => {
+          // Moving onto a child fires dragleave on the zone; ignore it.
+          if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return
+          setOver(false)
+        }}
         onDrop={onDrop}
         data-over={over || undefined}
         aria-busy={busy || undefined}
         className={cn(
           'flex flex-col items-center justify-center gap-1.5 rounded-[12px] border border-dashed border-line px-3 py-5 text-center text-[12px] text-fg-46 transition-colors',
-          over && 'border-violet bg-violet/10 text-fg'
+          over && 'border-violet bg-violet/10 text-fg',
+          busy && 'cursor-not-allowed'
         )}
       >
         {busy ? (
@@ -272,6 +278,7 @@ function CsvCard({ onCreated }: SourceCardsProps) {
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
+              aria-label="Browse for a CSV file"
               className="text-violet-soft underline-offset-2 hover:text-fg hover:underline"
             >
               or browse
@@ -289,7 +296,8 @@ function CsvCard({ onCreated }: SourceCardsProps) {
           accept=".csv,text/csv"
           className="sr-only"
           tabIndex={-1}
-          aria-label="Choose a CSV file"
+          aria-hidden
+          data-testid="csv-input"
           onChange={(e) => {
             const f = e.target.files?.[0]
             if (f) void send(f)

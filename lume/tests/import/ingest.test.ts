@@ -13,7 +13,7 @@ vi.mock('@/lib/adapters/telegram', () => ({ sendMessage }))
 const storage = vi.hoisted(() => ({ uploadCsv: vi.fn(), removeObject: vi.fn() }))
 vi.mock('@/lib/import/storage', () => storage)
 
-import { createApolloOrder, createIngest } from '@/lib/import/ingest'
+import { createApolloOrder, createIngest, createIngestForStoredObject } from '@/lib/import/ingest'
 
 const ID = '7db3d841-252c-4572-95ec-bc110727df8d'
 const enc = (s: string) => new TextEncoder().encode(s)
@@ -90,6 +90,23 @@ describe('createIngest', () => {
     storage.uploadCsv.mockRejectedValue(new Error('storage 500'))
     await expect(createIngest(enc('email\na\n'), 'f.csv', { source: 'csv' })).rejects.toThrow('storage 500')
     expect(svc.insertIngest).not.toHaveBeenCalled()
+  })
+})
+
+describe('createIngestForStoredObject', () => {
+  it('ingests an already-uploaded object without uploading or removing anything', async () => {
+    sendMessage.mockResolvedValue({ ok: false, skipped: true })
+    const path = 'lume/0b6f6c1e-8a51-4c43-9d0e-6e7a1f3b2c4d.csv'
+    const r = await createIngestForStoredObject(path, 'leads.csv', enc('Name,Work Email\nA,'), 900, { source: 'csv' })
+    expect(storage.uploadCsv).not.toHaveBeenCalled()
+    expect(svc.insertIngest.mock.calls[0][0]).toMatchObject({ storage_path: path, row_count: 900, detected_email_column: 'Work Email' })
+    expect(r.telegram).toBe('skipped')
+  })
+
+  it('an insert failure leaves the object for a retry', async () => {
+    svc.insertIngest.mockRejectedValue(new Error('db down'))
+    await expect(createIngestForStoredObject('lume/x.csv', 'f.csv', enc('email\n'), 1, { source: 'csv' })).rejects.toThrow('db down')
+    expect(storage.removeObject).not.toHaveBeenCalled()
   })
 })
 

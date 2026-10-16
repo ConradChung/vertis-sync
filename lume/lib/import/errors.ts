@@ -9,6 +9,10 @@ export function intakeErrorResponse(err: unknown, where: string): NextResponse {
     console.error(`[${where}] ${err.message}`)
     return NextResponse.json({ error: 'storage' }, { status: 502 })
   }
+  if (err instanceof Error && err.name === 'TimeoutError') {
+    console.error(`[${where}] timed out`)
+    return NextResponse.json({ error: 'timeout' }, { status: 504 })
+  }
   return dbErrorResponse(err, where)
 }
 

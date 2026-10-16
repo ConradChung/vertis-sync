@@ -13,7 +13,7 @@ const TIER1_NAMES = new Set(['email', 'work_email', 'business_email'])
 const PERSONAL_SUBSTRINGS = ['personal']
 
 /** Bulk Apollo columns telegram-inbox drops at approval (not used for detection). */
-export const DROPPED_COLUMNS: ReadonlySet<string> = new Set(['keywords', 'technologies'])
+export const DROPPED_COLUMNS = new Set(['keywords', 'technologies'])
 
 export function normalizeHeader(h: string): string {
   return h.toLowerCase().trim().replace(/\s+/g, '_')
@@ -29,7 +29,8 @@ export function keptColumnIndexes(headers: string[]): number[] {
 
 export type EmailDetection = { column: string } | { ambiguous: string[] } | { error: string }
 
-export function detectEmailColumn(headers: string[]): EmailDetection {
+// Signature spelled out as upstream writes it (tests/import/parity.test.ts compares the source).
+export function detectEmailColumn(headers: string[]): { column: string } | { ambiguous: string[] } | { error: string } {
   const normalized = headers.map(normalizeHeader)
   const tier1: string[] = []
   const tier3: string[] = []

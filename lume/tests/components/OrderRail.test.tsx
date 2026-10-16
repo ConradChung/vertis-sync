@@ -143,6 +143,14 @@ describe('OrderRailView', () => {
     expect(screen.queryByRole('region', { name: 'Leadsfriday count' })).toBeNull()
   })
 
+  it('apollo_url is a link only when it is an app.apollo.io URL', () => {
+    const { unmount } = render(<OrderRailView kind="apollo_order" detail={apollo(false)} />)
+    expect(screen.getByRole('link', { name: /Apollo search/ }).getAttribute('href')).toBe('https://app.apollo.io/#/people?x=1')
+    unmount()
+    render(<OrderRailView kind="apollo_order" detail={{ ...apollo(false), apollo_url: 'javascript:alert(1)' } as OrderDetail} />)
+    expect(screen.queryByRole('link', { name: /Apollo search/ })).toBeNull()
+  })
+
   it('job_batch: counts and its gate', () => {
     render(
       <OrderRailView

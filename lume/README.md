@@ -81,13 +81,19 @@ Environment variable names are listed in `.env.example`.
   while it awaits. Hotkeys A/R never fire Confirm/Cancel or spending actions.
   Pure logic in `lib/validate/*`.
 - Import (`/import`): `POST /api/import/{apify,csv,apollo-link}` only create
-  the intake — `lib/import/ingest.ts` uploads to `raw-uploads/lume/<uuid>.csv`,
+  the intake. CSV uploads skip the function body (Vercel ~4.5 MB cap):
+  `/api/import/csv/sign` returns a signed Storage upload URL for
+  `lume/<uuid>.csv` plus an HMAC `upload_ticket`; the browser uploads with
+  `uploadToSignedUrl`, then `/api/import/csv` verifies path + ticket, refuses
+  a path already ingested (409), stats/streams the object (≤ 20 MB) and calls
+  `createIngestForStoredObject`. Apify reads items with a 40 MB cap under one
+  105 s deadline (504 `apify_timeout`). Otherwise the intake — `lib/import/ingest.ts` uploads to `raw-uploads/lume/<uuid>.csv`,
   inserts `telegram_ingests` (`sender_platform='lume'`, `awaiting_approval`)
   and sends telegram-inbox's own prompt/keyboard; Apollo links become
   `apollo_orders` `awaiting_count` with the `lfo_*` keyboard. Approval and
   everything after stay in telegram-inbox; Lume never creates
   `validation_jobs`. Email-column detection is a copy of telegram-inbox's
-  (`lib/import/csv.ts`, parity tests). CSV writer flattens newlines (the
+  (`lib/import/csv.ts`; `tests/import/parity.test.ts` compares the source). CSV writer flattens newlines (the
   pipeline parses line by line). The rail's count picker sends
   `lfo_count:<id>:<n>` via `/api/gates/decide` (click only).
 - Live read check: `LUME_SMOKE=1 npm run smoke:db` (row counts only).

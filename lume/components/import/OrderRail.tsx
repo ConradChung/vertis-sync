@@ -172,7 +172,7 @@ function DetailBody({ detail, onDecided }: { detail: OrderDetail; onDecided?: ()
               ['Leadsfriday status', detail.leadsfriday_status ?? '—'],
             ]}
           />
-          {detail.apollo_url && (
+          {detail.apollo_url?.startsWith('https://app.apollo.io/') && (
             <a href={detail.apollo_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 self-start text-violet-soft hover:text-fg">
               Apollo search <ExternalLink className="size-3" aria-hidden />
             </a>

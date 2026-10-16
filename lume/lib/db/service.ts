@@ -645,3 +645,11 @@ export async function getGatesForTargets(targetIds: string[]): Promise<GateRow[]
     .order('target_id', { ascending: true })
   return unwrap('getGatesForTargets', res) as GateRow[]
 }
+
+/** An ingest already pointing at this object (a re-submitted upload ticket). */
+export async function findIngestByStoragePath(storagePath: string): Promise<{ id: string } | null> {
+  const sb = createServiceClient()
+  const res = await sb.from('telegram_ingests').select('id').eq('storage_path', storagePath).limit(1).maybeSingle()
+  if (res.error) throw new DbError('findIngestByStoragePath', res.error)
+  return (res.data as { id: string } | null) ?? null
+}

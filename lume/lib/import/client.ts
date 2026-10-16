@@ -2,6 +2,7 @@
  * Browser-side calls for the Import screen. Never throws: a network failure
  * is `{ status: 0 }`. Pure helpers for messages live here too.
  */
+import { createClient } from '@/lib/supabase/client'
 import { sendJson, type ApiAnswer } from '@/lib/validate/client'
 
 export interface IngestAnswer {
@@ -13,6 +14,7 @@ export interface IngestAnswer {
   gate: string
   items?: number
   truncated?: boolean
+  skipped?: number
 }
 
 export interface ApolloAnswer {
@@ -30,22 +32,30 @@ export function sendApolloLink(url: string): Promise<ApiAnswer<ApolloAnswer>> {
   return sendJson<ApolloAnswer>('/api/import/apollo-link', { url })
 }
 
+interface SignAnswer {
+  path: string
+  token: string
+  signedUrl: string
+  upload_ticket: string
+}
+
+/**
+ * Three steps, so the file never passes through a Vercel function (~4.5 MB
+ * body cap): sign → upload straight to Storage → ingest the stored object.
+ */
 export async function uploadCsvFile(file: File): Promise<ApiAnswer<IngestAnswer>> {
-  const form = new FormData()
-  form.append('file', file, file.name)
+  const sign = await sendJson<SignAnswer>('/api/import/csv/sign', { filename: file.name, size: file.size })
+  if (sign.status !== 200 || !sign.body) return sign as unknown as ApiAnswer<IngestAnswer>
+  const { path, token, upload_ticket } = sign.body
   try {
-    const res = await fetch('/api/import/csv', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { Accept: 'application/json' },
-      body: form,
-      signal: AbortSignal.timeout(90_000),
-    })
-    return { status: res.status, body: (await res.json().catch(() => null)) as IngestAnswer | null }
-  } catch (err) {
-    const name = err instanceof Error ? err.name : ''
-    return { status: 0, body: null, aborted: name === 'TimeoutError' || name === 'AbortError' }
+    const { error } = await createClient()
+      .storage.from('raw-uploads')
+      .uploadToSignedUrl(path, token, file, { contentType: 'text/csv' })
+    if (error) return { status: 502, body: { error: 'storage' } as unknown as IngestAnswer }
+  } catch {
+    return { status: 0, body: null }
   }
+  return sendJson<IngestAnswer>('/api/import/csv', { storage_path: path, filename: file.name, upload_ticket }, { timeoutMs: 90_000 })
 }
 
 const MESSAGES: Record<string, string> = {
@@ -63,6 +73,11 @@ const MESSAGES: Record<string, string> = {
   missing_file: 'Choose a file first.',
   invalid_apollo_url: 'Paste an Apollo people search link (https://app.apollo.io/#/people?…).',
   storage: 'Could not save the file — try again.',
+  apify_timeout: 'Apify took too long — try again, or pull a smaller dataset.',
+  timeout: 'Timed out — check the orders table before retrying.',
+  already_ingested: 'That upload was already sent for approval.',
+  upload_missing: 'The upload did not arrive — try again.',
+  invalid_ticket: 'Upload expired — try again.',
   database: 'Could not save — try again.',
   unauthenticated: 'Your session ended — sign in again.',
 }
