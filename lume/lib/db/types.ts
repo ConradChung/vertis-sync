@@ -263,3 +263,47 @@ export interface LumeExternalScheduleRow {
   notes: string | null
   created_at: string
 }
+
+// ---------------------------------------------------------------------------
+// Validate screen (validation_jobs / validation_rows reads)
+
+/** `getJobProgress()`: the progress panel inside a job gate. */
+export interface JobProgress {
+  id: string
+  filename: string | null
+  status: string | null
+  total_rows: number
+  processed_rows: number
+  eta_seconds: number | null
+  eta_updated_at: string | null
+  enrich: boolean
+  enrich_started: boolean
+  enriched_rows: number
+  finder_status: string | null
+  rows_missing_email: number | null
+  emails_found: number | null
+  instantly_status: string | null
+  instantly_campaign_id: string | null
+  instantly_campaign_name: string | null
+  location_barrier: boolean
+  company_barrier: boolean
+  company_strict: boolean
+  /** Exact per-status counts over validation_rows. */
+  counts: { pending: number; valid: number; invalid: number; error: number; no_email: number }
+}
+
+/** `instantly-push` `mode:'preview'` response. */
+export interface PushPreview {
+  ok: boolean
+  eligible: number
+  filtered: number
+  junk: number
+  missingFirstName: number
+  blankLocation: number
+  samples: { original: string; normalized: string }[]
+  strict: boolean
+  noLocationRouted?: number
+  hasNoLocationCampaign?: boolean
+  instantlyKeyPresent: boolean
+  error?: string
+}

@@ -67,6 +67,15 @@ Environment variable names are listed in `.env.example`.
   "Today" is the owner's zone (`lib/time/owner.ts`, America/Los_Angeles).
 - `/api/webhooks/instantly?secret=…` (128 KB cap, counted in bytes) → `events` via `logEvent` (dedupe on
   `webhook_id` = `instantly:<event_type>:<id>[:<timestamp>]` or a SHA-256 of the body).
+- Validate (`/validate`): decisions go through `POST /api/gates/decide`
+  (`maxDuration = 300`; 409 = already handled, 202 = still working, re-read).
+  `push_go` / `camp_launch` / `lume_ok` / `lume_no` are refused there (400
+  `needs_confirmation`): "Push these" creates a `pending_actions` row via
+  `POST /api/actions` (`lib/actions/create.ts`, one awaiting action per kind
+  per job). Campaign pick, barriers and names mode are Lume-local conditional
+  PATCHes on `/api/gates/campaign/[jobId]` (GET = `instantly-push` preview).
+  Per-lead rows: `/api/jobs/[id]/rows` (pending rows editable). Pure logic in
+  `lib/validate/*`.
 - Live read check: `LUME_SMOKE=1 npm run smoke:db` (row counts only).
 
 ## Design system notes
