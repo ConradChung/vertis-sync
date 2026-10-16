@@ -1,20 +1,19 @@
 import { NextResponse } from 'next/server'
 import { requireOwner } from '@/lib/auth/guards'
-import { getOverview, getScheduledJobs } from '@/lib/db/service'
 import { dbErrorResponse } from '@/lib/http/errors'
-import type { OverviewResponse } from '@/lib/db/types'
+import { buildOverview } from '@/lib/overview/build'
 
 /**
- * `lume_overview()` merged with `lume_scheduled_jobs()`. Instantly numbers
- * (campaign health, inbox health) are added in Task 8.
+ * The whole Overview in one response (`OverviewPayload`): `lume_overview()`,
+ * scheduled jobs with `next_run`, the reply feed, agent activity, 7-day reply
+ * counts, the campaign strip with health, and Instantly totals + accounts
+ * when `INSTANTLY_API_KEY` is set (`instantly: { configured: false }` if not).
  */
 export async function GET(req: Request) {
   const auth = await requireOwner(req)
   if (!auth.ok) return auth.response
   try {
-    const [overview, scheduled_jobs] = await Promise.all([getOverview(), getScheduledJobs()])
-    const body: OverviewResponse = { ...overview, scheduled_jobs }
-    return NextResponse.json(body)
+    return NextResponse.json(await buildOverview(new Date()))
   } catch (err) {
     return dbErrorResponse(err, 'api/overview')
   }

@@ -3,7 +3,7 @@
 import useSWR from 'swr'
 import { fetchJson } from '@/hooks/fetcher'
 import { useRealtimeInvalidate } from '@/hooks/useRealtimeInvalidate'
-import type { OverviewResponse } from '@/lib/db/types'
+import type { OverviewPayload } from '@/lib/overview/types'
 
 /**
  * Overview KPIs, recent events and scheduled jobs from `GET /api/overview`.
@@ -12,7 +12,7 @@ import type { OverviewResponse } from '@/lib/db/types'
  * the cron countdowns.
  */
 export function useOverview() {
-  const swr = useSWR<OverviewResponse>('/api/overview', fetchJson, {
+  const swr = useSWR<OverviewPayload>('/api/overview', fetchJson, {
     refreshInterval: 60_000,
     keepPreviousData: true,
   })

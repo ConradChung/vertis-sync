@@ -35,6 +35,8 @@ Environment variable names are listed in `.env.example`.
   or `requireSecret` from `@/lib/auth/guards` itself; the middleware is the
   second line, not the first. `tests/api/routeGuards.test.ts` enforces it, with
   an explicit allowlist for routes that are their own gate (`/api/auth/magic-link`).
+  `requireSecret(req, { query: 'secret' }, ENV)` reads the secret from a URL
+  parameter for callers that cannot set headers (Instantly webhooks).
 - `requestOrigin()` prefers `LUME_URL` over forwarded headers, so a magic link
   requested from a Vercel preview deployment redirects to the production
   origin after login (the one Supabase Auth allowlists). Set `LUME_URL` per
@@ -54,6 +56,12 @@ Environment variable names are listed in `.env.example`.
   when `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` are unset.
 - Screens use SWR hooks in `hooks/` that revalidate on Realtime inserts
   (`useRealtimeInvalidate`).
+- Instantly (`lib/adapters/instantly.ts`, server-only; pure mappers in
+  `instantly.map.ts`): 60 s in-memory cache per URL. With `INSTANTLY_API_KEY`
+  unset every `/api/instantly/*` route answers `200 {configured:false}` and
+  the Overview tiles show "Instantly not connected".
+- `/api/webhooks/instantly?secret=…` → `events` via `logEvent` (dedupe on
+  `webhook_id` = `instantly:<event_type>:<id>` or a SHA-256 of the body).
 - Live read check: `LUME_SMOKE=1 npm run smoke:db` (row counts only).
 
 ## Design system notes

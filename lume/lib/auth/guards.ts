@@ -57,17 +57,24 @@ export async function requireOwner(req?: Request): Promise<OwnerAuth | Fail> {
   return { ok: true, via: 'session', user }
 }
 
+/** Where a shared secret is presented: a header name, or `{ query }` for a URL parameter. */
+export type SecretSource = string | { query: string }
+
 /**
  * For shared-secret entrypoints (webhooks, DB hooks, cron, action execute).
  *
- * Compares the named request header to the named env var in constant time.
- * 401 on any mismatch, including an unset env var.
+ * Compares the presented secret to the named env var in constant time.
+ * 401 on any mismatch, including an unset env var. The secret comes from a
+ * request header, or from a query parameter for callers that cannot set
+ * headers (Instantly webhooks: `?secret=`):
  *
  *   const auth = requireSecret(req, 'x-lume-secret', 'LUME_ACTION_SECRET')
+ *   const auth = requireSecret(req, { query: 'secret' }, 'INSTANTLY_WEBHOOK_SECRET')
  *   if (!auth.ok) return auth.response
  */
-export function requireSecret(req: Request, headerName: string, envName: string): Pass<object> | Fail {
-  const presented = req.headers.get(headerName)
+export function requireSecret(req: Request, source: SecretSource, envName: string): Pass<object> | Fail {
+  const presented =
+    typeof source === 'string' ? req.headers.get(source) : new URL(req.url).searchParams.get(source.query)
   const expected = process.env[envName]
   if (!secretMatches(presented, expected)) {
     return { ok: false, response: NextResponse.json({ error: 'unauthorized' }, { status: 401 }) }

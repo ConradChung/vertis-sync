@@ -219,3 +219,38 @@ export async function logEvent(input: EventInsert): Promise<EventRow | null> {
   const res = await sb.from('events').insert(row).select().single()
   return unwrap('logEvent', res) as EventRow
 }
+
+/** Slim rows for counting: events of `types` since `sinceIso` (capped at 5,000). */
+export async function getEventStamps({
+  types,
+  sinceIso,
+}: {
+  types: string[]
+  sinceIso: string
+}): Promise<Pick<EventRow, 'type' | 'campaign_id' | 'created_at'>[]> {
+  const sb = createServiceClient()
+  const res = await sb
+    .from('events')
+    .select('type,campaign_id,created_at')
+    .in('type', types)
+    .gte('created_at', sinceIso)
+    .order('created_at', { ascending: false })
+    .limit(5000)
+  return unwrap('getEventStamps', res) as Pick<EventRow, 'type' | 'campaign_id' | 'created_at'>[]
+}
+
+/** Newest events whose type starts with any of `prefixes` (e.g. `agent.`, `lume.`). */
+export async function getEventsByTypePrefix(prefixes: string[], limit = 20): Promise<EventRow[]> {
+  const sb = createServiceClient()
+  const n = Math.min(Math.max(Math.floor(limit), 1), 200)
+  // Prefixes are code constants; `%`/`,` never come from user input here.
+  const or = prefixes.map((p) => `type.like.${p}*`).join(',')
+  const res = await sb
+    .from('events')
+    .select('*')
+    .or(or)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(n)
+  return unwrap('getEventsByTypePrefix', res) as EventRow[]
+}

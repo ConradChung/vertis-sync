@@ -132,10 +132,7 @@ export interface Overview {
   recent_events: EventRow[]
 }
 
-/** What `GET /api/overview` returns: the RPC plus the scheduled jobs. */
-export interface OverviewResponse extends Overview {
-  scheduled_jobs: ScheduledJob[]
-}
+// `GET /api/overview`'s full response is `OverviewPayload` in lib/overview/types.ts.
 
 // ---------------------------------------------------------------------------
 // Tables

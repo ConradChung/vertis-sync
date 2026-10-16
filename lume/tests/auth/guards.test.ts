@@ -78,3 +78,33 @@ describe('requireOwner with the internal bearer', () => {
     expect(createClient).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('requireSecret', () => {
+  beforeEach(() => {
+    process.env.TEST_HOOK_SECRET = 'hook-abc'
+  })
+
+  it('reads a header by name', async () => {
+    const { requireSecret } = await import('@/lib/auth/guards')
+    const ok = requireSecret(new Request('http://x/api/hooks/a', { headers: { 'x-lume-secret': 'hook-abc' } }), 'x-lume-secret', 'TEST_HOOK_SECRET')
+    expect(ok.ok).toBe(true)
+    const bad = requireSecret(new Request('http://x/api/hooks/a', { headers: { 'x-lume-secret': 'nope' } }), 'x-lume-secret', 'TEST_HOOK_SECRET')
+    expect(bad.ok).toBe(false)
+    if (!bad.ok) expect(bad.response.status).toBe(401)
+  })
+
+  it('reads a query parameter with { query }', async () => {
+    const { requireSecret } = await import('@/lib/auth/guards')
+    expect(requireSecret(new Request('http://x/api/webhooks/i?secret=hook-abc'), { query: 'secret' }, 'TEST_HOOK_SECRET').ok).toBe(true)
+    expect(requireSecret(new Request('http://x/api/webhooks/i?secret=wrong'), { query: 'secret' }, 'TEST_HOOK_SECRET').ok).toBe(false)
+    expect(requireSecret(new Request('http://x/api/webhooks/i'), { query: 'secret' }, 'TEST_HOOK_SECRET').ok).toBe(false)
+    // the header of the same name does not count for a query source
+    expect(requireSecret(new Request('http://x/api/webhooks/i', { headers: { secret: 'hook-abc' } }), { query: 'secret' }, 'TEST_HOOK_SECRET').ok).toBe(false)
+  })
+
+  it('fails closed when the env var is unset', async () => {
+    const { requireSecret } = await import('@/lib/auth/guards')
+    delete process.env.TEST_HOOK_SECRET
+    expect(requireSecret(new Request('http://x/?secret='), { query: 'secret' }, 'TEST_HOOK_SECRET').ok).toBe(false)
+  })
+})
