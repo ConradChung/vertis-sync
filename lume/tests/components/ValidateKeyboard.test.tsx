@@ -56,14 +56,21 @@ describe('Validate keyboard', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('A on a focused jobs_review card decides jobs_pull through /api/gates/decide', async () => {
+  it('A on a focused jobs_review card does nothing (jobs_pull spends: Apollo resolves + a Leadsfriday order)', async () => {
     render(<ValidateView gates={GATES} onRefresh={() => {}} />)
     await focusOn(card(/Job scrape review/))
     await press('a')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('R on a focused jobs_review card decides jobs_skip through /api/gates/decide', async () => {
+    render(<ValidateView gates={GATES} onRefresh={() => {}} />)
+    await focusOn(card(/Job scrape review/))
+    await press('r')
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('/api/gates/decide')
-    expect(JSON.parse(String(init.body))).toEqual({ callback_data: `jobs_pull:${id(1)}` })
+    expect(JSON.parse(String(init.body))).toEqual({ callback_data: `jobs_skip:${id(1)}` })
   })
 
   it('A on jobs_fill (spends) does nothing', async () => {

@@ -8,7 +8,10 @@ import type {
   GateKind,
   Json,
   GateRow,
+  ApolloOrderRow,
+  JobBatchRow,
   JobProgress,
+  JobSampleSource,
   LeadBankRow,
   LumeCampaignRow,
   OrderRow,
@@ -16,6 +19,8 @@ import type {
   PendingActionKind,
   PendingActionRow,
   ScheduledJob,
+  TelegramIngestInsert,
+  TelegramIngestRow,
 } from '@/lib/db/types'
 import {
   mergeRowData,
@@ -548,4 +553,95 @@ export async function getPushJob(jobId: string): Promise<{
     .maybeSingle()
   if (res.error) throw new DbError('getPushJob', res.error)
   return (res.data as never) ?? null
+}
+
+// ---------------------------------------------------------------------------
+// Import intakes. Lume only creates the intake row (an ingest awaiting
+// approval, or an Apollo order awaiting its count); telegram-inbox and the
+// pipeline own every step after that. Lume never creates validation_jobs.
+
+export async function insertIngest(row: TelegramIngestInsert): Promise<TelegramIngestRow> {
+  const sb = createServiceClient()
+  const res = await sb.from('telegram_ingests').insert(row).select('*').single()
+  return unwrap('insertIngest', res) as TelegramIngestRow
+}
+
+export async function setIngestMessageId(id: string, messageId: number): Promise<void> {
+  const sb = createServiceClient()
+  const res = await sb.from('telegram_ingests').update({ telegram_message_id: messageId }).eq('id', id)
+  if (res.error) throw new DbError('setIngestMessageId', res.error)
+}
+
+export async function insertApolloOrder(apolloUrl: string): Promise<ApolloOrderRow> {
+  const sb = createServiceClient()
+  const res = await sb.from('apollo_orders').insert({ apollo_url: apolloUrl, status: 'awaiting_count' }).select('*').single()
+  return unwrap('insertApolloOrder', res) as ApolloOrderRow
+}
+
+export async function setApolloOrderMessageId(id: string, messageId: number): Promise<void> {
+  const sb = createServiceClient()
+  const res = await sb.from('apollo_orders').update({ telegram_message_id: messageId }).eq('id', id)
+  if (res.error) throw new DbError('setApolloOrderMessageId', res.error)
+}
+
+export async function getIngest(id: string): Promise<TelegramIngestRow | null> {
+  const sb = createServiceClient()
+  const res = await sb.from('telegram_ingests').select('*').eq('id', id).maybeSingle()
+  if (res.error) throw new DbError('getIngest', res.error)
+  return (res.data as TelegramIngestRow | null) ?? null
+}
+
+const APOLLO_ORDER_COLS =
+  'id,apollo_url,contact_count,status,count_status,leadsfriday_order_id,leadsfriday_status,credits_deducted,new_balance,ingest_id,telegram_message_id,error,created_at'
+
+export async function getApolloOrder(id: string): Promise<ApolloOrderRow | null> {
+  const sb = createServiceClient()
+  const res = await sb.from('apollo_orders').select(APOLLO_ORDER_COLS).eq('id', id).maybeSingle()
+  if (res.error) throw new DbError('getApolloOrder', res.error)
+  return (res.data as ApolloOrderRow | null) ?? null
+}
+
+const JOB_BATCH_COLS =
+  'id,batch_date,status,companies_added,companies_pulled,companies_unresolved,contacts_total,contacts_kept,leadsfriday_order_id,leadsfriday_status,error,created_at'
+
+export async function getJobBatch(id: string): Promise<JobBatchRow | null> {
+  const sb = createServiceClient()
+  const res = await sb.from('job_batches').select(JOB_BATCH_COLS).eq('id', id).maybeSingle()
+  if (res.error) throw new DbError('getJobBatch', res.error)
+  return (res.data as JobBatchRow | null) ?? null
+}
+
+/** A job's enrichment config and its first `n` rows' `row_data` (read-only). `null` when the job is gone. */
+export async function getJobSample(jobId: string, n = 5): Promise<JobSampleSource | null> {
+  const sb = createServiceClient()
+  const jobRes = await sb
+    .from('validation_jobs')
+    .select('id,filename,status,total_rows,enrich,icp_filter,icp_description,column_order')
+    .eq('id', jobId)
+    .maybeSingle()
+  if (jobRes.error) throw new DbError('getJobSample', jobRes.error)
+  if (!jobRes.data) return null
+  const rowsRes = await sb
+    .from('validation_rows')
+    .select('row_index,row_data')
+    .eq('job_id', jobId)
+    .order('row_index', { ascending: true })
+    .order('id', { ascending: true })
+    .limit(Math.min(Math.max(Math.floor(n), 1), 20))
+  if (rowsRes.error) throw new DbError('getJobSample.rows', rowsRes.error)
+  return { ...(jobRes.data as Omit<JobSampleSource, 'rows'>), rows: (rowsRes.data ?? []) as JobSampleSource['rows'] }
+}
+
+/** Open gates on any of these targets (an order, its job), oldest first. */
+export async function getGatesForTargets(targetIds: string[]): Promise<GateRow[]> {
+  const ids = targetIds.filter(Boolean)
+  if (!ids.length) return []
+  const sb = createServiceClient()
+  const res = await sb
+    .from('lume_gates')
+    .select('*')
+    .in('target_id', ids)
+    .order('created_at', { ascending: true })
+    .order('target_id', { ascending: true })
+  return unwrap('getGatesForTargets', res) as GateRow[]
 }

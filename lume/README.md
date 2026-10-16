@@ -80,6 +80,16 @@ Environment variable names are listed in `.env.example`.
   campaign, barriers, names mode and eligible count; barriers are locked
   while it awaits. Hotkeys A/R never fire Confirm/Cancel or spending actions.
   Pure logic in `lib/validate/*`.
+- Import (`/import`): `POST /api/import/{apify,csv,apollo-link}` only create
+  the intake — `lib/import/ingest.ts` uploads to `raw-uploads/lume/<uuid>.csv`,
+  inserts `telegram_ingests` (`sender_platform='lume'`, `awaiting_approval`)
+  and sends telegram-inbox's own prompt/keyboard; Apollo links become
+  `apollo_orders` `awaiting_count` with the `lfo_*` keyboard. Approval and
+  everything after stay in telegram-inbox; Lume never creates
+  `validation_jobs`. Email-column detection is a copy of telegram-inbox's
+  (`lib/import/csv.ts`, parity tests). CSV writer flattens newlines (the
+  pipeline parses line by line). The rail's count picker sends
+  `lfo_count:<id>:<n>` via `/api/gates/decide` (click only).
 - Live read check: `LUME_SMOKE=1 npm run smoke:db` (row counts only).
 
 ## Design system notes

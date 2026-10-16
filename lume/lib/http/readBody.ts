@@ -1,15 +1,16 @@
 /**
- * Read a request body as text with a hard byte cap. A declared
- * `Content-Length` over the cap is refused before anything is read; otherwise
- * the stream is consumed chunk by chunk, counting bytes (not UTF-16 code
- * units), and cancelled as soon as it passes the cap.
+ * Read a request body with a hard byte cap. A declared `Content-Length` over
+ * the cap is refused before anything is read; otherwise the stream is
+ * consumed chunk by chunk, counting bytes (not UTF-16 code units), and
+ * cancelled as soon as it passes the cap.
  */
 export type CappedBody = { ok: true; text: string } | { ok: false; reason: 'too_large' }
+export type CappedBytes = { ok: true; bytes: Uint8Array } | { ok: false; reason: 'too_large' }
 
-export async function readBodyCapped(req: Request, maxBytes: number): Promise<CappedBody> {
+export async function readBytesCapped(req: Request, maxBytes: number): Promise<CappedBytes> {
   const declared = Number(req.headers.get('content-length'))
   if (Number.isFinite(declared) && declared > maxBytes) return { ok: false, reason: 'too_large' }
-  if (!req.body) return { ok: true, text: '' }
+  if (!req.body) return { ok: true, bytes: new Uint8Array(0) }
 
   const reader = req.body.getReader()
   const chunks: Uint8Array[] = []
@@ -30,5 +31,10 @@ export async function readBodyCapped(req: Request, maxBytes: number): Promise<Ca
     buf.set(c, off)
     off += c.byteLength
   }
-  return { ok: true, text: new TextDecoder().decode(buf) }
+  return { ok: true, bytes: buf }
+}
+
+export async function readBodyCapped(req: Request, maxBytes: number): Promise<CappedBody> {
+  const r = await readBytesCapped(req, maxBytes)
+  return r.ok ? { ok: true, text: new TextDecoder().decode(r.bytes) } : r
 }

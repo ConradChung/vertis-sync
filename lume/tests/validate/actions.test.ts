@@ -77,7 +77,6 @@ describe('buttonsFor', () => {
 describe('hotkeyTarget', () => {
   it('approve = first keyboard-safe approve-like button', () => {
     expect(hotkeyTarget(BUTTON_SPECS.ingest_approval, 'approve')?.action).toBe('approve')
-    expect(hotkeyTarget(BUTTON_SPECS.jobs_review, 'approve')?.action).toBe('jobs_pull')
     expect(hotkeyTarget(BUTTON_SPECS.push_review, 'approve')?.mode).toBe('create_action')
     expect(hotkeyTarget(BUTTON_SPECS.campaign_choice, 'approve')?.mode).toBe('panel')
   })
@@ -88,6 +87,9 @@ describe('hotkeyTarget', () => {
   })
   it('spending actions are click-only', () => {
     expect(hotkeyTarget(BUTTON_SPECS.jobs_fill, 'approve')).toBeUndefined()
+    // jobs_pull triggers Apollo resolves and a Leadsfriday order.
+    expect(hotkeyTarget(BUTTON_SPECS.jobs_review, 'approve')).toBeUndefined()
+    expect(hotkeyTarget(BUTTON_SPECS.jobs_review, 'reject')?.action).toBe('jobs_skip')
     expect(hotkeyTarget(BUTTON_SPECS.finder_decision, 'approve')).toBeUndefined()
     expect(hotkeyTarget(BUTTON_SPECS.lfo_count, 'approve')).toBeUndefined()
     // approve_enrich is never reached by A (plain approve comes first, and it is excluded anyway).

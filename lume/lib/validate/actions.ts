@@ -94,9 +94,16 @@ export function buttonsFor(gate: Pick<GateRow, 'kind' | 'actions'>): readonly Bu
 
 /**
  * Actions that spend money or credits (contacts ordered, enrichment, the
- * email finder). They need a click; no keystroke ever fires them.
+ * email finder; `jobs_pull` resolves companies in Apollo and places a
+ * Leadsfriday order). They need a click; no keystroke ever fires them.
  */
-export const SPENDING_ACTIONS: ReadonlySet<string> = new Set(['jobs_order_now', 'approve_enrich', 'finder_go', 'lfo_count'])
+export const SPENDING_ACTIONS: ReadonlySet<string> = new Set([
+  'jobs_order_now',
+  'jobs_pull',
+  'approve_enrich',
+  'finder_go',
+  'lfo_count',
+])
 
 const keyboardSafe = (s: ButtonSpec) => s.mode !== 'action_decide' && !SPENDING_ACTIONS.has(s.action)
 

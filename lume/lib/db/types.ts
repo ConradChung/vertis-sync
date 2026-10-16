@@ -307,3 +307,79 @@ export interface PushPreview {
   instantlyKeyPresent: boolean
   error?: string
 }
+
+// ---------------------------------------------------------------------------
+// Import intakes (telegram_ingests / apollo_orders / job_batches)
+
+export interface TelegramIngestRow {
+  id: string
+  telegram_chat_id: string
+  telegram_message_id: number | null
+  sender_chat_id: string
+  sender_name: string | null
+  sender_platform: 'telegram' | 'slack' | 'lume'
+  filename: string
+  storage_path: string
+  row_count: number | null
+  detected_email_column: string | null
+  status: 'awaiting_approval' | 'approved' | 'rejected' | 'error'
+  validation_job_id: string | null
+  created_at: string
+}
+
+export type TelegramIngestInsert = Pick<
+  TelegramIngestRow,
+  | 'telegram_chat_id'
+  | 'sender_chat_id'
+  | 'sender_name'
+  | 'sender_platform'
+  | 'filename'
+  | 'storage_path'
+  | 'row_count'
+  | 'detected_email_column'
+  | 'status'
+>
+
+export interface ApolloOrderRow {
+  id: string
+  apollo_url: string | null
+  contact_count: number | null
+  status: string
+  count_status: string
+  leadsfriday_order_id: number | null
+  leadsfriday_status: string | null
+  credits_deducted: number | null
+  new_balance: number | null
+  ingest_id: string | null
+  telegram_message_id: number | null
+  error: string | null
+  created_at: string
+}
+
+export interface JobBatchRow {
+  id: string
+  batch_date: string
+  status: string
+  companies_added: number
+  companies_pulled: number
+  companies_unresolved: number
+  contacts_total: number
+  contacts_kept: number
+  leadsfriday_order_id: number | null
+  leadsfriday_status: string | null
+  error: string | null
+  created_at: string
+}
+
+/** The `validation_jobs` fields an orders detail shows. */
+export interface JobSampleSource {
+  id: string
+  filename: string | null
+  status: string | null
+  total_rows: number | null
+  enrich: boolean | null
+  icp_filter: boolean | null
+  icp_description: string | null
+  column_order: unknown
+  rows: { row_index: number; row_data: Record<string, unknown> | null }[]
+}
