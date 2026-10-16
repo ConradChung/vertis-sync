@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { isOwner } from '@/lib/auth/isOwner'
 import { secretMatches } from '@/lib/auth/secret'
 import { internalBearerMatches } from '@/lib/auth/internalBearer'
+import { hasBearerToken } from '@/lib/auth/bearer'
 
 export { secretMatches }
 
@@ -19,8 +20,11 @@ export type OwnerAuth =
  *
  * Two ways in:
  *  1. `Authorization: Bearer ${LUME_INTERNAL_SECRET}` (constant-time) — the
- *     agent's tool wrappers calling routes server-to-server. Only checked when
- *     the request is passed in; browsers never send this header.
+ *     agent's tool wrappers calling routes server-to-server. The middleware
+ *     already compared it; this repeats the check as defence in depth. A
+ *     bearer that is present but wrong is a 401 here too — it never falls
+ *     through to the cookie session. Only checked when the request is passed
+ *     in; browsers never send this header.
  *  2. The owner's cookie session, read through the server client and checked
  *     against `LUME_ALLOWED_EMAIL`.
  *
@@ -31,8 +35,12 @@ export type OwnerAuth =
  *   if (!auth.ok) return auth.response
  */
 export async function requireOwner(req?: Request): Promise<OwnerAuth | Fail> {
-  if (req && internalBearerMatches(req.headers.get('authorization'), process.env.LUME_INTERNAL_SECRET)) {
-    return { ok: true, via: 'internal', user: null }
+  const authorization = req?.headers.get('authorization')
+  if (req && hasBearerToken(authorization)) {
+    if (internalBearerMatches(authorization, process.env.LUME_INTERNAL_SECRET)) {
+      return { ok: true, via: 'internal', user: null }
+    }
+    return { ok: false, response: NextResponse.json({ error: 'unauthorized' }, { status: 401 }) }
   }
 
   const supabase = await createClient()

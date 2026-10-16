@@ -16,12 +16,17 @@ import {
  * Unconfigured (no TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID, as in local dev):
  * every send logs `[telegram] not configured — skipped: …` and resolves to
  * `{ ok: false, skipped: true }` so callers never 500 over a missing bot.
+ *
+ * `LUME_URL` unset: the message goes out without its deep link, the adapter
+ * logs `[telegram] LUME_URL unset — deep link omitted`, and the result
+ * carries `linkOmitted: true`.
  */
 
-export type TelegramResult =
+export type TelegramResult = (
   | { ok: true; messageId: number | null }
   | { ok: false; skipped: true }
   | { ok: false; skipped?: false; error: string }
+) & { linkOmitted?: true }
 
 interface TelegramConfig {
   token: string
@@ -40,6 +45,11 @@ function skipped(text: string): TelegramResult {
   return { ok: false, skipped: true }
 }
 
+/** The bot token is part of every API URL; never let it reach a log line. */
+function redact(message: string, token: string): string {
+  return token ? message.split(token).join('<token>') : message
+}
+
 async function call(cfg: TelegramConfig, method: string, body: Record<string, unknown>): Promise<TelegramResult> {
   try {
     const res = await fetch(`https://api.telegram.org/bot${cfg.token}/${method}`, {
@@ -52,14 +62,15 @@ async function call(cfg: TelegramConfig, method: string, body: Record<string, un
       | { ok: boolean; result?: { message_id?: number }; description?: string }
       | null
     if (!res.ok || !json?.ok) {
-      const error = json?.description ?? `HTTP ${res.status}`
+      const error = redact(json?.description ?? `HTTP ${res.status}`, cfg.token)
       console.error(`[telegram] ${method} failed: ${error}`)
       return { ok: false, error }
     }
     const messageId = typeof json.result?.message_id === 'number' ? json.result.message_id : null
     return { ok: true, messageId }
   } catch (err) {
-    const error = err instanceof Error ? err.message : String(err)
+    // undici error messages can embed the request URL, token included.
+    const error = redact(err instanceof Error ? err.message : String(err), cfg.token)
     console.error(`[telegram] ${method} threw: ${error}`)
     return { ok: false, error }
   }
@@ -95,7 +106,11 @@ export async function editMessage(
   })
 }
 
-const send = (m: OutgoingMessage) => sendMessage(m.text, { replyMarkup: m.replyMarkup, disablePreview: m.disablePreview })
+async function send(m: OutgoingMessage): Promise<TelegramResult> {
+  if (m.linkOmitted) console.warn('[telegram] LUME_URL unset — deep link omitted')
+  const result = await sendMessage(m.text, { replyMarkup: m.replyMarkup, disablePreview: m.disablePreview })
+  return m.linkOmitted ? { ...result, linkOmitted: true } : result
+}
 
 /** `🔗 <title or kind> — open in Lume` + deep link. */
 export function sendGatePing(kind: GateKind | string, targetId: string, title?: string | null): Promise<TelegramResult> {

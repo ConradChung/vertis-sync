@@ -16,8 +16,14 @@ export type DecideResult =
   | { ok: true; claimed: boolean | null; action: string; target_id: string }
   | { ok: false; status: number; error: string }
 
-/** An `approve` of a large CSV runs 60–100 s inside the edge function. */
-export const DECIDE_TIMEOUT_MS = 280_000
+/**
+ * The edge function's wall clock is ~150 s; an `approve` of a large CSV runs
+ * 60–100 s inside it. 170 s gives the function room to finish or be killed
+ * before we give up, and stays under the 300 s the Task 9 decide route must
+ * declare (`export const maxDuration = 300`) so the Vercel function outlives
+ * this fetch. A timeout here means "re-read the gate", never "it failed".
+ */
+export const DECIDE_TIMEOUT_MS = 170_000
 
 export async function decide(callbackData: string): Promise<DecideResult> {
   // Refuse locally what the entrypoint would refuse with a 400: no round trip.
@@ -32,7 +38,9 @@ export async function decide(callbackData: string): Promise<DecideResult> {
     res = await fetch(`${base}/functions/v1/telegram-inbox`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Lume-Secret': secret },
-      body: JSON.stringify({ callback_data: callbackData }),
+      // `origin` names the caller for the handler's logs and the lfo_count
+      // rule (design doc); the entrypoint ignores keys it does not read.
+      body: JSON.stringify({ callback_data: callbackData, origin: 'lume' }),
       signal: AbortSignal.timeout(DECIDE_TIMEOUT_MS),
     })
   } catch (err) {

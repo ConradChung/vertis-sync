@@ -27,8 +27,18 @@ Environment variable names are listed in `.env.example`.
   is the single list of what passes without a session.
 - Server-to-server: `/api/*` also accepts `Authorization: Bearer
   ${LUME_INTERNAL_SECRET}` (the agent's tool wrappers, Task 14). The middleware
-  only checks the header's shape (`lib/auth/bearer.ts`, Edge-safe); the route's
-  `requireOwner(req)` does the constant-time comparison.
+  compares it in constant time with Web Crypto (`lib/auth/bearer.ts`,
+  Edge-safe): valid → through, present-but-wrong → 401, absent → cookie
+  session. The route's `requireOwner(req)` repeats the check as defence in
+  depth and also 401s a wrong bearer without falling back to cookies.
+- **Route-guard rule:** every `app/api/**/route.ts` must call `requireOwner`
+  or `requireSecret` from `@/lib/auth/guards` itself; the middleware is the
+  second line, not the first. `tests/api/routeGuards.test.ts` enforces it, with
+  an explicit allowlist for routes that are their own gate (`/api/auth/magic-link`).
+- `requestOrigin()` prefers `LUME_URL` over forwarded headers, so a magic link
+  requested from a Vercel preview deployment redirects to the production
+  origin after login (the one Supabase Auth allowlists). Set `LUME_URL` per
+  environment if a preview should stay on itself.
 
 ## Data layer
 

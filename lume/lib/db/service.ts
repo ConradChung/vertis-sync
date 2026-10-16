@@ -1,7 +1,7 @@
 import 'server-only'
 import type { PostgrestError } from '@supabase/supabase-js'
 import { createServiceClient } from '@/lib/supabase/service'
-import { applyLeadBankFilter, pageRange, type LeadBankFilter } from '@/lib/db/leadBankQuery'
+import { applyLeadBankFilter, pageRange, type LeadBankFilter, type LeadBankQuery } from '@/lib/db/leadBankQuery'
 import type {
   EventInsert,
   EventRow,
@@ -21,6 +21,10 @@ import type {
  *
  * The views and RPCs are service_role-only in the database (see the
  * lume_views migrations); the browser never reads them directly.
+ *
+ * Every `created_at` order carries a stable tiebreak (`target_id` / `id`) so
+ * two rows written in the same transaction keep one order across requests
+ * and pages never show a row twice or skip one.
  */
 
 export class DbError extends Error {
@@ -43,6 +47,9 @@ export class DbError extends Error {
 
 export const isDbError = (e: unknown): e is DbError => e instanceof DbError
 
+/** PostgREST 416: the requested offset lies past the (exact-counted) total. */
+const RANGE_NOT_SATISFIABLE = 'PGRST103'
+
 function unwrap<T>(op: string, res: { data: T | null; error: PostgrestError | null }): T {
   if (res.error) throw new DbError(op, res.error)
   if (res.data === null || res.data === undefined) throw new DbError(op, new Error('no data'))
@@ -54,7 +61,11 @@ function unwrap<T>(op: string, res: { data: T | null; error: PostgrestError | nu
 
 export async function getGates(): Promise<GateRow[]> {
   const sb = createServiceClient()
-  const res = await sb.from('lume_gates').select('*').order('created_at', { ascending: true })
+  const res = await sb
+    .from('lume_gates')
+    .select('*')
+    .order('created_at', { ascending: true })
+    .order('target_id', { ascending: true })
   return unwrap('getGates', res) as GateRow[]
 }
 
@@ -72,7 +83,12 @@ export async function getGate(kind: GateKind | string, targetId: string): Promis
 export async function getOrders({ limit = 100 }: { limit?: number } = {}): Promise<OrderRow[]> {
   const sb = createServiceClient()
   const n = Math.min(Math.max(Math.floor(limit), 1), 500)
-  const res = await sb.from('lume_orders').select('*').order('created_at', { ascending: false }).limit(n)
+  const res = await sb
+    .from('lume_orders')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: true })
+    .limit(n)
   return unwrap('getOrders', res) as OrderRow[]
 }
 
@@ -93,17 +109,43 @@ export async function getLeadBank({
 }: { filter?: LeadBankFilter; page?: number; pageSize?: number } = {}): Promise<LeadBankPage> {
   const sb = createServiceClient()
   const [from, to] = pageRange(page, pageSize)
+  // `count: 'exact'` runs a second `count(*)` over the filtered union view on
+  // every page. At ~3k rows that is a few ms and the Rotate screen needs the
+  // total for its pager; switch to 'estimated' if lead_bank grows past ~100k.
   const base = sb.from('lume_lead_bank').select('*', { count: 'exact' })
   const res = await applyLeadBankFilter(base, filter)
     .order('created_at', { ascending: false, nullsFirst: false })
+    .order('id', { ascending: true })
     .range(from, to)
-  if (res.error) throw new DbError('getLeadBank', res.error)
+  if (res.error) {
+    // `.range()` sends `offset`/`limit`; with an exact count PostgREST answers
+    // 416 when the offset passes the total. For a pager that is an empty page.
+    // (Verified live: offset 1,000,000 → 416 PGRST103.) The error carries no
+    // count, so fetch the real total with a head-only count for the pager.
+    if (res.error.code === RANGE_NOT_SATISFIABLE) {
+      return { rows: [], total: await countLeadBank(filter), page: Math.max(1, Math.floor(page)), pageSize: to - from + 1 }
+    }
+    throw new DbError('getLeadBank', res.error)
+  }
   return {
     rows: (res.data ?? []) as LeadBankRow[],
     total: res.count ?? 0,
     page: Math.max(1, Math.floor(page)),
     pageSize: to - from + 1,
   }
+}
+
+/** Head-only exact count of the filtered lead bank (no rows transferred). */
+async function countLeadBank(filter: LeadBankFilter): Promise<number> {
+  const sb = createServiceClient()
+  // Typed as the narrow builder slice: inferring applyLeadBankFilter's generic
+  // over the full head-query type trips TS2589 (instantiation too deep).
+  type HeadQuery = LeadBankQuery<HeadQuery> &
+    PromiseLike<{ count: number | null; error: PostgrestError | null }>
+  const q = sb.from('lume_lead_bank').select('id', { count: 'exact', head: true }) as unknown as HeadQuery
+  const res = await applyLeadBankFilter<HeadQuery>(q, filter)
+  if (res.error) throw new DbError('getLeadBank.count', res.error)
+  return res.count ?? 0
 }
 
 // ---------------------------------------------------------------------------
@@ -115,10 +157,11 @@ export async function getOverview(): Promise<Overview> {
   return unwrap('getOverview', res) as Overview
 }
 
+/** `lume_scheduled_jobs()` coalesces to `'[]'::json`, so `unwrap` never sees null here. */
 export async function getScheduledJobs(): Promise<ScheduledJob[]> {
   const sb = createServiceClient()
   const res = await sb.rpc('lume_scheduled_jobs')
-  return (unwrap('getScheduledJobs', res) as ScheduledJob[] | null) ?? []
+  return unwrap('getScheduledJobs', res) as ScheduledJob[]
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +169,7 @@ export async function getScheduledJobs(): Promise<ScheduledJob[]> {
 
 export async function getCampaigns(): Promise<LumeCampaignRow[]> {
   const sb = createServiceClient()
-  const res = await sb.from('lume_campaigns').select('*').order('family').order('name')
+  const res = await sb.from('lume_campaigns').select('*').order('family').order('name').order('id')
   return unwrap('getCampaigns', res) as LumeCampaignRow[]
 }
 
@@ -141,14 +184,16 @@ export async function getRecentEvents({
   const n = Math.min(Math.max(Math.floor(limit), 1), 500)
   let q = sb.from('events').select('*')
   if (types && types.length) q = q.in('type', types)
-  const res = await q.order('created_at', { ascending: false }).limit(n)
+  const res = await q.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(n)
   return unwrap('getRecentEvents', res) as EventRow[]
 }
 
 /**
  * Append to the feed. With `webhook_id` set it is an upsert on the unique
- * `events_webhook_id_idx` that ignores duplicates, so an Instantly retry never
- * double-counts; the result is then `null` for the duplicate.
+ * `events_webhook_id_idx` (non-partial since 20261015071538 — PostgREST emits
+ * `on conflict (webhook_id)` with no predicate) that ignores duplicates, so an
+ * Instantly retry never double-counts; the result is then `null` for the
+ * duplicate.
  */
 export async function logEvent(input: EventInsert): Promise<EventRow | null> {
   const sb = createServiceClient()

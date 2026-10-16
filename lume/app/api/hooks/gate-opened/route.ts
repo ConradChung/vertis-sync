@@ -25,6 +25,8 @@ export async function POST(req: Request) {
   }
   const parsed = gateOpenedSchema.safeParse(raw)
   if (!parsed.success) {
+    // The body is {kind, target_table, target_id} — ids and enum names, no PII.
+    console.error('[hooks/gate-opened] invalid body', parsed.error.issues)
     return NextResponse.json({ ok: false, error: 'invalid body' }, { status: 400 })
   }
   const { kind, target_table, target_id } = parsed.data

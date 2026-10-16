@@ -45,6 +45,14 @@ describe('links', () => {
   it('actionLink is ${LUME_URL}/actions/<id>', () => {
     expect(actionLink(ID)).toBe(`https://lume.example.com/actions/${ID}`)
   })
+
+  it('are null when LUME_URL is unset or blank', () => {
+    delete process.env.LUME_URL
+    expect(deepLink('stall', ID)).toBeNull()
+    expect(actionLink(ID)).toBeNull()
+    process.env.LUME_URL = '   '
+    expect(deepLink('stall', ID)).toBeNull()
+  })
 })
 
 describe('buildGatePing', () => {
@@ -62,8 +70,18 @@ describe('buildGatePing', () => {
     expect(buildGatePing('finder_decision', ID, '   ').text.startsWith('🔗 finder_decision')).toBe(true)
   })
 
-  it('disables the link preview', () => {
-    expect(buildGatePing('stall', ID).disablePreview).toBe(true)
+  it('disables the link preview and does not flag linkOmitted', () => {
+    const m = buildGatePing('stall', ID)
+    expect(m.disablePreview).toBe(true)
+    expect(m.linkOmitted).toBeUndefined()
+  })
+
+  it('omits the link and flags it when LUME_URL is unset', () => {
+    delete process.env.LUME_URL
+    const m = buildGatePing('stall', ID, 'leads.csv')
+    expect(m.text).toBe('🔗 leads.csv — open in Lume')
+    expect(m.text).not.toContain('http')
+    expect(m.linkOmitted).toBe(true)
   })
 })
 
@@ -73,10 +91,11 @@ describe('buildActionPrompt', () => {
   })
 
   it('carries kind, summary and the deep link in the text', () => {
-    const { text } = buildActionPrompt(actionRow())
+    const { text, linkOmitted } = buildActionPrompt(actionRow())
     expect(text).toContain('push_to_instantly')
     expect(text).toContain('312 valid → Kaspen SF')
     expect(text).toContain(`https://lume.example.com/actions/${ID}`)
+    expect(linkOmitted).toBeUndefined()
   })
 
   it('falls back to the kind when payload.summary is missing', () => {
@@ -94,6 +113,16 @@ describe('buildActionPrompt', () => {
         ],
       ],
     })
+  })
+
+  it('keeps the keyboard but drops the link when LUME_URL is unset', () => {
+    delete process.env.LUME_URL
+    const m = buildActionPrompt(actionRow())
+    expect(m.text).not.toContain('http')
+    expect(m.text).not.toContain('Review in Lume')
+    expect(m.text).toContain('312 valid → Kaspen SF')
+    expect(m.replyMarkup?.inline_keyboard[0]).toHaveLength(2)
+    expect(m.linkOmitted).toBe(true)
   })
 })
 

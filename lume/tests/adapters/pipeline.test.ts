@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { decide } from '@/lib/adapters/pipeline'
+import { DECIDE_TIMEOUT_MS, decide } from '@/lib/adapters/pipeline'
 
 const ID = '0f8fad5b-d9cb-469f-a165-70867728950e'
 const CB = `approve:${ID}`
@@ -34,10 +34,16 @@ describe('pipeline.decide', () => {
     const headers = new Headers(init?.headers)
     expect(headers.get('x-lume-secret')).toBe('shh-action')
     expect(headers.get('content-type')).toBe('application/json')
-    expect(JSON.parse(String(init?.body))).toEqual({ callback_data: CB })
+    expect(JSON.parse(String(init?.body))).toEqual({ callback_data: CB, origin: 'lume' })
     expect(init?.signal).toBeInstanceOf(AbortSignal)
 
     expect(result).toEqual({ ok: true, claimed: true, action: 'approve', target_id: ID })
+  })
+
+  it('times out after 170 s: past the edge function wall clock, under the route maxDuration of 300 s', () => {
+    expect(DECIDE_TIMEOUT_MS).toBe(170_000)
+    expect(DECIDE_TIMEOUT_MS).toBeGreaterThan(150_000)
+    expect(DECIDE_TIMEOUT_MS).toBeLessThan(300_000)
   })
 
   it('passes through claimed:false and claimed:null', async () => {

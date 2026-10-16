@@ -1,6 +1,6 @@
 -- supabase/tests/lume_core_test.sql
 begin;
-select plan(29);
+select plan(30);
 
 -- structure
 select has_table('public', 'events', 'events exists');
@@ -13,6 +13,10 @@ select col_has_check('public', 'pending_actions', 'claim_status', 'pending_actio
 select has_column('public', 'events', 'webhook_id', 'events.webhook_id exists');
 select has_column('public', 'pending_actions', 'executed_at', 'pending_actions.executed_at exists');
 select has_index('public', 'events', 'events_webhook_id_idx', 'events has the webhook_id dedupe index');
+-- Non-partial on purpose (20261015071538): PostgREST's upsert emits
+-- `on conflict (webhook_id)` without a predicate, which cannot use a partial index.
+select ok((select i.indpred is null from pg_index i join pg_class c on c.oid = i.indexrelid where c.relname = 'events_webhook_id_idx'),
+          'events_webhook_id_idx is not partial');
 select ok((select count(*) from pg_publication_tables where pubname='supabase_realtime' and tablename in ('events','pending_actions','agent_runs')) = 3, 'three lume tables are in supabase_realtime');
 
 -- RLS + policies
@@ -45,10 +49,12 @@ select throws_ok($$insert into pending_actions (kind, claim_status) values ('dec
 select lives_ok($$insert into pending_actions (kind, status) values ('decide_gate', 'executing')$$, 'pending_actions.status accepts executing');
 
 -- behaviour: webhook dedupe
+-- Plain `on conflict (webhook_id)`: the exact arbiter PostgREST emits for
+-- `?on_conflict=webhook_id` (supabase-js upsert with ignoreDuplicates).
 insert into events (type, title, webhook_id) values ('reply', 'first', 'wh_test_1')
-  on conflict (webhook_id) where webhook_id is not null do nothing;
+  on conflict (webhook_id) do nothing;
 insert into events (type, title, webhook_id) values ('reply', 'replay', 'wh_test_1')
-  on conflict (webhook_id) where webhook_id is not null do nothing;
+  on conflict (webhook_id) do nothing;
 select is((select count(*) from events where webhook_id = 'wh_test_1'), 1::bigint, 'duplicate webhook_id is dropped');
 
 -- behaviour: atomic claim

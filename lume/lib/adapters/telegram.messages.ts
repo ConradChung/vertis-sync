@@ -4,6 +4,11 @@ import type { GateKind, PendingActionRow } from '@/lib/db/types'
 /**
  * Pure message builders for the Telegram adapter (no `server-only`, so they
  * are unit-tested). `lib/adapters/telegram.ts` sends what these return.
+ *
+ * Deep links need `LUME_URL`. When it is unset the builders return the
+ * message without a link and set `linkOmitted`; the adapter logs it. A ping
+ * with no link is still worth sending — the pipeline's own prompt already
+ * carries the buttons, this one just says "there is a gate".
  */
 
 export interface InlineKeyboardButton {
@@ -18,22 +23,30 @@ export interface OutgoingMessage {
   text: string
   replyMarkup?: InlineKeyboardMarkup
   disablePreview?: boolean
+  /** True when `LUME_URL` was unset and the deep link was left out. */
+  linkOmitted?: true
 }
 
-/** `${LUME_URL}/validate?gate=<kind>:<id>` — the Validate screen scrolls to the gate. */
-export const deepLink = (kind: GateKind | string, id: string): string =>
-  `${configuredBaseUrl()}/validate?gate=${kind}:${id}`
+/** `${LUME_URL}/validate?gate=<kind>:<id>`; `null` when `LUME_URL` is unset. */
+export function deepLink(kind: GateKind | string, id: string): string | null {
+  const base = configuredBaseUrl()
+  return base ? `${base}/validate?gate=${kind}:${id}` : null
+}
 
-/** `${LUME_URL}/actions/<id>` — the pending-action confirm page. */
-export const actionLink = (id: string): string => `${configuredBaseUrl()}/actions/${id}`
+/** `${LUME_URL}/actions/<id>`; `null` when `LUME_URL` is unset. */
+export function actionLink(id: string): string | null {
+  const base = configuredBaseUrl()
+  return base ? `${base}/actions/${id}` : null
+}
 
 /** Second, short message after the pipeline's own prompt: a link into Lume. */
 export function buildGatePing(kind: GateKind | string, targetId: string, title?: string | null): OutgoingMessage {
   const label = title?.trim() || kind
-  return {
-    text: `🔗 ${label} — open in Lume\n${deepLink(kind, targetId)}`,
-    disablePreview: true,
-  }
+  const link = deepLink(kind, targetId)
+  const head = `🔗 ${label} — open in Lume`
+  return link
+    ? { text: `${head}\n${link}`, disablePreview: true }
+    : { text: head, disablePreview: true, linkOmitted: true }
 }
 
 /** Approval prompt for a `pending_actions` row: summary, lume_ok/lume_no buttons, deep link. */
@@ -41,8 +54,10 @@ export function buildActionPrompt(action: PendingActionRow): OutgoingMessage {
   const summary = typeof action.payload?.summary === 'string' && action.payload.summary.trim()
     ? action.payload.summary.trim()
     : action.kind
-  const lines = [`🛡 ${action.kind}`, summary, '', `Review in Lume: ${actionLink(action.id)}`]
-  return {
+  const link = actionLink(action.id)
+  const lines = [`🛡 ${action.kind}`, summary]
+  if (link) lines.push('', `Review in Lume: ${link}`)
+  const message: OutgoingMessage = {
     text: lines.join('\n'),
     replyMarkup: {
       inline_keyboard: [
@@ -54,6 +69,8 @@ export function buildActionPrompt(action: PendingActionRow): OutgoingMessage {
     },
     disablePreview: true,
   }
+  if (!link) message.linkOmitted = true
+  return message
 }
 
 /** Same wording telegram-inbox uses after a Lume-originated action. */

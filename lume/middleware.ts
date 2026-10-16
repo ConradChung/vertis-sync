@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
 import { isOwner } from '@/lib/auth/isOwner'
 import { isPublicPath } from '@/lib/auth/publicPaths'
-import { hasBearerToken } from '@/lib/auth/bearer'
+import { bearerMatches, hasBearerToken } from '@/lib/auth/bearer'
 
 /**
  * Single-user gate. `lib/auth/publicPaths.ts` is the single source of what
@@ -28,11 +28,17 @@ export async function middleware(request: NextRequest) {
   }
 
   // Server-to-server callers (the agent's tool wrappers) authenticate with
-  // `Authorization: Bearer ${LUME_INTERNAL_SECRET}`, which the route's
-  // `requireOwner(req)` verifies in constant time. The middleware only checks
-  // the header's shape: a wrong token still gets a 401, from the handler.
-  if (isApi && hasBearerToken(request.headers.get('authorization'))) {
-    return NextResponse.next({ request })
+  // `Authorization: Bearer ${LUME_INTERNAL_SECRET}`. Compared here in constant
+  // time (Web Crypto; this is the Edge runtime): a valid bearer passes to the
+  // handler, a present-but-wrong one is a 401 right here, and the route's
+  // `requireOwner(req)` repeats the check as defence in depth. No bearer at
+  // all falls through to the cookie session below.
+  const authorization = request.headers.get('authorization')
+  if (isApi && hasBearerToken(authorization)) {
+    if (await bearerMatches(authorization, process.env.LUME_INTERNAL_SECRET)) {
+      return NextResponse.next({ request })
+    }
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
   const { response, user } = await updateSession(request)

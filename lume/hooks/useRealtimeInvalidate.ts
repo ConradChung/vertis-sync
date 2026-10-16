@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
 export type RealtimeTable = 'events' | 'pending_actions' | 'agent_runs'
@@ -29,6 +29,11 @@ export function useRealtimeInvalidate(onChange: () => void, options: RealtimeInv
   const tables = options.tables ?? ['events']
   const tablesKey = tables.join(',')
 
+  // realtime-js dedupes channels by topic: two hooks on the same page that
+  // both asked for `events` would otherwise share (and, on unmount, tear down)
+  // one channel. useId gives each mounted hook its own stable topic.
+  const topicId = useId()
+
   const callbackRef = useRef(onChange)
   callbackRef.current = onChange
 
@@ -46,12 +51,10 @@ export function useRealtimeInvalidate(onChange: () => void, options: RealtimeInv
       }, debounceMs)
     }
 
-    const channel = supabase.channel(`lume-invalidate-${tablesKey}-${Math.random().toString(36).slice(2, 8)}`)
+    const channel = supabase.channel(`lume-invalidate:${tablesKey}:${topicId}`)
     for (const table of tablesKey.split(',') as RealtimeTable[]) {
-      if (table === 'events') {
-        channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table }, fire)
-      } else {
-        channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table }, fire)
+      channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table }, fire)
+      if (table !== 'events') {
         channel.on('postgres_changes', { event: 'UPDATE', schema: 'public', table }, fire)
       }
     }
@@ -62,5 +65,5 @@ export function useRealtimeInvalidate(onChange: () => void, options: RealtimeInv
       if (timer) clearTimeout(timer)
       void supabase.removeChannel(channel)
     }
-  }, [tablesKey, debounceMs, enabled])
+  }, [tablesKey, debounceMs, enabled, topicId])
 }
