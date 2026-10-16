@@ -4,10 +4,10 @@ import { dbErrorResponse } from '@/lib/http/errors'
 import { buildOverview } from '@/lib/overview/build'
 
 /**
- * The whole Overview in one response (`OverviewPayload`): `lume_overview()`,
- * scheduled jobs with `next_run`, the reply feed, agent activity, 7-day reply
- * counts, the campaign strip with health, and Instantly totals + accounts
- * when `INSTANTLY_API_KEY` is set (`instantly: { configured: false }` if not).
+ * Database half of the Overview (`OverviewPayload`): `lume_overview()`,
+ * scheduled jobs with `next_run`, the reply feed, agent activity and the
+ * owner-zone 7-day series. No Instantly calls: those live in
+ * `/api/overview/instantly` so a burst of Realtime refetches stays in the DB.
  */
 export async function GET(req: Request) {
   const auth = await requireOwner(req)

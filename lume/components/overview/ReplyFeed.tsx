@@ -1,10 +1,11 @@
 'use client'
 
+import { useEffect, useRef, useState } from 'react'
 import { useReducedMotion } from 'motion/react'
 import { AnimatedList } from '@/components/ui/animated-list'
 import { BorderBeam } from '@/components/ui/border-beam'
 import { GlassCard } from '@/components/ui/glass-card'
-import { EmptyLine, SectionTitle, ShimmerBar, useNow } from '@/components/overview/parts'
+import { EmptyLine, SectionTitle, ShimmerBar, SrOnly, useNow } from '@/components/overview/parts'
 import { timeAgo } from '@/lib/overview/compute'
 import type { EventRow, Json } from '@/lib/db/types'
 import { cn } from '@/lib/utils'
@@ -76,9 +77,34 @@ function FeedItem({ ev, campaignName, now }: { ev: EventRow; campaignName: strin
   )
 }
 
+const ANNOUNCE: Record<string, string> = { reply: 'New reply from', interested: 'New interested lead:', bounce: 'New bounce:' }
+
+/**
+ * One polite announcement when the newest event changes (not on first load,
+ * not on every refetch). The list itself is not a live region.
+ */
+function useNewestAnnouncement(events: EventRow[]): string {
+  const newest = events[0]
+  const seen = useRef<number | null | undefined>(undefined)
+  const [message, setMessage] = useState('')
+  useEffect(() => {
+    const id = newest?.id ?? null
+    if (seen.current === undefined) {
+      seen.current = id
+      return
+    }
+    if (id !== null && id !== seen.current) {
+      seen.current = id
+      setMessage(`${ANNOUNCE[newest.type] ?? 'New event:'} ${newest.lead_email ?? 'unknown lead'}`)
+    }
+  }, [newest])
+  return message
+}
+
 export function ReplyFeed({ events, campaignNames }: { events: EventRow[]; campaignNames: Record<string, string> }) {
   const reduce = useReducedMotion()
   const now = useNow(30_000)
+  const announcement = useNewestAnnouncement(events)
   const nameFor = (ev: EventRow) =>
     (ev.campaign_id && campaignNames[ev.campaign_id]) || str(ev.payload.campaign_name) || (ev.campaign_id ? ev.campaign_id.slice(0, 8) : null)
 
@@ -91,6 +117,9 @@ export function ReplyFeed({ events, campaignNames }: { events: EventRow[]; campa
   return (
     <GlassCard className="gap-0 py-0" aria-label="Live reply feed">
       {!reduce && <BorderBeam size={90} duration={9} colorFrom="#8b5cf6" colorTo="#22c55e" />}
+      <SrOnly role="status" aria-live="polite">
+        {announcement}
+      </SrOnly>
       <SectionTitle title="Live reply feed">
         <span className="flex items-center gap-1.5">
           <span className="inline-block size-[6px] rounded-full bg-green shadow-[0_0_8px_var(--green)]" aria-hidden />
@@ -100,7 +129,7 @@ export function ReplyFeed({ events, campaignNames }: { events: EventRow[]; campa
       {events.length === 0 ? (
         <EmptyLine text="No replies yet — they stream in as Instantly webhooks fire." action={{ label: 'Campaigns', href: '/campaigns' }} />
       ) : (
-        <div className="px-[18px] pb-[10px]" aria-live="polite">
+        <div className="px-[18px] pb-[10px]">
           {reduce ? (
             <div className="flex flex-col">{[...items].reverse()}</div>
           ) : (

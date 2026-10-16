@@ -89,6 +89,46 @@ describe('POST /api/webhooks/instantly', () => {
     expect(first.webhook_id).toBe(logEvent.mock.calls[1][0].webhook_id)
   })
 
+  it('413 when Content-Length declares more than 128 KB, before reading', async () => {
+    const req = new Request('http://localhost/api/webhooks/instantly?secret=wh-secret', {
+      method: 'POST',
+      body: reply,
+      headers: { 'content-length': String(200 * 1024) },
+    })
+    const res = await webhookPOST(req)
+    expect(res.status).toBe(413)
+    expect(req.bodyUsed).toBe(false)
+    expect(logEvent).not.toHaveBeenCalled()
+  })
+
+  it('413 when the streamed body passes 128 KB in bytes (no Content-Length), and cancels the stream', async () => {
+    let cancelled = false
+    let pulls = 0
+    // 3-byte characters: 50k of them is 150 KB in bytes but only 50k UTF-16 units.
+    const chunk = new TextEncoder().encode('€'.repeat(10_000)) // 30 KB
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        pulls++
+        if (pulls > 50) return c.close()
+        c.enqueue(chunk)
+      },
+      cancel() {
+        cancelled = true
+      },
+    })
+    const req = new Request('http://localhost/api/webhooks/instantly?secret=wh-secret', {
+      method: 'POST',
+      body: stream,
+      // @ts-expect-error -- Node's undici requires duplex for streamed bodies
+      duplex: 'half',
+    })
+    const res = await webhookPOST(req)
+    expect(res.status).toBe(413)
+    expect(cancelled).toBe(true)
+    expect(pulls).toBeLessThan(10)
+    expect(logEvent).not.toHaveBeenCalled()
+  })
+
   it('400 on a non-JSON body', async () => {
     expect((await post('wh-secret', 'not json')).status).toBe(400)
     expect((await post('wh-secret', '[1,2]')).status).toBe(400)

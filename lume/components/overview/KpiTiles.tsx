@@ -2,37 +2,47 @@
 
 import Link from 'next/link'
 import type { ReactNode } from 'react'
+import { Info } from 'lucide-react'
 import { GlassCard } from '@/components/ui/glass-card'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { NotConnected, Num, ShimmerBar, Spark, type Tone } from '@/components/overview/parts'
-import type { InstantlySummary } from '@/lib/overview/types'
+import type { OverviewInstantly } from '@/lib/overview/types'
 import { cn } from '@/lib/utils'
 
 export interface KpiData {
   replies_today: number
+  /** Owner-zone days; the last bucket is today. */
   replies_7d: number[]
   pending_gates: number
-  instantly: InstantlySummary
+  /** Gates opened per owner-zone day (`lume.gate_ping`). */
+  gates_opened_7d: number[]
 }
 
 const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 })
 
 function Tile({
   label,
+  hint,
   tone,
   value,
   delta,
   deltaTone = 'green',
   spark,
+  sparkLabel,
   href,
+  ariaLabel,
   children,
 }: {
   label: string
+  hint?: string
   tone: Tone
   value?: ReactNode
   delta?: string
   deltaTone?: 'green' | 'amber' | 'muted'
   spark?: number[]
+  sparkLabel?: string
   href?: string
+  ariaLabel?: string
   children?: ReactNode
 }) {
   const body = (
@@ -44,7 +54,21 @@ function Tile({
       data-tone={tone}
     >
       <div className="flex items-center justify-between text-[12px] text-fg-70">
-        <span>{label}</span>
+        <span className="inline-flex items-center gap-1.5">
+          {label}
+          {hint && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span tabIndex={0} aria-label={hint} className="relative z-10 inline-flex cursor-help text-fg-24 outline-none hover:text-fg-70 focus-visible:text-fg-70">
+                    <Info className="size-3" aria-hidden />
+                  </span>
+                }
+              />
+              <TooltipContent>{hint}</TooltipContent>
+            </Tooltip>
+          )}
+        </span>
         {href && <span className="hidden text-[11px] text-fg-46 sm:inline">Review →</span>}
       </div>
       {value !== undefined && (
@@ -58,11 +82,11 @@ function Tile({
         </div>
       )}
       {children}
-      {spark && <Spark data={spark} tone={tone} className="mt-auto pt-[10px]" />}
+      {spark && <Spark data={spark} tone={tone} className="mt-auto pt-[10px]" label={sparkLabel} />}
     </GlassCard>
   )
   return href ? (
-    <Link href={href} className="block rounded-panel outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`${label}: open Validate`}>
+    <Link href={href} className="block rounded-panel outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={ariaLabel}>
       {body}
     </Link>
   ) : (
@@ -88,19 +112,44 @@ function vsYesterday(series: number[]): string {
   return `${d > 0 ? '+' : ''}${d} from yesterday`
 }
 
-function InstantlyGap({ instantly }: { instantly: InstantlySummary }) {
-  if (!instantly.configured) return <NotConnected className="mt-[14px]" />
+/** The Instantly tiles' value when there's no number: loading, not connected, or unreachable. */
+function InstantlyGap({ instantly, failed }: { instantly: OverviewInstantly | undefined; failed?: boolean }) {
+  if (!instantly && !failed) return <ShimmerBar className="mt-[14px] h-3 w-3/4" />
+  if (instantly && !instantly.configured) return <NotConnected className="mt-[14px]" />
   return <NotConnected className="mt-[14px]">Instantly unreachable — retrying</NotConnected>
 }
 
-export function KpiTiles({ data }: { data: KpiData }) {
-  const ins = data.instantly
-  const live = ins.configured && !ins.error ? ins : null
+const SENT_HINT = "Workspace-wide. Instantly's own day (its workspace timezone), which can differ from Pacific."
+
+/**
+ * `instantly` is the separate `/api/overview/instantly` response: undefined
+ * while it loads, `instantlyFailed` when that request errored.
+ */
+export function KpiTiles({
+  data,
+  instantly,
+  instantlyFailed = false,
+}: {
+  data: KpiData
+  instantly: OverviewInstantly | undefined
+  instantlyFailed?: boolean
+}) {
+  const live = instantly?.configured && !instantly.error ? instantly : null
+  const dash = <span className="text-fg-24">—</span>
 
   return (
     <section aria-label="Key numbers" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-      <Tile label="Sent today" tone="violet" value={live ? <Num value={live.sent_today ?? 0} /> : <span className="text-fg-24">—</span>} delta={live ? vsAverage(live.sent_7d ?? []) : undefined} deltaTone="muted" spark={live?.sent_7d}>
-        {!live && <InstantlyGap instantly={ins} />}
+      <Tile
+        label="Sent today"
+        hint={SENT_HINT}
+        tone="violet"
+        value={live ? <Num value={live.sent_today ?? 0} /> : dash}
+        delta={live ? vsAverage(live.sent_7d ?? []) : undefined}
+        deltaTone="muted"
+        spark={live?.sent_7d}
+        sparkLabel="Sends per day, last 7 days"
+      >
+        {!live && <InstantlyGap instantly={instantly} failed={instantlyFailed} />}
       </Tile>
 
       <Tile
@@ -110,19 +159,24 @@ export function KpiTiles({ data }: { data: KpiData }) {
         delta={vsYesterday(data.replies_7d)}
         deltaTone={data.replies_today > 0 ? 'green' : 'muted'}
         spark={data.replies_7d}
+        sparkLabel="Replies per day (Pacific), last 7 days"
       />
 
       <Tile
         label="Pending approvals"
         tone="amber"
         href="/validate"
+        ariaLabel={`Pending approvals: ${data.pending_gates}. Open Validate`}
         value={<Num value={data.pending_gates} />}
         delta={data.pending_gates > 0 ? 'Needs attention' : 'All clear'}
         deltaTone={data.pending_gates > 0 ? 'amber' : 'muted'}
+        spark={data.gates_opened_7d}
+        sparkLabel="Approvals opened per day, last 7 days"
       />
 
       <Tile
-        label="Open opportunities"
+        label="Opportunities"
+        hint="Lifetime total across the Instantly workspace (Instantly reports no open count)."
         tone="cyan"
         value={
           live ? (
@@ -133,14 +187,15 @@ export function KpiTiles({ data }: { data: KpiData }) {
               )}
             </span>
           ) : (
-            <span className="text-fg-24">—</span>
+            dash
           )
         }
-        delta={live ? 'Across Instantly campaigns' : undefined}
+        delta={live ? 'Lifetime, all campaigns' : undefined}
         deltaTone="muted"
         spark={live?.opportunities_7d}
+        sparkLabel="New opportunities per day, last 7 days"
       >
-        {!live && <InstantlyGap instantly={ins} />}
+        {!live && <InstantlyGap instantly={instantly} failed={instantlyFailed} />}
       </Tile>
     </section>
   )

@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useId, useState, type ReactNode } from 'react'
+import { useEffect, useId, useState, type HTMLAttributes, type ReactNode } from 'react'
 import Link from 'next/link'
+import { CircleAlert, TriangleAlert } from 'lucide-react'
 import { useReducedMotion } from 'motion/react'
 import { NumberTicker } from '@/components/ui/number-ticker'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -90,23 +91,40 @@ export function Spark({
   )
 }
 
+/**
+ * Health dot with its reason in a tooltip. Red and amber also get an icon so
+ * colour is never the only signal (the dot's label carries the words).
+ */
 export function HealthDot({ level, reason }: { level: HealthLevel; reason: string }) {
   const color = HEALTH_VAR[level]
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span
-            role="img"
-            aria-label={`${level}: ${reason}`}
-            tabIndex={0}
-            className="inline-block size-[7px] shrink-0 cursor-help rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            style={{ background: color, boxShadow: level === 'idle' ? 'none' : `0 0 8px ${color}` }}
-          />
-        }
-      />
-      <TooltipContent>{reason}</TooltipContent>
-    </Tooltip>
+    <span className="inline-flex shrink-0 items-center gap-1">
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              role="img"
+              aria-label={`${level === 'idle' ? 'no data' : level}: ${reason}`}
+              tabIndex={0}
+              className="inline-block size-[7px] shrink-0 cursor-help rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              style={{ background: color, boxShadow: level === 'idle' ? 'none' : `0 0 8px ${color}` }}
+            />
+          }
+        />
+        <TooltipContent>{reason}</TooltipContent>
+      </Tooltip>
+      {level === 'red' && <CircleAlert className="size-3 text-red" aria-hidden />}
+      {level === 'amber' && <TriangleAlert className="size-3 text-amber" aria-hidden />}
+    </span>
+  )
+}
+
+/** Visually hidden, for screen readers only. */
+export function SrOnly({ children, ...props }: { children: ReactNode } & HTMLAttributes<HTMLSpanElement>) {
+  return (
+    <span className="sr-only" {...props}>
+      {children}
+    </span>
   )
 }
 

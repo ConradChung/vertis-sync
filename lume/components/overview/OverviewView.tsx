@@ -9,20 +9,27 @@ import { KpiTiles, KpiTilesSkeleton } from '@/components/overview/KpiTiles'
 import { NextRuns } from '@/components/overview/NextRuns'
 import { FeedSkeleton, ReplyFeed } from '@/components/overview/ReplyFeed'
 import { ShimmerBar } from '@/components/overview/parts'
-import type { OverviewPayload } from '@/lib/overview/types'
+import type { OverviewInstantly, OverviewPayload } from '@/lib/overview/types'
 
 /**
- * The Overview bento grid, data in via props so the page (SWR) and any
- * fixture/preview can render it the same way.
+ * The Overview bento grid, data in via props so the page (SWR) and fixtures
+ * render it the same way. `data` is the database half; `instantly` arrives
+ * separately and each Instantly-backed card shows its own loading state.
  */
 export function OverviewView({
   data,
   error,
   onRetry,
+  instantly,
+  instantlyError,
+  onRetryInstantly,
 }: {
   data: OverviewPayload | undefined
   error?: unknown
   onRetry?: () => void
+  instantly?: OverviewInstantly
+  instantlyError?: unknown
+  onRetryInstantly?: () => void
 }) {
   if (!data && error) {
     return (
@@ -36,7 +43,9 @@ export function OverviewView({
   }
   if (!data) return <OverviewSkeleton />
 
-  const campaignNames = Object.fromEntries(data.campaigns.map((c) => [c.id, c.name]))
+  const instantlyFailed = !instantly && instantlyError != null
+  const campaigns = instantly?.campaigns
+  const campaignNames = Object.fromEntries((campaigns ?? []).map((c) => [c.id, c.name]))
 
   return (
     <div className="flex flex-col gap-4">
@@ -48,17 +57,17 @@ export function OverviewView({
           </button>
         </p>
       )}
-      <KpiTiles data={data} />
+      <KpiTiles data={data} instantly={instantly} instantlyFailed={instantlyFailed} />
       <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
         <ReplyFeed events={data.reply_feed} campaignNames={campaignNames} />
         <div className="grid content-start gap-4">
-          <CampaignStrip campaigns={data.campaigns} />
+          <CampaignStrip campaigns={campaigns} failed={instantlyFailed} onRetry={onRetryInstantly} />
           <AgentActivity events={data.agent_activity} />
         </div>
       </div>
       <div className="grid gap-4 lg:grid-cols-[1.2fr_.8fr]">
-        <InboxHealth instantly={data.instantly} />
-        <NextRuns jobs={data.next_runs} total={data.scheduled_jobs.length} />
+        <InboxHealth instantly={instantly} failed={instantlyFailed} />
+        <NextRuns scheduled={data.scheduled_jobs} />
       </div>
     </div>
   )

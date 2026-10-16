@@ -35,15 +35,24 @@ export function campaignHealth({
   return { level: 'green', reason: `Reply rate ${pct(replyRate)} · ${b} in 24 h` }
 }
 
-/** Count rows per UTC date over `dates` (YYYY-MM-DD, ascending). */
-export function countByDay(rows: { created_at: string }[], dates: string[]): number[] {
+const utcDate = (t: number) => new Date(t).toISOString().slice(0, 10)
+
+/**
+ * Count rows per calendar date over `dates` (YYYY-MM-DD, ascending). `dayOf`
+ * picks the zone; the Overview passes `ownerDate` (America/Los_Angeles).
+ */
+export function countByDay(
+  rows: { created_at: string }[],
+  dates: string[],
+  dayOf: (t: number) => string = utcDate
+): number[] {
   const idx = new Map(dates.map((d, i) => [d, i]))
   const out = dates.map(() => 0)
   for (const r of rows) {
-    // created_at can carry any offset; normalise to a UTC date first.
+    // created_at can carry any offset; parse to an instant first.
     const t = Date.parse(r.created_at)
     if (!Number.isFinite(t)) continue
-    const j = idx.get(new Date(t).toISOString().slice(0, 10))
+    const j = idx.get(dayOf(t))
     if (j !== undefined) out[j]++
   }
   return out

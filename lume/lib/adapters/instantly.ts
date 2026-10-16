@@ -16,9 +16,9 @@ import {
  * (analytics overview + daily) and `app/api/instantly/campaigns/route.ts`
  * (paged list, deleted campaigns dropped), plus `GET /accounts`.
  *
- * Server-only: the key never reaches the browser. Successful responses are
- * cached in memory for 60 s per URL (one warm lambda / dev server serves the
- * Overview's poll from cache); failures are never cached.
+ * Server-only: the key never reaches the browser. Responses are cached in
+ * memory per URL (see `instantlyGet`), so one warm lambda / dev server serves
+ * the Overview's 60 s poll from cache.
  *
  * With `INSTANTLY_API_KEY` unset `isInstantlyConfigured()` is false and the
  * routes answer `{ configured: false }` without calling anything.
@@ -42,13 +42,40 @@ export function isInstantlyConfigured(): boolean {
   return Boolean(process.env.INSTANTLY_API_KEY?.trim())
 }
 
-const cache = new Map<string, { at: number; body: unknown }>()
+type Entry = { expires: number; body?: unknown; error?: InstantlyError }
+const cache = new Map<string, Entry>()
+const inflight = new Map<string, Promise<unknown>>()
+
+const NEGATIVE_TTL_MS = 15_000
+const MAX_RETRY_AFTER_MS = 5 * 60_000
 
 /** Test hook. */
 export function clearInstantlyCache(): void {
   cache.clear()
+  inflight.clear()
 }
 
+function store(href: string, entry: Entry): void {
+  const now = Date.now()
+  for (const [k, e] of cache) if (e.expires <= now) cache.delete(k)
+  cache.set(href, entry)
+}
+
+/** `Retry-After` (seconds or an HTTP date) → ms, at least the negative TTL. */
+export function retryAfterMs(header: string | null, now = Date.now()): number {
+  if (!header) return NEGATIVE_TTL_MS
+  const secs = Number(header)
+  const ms = Number.isFinite(secs) ? secs * 1000 : Date.parse(header) - now
+  if (!Number.isFinite(ms)) return NEGATIVE_TTL_MS
+  return Math.min(Math.max(ms, NEGATIVE_TTL_MS), MAX_RETRY_AFTER_MS)
+}
+
+/**
+ * GET with a per-URL cache: successes for 60 s, failures for 15 s (or the
+ * 429's `Retry-After`), and one shared in-flight request per URL so a burst
+ * of Overview loads makes one upstream call. Expired entries are pruned on
+ * every write.
+ */
 async function instantlyGet(path: string, params: Record<string, string | undefined> = {}): Promise<unknown> {
   const key = process.env.INSTANTLY_API_KEY?.trim()
   if (!key) throw new InstantlyError(0, 'INSTANTLY_API_KEY is not configured')
@@ -58,20 +85,57 @@ async function instantlyGet(path: string, params: Record<string, string | undefi
   const href = url.toString()
 
   const hit = cache.get(href)
-  if (hit && Date.now() - hit.at < TTL_MS) return hit.body
-
-  const res = await fetch(href, {
-    headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
-    cache: 'no-store',
-    signal: AbortSignal.timeout(15_000),
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new InstantlyError(res.status, `Instantly ${path} failed (${res.status}): ${text.slice(0, 200)}`)
+  if (hit && hit.expires > Date.now()) {
+    if (hit.error) throw hit.error
+    return hit.body
   }
-  const body: unknown = await res.json()
-  cache.set(href, { at: Date.now(), body })
-  return body
+  const pending = inflight.get(href)
+  if (pending) return pending
+
+  const p = (async () => {
+    let res: Response
+    try {
+      res = await fetch(href, {
+        headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(15_000),
+      })
+    } catch (err) {
+      const e = new InstantlyError(0, `Instantly ${path} unreachable: ${err instanceof Error ? err.message : String(err)}`)
+      store(href, { expires: Date.now() + NEGATIVE_TTL_MS, error: e })
+      throw e
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      const e = new InstantlyError(res.status, `Instantly ${path} failed (${res.status}): ${text.slice(0, 200)}`)
+      const ttl = res.status === 429 ? retryAfterMs(res.headers.get('retry-after')) : NEGATIVE_TTL_MS
+      store(href, { expires: Date.now() + ttl, error: e })
+      throw e
+    }
+    const body: unknown = await res.json()
+    store(href, { expires: Date.now() + TTL_MS, body })
+    return body
+  })()
+  inflight.set(href, p)
+  try {
+    return await p
+  } finally {
+    inflight.delete(href)
+  }
+}
+
+/** Run `fn` over `items` with at most `limit` in flight; results keep input order. */
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length)
+  let next = 0
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++
+      out[i] = await fn(items[i])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return out
 }
 
 /** Every page of a cursor-paged list (`limit` + `starting_after`). */

@@ -60,8 +60,13 @@ Environment variable names are listed in `.env.example`.
   `instantly.map.ts`): 60 s in-memory cache per URL. With `INSTANTLY_API_KEY`
   unset every `/api/instantly/*` route answers `200 {configured:false}` and
   the Overview tiles show "Instantly not connected".
-- `/api/webhooks/instantly?secret=…` → `events` via `logEvent` (dedupe on
-  `webhook_id` = `instantly:<event_type>:<id>` or a SHA-256 of the body).
+- Overview: `/api/overview` is database-only and refetches on Realtime
+  inserts it shows (filtered, ≤ 1 per 5 s); `/api/overview/instantly` is a
+  60 s poll. The adapter shares in-flight requests, negative-caches failures
+  15 s (or a 429's `Retry-After`) and runs ≤ 4 per-campaign calls at once.
+  "Today" is the owner's zone (`lib/time/owner.ts`, America/Los_Angeles).
+- `/api/webhooks/instantly?secret=…` (128 KB cap, counted in bytes) → `events` via `logEvent` (dedupe on
+  `webhook_id` = `instantly:<event_type>:<id>[:<timestamp>]` or a SHA-256 of the body).
 - Live read check: `LUME_SMOKE=1 npm run smoke:db` (row counts only).
 
 ## Design system notes

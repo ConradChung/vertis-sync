@@ -3,8 +3,10 @@
 import { Clock } from 'lucide-react'
 import { GlassCard } from '@/components/ui/glass-card'
 import { EmptyLine, SectionTitle, useNow } from '@/components/overview/parts'
+import { useMemo } from 'react'
 import { countdown } from '@/lib/overview/compute'
 import type { ScheduledJobWithNext } from '@/lib/overview/types'
+import { upcoming, withNextRun } from '@/lib/schedule/nextRun'
 
 const RUNNER: Record<string, string> = { pg_cron: 'pg_cron', claude: 'Claude task', vercel: 'Vercel cron', rotation_rule: 'rotation rule' }
 
@@ -12,9 +14,23 @@ function utcTime(iso: string): string {
   return `${new Date(iso).toISOString().slice(11, 16)} UTC`
 }
 
-/** The next three runs with a once-a-second countdown (text only; nothing animates). */
-export function NextRuns({ jobs, total }: { jobs: ScheduledJobWithNext[]; total: number }) {
+/**
+ * The next three runs with a once-a-second countdown (text only; nothing
+ * animates). When a run comes due, its next occurrence is recomputed here
+ * from the cron (cron-parser, UTC) instead of sitting at "due" until the
+ * next poll.
+ */
+export function NextRuns({ scheduled }: { scheduled: ScheduledJobWithNext[] }) {
   const now = useNow(1000)
+  // Recompute only when some shown run has passed (changes the memo key).
+  const dueKey = scheduled.filter((j) => j.next_run && Date.parse(j.next_run) <= now).length
+  const minute = Math.floor(now / 60_000)
+  const jobs = useMemo(
+    () => upcoming(dueKey ? withNextRun(scheduled, new Date(minute * 60_000 + 1000)) : scheduled, 3),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- recompute per due change / minute only
+    [scheduled, dueKey, dueKey ? minute : 0]
+  )
+  const total = scheduled.length
   return (
     <GlassCard className="gap-0 py-0" aria-label="Next runs">
       <SectionTitle title="Next runs">

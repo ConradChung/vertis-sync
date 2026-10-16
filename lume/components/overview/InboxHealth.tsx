@@ -1,23 +1,30 @@
 'use client'
 
 import { GlassCard } from '@/components/ui/glass-card'
-import { EmptyLine, HealthDot, NotConnected, SectionTitle } from '@/components/overview/parts'
+import { EmptyLine, HealthDot, NotConnected, SectionTitle, ShimmerBar } from '@/components/overview/parts'
 import { accountHealth } from '@/lib/overview/compute'
-import type { InstantlySummary } from '@/lib/overview/types'
+import type { OverviewInstantly } from '@/lib/overview/types'
 
 const label = (s: string) => s.replace(/_/g, ' ')
 
-export function InboxHealth({ instantly }: { instantly: InstantlySummary }) {
-  const accounts = instantly.configured && !instantly.error ? instantly.accounts : undefined
+/** `instantly` undefined = still loading (or the request failed: `failed`). Accounts show even when analytics failed. */
+export function InboxHealth({ instantly, failed = false }: { instantly: OverviewInstantly | undefined; failed?: boolean }) {
+  const accounts = instantly?.configured ? instantly.accounts : undefined
 
   return (
     <GlassCard className="gap-0 py-0" aria-label="Inbox health">
       <SectionTitle title="Inbox health">{accounts && <span className="font-mono tabular-nums">{accounts.length} accounts</span>}</SectionTitle>
-      {!instantly.configured ? (
+      {!instantly && !failed ? (
+        <div className="space-y-3 px-[18px] pt-1 pb-6" aria-hidden>
+          <ShimmerBar className="h-3 w-full" />
+          <ShimmerBar className="h-3 w-5/6" />
+          <ShimmerBar className="h-3 w-2/3" />
+        </div>
+      ) : instantly && !instantly.configured ? (
         <div className="px-[18px] pt-1 pb-6">
           <NotConnected />
         </div>
-      ) : instantly.error || !accounts ? (
+      ) : !accounts ? (
         <div className="px-[18px] pt-1 pb-6">
           <NotConnected>Instantly accounts unavailable — retrying</NotConnected>
         </div>

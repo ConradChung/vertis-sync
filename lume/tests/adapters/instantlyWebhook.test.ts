@@ -33,6 +33,9 @@ describe('webhook_id (dedupe key)', () => {
   it("uses the payload's event id when present", () => {
     expect(webhookIdFor({ event_type: 'reply_received', event_id: 'evt_9', email_id: 'e1' })).toBe('instantly:reply_received:evt_9')
     expect(webhookIdFor({ id: 42 })).toBe('instantly:unknown:42')
+    expect(webhookIdFor({ event_type: 'reply_received', email_id: 'm1', timestamp: '2026-10-15T10:00:00Z' })).toBe(
+      'instantly:reply_received:m1:2026-10-15T10:00:00Z'
+    )
     // a sent and a bounce for the same message must not dedupe each other
     expect(webhookIdFor({ event_type: 'email_sent', email_id: 'em_1' })).not.toBe(webhookIdFor({ event_type: 'email_bounced', email_id: 'em_1' }))
   })

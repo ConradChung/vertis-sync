@@ -6,8 +6,8 @@ import type { EventInsert, Json } from '@/lib/db/types'
  *
  * `event_type` reply_received | lead_interested | email_bounced | email_sent
  * → `reply | interested | bounce | sent`; anything else is kept as
- * `instantly.<event_type>`. `webhook_id` is `<event_type>:<event id>` when the
- * payload carries an id, else a SHA-256 of the canonical body, so a retried delivery
+ * `instantly.<event_type>`. `webhook_id` is `<event_type>:<event id>[:<timestamp>]`
+ * when the payload carries an id, else a SHA-256 of the canonical body, so a retried delivery
  * of the same body dedupes on the unique `events_webhook_id_idx`.
  */
 
@@ -47,10 +47,13 @@ function canonical(v: unknown): string {
 export function webhookIdFor(body: Body): string {
   // The event type is part of the key: `email_id` can be shared by the
   // `email_sent` and a later `email_bounced` for the same message.
+  // `timestamp`, when present, separates two genuine deliveries that share
+  // an id (e.g. a second reply in the same thread reusing a message id).
   const type = s(body.event_type) ?? 'unknown'
+  const ts = s(body.timestamp)
   for (const k of ID_KEYS) {
     const v = s(body[k])
-    if (v) return `instantly:${type}:${v}`
+    if (v) return `instantly:${type}:${v}${ts ? `:${ts}` : ''}`
   }
   return `instantly:sha256:${createHash('sha256').update(canonical(body)).digest('hex')}`
 }

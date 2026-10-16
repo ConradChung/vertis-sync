@@ -8,13 +8,30 @@ const SPARK_TONE: Record<HealthLevel, Tone> = { green: 'green', amber: 'amber', 
 
 const rate = (r: number | null) => (r === null ? '—' : `${r < 10 ? r.toFixed(1) : Math.round(r)}%`)
 
-export function CampaignStrip({ campaigns }: { campaigns: CampaignStripItem[] }) {
+export function CampaignStrip({
+  campaigns,
+  failed = false,
+  onRetry,
+}: {
+  /** undefined while `/api/overview/instantly` loads. */
+  campaigns: CampaignStripItem[] | undefined
+  failed?: boolean
+  onRetry?: () => void
+}) {
+  if (!campaigns && !failed) return <CampaignStripSkeleton />
   return (
     <GlassCard className="gap-0 py-0" aria-label="Campaigns">
       <SectionTitle title="Campaigns">
         <span>reply rate · 7-day sends</span>
       </SectionTitle>
-      {campaigns.length === 0 ? (
+      {!campaigns ? (
+        <div className="flex items-center justify-between gap-3 px-[18px] py-6 text-[13px] text-fg-46" role="alert">
+          <span>Couldn&apos;t load campaigns.</span>
+          <button type="button" onClick={onRetry} className="text-[12px] text-violet-soft hover:text-fg">
+            Retry
+          </button>
+        </div>
+      ) : campaigns.length === 0 ? (
         <EmptyLine text="No campaigns yet." action={{ label: 'Campaigns', href: '/campaigns' }} />
       ) : (
         <ul>
