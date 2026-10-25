@@ -7,10 +7,13 @@ import { getPushJob, PUSH_REVIEW_STATUSES } from '@/lib/db/service'
 import type { Json } from '@/lib/db/types'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { parseJsonBody, UUID_RE } from '@/lib/http/json'
+import { buildActivateRule, buildAssignLeads, rotateActionBody, type RotateBuild } from '@/lib/rules/actions'
 
 /**
  * Request a high-risk action (a `pending_actions` row + Telegram prompt).
- * Only `push_to_instantly` and `launch_campaign` for now.
+ * Kinds: `push_to_instantly`, `launch_campaign` (Validate) and
+ * `assign_leads`, `activate_rule` (Rotate — see lib/rules/actions.ts). Nothing
+ * here executes anything; Task 12's executor runs a confirmed action.
  *
  * The payload is a snapshot of what the owner confirms, built here from the
  * job row and the instantly-push preview (never from the client):
@@ -19,10 +22,15 @@ import { parseJsonBody, UUID_RE } from '@/lib/http/json'
  * compares the job's current columns to it before sending push_go.
  */
 
-const Body = z.object({
+const JobBody = z.object({
   kind: z.enum(['push_to_instantly', 'launch_campaign']),
   payload: z.looseObject({ job_id: z.string().regex(UUID_RE) }),
 })
+
+const Body = z.union([JobBody, rotateActionBody])
+
+/** 500 selected lead refs ≈ 35 KB of JSON. */
+const MAX_BODY_BYTES = 64 * 1024
 
 const onOff = (v: boolean) => (v ? 'on' : 'off')
 const fmt = new Intl.NumberFormat('en-US')
@@ -31,8 +39,26 @@ export async function POST(req: Request) {
   const auth = await requireOwner(req)
   if (!auth.ok) return auth.response
 
-  const body = await parseJsonBody(req, Body, 4096)
+  const body = await parseJsonBody(req, Body, MAX_BODY_BYTES)
   if (!body.ok) return body.response
+  const requestedBy = auth.via === 'internal' ? 'agent' : 'user'
+
+  if (body.data.kind === 'assign_leads' || body.data.kind === 'activate_rule') {
+    const data = body.data
+    try {
+      const built: RotateBuild =
+        data.kind === 'assign_leads' ? await buildAssignLeads(data.payload) : await buildActivateRule(data.payload)
+      if (!built.ok) return NextResponse.json({ error: built.error }, { status: built.status })
+      const action = await createAction(data.kind, built.payload, requestedBy, { ruleId: built.ruleId ?? null })
+      return NextResponse.json(
+        { ok: true, action: { id: action.id, kind: action.kind, summary: built.payload.summary } },
+        { status: 201 }
+      )
+    } catch (err) {
+      return actionError(err)
+    }
+  }
+
   const { kind } = body.data
   const jobId = body.data.payload.job_id.toLowerCase()
 
@@ -78,15 +104,19 @@ export async function POST(req: Request) {
       }
     }
 
-    const action = await createAction(kind, payload, auth.via === 'internal' ? 'agent' : 'user')
+    const action = await createAction(kind, payload, requestedBy)
     return NextResponse.json({ ok: true, action: { id: action.id, kind: action.kind, summary: payload.summary } }, { status: 201 })
   } catch (err) {
-    if (err instanceof DuplicateActionError) {
-      return NextResponse.json({ error: 'duplicate', existing_id: err.existingId || null }, { status: 409 })
-    }
-    if (err instanceof InvalidActionPayloadError) {
-      return NextResponse.json({ error: 'invalid_payload' }, { status: 400 })
-    }
-    return dbErrorResponse(err, 'api/actions')
+    return actionError(err)
   }
+}
+
+function actionError(err: unknown) {
+  if (err instanceof DuplicateActionError) {
+    return NextResponse.json({ error: 'duplicate', existing_id: err.existingId || null }, { status: 409 })
+  }
+  if (err instanceof InvalidActionPayloadError) {
+    return NextResponse.json({ error: 'invalid_payload' }, { status: 400 })
+  }
+  return dbErrorResponse(err, 'api/actions')
 }

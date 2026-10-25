@@ -2,6 +2,9 @@ import 'server-only'
 import type { PostgrestError } from '@supabase/supabase-js'
 import { createServiceClient } from '@/lib/supabase/service'
 import { applyLeadBankFilter, pageRange, type LeadBankFilter, type LeadBankQuery } from '@/lib/db/leadBankQuery'
+import { applyFilter, type RuleFilter, type RuleFilterQuery } from '@/lib/rules/filter'
+import type { InstantlyCampaignDetail } from '@/lib/adapters/instantly.map'
+import { lumeCampaignStatus } from '@/lib/adapters/instantly.map'
 import type {
   EventInsert,
   EventRow,
@@ -18,6 +21,7 @@ import type {
   Overview,
   PendingActionKind,
   PendingActionRow,
+  RotationRuleRow,
   ScheduledJob,
   TelegramIngestInsert,
   TelegramIngestRow,
@@ -652,4 +656,232 @@ export async function findIngestByStoragePath(storagePath: string): Promise<{ id
   const res = await sb.from('telegram_ingests').select('id').eq('storage_path', storagePath).limit(1).maybeSingle()
   if (res.error) throw new DbError('findIngestByStoragePath', res.error)
   return (res.data as { id: string } | null) ?? null
+}
+
+// ---------------------------------------------------------------------------
+// Rotate: rules, candidates, campaign queue depth, Instantly sync.
+// Nothing here writes lead_bank: assignment is a pending action that Task 12's
+// executor runs after a tap.
+
+export async function getRules(): Promise<RotationRuleRow[]> {
+  const sb = createServiceClient()
+  const res = await sb.from('rotation_rules').select('*').order('created_at', { ascending: true }).order('id', { ascending: true })
+  return unwrap('getRules', res) as RotationRuleRow[]
+}
+
+export async function getRule(id: string): Promise<RotationRuleRow | null> {
+  const sb = createServiceClient()
+  const res = await sb.from('rotation_rules').select('*').eq('id', id).maybeSingle()
+  if (res.error) throw new DbError('getRule', res.error)
+  return (res.data as RotationRuleRow | null) ?? null
+}
+
+export type RuleInsert = Pick<RotationRuleRow, 'name' | 'campaign_id' | 'filter' | 'daily_cap' | 'order_by' | 'cron'>
+
+/** Always inserted inactive: activation is a pending action (`activate_rule`). */
+export async function insertRule(row: RuleInsert): Promise<RotationRuleRow> {
+  const sb = createServiceClient()
+  const res = await sb
+    .from('rotation_rules')
+    .insert({ ...row, filter: row.filter as unknown as Json, active: false, next_run_at: null })
+    .select('*')
+    .single()
+  return unwrap('insertRule', res) as RotationRuleRow
+}
+
+/** `active` may only be set to false here; `null` when the rule is gone. */
+export async function updateRule(
+  id: string,
+  patch: Partial<RuleInsert> & { active?: false; next_run_at?: string | null }
+): Promise<RotationRuleRow | null> {
+  const sb = createServiceClient()
+  if ((patch as { active?: unknown }).active === true) throw new DbError('updateRule', new Error('active=true only via activate_rule'))
+  const res = await sb.from('rotation_rules').update(patch).eq('id', id).select('*')
+  if (res.error) throw new DbError('updateRule', res.error)
+  return ((res.data ?? [])[0] as RotationRuleRow | undefined) ?? null
+}
+
+/** Deletes an inactive rule; `false` when it is active or gone. */
+export async function deleteInactiveRule(id: string): Promise<boolean> {
+  const sb = createServiceClient()
+  const res = await sb.from('rotation_rules').delete().eq('id', id).eq('active', false).select('id')
+  if (res.error) throw new DbError('deleteInactiveRule', res.error)
+  return (res.data ?? []).length > 0
+}
+
+export type DueRule = Pick<RotationRuleRow, 'id' | 'name' | 'campaign_id' | 'filter' | 'daily_cap' | 'order_by' | 'cron' | 'next_run_at'>
+
+/** Active rules whose `next_run_at` is unset or not after `nowIso`. */
+export async function getDueRules(nowIso: string): Promise<DueRule[]> {
+  const sb = createServiceClient()
+  const res = await sb
+    .from('rotation_rules')
+    .select('id,name,campaign_id,filter,daily_cap,order_by,cron,next_run_at')
+    .eq('active', true)
+    .or(`next_run_at.is.null,next_run_at.lte."${nowIso}"`)
+    .order('next_run_at', { ascending: true, nullsFirst: true })
+    .order('id', { ascending: true })
+  return unwrap('getDueRules', res) as DueRule[]
+}
+
+/**
+ * Claim a due rule by advancing it — the single conditional UPDATE the
+ * rotation tick runs before anything else:
+ *   update rotation_rules set next_run_at = $next, last_run_at = now()
+ *    where id = $1 and active and (next_run_at is null or next_run_at <= now())
+ *   returning id
+ * `false` = another tick advanced it first (or it was paused): skip.
+ */
+export async function claimRule(id: string, nextRunAt: string, nowIso: string): Promise<boolean> {
+  const sb = createServiceClient()
+  const res = await sb
+    .from('rotation_rules')
+    .update({ next_run_at: nextRunAt, last_run_at: nowIso })
+    .eq('id', id)
+    .eq('active', true)
+    .or(`next_run_at.is.null,next_run_at.lte."${nowIso}"`)
+    .select('id')
+  if (res.error) throw new DbError('claimRule', res.error)
+  return (res.data ?? []).length > 0
+}
+
+export async function setRuleResult(id: string, result: Record<string, Json>): Promise<void> {
+  const sb = createServiceClient()
+  const res = await sb.from('rotation_rules').update({ last_result: result }).eq('id', id)
+  if (res.error) throw new DbError('setRuleResult', res.error)
+}
+
+/** Open (awaiting) action of `kind` carrying `rule_id`, if any. */
+export async function findAwaitingRuleAction(kind: PendingActionKind, ruleId: string): Promise<PendingActionRow | null> {
+  const sb = createServiceClient()
+  const res = await sb
+    .from('pending_actions')
+    .select('*')
+    .eq('status', 'awaiting')
+    .eq('kind', kind)
+    .eq('rule_id', ruleId)
+    .limit(1)
+    .maybeSingle()
+  if (res.error) throw new DbError('findAwaitingRuleAction', res.error)
+  return (res.data as PendingActionRow | null) ?? null
+}
+
+/** Every awaiting action tied to a rule (the Rules table shows them). */
+export async function getAwaitingRuleActions(): Promise<Pick<PendingActionRow, 'id' | 'kind' | 'rule_id' | 'created_at'>[]> {
+  const sb = createServiceClient()
+  const res = await sb
+    .from('pending_actions')
+    .select('id,kind,rule_id,created_at')
+    .eq('status', 'awaiting')
+    .not('rule_id', 'is', null)
+    .order('created_at', { ascending: true })
+  return unwrap('getAwaitingRuleActions', res) as Pick<PendingActionRow, 'id' | 'kind' | 'rule_id' | 'created_at'>[]
+}
+
+/** Exact count of `lume_lead_bank` candidates for `filter`, minus rows already queued for `campaignId`. */
+export async function countCandidates(filter: RuleFilter, campaignId: string): Promise<number> {
+  const sb = createServiceClient()
+  type HeadQuery = RuleFilterQuery<HeadQuery> & PromiseLike<{ count: number | null; error: PostgrestError | null }>
+  const q = sb.from('lume_lead_bank').select('id', { count: 'exact', head: true }) as unknown as HeadQuery
+  const res = await applyFilter<HeadQuery>(q, filter, { campaignId })
+  if (res.error) throw new DbError('countCandidates', res.error)
+  return res.count ?? 0
+}
+
+export interface LeadRef {
+  origin: 'lead_bank' | 'validation_rows'
+  id: string
+}
+
+/** The selected leads that still exist in `lume_lead_bank` and are not already queued for `campaignId`. */
+export async function resolveLeadRefs(refs: LeadRef[], campaignId: string): Promise<LeadRef[]> {
+  if (!refs.length) return []
+  const sb = createServiceClient()
+  const res = await sb
+    .from('lume_lead_bank')
+    .select('origin,id,campaign_id')
+    .in('id', [...new Set(refs.map((r) => r.id))])
+  if (res.error) throw new DbError('resolveLeadRefs', res.error)
+  const found = new Set(
+    ((res.data ?? []) as { origin: string; id: string; campaign_id: string | null }[])
+      .filter((r) => r.campaign_id !== campaignId)
+      .map((r) => `${r.origin}:${r.id}`)
+  )
+  const seen = new Set<string>()
+  return refs.filter((r) => {
+    const k = `${r.origin}:${r.id}`
+    if (!found.has(k) || seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
+}
+
+export async function getCampaignByExternalId(externalId: string): Promise<LumeCampaignRow | null> {
+  const sb = createServiceClient()
+  const res = await sb.from('lume_campaigns').select('*').eq('external_id', externalId).limit(1).maybeSingle()
+  if (res.error) throw new DbError('getCampaignByExternalId', res.error)
+  return (res.data as LumeCampaignRow | null) ?? null
+}
+
+/** `lead_bank` rows in `queued` per campaign id (head-only counts; a handful of campaigns). */
+export async function getQueuedCounts(campaignIds: string[]): Promise<Record<string, number>> {
+  const ids = [...new Set(campaignIds.filter(Boolean))]
+  const sb = createServiceClient()
+  const pairs = await Promise.all(
+    ids.map(async (id) => {
+      const r = await sb.from('lead_bank').select('id', { count: 'exact', head: true }).eq('campaign_id', id).eq('state', 'queued')
+      if (r.error) throw new DbError('getQueuedCounts', r.error)
+      return [id, r.count ?? 0] as const
+    })
+  )
+  return Object.fromEntries(pairs)
+}
+
+/**
+ * Upsert Instantly campaigns into `lume_campaigns` on (sender_type,
+ * external_id). New rows land as family 'other'; existing rows keep the
+ * family the owner set. Campaigns missing from Instantly are left alone.
+ */
+export async function syncInstantlyCampaigns(
+  campaigns: InstantlyCampaignDetail[],
+  nowIso: string
+): Promise<{ inserted: number; updated: number }> {
+  if (!campaigns.length) return { inserted: 0, updated: 0 }
+  const sb = createServiceClient()
+  const existing = await sb.from('lume_campaigns').select('external_id,family').eq('sender_type', 'instantly')
+  if (existing.error) throw new DbError('syncInstantlyCampaigns.read', existing.error)
+  const family = new Map(((existing.data ?? []) as { external_id: string | null; family: string }[]).map((r) => [r.external_id, r.family]))
+  const rows = campaigns.map((c) => ({
+    sender_type: 'instantly',
+    external_id: c.id,
+    name: c.name,
+    family: family.get(c.id) ?? 'other',
+    status: lumeCampaignStatus(c.status),
+    capacity_per_day: c.dailyLimit,
+    instantly: { status: c.status, daily_limit: c.dailyLimit, accounts: c.accounts } as Json,
+    synced_at: nowIso,
+  }))
+  const res = await sb.from('lume_campaigns').upsert(rows, { onConflict: 'sender_type,external_id' }).select('id')
+  if (res.error) throw new DbError('syncInstantlyCampaigns', res.error)
+  const inserted = campaigns.filter((c) => !family.has(c.id)).length
+  return { inserted, updated: campaigns.length - inserted }
+}
+
+/**
+ * Expire awaiting actions created before `cutoffIso`: `status='expired'` and
+ * the claim slot taken, so a late Telegram or Lume tap finds nothing to claim.
+ */
+export async function expireStaleActions(
+  cutoffIso: string
+): Promise<Pick<PendingActionRow, 'id' | 'kind' | 'telegram_message_id' | 'payload'>[]> {
+  const sb = createServiceClient()
+  const res = await sb
+    .from('pending_actions')
+    .update({ status: 'expired', claim_status: 'claimed' })
+    .eq('status', 'awaiting')
+    .eq('claim_status', 'awaiting')
+    .lt('created_at', cutoffIso)
+    .select('id,kind,telegram_message_id,payload')
+  if (res.error) throw new DbError('expireStaleActions', res.error)
+  return (res.data ?? []) as Pick<PendingActionRow, 'id' | 'kind' | 'telegram_message_id' | 'payload'>[]
 }

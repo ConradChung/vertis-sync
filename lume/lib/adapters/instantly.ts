@@ -2,6 +2,8 @@ import 'server-only'
 import {
   itemsOf,
   mapAccounts,
+  mapCampaignDetails,
+  mapCampaignSequence,
   mapAnalyticsOverview,
   mapCampaigns,
   mapDaily,
@@ -9,6 +11,8 @@ import {
   type DailyPoint,
   type InstantlyAccount,
   type InstantlyCampaign,
+  type InstantlyCampaignDetail,
+  type SequenceStep,
 } from '@/lib/adapters/instantly.map'
 
 /**
@@ -175,4 +179,14 @@ export async function getDailyAnalytics(opts: { campaignId?: string; startDate?:
 
 export async function listAccounts(): Promise<InstantlyAccount[]> {
   return mapAccounts(await getAllPages('/accounts'))
+}
+
+/** Every campaign with `daily_limit` and account count, for the `lume_campaigns` sync. */
+export async function listCampaignDetails(): Promise<InstantlyCampaignDetail[]> {
+  return mapCampaignDetails(await getAllPages('/campaigns'))
+}
+
+/** First steps of a campaign's sequence (read-only preview). */
+export async function getCampaignSequence(campaignId: string, limit = 3): Promise<SequenceStep[]> {
+  return mapCampaignSequence(await instantlyGet(`/campaigns/${encodeURIComponent(campaignId)}`), limit)
 }

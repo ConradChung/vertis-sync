@@ -6,11 +6,13 @@
 -- vault secrets created below and the pg_net queue rows they cause (the pg_net
 -- worker only sends committed rows).
 --
--- The gate-hook assertions create lume_url / lume_hook_secret for the length
--- of the transaction. Once the live vault holds them (a deployed Lume), the
--- ingest below still queues a request, but to the live URL, so the negative
--- case and the url/secret assertions are skipped rather than failed; the plan
--- count never changes.
+-- The gate-hook assertions create whichever of lume_url / lume_hook_secret
+-- the live vault lacks, for the length of the transaction. Presence is
+-- tracked per secret: once the live vault holds its own lume_url the url
+-- assertion is skipped, its own lume_hook_secret the header assertion, and
+-- both the negative "no secrets" case (the ingest then does queue a request,
+-- to the live URL). A half-configured vault therefore skips rather than
+-- fails; the plan count never changes.
 --
 -- The final "writer survives" proof takes ACCESS EXCLUSIVE on events until
 -- rollback. It is skipped unless lume.allow_destructive_tests = on, which
@@ -22,7 +24,8 @@ select plan(63);
 
 -- the vault state has to be snapshotted before this file adds its own secrets
 create temp table lume_trig_t as
-  select exists (select 1 from vault.secrets where name in ('lume_url', 'lume_hook_secret')) as live_secrets;
+  select exists (select 1 from vault.secrets where name = 'lume_url') as has_url,
+         exists (select 1 from vault.secrets where name = 'lume_hook_secret') as has_secret;
 
 -- structure ------------------------------------------------------------------
 select has_function('public', 'lume_event_on_change', 'lume_event_on_change() exists');
@@ -46,20 +49,20 @@ select has_trigger('public', 'lead_bank', 'lume_events_lead_bank', 'lead_bank ha
 select has_trigger('public', 'rotation_runs', 'lume_events_rotation_runs', 'rotation_runs has the events trigger');
 
 -- gate hook without secrets: a gate opens, nothing is queued -----------------
--- (skipped once the live vault has lume secrets: the ingest then does queue
--- a request, to the live URL, which rolls back with everything else)
+-- (skipped once the live vault has both lume secrets: the ingest then does
+-- queue a request, to the live URL, which rolls back with everything else)
 insert into telegram_ingests (id, telegram_chat_id, sender_chat_id, filename, storage_path, row_count, status)
   values ('00000000-0000-0000-0000-000000000303', '1', '1', 'trig.csv', 'telegram/trig.csv', 10, 'awaiting_approval');
-select case when (select live_secrets from lume_trig_t)
-  then skip('live vault already has lume secrets')
+select case when (select has_url and has_secret from lume_trig_t)
+  then skip('live vault already has both lume secrets')
   else is((select count(*)::int from net.http_request_queue
            where convert_from(body, 'utf8')::jsonb->>'target_id' = '00000000-0000-0000-0000-000000000303'),
-          0, 'without lume secrets in the vault an opened gate queues no hook request') end;
+          0, 'without both lume secrets in the vault an opened gate queues no hook request') end;
 
 -- secrets for the rest of the transaction (rolled back with everything else);
--- only created when the live vault has neither, so the file never collides
-select vault.create_secret('https://lume.test', 'lume_url') where not (select live_secrets from lume_trig_t);
-select vault.create_secret('s3cret', 'lume_hook_secret') where not (select live_secrets from lume_trig_t);
+-- each is created only when the live vault lacks it, so the file never collides
+select vault.create_secret('https://lume.test', 'lume_url') where not (select has_url from lume_trig_t);
+select vault.create_secret('s3cret', 'lume_hook_secret') where not (select has_secret from lume_trig_t);
 
 -- validation_jobs ------------------------------------------------------------
 insert into validation_jobs (id, filename, total_rows, status)
@@ -94,11 +97,11 @@ select is((select count(*)::int from events where source = 'validation_jobs' and
 select is((select count(*)::int from net.http_request_queue
            where convert_from(body, 'utf8')::jsonb->>'target_id' = '00000000-0000-0000-0000-000000000301'),
           1, 'the finder gate queues exactly one hook request');
-select case when (select live_secrets from lume_trig_t) then skip('live vault already has lume secrets')
+select case when (select has_url from lume_trig_t) then skip('live vault has its own lume_url')
   else is((select url from net.http_request_queue
            where convert_from(body, 'utf8')::jsonb->>'target_id' = '00000000-0000-0000-0000-000000000301'),
           'https://lume.test/api/hooks/gate-opened', 'the hook posts to lume_url/api/hooks/gate-opened') end;
-select case when (select live_secrets from lume_trig_t) then skip('live vault already has lume secrets')
+select case when (select has_secret from lume_trig_t) then skip('live vault has its own lume_hook_secret')
   else is((select headers->>'X-Lume-Hook-Secret' from net.http_request_queue
            where convert_from(body, 'utf8')::jsonb->>'target_id' = '00000000-0000-0000-0000-000000000301'),
           's3cret', 'the hook carries lume_hook_secret') end;

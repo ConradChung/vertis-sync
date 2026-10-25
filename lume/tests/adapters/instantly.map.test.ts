@@ -106,3 +106,51 @@ describe('mapAccount', () => {
     expect(mapAccounts([{ email: 'z@x.com' }, {}, { email: 'a@x.com' }]).map((a) => a.email)).toEqual(['a@x.com', 'z@x.com'])
   })
 })
+
+import { lumeCampaignStatus, mapCampaignDetails, mapCampaignSequence } from '@/lib/adapters/instantly.map'
+
+describe('mapCampaignDetails', () => {
+  it('adds daily_limit and the account count', () => {
+    expect(
+      mapCampaignDetails([
+        { id: 'c1', name: 'A', status: 1, daily_limit: 50, email_list: ['a@x', 'b@x'] },
+        { id: 'c2', name: 'B', status: 2 },
+        { id: 'gone', name: 'D', status: -1 },
+      ])
+    ).toEqual([
+      { id: 'c1', name: 'A', status: 1, statusLabel: 'active', dailyLimit: 50, accounts: 2 },
+      { id: 'c2', name: 'B', status: 2, statusLabel: 'paused', dailyLimit: null, accounts: 0 },
+    ])
+  })
+
+  it('maps statuses onto the lume vocabulary', () => {
+    expect([0, 1, 2, 3, 4, 9].map(lumeCampaignStatus)).toEqual(['draft', 'active', 'paused', 'completed', 'active', 'unknown'])
+  })
+})
+
+describe('mapCampaignSequence', () => {
+  it('takes the first steps of the first sequence, variant A, as plain text', () => {
+    const steps = mapCampaignSequence({
+      sequences: [
+        {
+          steps: [
+            { delay: 0, variants: [{ subject: 'Hi {{firstName}}', body: '<p>Hello&nbsp;there</p><p>Bye</p>' }, { subject: 'B' }] },
+            { delay: 3, variants: [{ subject: '', body: 'Bump' }] },
+            { delay: 4, variants: [] },
+            { delay: 5, variants: [{ subject: 'four' }] },
+          ],
+        },
+      ],
+    })
+    expect(steps).toEqual([
+      { step: 1, delayDays: 0, subject: 'Hi {{firstName}}', body: 'Hello there\nBye', variants: 2 },
+      { step: 2, delayDays: 3, subject: '', body: 'Bump', variants: 1 },
+      { step: 3, delayDays: 4, subject: '', body: '', variants: 0 },
+    ])
+  })
+
+  it('[] for anything else', () => {
+    expect(mapCampaignSequence(null)).toEqual([])
+    expect(mapCampaignSequence({ sequences: [] })).toEqual([])
+  })
+})

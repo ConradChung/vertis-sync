@@ -188,3 +188,77 @@ export function mapAccounts(items: unknown[]): InstantlyAccount[] {
     .filter((a): a is InstantlyAccount => a !== null)
     .sort((a, b) => a.email.localeCompare(b.email))
 }
+
+// ---------------------------------------------------------------------------
+// Campaign sync (Rotate) and sequence preview
+
+export interface InstantlyCampaignDetail extends InstantlyCampaign {
+  /** Campaign `daily_limit` (sends per day), when set. */
+  dailyLimit: number | null
+  /** Number of sending accounts on the campaign (`email_list`). */
+  accounts: number
+}
+
+/** Like `mapCampaigns`, plus the fields `lume_campaigns` keeps from a sync. */
+export function mapCampaignDetails(items: unknown[]): InstantlyCampaignDetail[] {
+  const byId = new Map<string, Raw>()
+  for (const it of items) if (isObj(it) && typeof it.id === 'string') byId.set(it.id, it)
+  return mapCampaigns(items).map((c) => {
+    const raw = byId.get(c.id) ?? {}
+    const list = raw.email_list
+    return { ...c, dailyLimit: num(raw, 'daily_limit'), accounts: Array.isArray(list) ? list.length : 0 }
+  })
+}
+
+/** Instantly's numeric status → the `lume_campaigns.status` vocabulary. */
+export function lumeCampaignStatus(status: number): string {
+  if (status === 4) return 'active' // running subsequences
+  const label = campaignStatusLabel(status)
+  return ['draft', 'active', 'paused', 'completed'].includes(label) ? label : 'unknown'
+}
+
+export interface SequenceStep {
+  step: number
+  /** Days to wait before this step (Instantly `delay`, relative to the previous one). */
+  delayDays: number
+  subject: string
+  /** Plain text: HTML tags stripped, whitespace collapsed, capped at 600 chars. */
+  body: string
+  variants: number
+}
+
+const stripHtml = (s: string) =>
+  s
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+
+/** `GET /campaigns/{id}` → the first `limit` steps of the first sequence (variant A). */
+export function mapCampaignSequence(body: unknown, limit = 3): SequenceStep[] {
+  if (!isObj(body) || !Array.isArray(body.sequences)) return []
+  const first = body.sequences[0]
+  if (!isObj(first) || !Array.isArray(first.steps)) return []
+  const out: SequenceStep[] = []
+  for (const s of first.steps) {
+    if (out.length >= limit) break
+    if (!isObj(s)) continue
+    const variants = Array.isArray(s.variants) ? s.variants.filter(isObj) : []
+    const a = variants[0] ?? {}
+    const text = stripHtml(str(a, 'body') ?? '')
+    out.push({
+      step: out.length + 1,
+      delayDays: num(s, 'delay') ?? 0,
+      subject: str(a, 'subject') ?? '',
+      body: text.length > 600 ? `${text.slice(0, 600)}…` : text,
+      variants: variants.length,
+    })
+  }
+  return out
+}
