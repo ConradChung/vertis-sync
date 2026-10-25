@@ -8,16 +8,21 @@ import type { Json, PendingActionKind, PendingActionRow } from '@/lib/db/types'
  * Telegram (`lume_ok` / `lume_no` + a `/actions/<id>` deep link). Task 12
  * builds the decide/execute side; this is only the request.
  *
- * The payload must carry `job_id` (lowercase uuid, as the DB prints it — the
- * `lume_gates` push_review anti-join compares `payload->>'job_id'` to
- * `id::text`) and a human `summary`. A second awaiting action of the same
- * kind for the same job is refused with `DuplicateActionError` — checked
- * first, and backed by the unique partial index
- * `pending_actions_one_awaiting_idx` (23505 → the same error).
+ * Every action about a validation job (`push_to_instantly`, `launch_campaign`,
+ * and any other kind that names one) carries `job_id` (lowercase uuid, as the
+ * DB prints it — the `lume_gates` push_review anti-join compares
+ * `payload->>'job_id'` to `id::text`); all carry a human `summary`. A second
+ * awaiting action of the same kind for the same job is refused with
+ * `DuplicateActionError` — checked first, and backed by the unique partial
+ * indexes `pending_actions_one_awaiting_idx` (job) and
+ * `pending_actions_one_awaiting_rule_idx` (rule) (23505 → the same error).
  *
  * Telegram unconfigured: the row is still created; the prompt is skipped
  * (the adapter logs it) and `telegram_message_id` stays null.
  */
+
+/** Kinds that are always about one validation job. */
+export const JOB_KINDS: ReadonlySet<PendingActionKind> = new Set<PendingActionKind>(['push_to_instantly', 'launch_campaign'])
 
 const LOWER_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
@@ -49,15 +54,20 @@ export async function createAction(
   meta: CreateActionMeta = {}
 ): Promise<PendingActionRow> {
   const jobId = payload.job_id
-  if (typeof jobId !== 'string' || !LOWER_UUID.test(jobId)) {
+  if (jobId === undefined && JOB_KINDS.has(kind)) {
+    throw new InvalidActionPayloadError('payload.job_id must be a lowercase uuid')
+  }
+  if (jobId !== undefined && (typeof jobId !== 'string' || !LOWER_UUID.test(jobId))) {
     throw new InvalidActionPayloadError('payload.job_id must be a lowercase uuid')
   }
   if (typeof payload.summary !== 'string' || !payload.summary.trim()) {
     throw new InvalidActionPayloadError('payload.summary is required')
   }
 
-  const existing = await findAwaitingAction(kind, jobId)
-  if (existing) throw new DuplicateActionError(existing.id)
+  if (typeof jobId === 'string') {
+    const existing = await findAwaitingAction(kind, jobId)
+    if (existing) throw new DuplicateActionError(existing.id)
+  }
 
   let row: PendingActionRow
   try {
@@ -71,7 +81,7 @@ export async function createAction(
   } catch (err) {
     // pending_actions_one_awaiting_idx: a concurrent request won the race.
     if (isDbError(err) && err.code === '23505') {
-      const winner = await findAwaitingAction(kind, jobId).catch(() => null)
+      const winner = typeof jobId === 'string' ? await findAwaitingAction(kind, jobId).catch(() => null) : null
       throw new DuplicateActionError(winner?.id ?? '')
     }
     throw err
