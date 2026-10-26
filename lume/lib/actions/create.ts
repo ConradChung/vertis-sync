@@ -8,7 +8,7 @@ import type { Json, PendingActionKind, PendingActionRow } from '@/lib/db/types'
  * Telegram (`lume_ok` / `lume_no` + a `/actions/<id>` deep link). Task 12
  * builds the decide/execute side; this is only the request.
  *
- * The payload must carry `job_id` (lowercase uuid, as the DB prints it — the
+ * An action about a validation job must carry `job_id` (lowercase uuid, as the DB prints it — the
  * `lume_gates` push_review anti-join compares `payload->>'job_id'` to
  * `id::text`) and a human `summary`. A second awaiting action of the same
  * kind for the same job is refused with `DuplicateActionError` — checked
@@ -48,15 +48,17 @@ export async function createAction(
   requestedBy: PendingActionRow['requested_by'],
   meta: CreateActionMeta = {}
 ): Promise<PendingActionRow> {
+  // job_id is required only for actions about a validation job; actions about
+  // a campaign, a rule or a reply (agent / Rotate / Campaigns) carry none.
   const jobId = payload.job_id
-  if (typeof jobId !== 'string' || !LOWER_UUID.test(jobId)) {
+  if (jobId !== undefined && (typeof jobId !== 'string' || !LOWER_UUID.test(jobId))) {
     throw new InvalidActionPayloadError('payload.job_id must be a lowercase uuid')
   }
   if (typeof payload.summary !== 'string' || !payload.summary.trim()) {
     throw new InvalidActionPayloadError('payload.summary is required')
   }
 
-  const existing = await findAwaitingAction(kind, jobId)
+  const existing = typeof jobId === 'string' ? await findAwaitingAction(kind, jobId) : null
   if (existing) throw new DuplicateActionError(existing.id)
 
   let row: PendingActionRow
@@ -71,7 +73,7 @@ export async function createAction(
   } catch (err) {
     // pending_actions_one_awaiting_idx: a concurrent request won the race.
     if (isDbError(err) && err.code === '23505') {
-      const winner = await findAwaitingAction(kind, jobId).catch(() => null)
+      const winner = typeof jobId === 'string' ? await findAwaitingAction(kind, jobId).catch(() => null) : null
       throw new DuplicateActionError(winner?.id ?? '')
     }
     throw err
