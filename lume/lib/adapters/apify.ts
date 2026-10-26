@@ -1,9 +1,12 @@
 import 'server-only'
 
 /**
- * Apify REST, read-only: a dataset's items, or the default dataset of an
- * actor's last SUCCEEDED run. Token from `APIFY_API_TOKEN`, sent as a bearer
- * header (never in a URL that could reach a log).
+ * Apify REST. Reads: a dataset's items, the default dataset of an actor's
+ * last SUCCEEDED run, Store search, actor details + pricing, the default
+ * build's input schema, a run's status. One write: `startRun`, called only by
+ * the `run_actor` pending action's executor (lib/actions/execute.ts) with
+ * limits from lib/apify/pricing.ts. Token from `APIFY_API_TOKEN`, sent as a
+ * bearer header (never in a URL that could reach a log).
  */
 
 export const APIFY_MAX_ITEMS = 20_000
@@ -35,20 +38,28 @@ function token(): string {
 const isTimeout = (err: unknown, signal?: AbortSignal) =>
   signal?.aborted || (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError'))
 
-async function get(path: string, signal?: AbortSignal): Promise<Response> {
+async function request(method: 'GET' | 'POST', path: string, signal?: AbortSignal, body?: unknown): Promise<Response> {
   const t = token()
   const timeout = AbortSignal.timeout(50_000)
   try {
     return await fetch(`${BASE}${path}`, {
-      headers: { Authorization: `Bearer ${t}`, Accept: 'application/json' },
+      method,
+      headers: {
+        Authorization: `Bearer ${t}`,
+        Accept: 'application/json',
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     })
   } catch (err) {
-    if (isTimeout(err, signal)) throw new ApifyError('timeout', 504, `GET ${path.split('?')[0]} timed out`)
+    if (isTimeout(err, signal)) throw new ApifyError('timeout', 504, `${method} ${path.split('?')[0]} timed out`)
     const msg = (err instanceof Error ? err.message : String(err)).split(t).join('<token>')
     throw new ApifyError('upstream', 0, msg)
   }
 }
+
+const get = (path: string, signal?: AbortSignal) => request('GET', path, signal)
 
 /** Body as text with a byte cap: Content-Length first, then counted while streaming. */
 async function readCapped(res: Response, maxBytes: number, signal?: AbortSignal): Promise<string> {
@@ -131,4 +142,197 @@ export async function datasetItems(datasetId: string, signal?: AbortSignal): Pro
   const capped = truncated ? body.slice(0, APIFY_MAX_ITEMS) : body
   const items = capped.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x))
   return { items, truncated, skipped: capped.length - items.length }
+}
+
+// ---------------------------------------------------------------------------
+// Store, actors, runs
+
+type Raw = Record<string, unknown>
+const obj = (v: unknown): Raw | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Raw) : null)
+const strOr = (v: unknown, d: string | null = null) => (typeof v === 'string' ? v : d)
+const numOr = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+
+/** `{ data }` of a JSON response; 404 → `not_found`, other non-2xx → `upstream`. */
+async function dataOf(res: Response, what: string): Promise<Raw> {
+  if (res.status === 404) throw new ApifyError('not_found', 404, `${what} not found`)
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: { type?: string; message?: string } } | null
+    const detail = body?.error?.message ? `: ${body.error.message.slice(0, 200)}` : ''
+    throw new ApifyError('upstream', res.status, `${what} HTTP ${res.status}${detail}`)
+  }
+  const body = (await res.json().catch(() => null)) as { data?: unknown } | null
+  const data = obj(body?.data)
+  if (!data) throw new ApifyError('upstream', 502, `${what}: unexpected response`)
+  return data
+}
+
+export interface StoreActor {
+  id: string
+  title: string
+  description: string
+  rating: number | null
+  reviews: number | null
+  users: number | null
+  users30d: number | null
+  successRate30d: number | null
+  categories: string[]
+  pricingInfo: unknown
+  url: string
+}
+
+export async function searchStore(query: string, limit = 10, signal?: AbortSignal): Promise<{ total: number; items: StoreActor[] }> {
+  const q = new URLSearchParams({ search: query, limit: String(Math.min(Math.max(limit, 1), 50)) })
+  const data = await dataOf(await get(`/store?${q}`, signal), 'store search')
+  const items = (Array.isArray(data.items) ? data.items : []).flatMap((raw): StoreActor[] => {
+    const i = obj(raw)
+    const username = strOr(i?.username)
+    const name = strOr(i?.name)
+    if (!i || !username || !name) return []
+    const stats = obj(i.stats) ?? {}
+    const runs = obj(stats.publicActorRunStats30Days)
+    const total = numOr(runs?.TOTAL)
+    const ok = numOr(runs?.SUCCEEDED)
+    return [
+      {
+        id: `${username}/${name}`,
+        title: strOr(i.title, name)!,
+        description: strOr(i.description, '')!.slice(0, 400),
+        rating: numOr(i.actorReviewRating ?? stats.actorReviewRating),
+        reviews: numOr(i.actorReviewCount ?? stats.actorReviewCount),
+        users: numOr(stats.totalUsers),
+        users30d: numOr(stats.totalUsers30Days),
+        successRate30d: total && ok !== null ? Math.round((ok / total) * 1000) / 10 : null,
+        categories: Array.isArray(i.categories) ? i.categories.filter((c): c is string => typeof c === 'string') : [],
+        pricingInfo: i.currentPricingInfo ?? null,
+        url: `https://apify.com/${username}/${name}`,
+      },
+    ]
+  })
+  return { total: numOr(data.total) ?? items.length, items }
+}
+
+export interface ActorDetails {
+  id: string
+  /** `username/name` */
+  name: string
+  title: string
+  description: string
+  pricingInfos: unknown[]
+  defaultMemoryMb: number | null
+  isDeprecated: boolean
+}
+
+export async function getActor(actorId: string, signal?: AbortSignal): Promise<ActorDetails> {
+  const d = await dataOf(await get(`/acts/${encodeURIComponent(actorPathId(actorId))}`, signal), `actor ${actorId}`)
+  const opts = obj(d.defaultRunOptions)
+  return {
+    id: strOr(d.id, actorId)!,
+    name: `${strOr(d.username, '')}/${strOr(d.name, '')}`,
+    title: strOr(d.title, strOr(d.name, actorId))!,
+    description: strOr(d.description, '')!.slice(0, 600),
+    pricingInfos: Array.isArray(d.pricingInfos) ? d.pricingInfos : [],
+    defaultMemoryMb: numOr(opts?.memoryMbytes),
+    isDeprecated: d.isDeprecated === true,
+  }
+}
+
+export interface ActorBuildInput {
+  /** `actorDefinition.input`, else the build's `inputSchema` string; null when the actor has none. */
+  schema: unknown
+  minMemoryMb: number | null
+  maxMemoryMb: number | null
+}
+
+/** The input schema of the actor's default build. */
+export async function getActorInputSchema(actorId: string, signal?: AbortSignal): Promise<ActorBuildInput> {
+  const d = await dataOf(
+    await get(`/acts/${encodeURIComponent(actorPathId(actorId))}/builds/default`, signal),
+    `default build of ${actorId}`
+  )
+  const def = obj(d.actorDefinition)
+  return {
+    schema: def?.input ?? d.inputSchema ?? null,
+    minMemoryMb: numOr(def?.minMemoryMbytes),
+    maxMemoryMb: numOr(def?.maxMemoryMbytes),
+  }
+}
+
+export interface RunInfo {
+  id: string
+  actorId: string | null
+  status: string
+  statusMessage: string | null
+  startedAt: string | null
+  finishedAt: string | null
+  datasetId: string | null
+  usageTotalUsd: number | null
+  options: Raw | null
+  chargedEventCounts: Raw | null
+  consoleUrl: string
+}
+
+function runInfo(d: Raw): RunInfo {
+  const id = strOr(d.id, '')!
+  const actId = strOr(d.actId)
+  return {
+    id,
+    actorId: actId,
+    status: strOr(d.status, 'UNKNOWN')!,
+    statusMessage: strOr(d.statusMessage),
+    startedAt: strOr(d.startedAt),
+    finishedAt: strOr(d.finishedAt),
+    datasetId: strOr(d.defaultDatasetId),
+    usageTotalUsd: numOr(d.usageTotalUsd),
+    options: obj(d.options),
+    chargedEventCounts: obj(d.chargedEventCounts),
+    consoleUrl: actId ? `https://console.apify.com/actors/${actId}/runs/${id}` : `https://console.apify.com/actors/runs/${id}`,
+  }
+}
+
+export interface StartRunOptions {
+  timeout: number
+  memory?: number
+  maxItems?: number
+  maxTotalChargeUsd: number
+}
+
+/**
+ * Start a run with Apify-enforced limits. Callers: the `run_actor` executor
+ * only. The limits are query parameters Apify applies to the run itself.
+ */
+export async function startRun(
+  actorId: string,
+  input: Record<string, unknown>,
+  o: StartRunOptions,
+  signal?: AbortSignal
+): Promise<RunInfo> {
+  const q = new URLSearchParams({ timeout: String(o.timeout), maxTotalChargeUsd: String(o.maxTotalChargeUsd) })
+  if (o.memory) q.set('memory', String(o.memory))
+  if (o.maxItems) q.set('maxItems', String(o.maxItems))
+  const res = await request('POST', `/acts/${encodeURIComponent(actorPathId(actorId))}/runs?${q}`, signal, input)
+  return runInfo(await dataOf(res, `start ${actorId}`))
+}
+
+export async function getRun(runId: string, signal?: AbortSignal): Promise<RunInfo & { itemCount: number | null }> {
+  const run = runInfo(await dataOf(await get(`/actor-runs/${encodeURIComponent(runId)}`, signal), `run ${runId}`))
+  let itemCount: number | null = null
+  if (run.datasetId) {
+    try {
+      const ds = await dataOf(await get(`/datasets/${encodeURIComponent(run.datasetId)}`, signal), 'dataset')
+      itemCount = numOr(ds.itemCount)
+    } catch {
+      // the count is a nicety; the status is what matters
+    }
+  }
+  return { ...run, itemCount }
+}
+
+/** The account's plan tier (FREE, BRONZE, …) for tiered event prices; null when unknown. */
+export async function planTier(signal?: AbortSignal): Promise<string | null> {
+  try {
+    const d = await dataOf(await get('/users/me', signal), 'user')
+    return strOr(obj(d.plan)?.tier)
+  } catch {
+    return null
+  }
 }
