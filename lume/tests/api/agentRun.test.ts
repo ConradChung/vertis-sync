@@ -19,6 +19,8 @@ const h = vi.hoisted(() => ({
   getConversation: vi.fn(),
   getMessages: vi.fn(),
   insertMessage: vi.fn(),
+  getSkill: vi.fn(),
+  markSkillRun: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/guards', () => ({ requireOwner: h.requireOwner }))
@@ -28,6 +30,13 @@ vi.mock('@/lib/agent/conversations', () => ({
   getConversation: h.getConversation,
   getMessages: h.getMessages,
   insertMessage: h.insertMessage,
+}))
+vi.mock('@/lib/agent/skills', () => ({
+  getSkill: h.getSkill,
+  markSkillRun: h.markSkillRun,
+  listSkills: vi.fn(),
+  findSkillByName: vi.fn(),
+  createSkill: vi.fn(),
 }))
 vi.mock('@/lib/actions/create', () => ({ createAction: h.createAction }))
 vi.mock('@/lib/db/service', () => ({ logEvent: h.logEvent, isDbError: () => false }))
@@ -311,5 +320,42 @@ describe('POST /api/agent/run', () => {
       expect(res.status).toBe(500)
       expect(h.toolRunner).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe('POST /api/agent/run with a saved skill', () => {
+  const SKILL = '11111111-2222-4333-8444-555555555555'
+  const skill = { id: SKILL, name: 'Roofers', description: '', steps: [{ type: 'launch' }], variables: [], source_conversation_id: null, created_at: '', updated_at: '', last_run_at: null, run_count: 0 }
+  const promptSent = () => (h.toolRunner.mock.calls[0][0] as { messages: { content: string }[] }).messages[0].content
+
+  it('run: injects the RUN block ahead of the message and bumps the run count', async () => {
+    h.getSkill.mockResolvedValue(skill)
+    fakeRunner([{ text: 'Which city?' }])
+    await events(await post('Run the skill "Roofers".', { skill_id: SKILL.toUpperCase(), skill_mode: 'run' }))
+    expect(h.getSkill).toHaveBeenCalledWith(SKILL)
+    expect(promptSent()).toMatch(/^The owner chose to RUN the saved skill "Roofers"/)
+    expect(promptSent()).toContain('Run the skill "Roofers".')
+    expect(h.markSkillRun).toHaveBeenCalledWith(SKILL)
+    // The stored user message is the owner's own words, not the skill block.
+    expect(h.insertMessage).toHaveBeenCalledWith(expect.objectContaining({ role: 'user', text: 'Run the skill "Roofers".' }))
+  })
+
+  it('reference: context only, no run count', async () => {
+    h.getSkill.mockResolvedValue(skill)
+    fakeRunner([{ text: 'ok' }])
+    await events(await post('Make one like this for dentists', { skill_id: SKILL, skill_mode: 'reference' }))
+    expect(promptSent()).toContain('as reference only')
+    expect(promptSent()).not.toContain('RUN the saved skill')
+    expect(h.markSkillRun).not.toHaveBeenCalled()
+  })
+
+  it('404 skill_not_found when the skill is missing; no run starts', async () => {
+    h.getSkill.mockResolvedValue(null)
+    const res = await post('go', { skill_id: SKILL, skill_mode: 'run' })
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'skill_not_found' })
+    expect(h.insertAgentRun).not.toHaveBeenCalled()
+    expect(h.createConversation).not.toHaveBeenCalled()
+    expect(h.toolRunner).not.toHaveBeenCalled()
   })
 })

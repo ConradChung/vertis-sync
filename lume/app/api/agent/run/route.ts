@@ -9,6 +9,8 @@ import { buildPrompt } from '@/lib/agent/chat'
 import { createConversation, getConversation, getMessages, insertMessage } from '@/lib/agent/conversations'
 import { contextFromMessages, titleFromPrompt, type StoredApproval, type StoredToolEntry } from '@/lib/agent/history'
 import { SYSTEM_PROMPT } from '@/lib/agent/prompt'
+import { skillContext } from '@/lib/agent/skillModel'
+import { createSkill, findSkillByName, getSkill, listSkills, markSkillRun } from '@/lib/agent/skills'
 import { toRunnableTools, type ToolHooks } from '@/lib/agent/runnable'
 import { failStaleRuns, insertAgentRun, updateAgentRun, type AgentRunPatch } from '@/lib/agent/runs'
 import { buildTools } from '@/lib/agent/tools'
@@ -37,6 +39,10 @@ import { internalOrigin } from '@/lib/http/origin'
  * `approval_action_id`. Finish → `done` (or stays `needs_approval`) /
  * `failed`, with `usage` and the final text as `outcome`.
  *
+ * Skills: `skill_id` + `skill_mode` ('run' | 'reference') load a saved skill
+ * and put its steps ahead of the prompt (`skillContext`); 'run' also bumps
+ * its run count. 404 `skill_not_found` when it is missing or deleted.
+ *
  * SSE events (`data: <json>\n\n`): run (`{ id, conversation_id }`), text,
  * tool_start, tool_end, approval, done, error.
  *
@@ -52,6 +58,8 @@ const MODEL = process.env.LUME_AGENT_MODEL?.trim() || 'claude-sonnet-5-5'
 const Body = z.object({
   prompt: z.string().trim().min(1).max(4000),
   conversation_id: z.string().regex(UUID_RE).optional(),
+  skill_id: z.string().regex(UUID_RE).optional(),
+  skill_mode: z.enum(['run', 'reference']).optional(),
 })
 
 type SseEvent = Record<string, unknown> & { type: string }
@@ -82,7 +90,14 @@ export async function POST(req: Request) {
   let runId: string
   let conversationId: string
   let prompt = message
+  const skillMode = body.data.skill_mode ?? 'reference'
+  let skill: Awaited<ReturnType<typeof getSkill>> = null
   try {
+    // Before any write, so a missing skill leaves no empty conversation behind.
+    if (body.data.skill_id) {
+      skill = await getSkill(body.data.skill_id.toLowerCase())
+      if (!skill) return NextResponse.json({ error: 'skill_not_found' }, { status: 404 })
+    }
     if (body.data.conversation_id) {
       const id = body.data.conversation_id.toLowerCase()
       const conversation = await getConversation(id)
@@ -91,6 +106,10 @@ export async function POST(req: Request) {
       prompt = buildPrompt(contextFromMessages(await getMessages(conversationId)), message)
     } else {
       conversationId = (await createConversation(titleFromPrompt(message))).id
+    }
+    if (skill) {
+      prompt = `${skillContext(skill, skillMode)}\n\n${prompt}`
+      if (skillMode === 'run') await markSkillRun(skill.id)
     }
     runId = (await insertAgentRun(prompt, MODEL)).id
     await insertMessage({ conversation_id: conversationId, role: 'user', text: message, run_id: runId })
@@ -115,7 +134,7 @@ export async function POST(req: Request) {
         }
       }
       send({ type: 'run', id: runId, conversation_id: conversationId })
-      const reply = await executeRun({ runId, prompt, title: message, origin, send })
+      const reply = await executeRun({ runId, prompt, title: message, origin, conversationId, send })
       try {
         await insertMessage({ conversation_id: conversationId, role: 'assistant', run_id: runId, ...reply })
       } catch (err) {
@@ -155,6 +174,7 @@ async function executeRun({
   prompt,
   title,
   origin,
+  conversationId,
   send: emit,
 }: {
   runId: string
@@ -162,6 +182,7 @@ async function executeRun({
   /** The owner's own words (the prompt may carry packed history). */
   title: string
   origin: string
+  conversationId: string
   send: (e: SseEvent) => void
 }): Promise<RunReply> {
   // Mirror what the browser shows, so a reloaded conversation looks the same.
@@ -216,6 +237,8 @@ async function executeRun({
       prepare: (request) => buildActionRequest(request),
       agentRunId: runId,
       baseUrl: origin,
+      conversationId,
+      skills: { list: () => listSkills(), get: getSkill, findByName: findSkillByName, create: createSkill },
       notify: async (text) => {
         const r = await sendMessage(text, { disablePreview: true })
         return r.ok ? { ok: true } : { ok: false, error: 'error' in r ? String(r.error) : 'not sent' }

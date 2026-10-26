@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { Json, PendingActionKind } from '@/lib/db/types'
 import { HIGH_RISK_KIND, TOOL_TIERS, type ToolName, type ToolTier } from '@/lib/agent/permissions'
+import { describeStep, newSkillSchema, placeholdersIn, skillStepSchema, skillVariableSchema, type NewSkill, type Skill } from '@/lib/agent/skillModel'
 
 /**
  * The orb agent's tools. Each one is declared once with `tiered(spec, tier)`:
@@ -50,6 +51,18 @@ export interface ToolDeps {
   secret?: string
   /** Telegram message to the owner (the `notify` tool). */
   notify?: (text: string) => Promise<{ ok: boolean; error?: string }>
+  /** Saved skills (`lib/agent/skills.ts`), injected server-side; skill tools fail cleanly without it. */
+  skills?: SkillStore
+  /** The conversation this run belongs to (recorded as a saved skill's source). */
+  conversationId?: string
+}
+
+/** What the skill tools need from storage. */
+export interface SkillStore {
+  list: () => Promise<Skill[]>
+  get: (id: string) => Promise<Skill | null>
+  findByName: (name: string) => Promise<Skill | null>
+  create: (skill: NewSkill) => Promise<Skill>
 }
 
 export interface AgentTool {
@@ -648,7 +661,72 @@ const SPECS: Built[] = [
     },
     'high'
   ),
+  // skills (saved pipelines) -------------------------------------------------
+  tiered(
+    {
+      name: 'list_skills',
+      description: "List the owner's saved skills (re-runnable pipelines): name, description, steps outline, variables, run count.",
+      inputSchema: z.object({}),
+      run: async (_input, { deps }) => {
+        const skills = await skillStore(deps).list()
+        return {
+          skills: skills.map((s) => ({
+            id: s.id,
+            name: s.name,
+            description: s.description,
+            steps: s.steps.map(describeStep),
+            variables: s.variables.map((v) => v.name),
+            run_count: s.run_count,
+            last_run_at: s.last_run_at,
+          })),
+        }
+      },
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'get_skill',
+      description: 'Get one saved skill in full (steps with input templates, variables) by id or by name.',
+      inputSchema: z.object({ id: uuid.optional(), name: z.string().min(1).max(80).optional() }).refine((v) => v.id || v.name, 'id or name'),
+      run: async ({ id: skillId, name }, { deps }) => {
+        const store = skillStore(deps)
+        const skill = skillId ? await store.get(skillId.toLowerCase()) : await store.findByName(name ?? '')
+        if (!skill) throw new Error(`No saved skill ${skillId ? `with id ${skillId}` : `named "${name}"`}`)
+        return { skill }
+      },
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'save_skill',
+      description:
+        "Save the pipeline built in this conversation as a reusable skill. Only call after the owner said yes and confirmed the name. Distil it: actor inputs become input_template with the values the owner may change replaced by {{variable}} placeholders (declared in variables with a description and the value used this time as default); record the source campaign for duplicate_campaign. Steps in order; types: apify_actor, import, validate, duplicate_campaign, assign_leads, rotation_rule, launch, note.",
+      inputSchema: z.object({
+        name: z.string().min(1).max(80),
+        description: z.string().max(1000).optional(),
+        steps: z.array(skillStepSchema).min(1).max(30),
+        variables: z.array(skillVariableSchema).max(20).optional(),
+      }),
+      run: async (input, { deps }) => {
+        const parsed = newSkillSchema.safeParse({ ...input, source_conversation_id: deps.conversationId ?? null })
+        if (!parsed.success) throw new Error(`Skill refused: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`)
+        const declared = new Set(parsed.data.variables.map((v) => v.name))
+        const undeclared = placeholdersIn(parsed.data.steps).filter((n) => !declared.has(n))
+        if (undeclared.length) throw new Error(`Skill refused: placeholders without a variable: ${undeclared.join(', ')}`)
+        const skill = await skillStore(deps).create(parsed.data)
+        return { status: 'saved', skill_id: skill.id, name: skill.name, steps: skill.steps.length }
+      },
+    },
+    'low'
+  ),
 ]
+
+function skillStore(deps: ToolDeps): SkillStore {
+  if (!deps.skills) throw new Error('Saved skills are not available in this context')
+  return deps.skills
+}
 
 export function buildTools(deps: ToolDeps): AgentTool[] {
   const call = routeCaller(deps)

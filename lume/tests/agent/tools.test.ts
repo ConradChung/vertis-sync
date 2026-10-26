@@ -264,3 +264,52 @@ describe('orbStateFrom', () => {
     expect(withStaleRun(null, now)).toBeNull()
   })
 })
+
+describe('skill tools', () => {
+  const saved = { id: '11111111-2222-4333-8444-555555555555', name: 'Roofers', description: 'd', steps: [{ type: 'launch' }], variables: [{ name: 'city', description: '' }], run_count: 2, last_run_at: null }
+  function withSkills() {
+    const store = {
+      list: vi.fn().mockResolvedValue([saved]),
+      get: vi.fn().mockResolvedValue(saved),
+      findByName: vi.fn().mockResolvedValue(saved),
+      create: vi.fn().mockResolvedValue({ ...saved, id: 'new-id' }),
+    }
+    const fetch = vi.fn()
+    const tools = buildTools({ fetch, createAction: vi.fn(), prepare: vi.fn() as never, agentRunId: 'r1', baseUrl: 'https://lume.test', skills: store, conversationId: '22222222-3333-4444-8555-666666666666' })
+    return { store, fetch, tool: (n: string) => tools.find((t) => t.name === n)! }
+  }
+
+  it('tiers: list_skills and get_skill read, save_skill low (never an approval)', () => {
+    expect(TOOL_TIERS.list_skills).toBe('read')
+    expect(TOOL_TIERS.get_skill).toBe('read')
+    expect(TOOL_TIERS.save_skill).toBe('low')
+    expect(HIGH_RISK_KIND.save_skill).toBeUndefined()
+  })
+
+  it('list_skills outlines steps; get_skill finds by id or by name', async () => {
+    const { tool, store, fetch } = withSkills()
+    expect(await tool('list_skills').run({})).toEqual({ skills: [{ id: saved.id, name: 'Roofers', description: 'd', steps: ['Launch'], variables: ['city'], run_count: 2, last_run_at: null }] })
+    await tool('get_skill').run({ id: saved.id.toUpperCase() })
+    expect(store.get).toHaveBeenCalledWith(saved.id)
+    await tool('get_skill').run({ name: 'roofers' })
+    expect(store.findByName).toHaveBeenCalledWith('roofers')
+    store.findByName.mockResolvedValueOnce(null)
+    await expect(tool('get_skill').run({ name: 'nope' })).rejects.toThrow(/No saved skill/)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('save_skill validates, records the conversation and refuses undeclared placeholders', async () => {
+    const { tool, store } = withSkills()
+    const res = await tool('save_skill').run({ name: 'Roofers 2', steps: [{ type: 'duplicate_campaign', source_campaign_id: 'c1', name_template: 'Roofers {{city}}' }], variables: [{ name: 'city', description: 'City', default: 'Austin' }] })
+    expect(res).toEqual({ status: 'saved', skill_id: 'new-id', name: 'Roofers', steps: 1 })
+    expect(store.create).toHaveBeenCalledWith(expect.objectContaining({ name: 'Roofers 2', source_conversation_id: '22222222-3333-4444-8555-666666666666' }))
+    await expect(tool('save_skill').run({ name: 'X', steps: [{ type: 'duplicate_campaign', source_campaign_id: 'c1', name_template: '{{town}}' }] })).rejects.toThrow(/placeholders without a variable: town/)
+    await expect(tool('save_skill').run({ name: 'X', steps: [{ type: 'apify_actor', actor_id: 'a', budget_usd: 50 }] })).rejects.toThrow(/Skill refused/)
+    expect(store.create).toHaveBeenCalledTimes(1)
+  })
+
+  it('skill tools fail cleanly without a store', async () => {
+    const { tool } = setup()
+    await expect(tool('list_skills').run({})).rejects.toThrow(/not available/)
+  })
+})
