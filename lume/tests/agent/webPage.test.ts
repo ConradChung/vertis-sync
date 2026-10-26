@@ -86,3 +86,12 @@ describe('JavaScript-rendered pages', () => {
     expect(page.links).toEqual([{ text: 'About', url: 'https://d3.com/about.html' }])
   })
 })
+
+describe('htmlLinksToMarkdown — other tags', () => {
+  it('drops cite/span tags, keeps text, converts emphasis, leaves code and placeholders alone', () => {
+    expect(htmlLinksToMarkdown('<cite index="3-1,3-2">D3 sells to registrars.</cite> Next.')).toBe('D3 sells to registrars. Next.')
+    expect(htmlLinksToMarkdown('<b>Bold</b> and <em>it</em><br>line')).toBe('**Bold** and *it*\nline')
+    expect(htmlLinksToMarkdown('Approve at /actions/<id> and `<cite>` stays')).toBe('Approve at /actions/<id> and `<cite>` stays')
+    expect(htmlLinksToMarkdown('```\n<span>x</span>\n```')).toBe('```\n<span>x</span>\n```')
+  })
+})
