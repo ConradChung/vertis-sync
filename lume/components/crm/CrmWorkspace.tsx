@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Columns3, Rows3, Search, Users } from 'lucide-react'
 import { toast } from 'sonner'
@@ -41,7 +41,10 @@ export function CrmWorkspace({
   switcher,
   onCampaignChange,
   crumbs,
+  initialDealId,
 }: {
+  /** Open this deal's sheet on mount / when it changes (⌘K lead jump). */
+  initialDealId?: string | null
   campaignId: string
   campaignLabel?: string
   switcher?: boolean
@@ -50,7 +53,10 @@ export function CrmWorkspace({
 }) {
   const board = useCrmBoard(campaignId)
   const [view, setView] = useState<View>('board')
-  const [openId, setOpenId] = useState<string | null>(null)
+  const [openId, setOpenId] = useState<string | null>(initialDealId ?? null)
+  useEffect(() => {
+    if (initialDealId) setOpenId(initialDealId)
+  }, [initialDealId])
   const [closing, setClosing] = useState<{ deal: CrmDealCard; stage: 'Won' | 'Lost' } | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const data = board.data

@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
+import { CommandPalette } from '@/components/shell/CommandPalette'
 import { cn } from '@/lib/utils'
 
 export const TABS = [
@@ -11,6 +12,7 @@ export const TABS = [
   { href: '/validate', label: 'Validate' },
   { href: '/rotate', label: 'Rotate' },
   { href: '/campaigns', label: 'Campaigns' },
+  { href: '/crm', label: 'CRM' },
   { href: '/agent', label: 'Agent' },
 ] as const
 
@@ -53,6 +55,7 @@ export function TopBar() {
       <div className="ml-1 shrink-0 border-l border-border pl-1">
         <ThemeToggle />
       </div>
+      <CommandPalette />
     </header>
   )
 }
