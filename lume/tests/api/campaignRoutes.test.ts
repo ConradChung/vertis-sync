@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // Owner gate: toggled per test.
 let user: { email: string } | null = { email: 'owner@example.com' }
 vi.mock('@/lib/supabase/server', () => ({
-  createClient: async () => ({ auth: { getUser: async () => ({ data: { user } }) } }),
+  createClient: async () => ({ auth: { getClaims: async () => ({ data: user ? { claims: { sub: 'owner-id', ...user } } : null }) } }),
 }))
 
 const svc = vi.hoisted(() => ({

@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
-import type { User } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { isOwner } from '@/lib/auth/isOwner'
 import { secretMatches } from '@/lib/auth/secret'
 import { internalBearerMatches } from '@/lib/auth/internalBearer'
 import { hasBearerToken } from '@/lib/auth/bearer'
+import { verifiedSessionUser, type SessionUser } from '@/lib/auth/session'
 
 export { secretMatches }
 
@@ -12,7 +12,7 @@ type Pass<T> = { ok: true } & T
 type Fail = { ok: false; response: NextResponse }
 
 export type OwnerAuth =
-  | Pass<{ via: 'session'; user: User }>
+  | Pass<{ via: 'session'; user: SessionUser }>
   | Pass<{ via: 'internal'; user: null }>
 
 /**
@@ -44,9 +44,8 @@ export async function requireOwner(req?: Request): Promise<OwnerAuth | Fail> {
   }
 
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  // JWT verified locally against the signing keys: no Auth-server round trip.
+  const user = await verifiedSessionUser(supabase.auth)
 
   if (!user) {
     return { ok: false, response: NextResponse.json({ error: 'unauthenticated' }, { status: 401 }) }
@@ -64,7 +63,7 @@ export async function requireOwner(req?: Request): Promise<OwnerAuth | Fail> {
  * which the agent must never take on the owner's behalf (it files a
  * `decide_gate` pending action instead).
  */
-export async function requireOwnerSession(req: Request): Promise<Pass<{ via: 'session'; user: User }> | Fail> {
+export async function requireOwnerSession(req: Request): Promise<Pass<{ via: 'session'; user: SessionUser }> | Fail> {
   const auth = await requireOwner(req)
   if (!auth.ok) return auth
   if (auth.via !== 'session') {

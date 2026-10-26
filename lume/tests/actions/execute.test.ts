@@ -53,7 +53,7 @@ const tg = vi.hoisted(() => ({ sendMessage: vi.fn(), editMessage: vi.fn(), sendD
 vi.mock('@/lib/adapters/telegram', () => tg)
 
 vi.mock('@/lib/supabase/server', () => ({
-  createClient: async () => ({ auth: { getUser: async () => ({ data: { user: { email: 'owner@example.com' } } }) } }),
+  createClient: async () => ({ auth: { getClaims: async () => ({ data: { claims: { sub: 'owner-id', email: 'owner@example.com' } } }) } }),
 }))
 
 import { nextRun as ruleNextRun } from '@/lib/rules/nextRun'

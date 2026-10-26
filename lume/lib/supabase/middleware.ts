@@ -1,6 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
-import type { User } from '@supabase/supabase-js'
+import { verifiedSessionUser, type SessionUser } from '@/lib/auth/session'
 
 /**
  * Refreshes the Supabase session cookies on every matched request and
@@ -10,7 +10,7 @@ import type { User } from '@supabase/supabase-js'
  */
 export async function updateSession(
   request: NextRequest
-): Promise<{ response: NextResponse; user: User | null }> {
+): Promise<{ response: NextResponse; user: SessionUser | null }> {
   let response = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -30,11 +30,11 @@ export async function updateSession(
     }
   )
 
-  // Do not put logic between createServerClient and getUser(): it is what
+  // Do not put logic between createServerClient and getClaims(): it is what
   // triggers the refresh that keeps users from being randomly logged out.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  // getClaims verifies the JWT locally (signing keys), so this costs no
+  // Auth-server round trip on every request the way getUser() did.
+  const user = await verifiedSessionUser(supabase.auth)
 
   // No valid user but stale auth cookies: clear them so the next login is clean.
   // Skip `*-code-verifier`: it is set by signInWithOtp before the magic link

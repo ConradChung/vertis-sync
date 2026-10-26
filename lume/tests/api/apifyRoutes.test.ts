@@ -4,7 +4,7 @@ const svc = vi.hoisted(() => ({ storeShortlist: vi.fn(), loadActor: vi.fn(), bri
 vi.mock('@/lib/apify/service', async (orig) => ({ ...(await orig<typeof import('@/lib/apify/service')>()), ...svc }))
 const adapter = vi.hoisted(() => ({ getRun: vi.fn() }))
 vi.mock('@/lib/adapters/apify', async (orig) => ({ ...(await orig<typeof import('@/lib/adapters/apify')>()), ...adapter }))
-vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getUser: async () => ({ data: { user: null } }) } }) }))
+vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getClaims: async () => ({ data: null }) } }) }))
 
 import { GET as storeGET } from '@/app/api/apify/store/route'
 import { GET as actorGET } from '@/app/api/apify/actor/route'

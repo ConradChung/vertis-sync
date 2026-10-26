@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Owner gate passes; the route logic is what's under test.
 vi.mock('@/lib/supabase/server', () => ({
-  createClient: async () => ({ auth: { getUser: async () => ({ data: { user: { email: 'owner@example.com' } } }) } }),
+  createClient: async () => ({ auth: { getClaims: async () => ({ data: { claims: { sub: 'owner-id', email: 'owner@example.com' } } }) } }),
 }))
 const logEvent = vi.fn()
 vi.mock('@/lib/db/service', () => ({ logEvent: (...a: unknown[]) => logEvent(...a), isDbError: () => false }))

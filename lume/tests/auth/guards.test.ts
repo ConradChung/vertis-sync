@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // No cookie session in these tests: the only way through is the internal bearer.
-const getUser = vi.fn(async () => ({ data: { user: null }, error: null }))
-const createClient = vi.fn(async () => ({ auth: { getUser } }))
+const getClaims = vi.fn(async (): Promise<{ data: { claims: Record<string, unknown> } | null; error: unknown }> => ({ data: null, error: null }))
+const createClient = vi.fn(async () => ({ auth: { getClaims } }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: () => createClient() }))
 
 import { requireOwner } from '@/lib/auth/guards'
@@ -29,7 +29,7 @@ describe('requireOwner with the internal bearer', () => {
     process.env.LUME_INTERNAL_SECRET = 'internal-123'
     process.env.LUME_ALLOWED_EMAIL = 'owner@example.com'
     createClient.mockClear()
-    getUser.mockClear()
+    getClaims.mockClear()
   })
 
   it('passes when Authorization carries LUME_INTERNAL_SECRET, without touching the session', async () => {
@@ -76,6 +76,41 @@ describe('requireOwner with the internal bearer', () => {
     expect(auth.ok).toBe(false)
     if (!auth.ok) expect(auth.response.status).toBe(401)
     expect(createClient).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('requireOwner with a cookie session (claims verified locally)', () => {
+  beforeEach(() => {
+    process.env.LUME_ALLOWED_EMAIL = 'owner@example.com'
+    getClaims.mockReset()
+  })
+
+  it('passes the owner, built from the verified JWT claims', async () => {
+    getClaims.mockResolvedValueOnce({ data: { claims: { sub: 'u1', email: 'owner@example.com' } }, error: null })
+    const auth = await requireOwner(req())
+    expect(auth.ok).toBe(true)
+    if (auth.ok) {
+      expect(auth.via).toBe('session')
+      expect(auth.user).toEqual({ id: 'u1', email: 'owner@example.com' })
+    }
+  })
+
+  it('403s a verified session for another account', async () => {
+    getClaims.mockResolvedValueOnce({ data: { claims: { sub: 'u2', email: 'someone@else.com' } }, error: null })
+    const auth = await requireOwner(req())
+    expect(auth.ok).toBe(false)
+    if (!auth.ok) expect(auth.response.status).toBe(403)
+  })
+
+  it('401s when claims fail verification, lack a subject, or getClaims throws', async () => {
+    getClaims.mockResolvedValueOnce({ data: null, error: new Error('invalid JWT signature') })
+    getClaims.mockResolvedValueOnce({ data: { claims: { email: 'owner@example.com' } }, error: null })
+    getClaims.mockRejectedValueOnce(new Error('jwks fetch failed'))
+    for (let i = 0; i < 3; i++) {
+      const auth = await requireOwner(req())
+      expect(auth.ok).toBe(false)
+      if (!auth.ok) expect(auth.response.status).toBe(401)
+    }
   })
 })
 
