@@ -7,13 +7,14 @@ import { createAction } from '@/lib/actions/create'
 import { sendMessage } from '@/lib/adapters/telegram'
 import { SYSTEM_PROMPT } from '@/lib/agent/prompt'
 import { toRunnableTools, type ToolHooks } from '@/lib/agent/runnable'
-import { insertAgentRun, updateAgentRun, type AgentRunPatch } from '@/lib/agent/runs'
+import { failStaleRuns, insertAgentRun, updateAgentRun, type AgentRunPatch } from '@/lib/agent/runs'
 import { buildTools } from '@/lib/agent/tools'
-import type { ToolCallEntry } from '@/lib/agent/orbState'
+import { STALE_RUN_MS, type ToolCallEntry } from '@/lib/agent/orbState'
 import { logEvent } from '@/lib/db/service'
 import type { Json } from '@/lib/db/types'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { parseJsonBody } from '@/lib/http/json'
+import { internalOrigin } from '@/lib/http/origin'
 
 /**
  * POST `{ prompt }` → the orb agent, streamed as Server-Sent Events.
@@ -56,6 +57,14 @@ export async function POST(req: Request) {
   if (!body.ok) return body.response
   const prompt = body.data.prompt
 
+  // Runs left `running` by a killed function: close them so the orb and the
+  // run log stop showing them as live. Best effort.
+  try {
+    await failStaleRuns(new Date(Date.now() - STALE_RUN_MS))
+  } catch (err) {
+    console.error('[api/agent/run] stale run cleanup failed:', err instanceof Error ? err.message : err)
+  }
+
   let runId: string
   try {
     runId = (await insertAgentRun(prompt, MODEL)).id
@@ -63,7 +72,10 @@ export async function POST(req: Request) {
     return dbErrorResponse(err, 'api/agent/run')
   }
 
-  const origin = process.env.LUME_URL || new URL(req.url).origin
+  // Tool fetches stay on this deployment (LUME_INTERNAL_URL, else the request
+  // origin): a local or preview run must never call production. LUME_URL is
+  // for deep links only.
+  const origin = internalOrigin(req)
   let closed = false
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {

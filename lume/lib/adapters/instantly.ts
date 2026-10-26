@@ -14,6 +14,7 @@ import {
   type InstantlyCampaignDetail,
   type SequenceStep,
   mapSteps,
+  mapEmail,
   mapThreads,
   type InboxThread,
   type StepPoint,
@@ -206,4 +207,18 @@ export async function getStepAnalytics(campaignId: string): Promise<StepPoint[]>
  */
 export async function listCampaignThreads(campaignId: string): Promise<InboxThread[]> {
   return mapThreads(await instantlyGet('/emails', { campaign_id: campaignId, limit: String(PAGE_SIZE) }))
+}
+
+/**
+ * Who an Instantly email involves: the lead address and its campaign. Used to
+ * show the real recipient on a send_reply confirmation. Read-only, cached.
+ */
+export async function getEmailLead(emailId: string): Promise<{ lead: string | null; campaign_id: string | null }> {
+  const body = await instantlyGet(`/emails/${encodeURIComponent(emailId)}`)
+  const m = mapEmail(body)
+  const raw = body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+  return {
+    lead: m?.lead?.toLowerCase() ?? null,
+    campaign_id: typeof raw.campaign_id === 'string' && raw.campaign_id ? raw.campaign_id : null,
+  }
 }

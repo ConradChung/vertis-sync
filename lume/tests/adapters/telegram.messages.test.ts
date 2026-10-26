@@ -131,3 +131,42 @@ describe('buildDecisionNote', () => {
     expect(buildDecisionNote('approve', ID)).toBe('🖥 approve on 0f8fad5b — decided in Lume')
   })
 })
+
+describe('buildActionPrompt — send_reply shows what will be sent', () => {
+  beforeEach(() => {
+    process.env.LUME_URL = 'https://lume.example.com'
+  })
+
+  it('includes recipient, sender, subject and the full body', () => {
+    const body = 'Hi Sam,\n\nTuesday at 3 works. I will send an invite.\n\n— C'
+    const m = buildActionPrompt(
+      actionRow({
+        kind: 'send_reply',
+        payload: { summary: 'Send reply to sam@x.com', eaccount: 'me@send.com', reply_to_uuid: 'e1', subject: 'Re: Hi', body, lead_email: 'sam@x.com', recipient_verified: true },
+      })
+    )
+    expect(m.text).toContain('To: sam@x.com\n')
+    expect(m.text).toContain('From: me@send.com')
+    expect(m.text).toContain('Subject: Re: Hi')
+    expect(m.text).toContain(body)
+    expect(m.text).not.toContain('unverified')
+  })
+
+  it('marks an unlooked-up recipient unverified, and a missing one too', () => {
+    const a = buildActionPrompt(actionRow({ kind: 'send_reply', payload: { summary: 's', body: 'x', lead_email: 'boss@corp.com', recipient_verified: false } }))
+    expect(a.text).toContain('To: boss@corp.com (unverified)')
+    const b = buildActionPrompt(actionRow({ kind: 'send_reply', payload: { summary: 's', body: 'x', recipient_verified: false } }))
+    expect(b.text).toContain('To: unverified')
+  })
+
+  it('caps the body at 3500 chars and stays under Telegram’s 4096 limit', () => {
+    const m = buildActionPrompt(actionRow({ kind: 'send_reply', payload: { summary: 'Send reply', body: 'a'.repeat(10_000), lead_email: 'x@y.z' } }))
+    expect(m.text).toContain('a'.repeat(3500) + '… [truncated')
+    expect(m.text).not.toContain('a'.repeat(3501))
+    expect(m.text.length).toBeLessThan(4096)
+  })
+
+  it('other kinds are unchanged (no reply detail)', () => {
+    expect(buildActionPrompt(actionRow()).text).not.toContain('To:')
+  })
+})

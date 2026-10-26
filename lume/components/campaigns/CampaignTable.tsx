@@ -2,6 +2,7 @@
 
 import { GlassCard } from '@/components/ui/glass-card'
 import { NotConnected, SectionTitle, ShimmerBar } from '@/components/overview/parts'
+import { campaignStatusText, isProblemStatus } from '@/lib/adapters/instantly.map'
 import type { CampaignTableRow, InstantlyState } from '@/lib/campaigns/types'
 import { cn } from '@/lib/utils'
 
@@ -102,10 +103,20 @@ export function CampaignTable({
                     </div>
                   </td>
                   <td className="px-2 py-[10px]">
-                    <span className="inline-flex items-center gap-1.5 text-[12px] text-fg-46 capitalize">
-                      <span className={cn('size-1.5 rounded-full', STATUS_DOT[r.status] ?? 'bg-fg-24')} />
-                      {r.status.replace(/_/g, ' ')}
-                    </span>
+                    {isProblemStatus(r.status) ? (
+                      <span
+                        className="inline-flex items-center gap-1.5 rounded-full bg-red/15 px-2 py-0.5 text-[12px] whitespace-nowrap text-red"
+                        title="Instantly has stopped this campaign from sending"
+                      >
+                        <span className="size-1.5 rounded-full bg-red" />
+                        {campaignStatusText(r.status)}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 text-[12px] text-fg-46 capitalize">
+                        <span className={cn('size-1.5 rounded-full', STATUS_DOT[r.status] ?? 'bg-fg-24')} />
+                        {campaignStatusText(r.status)}
+                      </span>
+                    )}
                   </td>
                   <td className="px-2 py-[10px] text-right font-mono tabular-nums">{n(r.sent)}</td>
                   <td className="px-2 py-[10px] text-right font-mono tabular-nums">{n(r.replies)}</td>

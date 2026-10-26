@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  campaignStatusText,
+  isProblemStatus,
   itemsOf,
   lastNDates,
   mapAccount,
@@ -11,20 +13,37 @@ import {
 } from '@/lib/adapters/instantly.map'
 
 describe('mapCampaigns', () => {
-  it('drops deleted (status < 0) and id-less rows, labels status, sorts by name', () => {
+  it('keeps problem states (status < 0) with their labels, drops id-less rows, sorts by name', () => {
     const out = mapCampaigns([
       { id: 'b', name: 'Zeta', status: 1, extra: 'x' },
       { id: 'a', name: 'Alpha', status: 2 },
-      { id: 'd', name: 'Gone', status: -1 },
+      { id: 'd', name: 'Unhealthy', status: -1 },
+      { id: 'e', name: 'Bouncy', status: -2 },
+      { id: 'f', name: 'Suspended one', status: -99 },
       { name: 'no id', status: 1 },
       { id: 'c', name: 'Draft', status: 0 },
       'junk',
     ])
     expect(out).toEqual([
       { id: 'a', name: 'Alpha', status: 2, statusLabel: 'paused' },
+      { id: 'e', name: 'Bouncy', status: -2, statusLabel: 'bounce_protect' },
       { id: 'c', name: 'Draft', status: 0, statusLabel: 'draft' },
+      { id: 'f', name: 'Suspended one', status: -99, statusLabel: 'suspended' },
+      { id: 'd', name: 'Unhealthy', status: -1, statusLabel: 'accounts_unhealthy' },
       { id: 'b', name: 'Zeta', status: 1, statusLabel: 'active' },
     ])
+  })
+
+  it('names problem states for the status badge', () => {
+    expect(['suspended', 'accounts_unhealthy', 'bounce_protect', '-7', 'running_subsequences'].map(campaignStatusText)).toEqual([
+      'Suspended',
+      'Accounts unhealthy',
+      'Bounce protect',
+      'Problem (-7)',
+      'running subsequences',
+    ])
+    expect(['suspended', 'accounts_unhealthy', 'bounce_protect', '-7'].every(isProblemStatus)).toBe(true)
+    expect(['active', 'paused', 'draft'].some(isProblemStatus)).toBe(false)
   })
 })
 
@@ -115,16 +134,17 @@ describe('mapCampaignDetails', () => {
       mapCampaignDetails([
         { id: 'c1', name: 'A', status: 1, daily_limit: 50, email_list: ['a@x', 'b@x'] },
         { id: 'c2', name: 'B', status: 2 },
-        { id: 'gone', name: 'D', status: -1 },
+        { id: 'sick', name: 'D', status: -1 },
       ])
     ).toEqual([
       { id: 'c1', name: 'A', status: 1, statusLabel: 'active', dailyLimit: 50, accounts: 2 },
       { id: 'c2', name: 'B', status: 2, statusLabel: 'paused', dailyLimit: null, accounts: 0 },
+      { id: 'sick', name: 'D', status: -1, statusLabel: 'accounts_unhealthy', dailyLimit: null, accounts: 0 },
     ])
   })
 
   it('maps statuses onto the lume vocabulary', () => {
-    expect([0, 1, 2, 3, 4, 9].map(lumeCampaignStatus)).toEqual(['draft', 'active', 'paused', 'completed', 'active', 'unknown'])
+    expect([0, 1, 2, 3, 4, 9, -99, -1, -2, -5].map(lumeCampaignStatus)).toEqual(['draft', 'active', 'paused', 'completed', 'active', 'unknown', 'suspended', 'accounts_unhealthy', 'bounce_protect', 'unknown'])
   })
 })
 

@@ -50,17 +50,40 @@ export function campaignStatusLabel(status: number): string {
   if (status === 2) return 'paused'
   if (status === 3) return 'completed'
   if (status === 4) return 'running_subsequences'
+  if (status === -99) return 'suspended'
+  if (status === -1) return 'accounts_unhealthy'
+  if (status === -2) return 'bounce_protect'
   return String(status)
 }
 
-/** Drops deleted campaigns (status < 0) and rows without an id; sorted by name. */
+/** Instantly's problem states (status < 0): kept and surfaced, never hidden. */
+export const PROBLEM_STATUS_LABELS: Record<string, string> = {
+  suspended: 'Suspended',
+  accounts_unhealthy: 'Accounts unhealthy',
+  bounce_protect: 'Bounce protect',
+}
+
+/** Display text for a status label: problem states by name, the rest with spaces. */
+export function campaignStatusText(label: string): string {
+  return PROBLEM_STATUS_LABELS[label] ?? (/^-\d+$/.test(label) ? `Problem (${label})` : label.replace(/_/g, ' '))
+}
+
+export function isProblemStatus(label: string): boolean {
+  return label in PROBLEM_STATUS_LABELS || /^-\d+$/.test(label)
+}
+
+/**
+ * Rows without an id are dropped; problem states (status < 0: -99 suspended,
+ * -1 accounts unhealthy, -2 bounce protect) are kept so a stalled campaign
+ * shows up instead of vanishing. Sorted by name.
+ */
 export function mapCampaigns(items: unknown[]): InstantlyCampaign[] {
   const out: InstantlyCampaign[] = []
   for (const it of items) {
     if (!isObj(it)) continue
     const id = str(it, 'id')
     const status = num(it, 'status')
-    if (!id || status === null || status < 0) continue
+    if (!id || status === null) continue
     out.push({ id, name: str(it, 'name') ?? id, status, statusLabel: campaignStatusLabel(status) })
   }
   return out.sort((a, b) => a.name.localeCompare(b.name))
@@ -214,6 +237,7 @@ export function mapCampaignDetails(items: unknown[]): InstantlyCampaignDetail[] 
 export function lumeCampaignStatus(status: number): string {
   if (status === 4) return 'active' // running subsequences
   const label = campaignStatusLabel(status)
+  if (label in PROBLEM_STATUS_LABELS) return label // surfaced even when Instantly is unreachable
   return ['draft', 'active', 'paused', 'completed'].includes(label) ? label : 'unknown'
 }
 

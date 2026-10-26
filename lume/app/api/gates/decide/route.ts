@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { requireOwner } from '@/lib/auth/guards'
+import { requireOwnerSession } from '@/lib/auth/guards'
 import { decide } from '@/lib/adapters/pipeline'
 import { parseCallbackData } from '@/lib/adapters/pipeline.actions'
 import { logEvent } from '@/lib/db/service'
@@ -19,6 +19,9 @@ import { decideHttp } from '@/lib/validate/decideResult'
  * Steps that need a confirmation (`push_go`, `camp_launch`) and the pending
  * action buttons (`lume_ok`/`lume_no`) are refused here: they go through
  * `/api/actions` (a `pending_actions` row) and its decide/execute routes.
+ *
+ * Owner session only: the agent's internal bearer is a 403 (the agent files a
+ * `decide_gate` pending action instead of deciding a gate itself).
  */
 
 // decide() waits up to 170 s for the edge function; outlive it.
@@ -29,7 +32,7 @@ const Body = z.object({ callback_data: z.string().min(1).max(128) })
 const NEEDS_CONFIRMATION: ReadonlySet<string> = new Set(['push_go', 'camp_launch', 'lume_ok', 'lume_no'])
 
 export async function POST(req: Request) {
-  const auth = await requireOwner(req)
+  const auth = await requireOwnerSession(req)
   if (!auth.ok) return auth.response
 
   const body = await parseJsonBody(req, Body, 1024)

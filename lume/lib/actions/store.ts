@@ -89,6 +89,43 @@ export async function getStaleApprovedIds(olderThan: Date, limit = 20): Promise<
   return ((res.data ?? []) as { id: string }[]).map((r) => r.id)
 }
 
+/**
+ * `executing` rows that never finished (the function running them was killed
+ * mid-handler) and last changed before `olderThan` → `failed` with
+ * `result.error = 'interrupted'`. They are never re-run: the handler may have
+ * reached Instantly or the pipeline before it died, and a re-run could do it
+ * twice. Returns the rows it failed (one conditional UPDATE, so a late
+ * finishAction and this never both win).
+ */
+export async function failInterruptedActions(olderThan: Date, limit = 20): Promise<PendingActionRow[]> {
+  const sb = createServiceClient()
+  const stale = await sb
+    .from('pending_actions')
+    .select('id')
+    .eq('status', 'executing')
+    .is('executed_at', null)
+    .lt('updated_at', olderThan.toISOString())
+    .order('updated_at', { ascending: true })
+    .limit(limit)
+  if (stale.error) throw new DbError('failInterruptedActions', stale.error)
+  const ids = ((stale.data ?? []) as { id: string }[]).map((r) => r.id)
+  if (!ids.length) return []
+  const res = await sb
+    .from('pending_actions')
+    .update({
+      status: 'failed',
+      error: 'interrupted',
+      result: { error: 'interrupted' },
+      executed_at: new Date().toISOString(),
+    })
+    .in('id', ids)
+    .eq('status', 'executing')
+    .is('executed_at', null)
+    .select()
+  if (res.error) throw new DbError('failInterruptedActions', res.error)
+  return (res.data ?? []) as PendingActionRow[]
+}
+
 export interface LeadBankInsert {
   campaign_id: string
   email: string
@@ -137,6 +174,8 @@ interface LeadBankViewRow {
 const VIEW_COLS = 'origin,id,email,first_name,last_name,company_name,city,campaign_id'
 /** PostgREST's default max-rows; filter reads page at this size. */
 const PAGE = 1000
+/** Ids per `.in()` lookup: 100 uuids keep the GET URL well under proxy limits. */
+export const IN_CHUNK = 100
 
 const toInsert = (campaignId: string) => (r: LeadBankViewRow): LeadBankInsert | null => {
   const email = r.email?.trim().toLowerCase()
@@ -173,8 +212,8 @@ export async function resolveLeadsByRefs(refs: LeadBankRef[], campaignId: string
   const wanted = new Set(refs.map((r) => `${r.origin}:${r.id}`))
   const ids = [...new Set(refs.map((r) => r.id))]
   const found: LeadBankViewRow[] = []
-  for (let i = 0; i < ids.length; i += PAGE) {
-    const res = await sb.from('lume_lead_bank').select(VIEW_COLS).in('id', ids.slice(i, i + PAGE))
+  for (let i = 0; i < ids.length; i += IN_CHUNK) {
+    const res = await sb.from('lume_lead_bank').select(VIEW_COLS).in('id', ids.slice(i, i + IN_CHUNK))
     if (res.error) throw new DbError('resolveLeadsByRefs', res.error)
     found.push(...((res.data ?? []) as unknown as LeadBankViewRow[]))
   }

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { TOOL_TIERS, HIGH_RISK_KIND } from '@/lib/agent/permissions'
 import { buildTools } from '@/lib/agent/tools'
-import { orbStateFrom } from '@/lib/agent/orbState'
+import { orbStateFrom, withStaleRun } from '@/lib/agent/orbState'
 
 const JOB = '0b9f6a52-1c3e-4d7a-9f00-1234567890ab'
 
@@ -179,5 +179,17 @@ describe('orbStateFrom', () => {
     expect(orbStateFrom(run('done'))).toBe('idle')
     expect(orbStateFrom(run('failed'))).toBe('idle')
     expect(orbStateFrom(run('done'), { listening: true })).toBe('listening')
+  })
+
+  it('a running row older than 6 minutes counts as failed (idle), younger stays live', () => {
+    const now = Date.parse('2026-10-25T12:00:00Z')
+    const at = (minAgo: number) => new Date(now - minAgo * 60_000).toISOString()
+    expect(orbStateFrom({ ...run('running'), created_at: at(7) }, { now })).toBe('idle')
+    expect(orbStateFrom({ ...run('running', [{ status: 'running' }]), created_at: at(30) }, { now })).toBe('idle')
+    expect(orbStateFrom({ ...run('running'), created_at: at(5) }, { now })).toBe('thinking')
+    expect(withStaleRun({ ...run('running'), created_at: at(7) }, now)?.status).toBe('failed')
+    expect(withStaleRun({ ...run('needs_approval'), created_at: at(60) }, now)?.status).toBe('needs_approval')
+    expect(withStaleRun({ ...run('running') }, now)?.status).toBe('running') // no timestamp: unchanged
+    expect(withStaleRun(null, now)).toBeNull()
   })
 })

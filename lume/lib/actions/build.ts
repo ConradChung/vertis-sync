@@ -1,10 +1,11 @@
 import 'server-only'
 import { z } from 'zod'
 import { CAMPAIGN_ACTION_KINDS, parseCampaignPayload, type CampaignActionKind } from '@/lib/actions/payloads'
+import { getEmailLead, isInstantlyConfigured, listCampaigns } from '@/lib/adapters/instantly'
 import { getRule } from '@/lib/actions/store'
 import { parseCallbackData } from '@/lib/adapters/pipeline.actions'
 import { getPushPreview } from '@/lib/adapters/instantlyPush'
-import { getPushJob, PUSH_REVIEW_STATUSES } from '@/lib/db/service'
+import { getCampaignByExternalId, getInstantlyEmailEvent, getPushJob, PUSH_REVIEW_STATUSES } from '@/lib/db/service'
 import type { Json, PendingActionKind } from '@/lib/db/types'
 import { UUID_RE } from '@/lib/http/json'
 import { buildActivateRule, buildAssignLeads, rotateActionBody } from '@/lib/rules/actions'
@@ -24,7 +25,9 @@ import { buildActivateRule, buildAssignLeads, rotateActionBody } from '@/lib/rul
  *  delete_rule        { rule_id, summary }
  *  decide_gate        { callback_data, target_id, job_id?, summary }
  *  send_reply / pause_campaign / resume_campaign / create_campaign:
- *                     lib/actions/payloads.ts
+ *                     lib/actions/payloads.ts, with the display extras
+ *                     written here (`withServerExtras`): the campaign name
+ *                     and the reply recipient, never the caller's
  *
  * Rule kinds return `ruleId` for `createAction`'s `meta.ruleId`.
  */
@@ -106,7 +109,7 @@ export async function buildActionRequest(input: unknown): Promise<ActionBuild> {
       return buildJobAction(req.kind, (req.payload as { job_id: string }).job_id.toLowerCase())
     default: {
       const kind = req.kind as CampaignActionKind
-      const p = parseCampaignPayload(kind, req.payload, { trustSummary: false })
+      const p = parseCampaignPayload(kind, await withServerExtras(kind, req.payload), { trustSummary: false })
       if (!p.ok) return fail(400, 'invalid_payload')
       return { ok: true, kind, payload: p.payload as Record<string, Json> & { summary: string } }
     }
@@ -157,4 +160,77 @@ async function buildJobAction(kind: 'push_to_instantly' | 'launch_campaign', job
         `${strict ? 'stricter' : 'standard'} names)`,
     },
   }
+}
+
+const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null)
+
+/** Campaign name: `lume_campaigns`, then Instantly's list (cached read), else the id. */
+async function campaignName(id: string): Promise<string> {
+  try {
+    const c = await getCampaignByExternalId(id)
+    if (c?.name) return c.name
+  } catch (err) {
+    console.error('[actions/build] lume_campaigns lookup failed:', err instanceof Error ? err.message : err)
+  }
+  if (isInstantlyConfigured()) {
+    try {
+      const c = (await listCampaigns()).find((x) => x.id === id)
+      if (c?.name) return c.name
+    } catch (err) {
+      console.error('[actions/build] Instantly campaign lookup failed:', err instanceof Error ? err.message : err)
+    }
+  }
+  return id
+}
+
+/** The lead a reply goes to: the webhook event for that email, then Instantly's email read. */
+async function replyRecipient(replyToUuid: string): Promise<{ lead: string; campaign_id: string | null } | null> {
+  try {
+    const e = await getInstantlyEmailEvent(replyToUuid)
+    if (e?.lead_email) return { lead: e.lead_email.toLowerCase(), campaign_id: e.campaign_id }
+  } catch (err) {
+    console.error('[actions/build] email event lookup failed:', err instanceof Error ? err.message : err)
+  }
+  if (isInstantlyConfigured()) {
+    try {
+      const e = await getEmailLead(replyToUuid)
+      if (e.lead) return { lead: e.lead, campaign_id: e.campaign_id }
+    } catch (err) {
+      console.error('[actions/build] Instantly email lookup failed:', err instanceof Error ? err.message : err)
+    }
+  }
+  return null
+}
+
+/**
+ * Overwrite a campaign-kind payload's display extras server-side, so the
+ * confirmation (and its Telegram prompt) can never be steered by the caller:
+ * `campaign_name` is looked up from the campaign id; for send_reply,
+ * `lead_email` is the looked-up recipient (`recipient_verified: true`), or the
+ * caller's claim marked `recipient_verified: false` when no lookup knows it.
+ * Shape errors are left for `parseCampaignPayload`.
+ */
+async function withServerExtras(kind: CampaignActionKind, raw: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const p: Record<string, unknown> = { ...raw }
+  delete p.campaign_name
+  delete p.source_name
+  delete p.recipient_verified
+  if (kind === 'send_reply') {
+    const claimed = text(p.lead_email) ?? text(p.to)
+    delete p.lead_email
+    delete p.to
+    const replyTo = text(p.reply_to_uuid)
+    const found = replyTo ? await replyRecipient(replyTo) : null
+    if (found) {
+      p.lead_email = found.lead
+      p.recipient_verified = true
+      if (!text(p.campaign_id) && found.campaign_id) p.campaign_id = found.campaign_id
+    } else {
+      if (claimed) p.lead_email = claimed
+      p.recipient_verified = false
+    }
+  }
+  const id = text(kind === 'create_campaign' ? p.source_campaign_id : p.campaign_id)
+  if (id) p.campaign_name = await campaignName(id)
+  return p
 }

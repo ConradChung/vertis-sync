@@ -25,3 +25,15 @@ export function requestOrigin(request: Request): string {
   }
   return new URL(request.url).origin
 }
+
+/**
+ * Where this deployment calls itself server-to-server (agent tool fetches, the
+ * sweeper's execute dispatch): `LUME_INTERNAL_URL` when set, else the origin
+ * of the request being handled. Never `LUME_URL`: that is the public deep-link
+ * host, and a local or preview run must not call production.
+ */
+export function internalOrigin(request: Request): string {
+  const raw = process.env.LUME_INTERNAL_URL?.trim()
+  if (raw) return raw.replace(/\/+$/, '')
+  return new URL(request.url).origin
+}

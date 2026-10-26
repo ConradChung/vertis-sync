@@ -21,3 +21,20 @@ export async function updateAgentRun(id: string, patch: AgentRunPatch): Promise<
   const res = await sb.from('agent_runs').update(patch as Record<string, Json>).eq('id', id)
   if (res.error) throw new DbError('updateAgentRun', res.error)
 }
+
+/**
+ * Mark `running` rows started before `olderThan` as `failed` / 'timed out'
+ * (their function was killed before it could record an outcome). Lume has
+ * one owner, so every agent_runs row is the owner's. Returns how many.
+ */
+export async function failStaleRuns(olderThan: Date): Promise<number> {
+  const sb = createServiceClient()
+  const res = await sb
+    .from('agent_runs')
+    .update({ status: 'failed', outcome: 'timed out', finished_at: new Date().toISOString() })
+    .eq('status', 'running')
+    .lt('created_at', olderThan.toISOString())
+    .select('id')
+  if (res.error) throw new DbError('failStaleRuns', res.error)
+  return (res.data ?? []).length
+}

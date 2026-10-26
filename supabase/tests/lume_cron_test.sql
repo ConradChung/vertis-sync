@@ -11,7 +11,7 @@
 -- the pending actions and the pg_net queue rows (the pg_net worker only sends
 -- committed rows).
 begin;
-select plan(39);
+select plan(45);
 
 -- the vault state has to be snapshotted before this file adds its own secrets
 create temp table lume_cron_t as
@@ -108,6 +108,30 @@ update pending_actions set created_at = now() - interval '25 hours' where id = '
 select lives_ok($$select lume_rotation_tick()$$, 'lume_rotation_tick() runs with a stale awaiting action');
 select is((select count(*)::int from net.http_request_queue where url like '%/api/cron/rotation-tick'),
           3, 'an awaiting action older than 24 h queues a request even with no rule due');
+
+-- no rule due, nothing stale awaiting, an approved action decided 1 min ago
+-- and not executed: nothing new (the decide route is still running it) ------
+update pending_actions set status = 'approved', decided_at = now() - interval '1 minute', executed_at = null
+  where id = '00000000-0000-0000-0000-000000000402';
+select lives_ok($$select lume_rotation_tick()$$, 'lume_rotation_tick() runs with a freshly approved action');
+select is((select count(*)::int from net.http_request_queue where url like '%/api/cron/rotation-tick'),
+          3, 'an approved action decided under 2 minutes ago queues nothing');
+
+-- approved more than 2 minutes ago and still not executed: one POST so the
+-- sweeper re-dispatches it ----------------------------------------------------
+update pending_actions set decided_at = now() - interval '3 minutes' where id = '00000000-0000-0000-0000-000000000402';
+select lives_ok($$select lume_rotation_tick()$$, 'lume_rotation_tick() runs with a stuck approved action');
+select is((select count(*)::int from net.http_request_queue where url like '%/api/cron/rotation-tick'),
+          4, 'an approved action not executed 2 minutes after its decision queues a request');
+
+-- once executed it no longer counts ------------------------------------------
+update pending_actions set executed_at = now() where id = '00000000-0000-0000-0000-000000000402';
+select lives_ok($$select lume_rotation_tick()$$, 'lume_rotation_tick() runs with an executed approved action');
+select is((select count(*)::int from net.http_request_queue where url like '%/api/cron/rotation-tick'),
+          4, 'an executed approved action queues nothing');
+update pending_actions set status = 'awaiting', decided_at = null, executed_at = null,
+                           created_at = now() - interval '1 hour'
+  where id = '00000000-0000-0000-0000-000000000402';
 
 -- one awaiting action per (kind, rule) ---------------------------------------
 select throws_ok(

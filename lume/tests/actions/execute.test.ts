@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PendingActionRow } from '@/lib/db/types'
 
 // Every side effect is mocked: no DB, no Telegram, no Instantly, no pipeline.
@@ -7,6 +7,7 @@ const store = vi.hoisted(() => ({
   finishAction: vi.fn(),
   getAction: vi.fn(),
   getStaleApprovedIds: vi.fn(),
+  failInterruptedActions: vi.fn(),
   insertQueuedLeads: vi.fn(),
   resolveLeadsByRefs: vi.fn(),
   resolveLeadsByFilter: vi.fn(),
@@ -56,7 +57,7 @@ vi.mock('@/lib/supabase/server', () => ({
 }))
 
 import { nextRun as ruleNextRun } from '@/lib/rules/nextRun'
-import { EXECUTABLE_KINDS, executeAction, sweepStuckActions } from '@/lib/actions/execute'
+import { EXECUTABLE_KINDS, executeAction, recoverInterruptedActions, sweepStuckActions } from '@/lib/actions/execute'
 import { POST as decidePOST, maxDuration } from '@/app/api/actions/[id]/decide/route'
 import { POST as executePOST } from '@/app/api/actions/[id]/execute/route'
 import { POST as createPOST } from '@/app/api/actions/route'
@@ -314,20 +315,82 @@ describe('executeAction idempotency', () => {
 })
 
 describe('sweepStuckActions', () => {
-  it('asks only for approved rows decided more than 2 minutes ago and executes each', async () => {
-    const now = new Date('2026-10-25T12:00:00Z')
-    store.getStaleApprovedIds.mockResolvedValue([ID])
-    store.claimExecution.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }))
-    const out = await sweepStuckActions(now)
-    expect(store.getStaleApprovedIds.mock.calls[0][0].toISOString()).toBe('2026-10-25T11:58:00.000Z')
-    expect(store.claimExecution).toHaveBeenCalledWith(ID)
-    expect(out).toHaveLength(1)
+  const now = new Date('2026-10-25T12:00:00Z')
+  const ORIGIN = 'http://127.0.0.1:3000'
+  let fetchSpy: ReturnType<typeof vi.fn>
+  beforeEach(() => {
+    fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    vi.stubEnv('LUME_ACTION_SECRET', 'action-secret')
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
   })
 
-  it('nothing stale → nothing runs', async () => {
-    store.getStaleApprovedIds.mockResolvedValue([])
-    expect(await sweepStuckActions()).toEqual([])
+  it('asks for at most 10 approved rows decided over 2 minutes ago and POSTs each to the execute route; never runs inline', async () => {
+    store.getStaleApprovedIds.mockResolvedValue([ID])
+    fetchSpy.mockResolvedValue(new Response('{}', { status: 200 }))
+    const out = await sweepStuckActions(now, ORIGIN + '/')
+    expect(store.getStaleApprovedIds.mock.calls[0][0].toISOString()).toBe('2026-10-25T11:58:00.000Z')
+    expect(store.getStaleApprovedIds.mock.calls[0][1]).toBe(10)
+    expect(fetchSpy).toHaveBeenCalledOnce()
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(url).toBe(`${ORIGIN}/api/actions/${ID}/execute`)
+    expect(init.method).toBe('POST')
+    expect(init.headers['X-Lume-Secret']).toBe('action-secret')
+    expect(init.signal).toBeInstanceOf(AbortSignal)
     expect(store.claimExecution).not.toHaveBeenCalled()
+    expect(out).toEqual([{ id: ID, outcome: 'dispatched' }])
+  })
+
+  it('a dispatch that times out counts as dispatched (the execute route keeps running)', async () => {
+    store.getStaleApprovedIds.mockResolvedValue([ID])
+    fetchSpy.mockRejectedValue(Object.assign(new Error('timed out'), { name: 'TimeoutError' }))
+    expect(await sweepStuckActions(now, ORIGIN)).toEqual([{ id: ID, outcome: 'dispatched' }])
+  })
+
+  it('a refused or unreachable dispatch is reported as an error', async () => {
+    store.getStaleApprovedIds.mockResolvedValue(['a', 'b'])
+    fetchSpy
+      .mockResolvedValueOnce(new Response('{}', { status: 401 }))
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+    expect(await sweepStuckActions(now, ORIGIN)).toEqual([
+      { id: 'a', outcome: { error: 'execute returned 401' } },
+      { id: 'b', outcome: { error: 'fetch failed' } },
+    ])
+  })
+
+  it('without LUME_ACTION_SECRET nothing is sent', async () => {
+    vi.stubEnv('LUME_ACTION_SECRET', '')
+    store.getStaleApprovedIds.mockResolvedValue([ID])
+    expect(await sweepStuckActions(now, ORIGIN)).toEqual([{ id: ID, outcome: { error: 'LUME_ACTION_SECRET is not set' } }])
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('nothing stale → nothing sent', async () => {
+    store.getStaleApprovedIds.mockResolvedValue([])
+    expect(await sweepStuckActions(now, ORIGIN)).toEqual([])
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('recoverInterruptedActions', () => {
+  it('fails executing rows untouched for 10 minutes, posts a notice per row, never re-runs them', async () => {
+    const now = new Date('2026-10-25T12:00:00Z')
+    store.failInterruptedActions.mockResolvedValue([row('pause_campaign', { campaign_id: 'camp-1', summary: 'Pause X' }, { status: 'failed' })])
+    expect(await recoverInterruptedActions(now)).toEqual([ID])
+    expect(store.failInterruptedActions.mock.calls[0][0].toISOString()).toBe('2026-10-25T11:50:00.000Z')
+    expect(tg.sendMessage).toHaveBeenCalledWith(expect.stringContaining('Interrupted — pause_campaign'), expect.anything())
+    expect(tg.sendMessage.mock.calls[0][0]).toContain('Pause X')
+    expect(store.claimExecution).not.toHaveBeenCalled()
+    expect(ins.pauseCampaign).not.toHaveBeenCalled()
+  })
+
+  it('nothing interrupted → no notice', async () => {
+    store.failInterruptedActions.mockResolvedValue([])
+    expect(await recoverInterruptedActions(new Date())).toEqual([])
+    expect(tg.sendMessage).not.toHaveBeenCalled()
   })
 })
 
@@ -351,6 +414,18 @@ describe('POST /api/actions/[id]/decide', () => {
     expect(tg.editMessage).toHaveBeenCalledWith(42, expect.stringContaining('Approved'))
     expect(tg.sendDecisionNote).toHaveBeenCalledWith('lume_ok', ID)
     expect(ins.pauseCampaign).toHaveBeenCalledOnce()
+  })
+
+  it('403 session_required for the internal bearer: the agent cannot approve its own action', async () => {
+    vi.stubEnv('LUME_INTERNAL_SECRET', 'internal-secret')
+    const res = await decidePOST(
+      req(`/api/actions/${ID}/decide`, { decision: 'approve' }, { authorization: 'Bearer internal-secret' }),
+      params(ID)
+    )
+    vi.unstubAllEnvs()
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: 'session_required' })
+    expect(store.claimDecision).not.toHaveBeenCalled()
   })
 
   it('reject: claims, never executes', async () => {

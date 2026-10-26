@@ -14,6 +14,8 @@ const svc = vi.hoisted(() => ({
   insertPendingAction: vi.fn(),
   setActionMessageId: vi.fn(),
   getPushJob: vi.fn(),
+  getCampaignByExternalId: vi.fn(),
+  getInstantlyEmailEvent: vi.fn(),
 }))
 vi.mock('@/lib/db/service', () => ({
   ...Object.fromEntries(Object.keys(svc).map((k) => [k, (...a: unknown[]) => svc[k as keyof typeof svc](...a)])),
@@ -42,6 +44,8 @@ beforeEach(() => {
   findAwaitingActionBy.mockReset().mockResolvedValue(null)
   sendActionPrompt.mockReset().mockResolvedValue({ ok: true, messageId: null })
   getPushPreview.mockReset()
+  svc.getCampaignByExternalId.mockResolvedValue({ name: 'Kaspen PM' })
+  svc.getInstantlyEmailEvent.mockResolvedValue({ lead_email: 'lead@x.com', campaign_id: CID })
   svc.insertPendingAction.mockImplementation(async (row: { kind: string; payload: unknown }) => ({ id: 'act-1', ...row }))
   fetchSpy = vi.fn(async () => new Response('{}'))
   vi.stubGlobal('fetch', fetchSpy)
@@ -74,11 +78,11 @@ describe('POST /api/actions — campaign kinds', () => {
     expect(findAwaitingActionBy).toHaveBeenCalledWith(kind, key, value)
     expect(svc.insertPendingAction).toHaveBeenCalledTimes(1)
     const row = svc.insertPendingAction.mock.calls[0][0]
-    expect(row).toMatchObject({ kind, requested_by: 'user', payload: { ...payload } })
+    expect(row).toMatchObject({ kind, requested_by: 'user', payload: { ...payload, campaign_name: 'Kaspen PM' } })
     expect(row.payload.summary).toBeTruthy()
     expect(sendActionPrompt).toHaveBeenCalledTimes(1)
 
-    // Never touches Instantly (or any network) — the executor does, after confirmation.
+    // Names come from lume_campaigns / the email event: no network at all here.
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
@@ -115,13 +119,54 @@ describe('POST /api/actions — campaign kinds', () => {
     })
     expect(res.status).toBe(201)
     const row = svc.insertPendingAction.mock.calls[0][0]
+    expect(svc.getInstantlyEmailEvent).toHaveBeenCalledWith('e9')
     expect(row.payload).toEqual({
       eaccount: 'me@send.com',
       reply_to_uuid: 'e9',
       body: 'hi',
       lead_email: 'lead@x.com',
-      summary: expect.stringContaining('Send reply to lead@x.com from me@send.com'),
+      recipient_verified: true,
+      campaign_id: CID,
+      campaign_name: 'Kaspen PM',
+      summary: expect.stringContaining('Send reply to lead@x.com from me@send.com (Kaspen PM)'),
     })
+  })
+
+  it('campaign_name is looked up server-side; a caller-supplied one is ignored', async () => {
+    svc.getCampaignByExternalId.mockResolvedValue({ name: 'Real Name' })
+    const res = await post({ kind: 'pause_campaign', payload: { campaign_id: CID, campaign_name: 'Harmless test campaign' } })
+    expect(res.status).toBe(201)
+    const row = svc.insertPendingAction.mock.calls[0][0]
+    expect(svc.getCampaignByExternalId).toHaveBeenCalledWith(CID)
+    expect(row.payload.campaign_name).toBe('Real Name')
+    expect(row.payload.summary).toBe('Pause campaign Real Name')
+    expect(row.payload.summary).not.toContain('Harmless')
+  })
+
+  it('unknown campaign everywhere → the id; Instantly is only read (GET), never written', async () => {
+    svc.getCampaignByExternalId.mockResolvedValue(null)
+    const res = await post({ kind: 'resume_campaign', payload: { campaign_id: CID, campaign_name: 'Fake' } })
+    expect(res.status).toBe(201)
+    expect(svc.insertPendingAction.mock.calls[0][0].payload.summary).toBe(`Resume campaign ${CID}`)
+    for (const [, init] of fetchSpy.mock.calls as unknown as [string, RequestInit | undefined][]) {
+      expect(init?.method ?? 'GET').toBe('GET')
+    }
+  })
+
+  it('send_reply whose recipient no lookup knows is marked unverified (the caller claim is kept, flagged)', async () => {
+    svc.getInstantlyEmailEvent.mockResolvedValue(null)
+    const res = await post({
+      kind: 'send_reply',
+      payload: { eaccount: 'me@send.com', reply_to_uuid: 'e10', body: 'hi', lead_email: 'boss@corp.com' },
+    })
+    expect(res.status).toBe(201)
+    const p = svc.insertPendingAction.mock.calls[0][0].payload
+    expect(p.recipient_verified).toBe(false)
+    expect(p.lead_email).toBe('boss@corp.com')
+    expect(p.summary).toContain('to boss@corp.com (unverified)')
+    for (const [, init] of fetchSpy.mock.calls as unknown as [string, RequestInit | undefined][]) {
+      expect(init?.method ?? 'GET').toBe('GET')
+    }
   })
 
   it('23505 from the campaign unique index → 409 duplicate', async () => {

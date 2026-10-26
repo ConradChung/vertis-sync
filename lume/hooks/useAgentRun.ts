@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRealtimeInvalidate } from '@/hooks/useRealtimeInvalidate'
-import type { OrbRun } from '@/lib/agent/orbState'
+import { STALE_RUN_MS, withStaleRun, type OrbRun } from '@/lib/agent/orbState'
 
 /**
  * The latest `agent_runs` row (RLS: owner only) plus whether its approval
@@ -18,12 +18,13 @@ export function useLatestAgentRun(): { run: OrbRun | null; approvalSettled: bool
     const sb = createClient()
     const { data, error } = await sb
       .from('agent_runs')
-      .select('id,status,tool_calls,approval_action_id')
+      .select('id,status,tool_calls,approval_action_id,created_at')
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
     if (error) return
-    const latest = (data as OrbRun | null) ?? null
+    // A `running` row older than 6 min is a killed run: show it as failed.
+    const latest = withStaleRun((data as OrbRun | null) ?? null)
     setRun(latest)
     if (latest?.status === 'needs_approval' && latest.approval_action_id) {
       const { data: action } = await sb
@@ -40,6 +41,15 @@ export function useLatestAgentRun(): { run: OrbRun | null; approvalSettled: bool
   useEffect(() => {
     void load()
   }, [load])
+
+  // Re-read when a running run crosses the stale line (no Realtime event marks it).
+  useEffect(() => {
+    if (run?.status !== 'running' || !run.created_at) return
+    const due = Date.parse(run.created_at) + STALE_RUN_MS - Date.now()
+    if (!Number.isFinite(due)) return
+    const t = setTimeout(() => void load(), Math.max(0, due) + 1000)
+    return () => clearTimeout(t)
+  }, [run, load])
 
   useRealtimeInvalidate(() => void load(), { tables: ['agent_runs', 'pending_actions'], debounceMs: 150 })
 

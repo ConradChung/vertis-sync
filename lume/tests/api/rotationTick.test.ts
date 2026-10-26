@@ -26,7 +26,11 @@ vi.mock('@/lib/adapters/telegram', () => ({
 }))
 
 const sweep = vi.hoisted(() => vi.fn())
-vi.mock('@/lib/actions/execute', () => ({ sweepStuckActions: (...a: unknown[]) => sweep(...a) }))
+const recover = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/actions/execute', () => ({
+  sweepStuckActions: (...a: unknown[]) => sweep(...a),
+  recoverInterruptedActions: (...a: unknown[]) => recover(...a),
+}))
 
 import { POST } from '@/app/api/cron/rotation-tick/route'
 
@@ -84,6 +88,8 @@ beforeEach(() => {
   tg.editMessage.mockResolvedValue({ ok: true, messageId: 77 })
   sweep.mockReset()
   sweep.mockResolvedValue([])
+  recover.mockReset()
+  recover.mockResolvedValue([])
   fetchSpy.mockReset()
   vi.stubGlobal('fetch', fetchSpy)
   vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -223,22 +229,41 @@ describe('POST /api/cron/rotation-tick', () => {
     expect(svc.expireStaleActions).toHaveBeenCalled()
   })
 
-  it('sweeps approved-but-unexecuted actions on every tick and reports them', async () => {
+  it('sweeps approved-but-unexecuted actions on every tick, dispatching to the request origin, and reports them', async () => {
     svc.getDueRules.mockResolvedValue([])
     sweep.mockResolvedValue([
-      { id: ACTION, outcome: { ran: true, status: 'executed', result: {}, error: null } },
-      { id: 'b2', outcome: { ran: false, reason: 'not_claimable', status: 'executing' } },
-      { id: 'c3', outcome: { error: 'boom' } },
+      { id: ACTION, outcome: 'dispatched' },
+      { id: 'c3', outcome: { error: 'execute returned 401' } },
     ])
+    recover.mockResolvedValue(['d4'])
     const res = await tick()
     expect(res.status).toBe(200)
     expect(sweep).toHaveBeenCalledOnce()
     expect((sweep.mock.calls[0][0] as Date).toISOString()).toBe(NOW.toISOString())
-    expect((await res.json()).swept).toEqual([
-      { id: ACTION, status: 'executed' },
-      { id: 'b2', status: 'noop:not_claimable' },
-      { id: 'c3', status: 'error: boom' },
+    expect(sweep.mock.calls[0][1]).toBe('http://localhost')
+    const body = await res.json()
+    expect(body.swept).toEqual([
+      { id: ACTION, status: 'dispatched' },
+      { id: 'c3', status: 'error: execute returned 401' },
     ])
+    expect(body.interrupted).toEqual(['d4'])
+    expect(recover).toHaveBeenCalledOnce()
+  })
+
+  it('LUME_INTERNAL_URL overrides the request origin for the dispatch', async () => {
+    vi.stubEnv('LUME_INTERNAL_URL', 'http://127.0.0.1:3000/')
+    svc.getDueRules.mockResolvedValue([])
+    await tick()
+    expect(sweep.mock.calls[0][1]).toBe('http://127.0.0.1:3000')
+    vi.unstubAllEnvs()
+  })
+
+  it('a failing interrupted recovery is a 500 but the sweep still ran', async () => {
+    recover.mockRejectedValue(new Error('db down'))
+    const res = await tick()
+    expect(res.status).toBe(500)
+    expect(sweep).toHaveBeenCalledOnce()
+    expect((await res.json()).errors).toEqual([expect.stringContaining('interrupted')])
   })
 
   it('a failing sweep is a 500 but the rules still ran', async () => {

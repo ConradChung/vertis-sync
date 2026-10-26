@@ -793,20 +793,21 @@ export interface LeadRef {
   id: string
 }
 
+const RESOLVE_CHUNK = 100
+
 /** The selected leads that still exist in `lume_lead_bank` and are not already queued for `campaignId`. */
 export async function resolveLeadRefs(refs: LeadRef[], campaignId: string): Promise<LeadRef[]> {
   if (!refs.length) return []
   const sb = createServiceClient()
-  const res = await sb
-    .from('lume_lead_bank')
-    .select('origin,id,campaign_id')
-    .in('id', [...new Set(refs.map((r) => r.id))])
-  if (res.error) throw new DbError('resolveLeadRefs', res.error)
-  const found = new Set(
-    ((res.data ?? []) as { origin: string; id: string; campaign_id: string | null }[])
-      .filter((r) => r.campaign_id !== campaignId)
-      .map((r) => `${r.origin}:${r.id}`)
-  )
+  const ids = [...new Set(refs.map((r) => r.id))]
+  const rows: { origin: string; id: string; campaign_id: string | null }[] = []
+  // 100 ids per lookup: a 5k-row selection in one `.in()` overflows the GET URL.
+  for (let i = 0; i < ids.length; i += RESOLVE_CHUNK) {
+    const res = await sb.from('lume_lead_bank').select('origin,id,campaign_id').in('id', ids.slice(i, i + RESOLVE_CHUNK))
+    if (res.error) throw new DbError('resolveLeadRefs', res.error)
+    rows.push(...((res.data ?? []) as { origin: string; id: string; campaign_id: string | null }[]))
+  }
+  const found = new Set(rows.filter((r) => r.campaign_id !== campaignId).map((r) => `${r.origin}:${r.id}`))
   const seen = new Set<string>()
   return refs.filter((r) => {
     const k = `${r.origin}:${r.id}`
@@ -814,6 +815,25 @@ export async function resolveLeadRefs(refs: LeadRef[], campaignId: string): Prom
     seen.add(k)
     return true
   })
+}
+
+/**
+ * The lead and campaign of an Instantly email Lume saw via webhook
+ * (`events.source_id` = Instantly email id). Null when no event carries it.
+ */
+export async function getInstantlyEmailEvent(emailId: string): Promise<{ lead_email: string; campaign_id: string | null } | null> {
+  const sb = createServiceClient()
+  const res = await sb
+    .from('events')
+    .select('lead_email,campaign_id')
+    .eq('source', 'instantly')
+    .eq('source_id', emailId)
+    .not('lead_email', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (res.error) throw new DbError('getInstantlyEmailEvent', res.error)
+  return (res.data as { lead_email: string; campaign_id: string | null } | null) ?? null
 }
 
 export async function getCampaignByExternalId(externalId: string): Promise<LumeCampaignRow | null> {

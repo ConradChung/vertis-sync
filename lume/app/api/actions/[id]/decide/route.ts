@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { requireOwner } from '@/lib/auth/guards'
+import { requireOwnerSession } from '@/lib/auth/guards'
 import { executeAction } from '@/lib/actions/execute'
 import { claimDecision, getAction } from '@/lib/actions/store'
 import { editMessage, sendDecisionNote } from '@/lib/adapters/telegram'
@@ -13,6 +13,9 @@ import { parseJsonBody, uuidParam } from '@/lib/http/json'
  * `status` → approved | rejected, `decided_via='lume'`), so a Lume click and a
  * Telegram tap race for one row and exactly one wins; the loser gets 409
  * already_handled. On approve this request runs the executor itself.
+ *
+ * Owner session only: the agent's internal bearer is a 403, so a tool call
+ * can never approve its own pending action.
  */
 
 // executeAction may wait on pipeline.decide() (170 s); outlive it.
@@ -21,7 +24,7 @@ export const maxDuration = 300
 const Body = z.object({ decision: z.enum(['approve', 'reject']) })
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const auth = await requireOwner(req)
+  const auth = await requireOwnerSession(req)
   if (!auth.ok) return auth.response
 
   const id = uuidParam((await ctx.params).id)

@@ -57,6 +57,22 @@ export async function requireOwner(req?: Request): Promise<OwnerAuth | Fail> {
   return { ok: true, via: 'session', user }
 }
 
+/**
+ * `requireOwner`, but only the owner's own cookie session passes: the
+ * internal bearer (the agent's tool calls) is a 403 `session_required`. For
+ * routes that record a human decision — deciding a pending action or a gate —
+ * which the agent must never take on the owner's behalf (it files a
+ * `decide_gate` pending action instead).
+ */
+export async function requireOwnerSession(req: Request): Promise<Pass<{ via: 'session'; user: User }> | Fail> {
+  const auth = await requireOwner(req)
+  if (!auth.ok) return auth
+  if (auth.via !== 'session') {
+    return { ok: false, response: NextResponse.json({ error: 'session_required' }, { status: 403 }) }
+  }
+  return auth
+}
+
 /** Where a shared secret is presented: a header name, or `{ query }` for a URL parameter. */
 export type SecretSource = string | { query: string }
 

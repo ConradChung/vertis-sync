@@ -44,7 +44,7 @@ export interface ToolDeps {
   ) => Promise<CreatedAction>
   prepare: PrepareAction
   agentRunId: string
-  /** Lume's own origin. Defaults to `LUME_URL`. */
+  /** Lume's own origin (the run route passes `internalOrigin(req)`). Defaults to `LUME_INTERNAL_URL`. */
   baseUrl?: string
   /** Defaults to `LUME_INTERNAL_SECRET`. */
   secret?: string
@@ -145,7 +145,7 @@ async function requestApproval(
 }
 
 function routeCaller(deps: ToolDeps): RouteCall {
-  const base = (deps.baseUrl ?? process.env.LUME_URL ?? 'http://localhost:3000').replace(/\/+$/, '')
+  const base = (deps.baseUrl ?? process.env.LUME_INTERNAL_URL ?? 'http://localhost:3000').replace(/\/+$/, '')
   const secret = deps.secret ?? process.env.LUME_INTERNAL_SECRET ?? ''
   return async (path, init = {}) => {
     const method = init.method ?? 'GET'

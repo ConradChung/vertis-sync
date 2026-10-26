@@ -9,6 +9,7 @@ const h = vi.hoisted(() => ({
   requireOwner: vi.fn(),
   insertAgentRun: vi.fn(),
   updateAgentRun: vi.fn(),
+  failStaleRuns: vi.fn(),
   createAction: vi.fn(),
   logEvent: vi.fn(),
   sendMessage: vi.fn(),
@@ -17,7 +18,7 @@ const h = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/auth/guards', () => ({ requireOwner: h.requireOwner }))
-vi.mock('@/lib/agent/runs', () => ({ insertAgentRun: h.insertAgentRun, updateAgentRun: h.updateAgentRun }))
+vi.mock('@/lib/agent/runs', () => ({ insertAgentRun: h.insertAgentRun, updateAgentRun: h.updateAgentRun, failStaleRuns: h.failStaleRuns }))
 vi.mock('@/lib/actions/create', () => ({ createAction: h.createAction }))
 vi.mock('@/lib/db/service', () => ({ logEvent: h.logEvent, isDbError: () => false }))
 vi.mock('@/lib/adapters/telegram', () => ({ sendMessage: h.sendMessage }))
@@ -79,6 +80,7 @@ beforeEach(() => {
   h.requireOwner.mockResolvedValue({ ok: true, via: 'session', user: {} })
   h.insertAgentRun.mockResolvedValue({ id: 'run-1' })
   h.updateAgentRun.mockResolvedValue(undefined)
+  h.failStaleRuns.mockResolvedValue(0)
   h.createAction.mockResolvedValue({ id: 'act-1' })
   h.logEvent.mockResolvedValue(null)
   process.env.ANTHROPIC_API_KEY = 'test-key'
@@ -149,6 +151,46 @@ describe('POST /api/agent/run', () => {
     expect(ev).toContainEqual(expect.objectContaining({ type: 'tool_end', name: 'list_rules', ok: true }))
     expect(h.updateAgentRun.mock.calls.at(-1)![1]).toMatchObject({ status: 'done' })
     delete process.env.LUME_INTERNAL_SECRET
+  })
+
+  it('tool fetches go to the request origin, never LUME_URL (a local run must not call prod)', async () => {
+    vi.stubEnv('LUME_URL', 'https://lume-prod.example.com')
+    vi.stubEnv('LUME_INTERNAL_URL', '')
+    h.fetch.mockResolvedValue(new Response('[]'))
+    fakeRunner([{ text: '', call: { name: 'list_rules', input: {} } }, { text: 'No rules.' }])
+    await events(
+      await POST(new Request('http://localhost:3000/api/agent/run', { method: 'POST', body: JSON.stringify({ prompt: 'rules?' }) }))
+    )
+    expect(h.fetch.mock.calls[0][0]).toBe('http://localhost:3000/api/rules')
+    vi.unstubAllEnvs()
+  })
+
+  it('LUME_INTERNAL_URL wins for tool fetches when set', async () => {
+    vi.stubEnv('LUME_INTERNAL_URL', 'http://10.0.0.5:3000/')
+    h.fetch.mockResolvedValue(new Response('[]'))
+    fakeRunner([{ text: '', call: { name: 'list_rules', input: {} } }, { text: 'No rules.' }])
+    await events(await post('rules?'))
+    expect(h.fetch.mock.calls[0][0]).toBe('http://10.0.0.5:3000/api/rules')
+    vi.unstubAllEnvs()
+  })
+
+  it('closes runs left running for over 6 minutes before starting a new one', async () => {
+    const t0 = Date.now()
+    fakeRunner([{ text: 'ok' }])
+    await events(await post('hi'))
+    expect(h.failStaleRuns).toHaveBeenCalledOnce()
+    const cutoff = (h.failStaleRuns.mock.calls[0][0] as Date).getTime()
+    expect(cutoff).toBeGreaterThanOrEqual(t0 - 6 * 60_000 - 50)
+    expect(cutoff).toBeLessThanOrEqual(Date.now() - 6 * 60_000 + 50)
+    expect(h.failStaleRuns.mock.invocationCallOrder[0]).toBeLessThan(h.insertAgentRun.mock.invocationCallOrder[0])
+  })
+
+  it('a failing stale-run cleanup does not block the run', async () => {
+    h.failStaleRuns.mockRejectedValue(new Error('db down'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    fakeRunner([{ text: 'ok' }])
+    const ev = await events(await post('hi'))
+    expect(ev.at(-1)).toMatchObject({ type: 'done' })
   })
 
   it('a runner error marks the run failed', async () => {

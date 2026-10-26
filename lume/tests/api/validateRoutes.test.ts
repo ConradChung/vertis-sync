@@ -65,6 +65,21 @@ beforeEach(() => {
 describe('POST /api/gates/decide', () => {
   it('declares maxDuration 300', () => expect(maxDuration).toBe(300))
 
+  it('403 session_required for the internal bearer (the agent never decides a gate itself)', async () => {
+    vi.stubEnv('LUME_INTERNAL_SECRET', 'internal-secret')
+    const res = await decidePOST(
+      new Request('http://localhost/api/gates/decide', {
+        method: 'POST',
+        body: JSON.stringify({ callback_data: `lfo_count:${JOB}:499` }),
+        headers: { 'content-type': 'application/json', authorization: 'Bearer internal-secret' },
+      })
+    )
+    vi.unstubAllEnvs()
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: 'session_required' })
+    expect(decide).not.toHaveBeenCalled()
+  })
+
   it('400 on a non-allowlisted action, without calling the entrypoint', async () => {
     const res = await decidePOST(post('/api/gates/decide', { callback_data: `bar_loc:${JOB}` }))
     expect(res.status).toBe(400)

@@ -33,14 +33,14 @@ describe('instantly adapter (configured, mocked fetch)', () => {
     expect(isInstantlyConfigured()).toBe(false)
   })
 
-  it('pages the campaign list, drops deleted, sends the bearer', async () => {
+  it('pages the campaign list, keeps problem states, sends the bearer', async () => {
     const page1 = Array.from({ length: 100 }, (_, i) => ({ id: `c${i}`, name: `C${String(i).padStart(3, '0')}`, status: i === 5 ? -1 : 1 }))
     fetchMock
       .mockResolvedValueOnce(json({ items: page1, next_starting_after: 'cur1' }))
       .mockResolvedValueOnce(json({ items: [{ id: 'last', name: 'ZZ', status: 2 }], next_starting_after: 'cur2' }))
     const out = await listCampaigns()
-    expect(out).toHaveLength(100) // 101 minus the deleted one
-    expect(out.find((c) => c.id === 'c5')).toBeUndefined()
+    expect(out).toHaveLength(101) // a problem state (-1) is kept, not hidden
+    expect(out.find((c) => c.id === 'c5')?.statusLabel).toBe('accounts_unhealthy')
     expect(fetchMock).toHaveBeenCalledTimes(2)
     const [url1, init1] = fetchMock.mock.calls[0]
     expect(url1).toBe('https://api.instantly.ai/api/v2/campaigns?limit=100')

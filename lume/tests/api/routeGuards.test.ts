@@ -45,13 +45,13 @@ describe('app/api route guards', () => {
 
   for (const file of files) {
     if (ALLOWLIST[file]) continue
-    it(`${file} imports requireOwner or requireSecret from @/lib/auth/guards`, () => {
+    it(`${file} imports requireOwner, requireOwnerSession or requireSecret from @/lib/auth/guards`, () => {
       const src = readFileSync(join(ROOT, file), 'utf8')
       const m = GUARD_IMPORT.exec(src)
       expect(m, 'no import from @/lib/auth/guards').not.toBeNull()
       const names = m![1].split(',').map((s) => s.trim().split(/\s+as\s+/)[0])
-      const guard = names.find((n) => n === 'requireOwner' || n === 'requireSecret')
-      expect(guard, 'imports neither requireOwner nor requireSecret').toBeDefined()
+      const guard = names.find((n) => n === 'requireOwner' || n === 'requireOwnerSession' || n === 'requireSecret')
+      expect(guard, 'imports none of requireOwner / requireOwnerSession / requireSecret').toBeDefined()
       // Imported and actually called, not just imported.
       expect(new RegExp(`${guard}\\s*\\(`).test(src), `${guard} is imported but never called`).toBe(true)
     })

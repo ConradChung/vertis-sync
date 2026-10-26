@@ -49,6 +49,23 @@ export function buildGatePing(kind: GateKind | string, targetId: string, title?:
     : { text: head, disablePreview: true, linkOmitted: true }
 }
 
+/** Telegram caps a message at 4096 chars; this leaves room for the summary and link. */
+export const REPLY_BODY_MAX = 3500
+
+/** What a send_reply approval actually sends: recipient, sender, subject, the full body. */
+function replyDetail(p: Record<string, unknown>): string[] {
+  const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null)
+  const lead = text(p.lead_email)
+  const to = lead ? (p.recipient_verified === false ? `${lead} (unverified)` : lead) : 'unverified — check in Lume'
+  const body = text(p.body) ?? ''
+  const clipped = body.length > REPLY_BODY_MAX ? `${body.slice(0, REPLY_BODY_MAX)}… [truncated, full text in Lume]` : body
+  const out = [`To: ${to}`]
+  if (text(p.eaccount)) out.push(`From: ${text(p.eaccount)}`)
+  if (text(p.subject)) out.push(`Subject: ${text(p.subject)}`)
+  out.push('', clipped)
+  return out
+}
+
 /** Approval prompt for a `pending_actions` row: summary, lume_ok/lume_no buttons, deep link. */
 export function buildActionPrompt(action: PendingActionRow): OutgoingMessage {
   const summary = typeof action.payload?.summary === 'string' && action.payload.summary.trim()
@@ -56,6 +73,7 @@ export function buildActionPrompt(action: PendingActionRow): OutgoingMessage {
     : action.kind
   const link = actionLink(action.id)
   const lines = [`🛡 ${action.kind}`, summary]
+  if (action.kind === 'send_reply') lines.push('', ...replyDetail(action.payload ?? {}))
   if (link) lines.push('', `Review in Lume: ${link}`)
   const message: OutgoingMessage = {
     text: lines.join('\n'),

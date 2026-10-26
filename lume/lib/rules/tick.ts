@@ -1,6 +1,6 @@
 import 'server-only'
 import { createAction, DuplicateActionError } from '@/lib/actions/create'
-import { sweepStuckActions } from '@/lib/actions/execute'
+import { recoverInterruptedActions, sweepStuckActions } from '@/lib/actions/execute'
 import { editMessage, sendMessage } from '@/lib/adapters/telegram'
 import {
   claimRule,
@@ -36,10 +36,12 @@ import { nextRun } from '@/lib/rules/nextRun'
  * advanced the rule, so there is no retry until its next scheduled run.
  *
  * Before the rules, awaiting actions older than 24 h expire. After them, the
- * sweeper re-executes approved actions nobody ran (`executed_at` null,
- * decided over 2 min ago — the Telegram path's `waitUntil` can be cut);
- * `executeAction`'s claim makes that idempotent. The sweeper is the one place
- * this route runs an action, and only one the owner already approved.
+ * sweeper re-dispatches approved actions nobody ran (`executed_at` null,
+ * decided over 2 min ago — the Telegram path's `waitUntil` can be cut) to
+ * `/api/actions/<id>/execute` at `origin`, without waiting for them to finish
+ * (the execute route's claim makes that idempotent), and rows stuck in
+ * `executing` for 10 min are failed as `interrupted` (never re-run). This
+ * route never runs an action inline.
  */
 
 export const ACTION_TTL_MS = 24 * 3600_000
@@ -54,15 +56,17 @@ export interface TickResult {
   ok: boolean
   expired: number
   rules: RuleOutcome[]
-  /** Approved-but-unexecuted actions the sweeper re-ran. */
+  /** Approved-but-unexecuted actions the sweeper re-dispatched. */
   swept: { id: string; status: string }[]
+  /** `executing` rows cut mid-run, now `failed` (interrupted). */
+  interrupted: string[]
   errors: string[]
 }
 
 const fmt = new Intl.NumberFormat('en-US')
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300)
 
-export async function runRotationTick(now: Date = new Date()): Promise<TickResult> {
+export async function runRotationTick(now: Date, origin: string): Promise<TickResult> {
   const errors: string[] = []
   let expired = 0
   try {
@@ -82,16 +86,22 @@ export async function runRotationTick(now: Date = new Date()): Promise<TickResul
 
   const swept: TickResult['swept'] = []
   try {
-    for (const s of await sweepStuckActions(now)) {
-      const o = s.outcome
-      const status = !('ran' in o) ? `error: ${o.error}` : o.ran ? o.status : `noop:${o.reason}`
-      swept.push({ id: s.id, status })
+    for (const s of await sweepStuckActions(now, origin)) {
+      swept.push({ id: s.id, status: s.outcome === 'dispatched' ? 'dispatched' : `error: ${s.outcome.error}` })
     }
   } catch (err) {
     errors.push(`sweep: ${msg(err)}`)
     console.error('[rotation-tick] sweep failed:', msg(err))
   }
-  return { ok: errors.length === 0, expired, rules, swept, errors }
+
+  let interrupted: string[] = []
+  try {
+    interrupted = await recoverInterruptedActions(now)
+  } catch (err) {
+    errors.push(`interrupted: ${msg(err)}`)
+    console.error('[rotation-tick] interrupted recovery failed:', msg(err))
+  }
+  return { ok: errors.length === 0, expired, rules, swept, interrupted, errors }
 }
 
 async function expireActions(now: Date): Promise<number> {

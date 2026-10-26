@@ -9,11 +9,15 @@ import type { Json } from '@/lib/db/types'
  *
  * Shapes (executor fields first; the rest are display extras):
  *   send_reply      { eaccount, reply_to_uuid, body, subject?,
- *                     campaign_id?, lead_email?, campaign_name? }
+ *                     campaign_id?, lead_email?, campaign_name?,
+ *                     recipient_verified? }
  *   pause_campaign  { campaign_id, campaign_name? }
  *   resume_campaign { campaign_id, campaign_name? }
  *   create_campaign { source_campaign_id, name, campaign_name? }
  * plus a `summary` (written here when absent). Unknown keys are dropped.
+ * `buildActionRequest` (lib/actions/build.ts) overwrites the display extras
+ * server-side before this runs: `campaign_name` from `lume_campaigns` (or
+ * Instantly), `lead_email` + `recipient_verified` from the email lookup.
  * Aliases accepted for older callers: send_reply `to` → `lead_email`,
  * create_campaign `source_name` → `campaign_name`.
  *
@@ -38,6 +42,8 @@ export const CAMPAIGN_PAYLOADS = {
     campaign_id: ID.optional(),
     lead_email: LABEL,
     campaign_name: LABEL,
+    /** Set by the server builder: false when the recipient could not be looked up. */
+    recipient_verified: z.boolean().optional(),
   }),
   pause_campaign: z.object({ campaign_id: ID, campaign_name: LABEL }),
   resume_campaign: z.object({ campaign_id: ID, campaign_name: LABEL }),
@@ -68,7 +74,12 @@ export function campaignActionSummary(kind: CampaignActionKind, p: Record<string
   const camp = String(p.campaign_name || p.campaign_id || p.source_campaign_id || '')
   switch (kind) {
     case 'send_reply': {
-      const to = p.lead_email ? ` to ${p.lead_email}` : ''
+      const unverified = p.recipient_verified === false
+      const to = p.lead_email
+        ? ` to ${p.lead_email}${unverified ? ' (unverified)' : ''}`
+        : unverified
+          ? ' to an unverified recipient'
+          : ''
       const where = camp ? ` (${camp})` : ''
       return `Send reply${to} from ${p.eaccount}${where}: “${clip(String(p.body ?? '').replace(/\s+/g, ' '), 80)}”`
     }

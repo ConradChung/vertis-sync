@@ -17,6 +17,7 @@ import {
   activateRule,
   claimExecution,
   deleteRule,
+  failInterruptedActions,
   finishAction,
   getAction,
   getRule,
@@ -256,21 +257,83 @@ export async function executeAction(id: string): Promise<ExecuteOutcome> {
 }
 
 export const SWEEP_AFTER_MS = 2 * 60_000
+/** Approved actions dispatched per tick; the rest wait for the next one. */
+export const SWEEP_LIMIT = 10
+/** How long a dispatch waits for the execute route before calling it sent. */
+export const DISPATCH_TIMEOUT_MS = 2_500
+/** An `executing` row this old was cut mid-handler (execute's maxDuration is 300 s). */
+export const INTERRUPTED_AFTER_MS = 10 * 60_000
+
+export type SweepOutcome = 'dispatched' | { error: string }
 
 /**
- * Re-run approved actions nobody executed (the Telegram path fires execute
- * under waitUntil, which can be cut). `executeAction`'s claim makes this safe
- * to run alongside a live execute. Called by the rotation-tick route.
+ * Re-dispatch approved actions nobody executed (the Telegram path fires
+ * execute under waitUntil, which can be cut). The tick never runs them
+ * inline (its maxDuration is 60 s, a handler can take minutes): each id is a
+ * POST to `${origin}/api/actions/<id>/execute` with `X-Lume-Secret`, the same
+ * call telegram-inbox makes, so the action runs in its own 300 s function.
+ * Only the first ~2.5 s are awaited: an abort means the request went out and
+ * the route is working, so it counts as dispatched. The route's claim makes a
+ * duplicate dispatch a no-op. At most SWEEP_LIMIT per tick.
  */
-export async function sweepStuckActions(now: Date = new Date()): Promise<{ id: string; outcome: ExecuteOutcome | { error: string } }[]> {
-  const ids = await getStaleApprovedIds(new Date(now.getTime() - SWEEP_AFTER_MS))
-  const out: { id: string; outcome: ExecuteOutcome | { error: string } }[] = []
-  for (const id of ids) {
+export async function sweepStuckActions(now: Date, origin: string): Promise<{ id: string; outcome: SweepOutcome }[]> {
+  const ids = await getStaleApprovedIds(new Date(now.getTime() - SWEEP_AFTER_MS), SWEEP_LIMIT)
+  if (!ids.length) return []
+  const secret = process.env.LUME_ACTION_SECRET
+  if (!secret) return ids.map((id) => ({ id, outcome: { error: 'LUME_ACTION_SECRET is not set' } }))
+  const base = origin.replace(/\/+$/, '')
+  return Promise.all(ids.map(async (id) => ({ id, outcome: await dispatchExecute(`${base}/api/actions/${id}/execute`, secret) })))
+}
+
+async function dispatchExecute(url: string, secret: string): Promise<SweepOutcome> {
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Lume-Secret': secret },
+      body: '{}',
+      signal: AbortSignal.timeout(DISPATCH_TIMEOUT_MS),
+      cache: 'no-store',
+    })
+    // A fast answer: a no-op (already claimed), a quick handler, or a refusal.
+    return res.ok ? 'dispatched' : { error: `execute returned ${res.status}` }
+  } catch (err) {
+    const name = err instanceof Error ? err.name : ''
+    if (name === 'TimeoutError' || name === 'AbortError') return 'dispatched'
+    return { error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/**
+ * `executing` rows older than INTERRUPTED_AFTER_MS → `failed` (result.error =
+ * 'interrupted') + a Telegram notice. Never re-run: the handler may already
+ * have reached Instantly or the pipeline. Called by the rotation tick.
+ */
+export async function recoverInterruptedActions(now: Date): Promise<string[]> {
+  const rows = await failInterruptedActions(new Date(now.getTime() - INTERRUPTED_AFTER_MS))
+  for (const a of rows) {
+    const link = actionLink(a.id)
+    const lines = [
+      `⚠️ Interrupted — ${a.kind}`,
+      summaryOf(a),
+      'The run was cut off before it finished. It may have partly happened; check before redoing it.',
+    ]
+    if (link) lines.push(link)
     try {
-      out.push({ id, outcome: await executeAction(id) })
+      await sendMessage(lines.join('\n'), { disablePreview: true })
     } catch (err) {
-      out.push({ id, outcome: { error: err instanceof Error ? err.message : String(err) } })
+      console.error('[actions] telegram interrupted notice failed:', err instanceof Error ? err.message : err)
+    }
+    try {
+      await logEvent({
+        type: 'lume.action.failed',
+        source: 'lume',
+        source_id: a.id,
+        title: `${a.kind} interrupted`,
+        payload: { kind: a.kind, error: 'interrupted' },
+      })
+    } catch (err) {
+      console.error('[actions] logEvent failed:', err instanceof Error ? err.message : err)
     }
   }
-  return out
+  return rows.map((r) => r.id)
 }
