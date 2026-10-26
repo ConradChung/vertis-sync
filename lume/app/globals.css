@@ -415,13 +415,43 @@
 /* Motion: Lume always animates — the owner chose to ignore the OS "Reduce
    motion" setting (see lib/motion.ts and MotionConfig in app/layout.tsx). */
 
-/* Responsive shell */
-@media (max-width: 640px) {
+/* Responsive shell. Phones (below Tailwind `sm`) get a slim top header and a
+   bottom tab bar (components/shell/MobileNav.tsx); both clear the safe areas. */
+:root {
+  --bottombar-h: 0px;
+}
+@media (max-width: 639.98px) {
   :root {
-    --topbar-h: 72px;
+    --topbar-h: calc(env(safe-area-inset-top) + 66px);
+    --bottombar-h: calc(env(safe-area-inset-bottom) + 86px);
   }
   .shell {
-    padding: calc(var(--topbar-h) + 1.5rem) 1rem 2rem;
+    padding: calc(var(--topbar-h) + 0.75rem) 1rem calc(var(--bottombar-h) + 1rem);
+  }
+  .mobile-top {
+    top: calc(env(safe-area-inset-top) + 10px);
+  }
+  .mobile-bottom {
+    bottom: calc(env(safe-area-inset-bottom) + 10px);
+  }
+  /* On-screen keyboard open: drop the bottom bar so the composer gets the room. */
+  html[data-kb] {
+    --bottombar-h: 0px;
+  }
+  html[data-kb] .mobile-bottom {
+    display: none;
+  }
+  /* iOS zooms into inputs under 16px on focus. */
+  input:not([type='checkbox']):not([type='radio']),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+  /* Glass is expensive on phones: lighter blur, same look. */
+  .glass,
+  .glass-overlay {
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    backdrop-filter: blur(16px) saturate(140%);
   }
   .page-head {
     flex-direction: column;

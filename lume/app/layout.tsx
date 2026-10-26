@@ -14,6 +14,12 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  // Content runs under the notch/home indicator (nav bars pad with safe-area insets);
+  // the keyboard resizes the layout so the Agent composer stays visible.
+  viewportFit: 'cover',
+  interactiveWidget: 'resizes-content',
   colorScheme: 'dark light',
   themeColor: [
     { media: '(prefers-color-scheme: dark)', color: '#050505' },
@@ -33,7 +39,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <MotionConfig reducedMotion="never">
             <TooltipProvider>{children}</TooltipProvider>
           </MotionConfig>
-          <Toaster position="bottom-right" />
+          <Toaster position="bottom-right" mobileOffset={{ bottom: 'calc(var(--bottombar-h) + 12px)' }} />
         </ThemeProvider>
       </body>
     </html>
