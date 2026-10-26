@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PendingApproval } from '@/components/orb/PlanCard'
 import type { ToolLogEntry } from '@/components/orb/ToolLog'
-import { buildPrompt, parseSseFrames, type AgentEvent } from '@/lib/agent/chat'
+import { parseSseFrames, type AgentEvent } from '@/lib/agent/chat'
+import type { StoredMessage } from '@/lib/agent/history'
 
 export interface ChatMessage {
   id: string
@@ -20,12 +21,27 @@ export interface ChatMessage {
 export interface AgentChat {
   messages: ChatMessage[]
   busy: boolean
+  /** A stored conversation is being fetched. */
+  loading: boolean
+  /** The conversation in the URL is missing or deleted. */
+  notFound: boolean
+  /** The conversation being shown (null = a new, unsaved chat). */
+  conversationId: string | null
   /** A tool is executing in the live run. */
   acting: boolean
   /** Assistant text is arriving for the live run. */
   streaming: boolean
   send: (text: string) => Promise<void>
   reset: () => void
+}
+
+export interface AgentChatOptions {
+  /** The conversation to show; null starts a new chat. */
+  conversationId?: string | null
+  /** The server created (or confirmed) the conversation for this run. */
+  onConversation?: (id: string) => void
+  /** A run finished (stored on the server): refresh anything that lists conversations. */
+  onSettled?: () => void
 }
 
 let seq = 0
@@ -70,20 +86,69 @@ export function applyAgentEvent(m: ChatMessage, e: AgentEvent): ChatMessage {
   }
 }
 
+/** A stored message, as the chat renders it. */
+export function storedToChat(m: StoredMessage): ChatMessage {
+  return {
+    id: m.id,
+    role: m.role,
+    text: m.text ?? '',
+    tools: (m.tools ?? []) as ToolLogEntry[],
+    approvals: (m.approvals ?? []) as PendingApproval[],
+    ...(m.error ? { error: m.error } : {}),
+  }
+}
+
 /**
- * Session-only chat over `/api/agent/run` (SSE: run, text, tool_start,
- * tool_end, approval, done, error). Each send is its own server run; prior
- * turns are packed into the prompt as context (see `buildPrompt`). The route
- * cannot abort a run, so the composer is simply disabled while one is live.
+ * Chat over `/api/agent/run` (SSE: run, text, tool_start,
+ * tool_end, approval, done, error). Each send is its own server run; the
+ * server stores both turns and packs earlier ones into the prompt, so the
+ * client only sends the new message and the conversation id (adopted from the
+ * `run` event on a new chat). The route cannot abort a run, so the composer is
+ * simply disabled while one is live.
  */
-export function useAgentChat(): AgentChat {
+export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
+  const { conversationId = null } = opts
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [busy, setBusy] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [notFound, setNotFound] = useState(false)
+  const [current, setCurrent] = useState<string | null>(null)
   const busyRef = useRef(false)
-  const messagesRef = useRef<ChatMessage[]>([])
+  // The conversation on screen; a URL change to it (after `run`) must not reload it.
+  const currentRef = useRef<string | null>(null)
+  const optsRef = useRef(opts)
   useEffect(() => {
-    messagesRef.current = messages
-  }, [messages])
+    optsRef.current = opts
+  })
+
+  useEffect(() => {
+    if (conversationId === currentRef.current) return
+    currentRef.current = conversationId
+    setCurrent(conversationId)
+    setNotFound(false)
+    setMessages([])
+    if (!conversationId) {
+      setLoading(false)
+      return
+    }
+    const ctl = new AbortController()
+    setLoading(true)
+    fetch(`/api/agent/conversations/${conversationId}`, { credentials: 'same-origin', signal: ctl.signal })
+      .then(async (res) => {
+        if (res.status === 404 || res.status === 400) return setNotFound(true)
+        if (!res.ok) throw new Error(`Could not load this conversation (${res.status}).`)
+        const body = (await res.json()) as { messages: StoredMessage[] }
+        if (currentRef.current === conversationId) setMessages(body.messages.map(storedToChat))
+      })
+      .catch((err: unknown) => {
+        if (ctl.signal.aborted) return
+        setMessages([{ id: nextId(), role: 'assistant', text: '', tools: [], approvals: [], error: err instanceof Error ? err.message : 'Could not load this conversation.' }])
+      })
+      .finally(() => {
+        if (!ctl.signal.aborted) setLoading(false)
+      })
+    return () => ctl.abort()
+  }, [conversationId])
 
   const patch = useCallback((id: string, fn: (m: ChatMessage) => ChatMessage) => {
     setMessages((ms) => ms.map((m) => (m.id === id ? fn(m) : m)))
@@ -95,9 +160,6 @@ export function useAgentChat(): AgentChat {
       if (!text || busyRef.current) return
       busyRef.current = true
       setBusy(true)
-      const history = messagesRef.current
-        .filter((m) => !m.notConfigured && (m.role === 'user' || m.text))
-        .map((m) => ({ role: m.role, text: m.text }))
       const userMsg: ChatMessage = { id: nextId(), role: 'user', text, tools: [], approvals: [] }
       const aid = nextId()
       setMessages((ms) => [...ms, userMsg, { id: aid, role: 'assistant', text: '', tools: [], approvals: [], streaming: true }])
@@ -106,12 +168,14 @@ export function useAgentChat(): AgentChat {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: buildPrompt(history, text) }),
+          body: JSON.stringify({ prompt: text, ...(currentRef.current ? { conversation_id: currentRef.current } : {}) }),
         })
         if (!res.ok || !res.body) {
           const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string }
           if (res.status === 503 || body.error === 'agent_not_configured') {
             patch(aid, (m) => ({ ...m, notConfigured: true, error: body.message ?? 'The agent is not configured yet.' }))
+          } else if (res.status === 404) {
+            patch(aid, (m) => ({ ...m, error: 'This conversation was deleted. Start a new chat.' }))
           } else {
             patch(aid, (m) => ({ ...m, error: `Request failed (${res.status}${body.error ? `: ${body.error}` : ''})` }))
           }
@@ -124,6 +188,12 @@ export function useAgentChat(): AgentChat {
           if (done) break
           const { events, rest } = parseSseFrames(buffer + value)
           buffer = rest
+          const run = events.find((e) => e.type === 'run' && typeof e.conversation_id === 'string')
+          if (run && run.conversation_id !== currentRef.current) {
+            currentRef.current = String(run.conversation_id)
+            setCurrent(currentRef.current)
+            optsRef.current.onConversation?.(currentRef.current)
+          }
           if (events.length) patch(aid, (m) => events.reduce(applyAgentEvent, m))
         }
       } catch (err) {
@@ -132,19 +202,28 @@ export function useAgentChat(): AgentChat {
         patch(aid, (m) => ({ ...m, streaming: false }))
         busyRef.current = false
         setBusy(false)
+        optsRef.current.onSettled?.()
       }
     },
     [patch]
   )
 
+  /** Clear the screen for a new chat (the caller also drops `?c=` from the URL). */
   const reset = useCallback(() => {
-    if (!busyRef.current) setMessages([])
+    if (busyRef.current) return
+    currentRef.current = null
+    setCurrent(null)
+    setNotFound(false)
+    setMessages([])
   }, [])
 
   const live = busy ? messages.at(-1) : undefined
   return {
     messages,
     busy,
+    loading,
+    notFound,
+    conversationId: current,
     acting: !!live?.tools.some((t) => t.status === 'running'),
     streaming: !!live?.text,
     send,

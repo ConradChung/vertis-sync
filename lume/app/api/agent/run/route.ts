@@ -5,6 +5,9 @@ import { requireOwner } from '@/lib/auth/guards'
 import { buildActionRequest } from '@/lib/actions/build'
 import { createAction } from '@/lib/actions/create'
 import { sendMessage } from '@/lib/adapters/telegram'
+import { buildPrompt } from '@/lib/agent/chat'
+import { createConversation, getConversation, getMessages, insertMessage } from '@/lib/agent/conversations'
+import { contextFromMessages, titleFromPrompt, type StoredApproval, type StoredToolEntry } from '@/lib/agent/history'
 import { SYSTEM_PROMPT } from '@/lib/agent/prompt'
 import { toRunnableTools, type ToolHooks } from '@/lib/agent/runnable'
 import { failStaleRuns, insertAgentRun, updateAgentRun, type AgentRunPatch } from '@/lib/agent/runs'
@@ -13,11 +16,18 @@ import { STALE_RUN_MS, type ToolCallEntry } from '@/lib/agent/orbState'
 import { logEvent } from '@/lib/db/service'
 import type { Json } from '@/lib/db/types'
 import { dbErrorResponse } from '@/lib/http/errors'
-import { parseJsonBody } from '@/lib/http/json'
+import { parseJsonBody, UUID_RE } from '@/lib/http/json'
 import { internalOrigin } from '@/lib/http/origin'
 
 /**
- * POST `{ prompt }` → the orb agent, streamed as Server-Sent Events.
+ * POST `{ prompt, conversation_id? }` → the agent, streamed as Server-Sent Events.
+ *
+ * Chat history: without `conversation_id` a new `agent_conversations` row is
+ * created (titled from the prompt); with one (404 when missing or deleted),
+ * that conversation's stored turns are packed ahead of the prompt as context
+ * (`buildPrompt`) — the client never supplies history. The user message is
+ * stored before the run, the assistant message (text, tools, approvals,
+ * error) when it ends, server side, so a closed tab loses nothing.
  *
  * One `agent_runs` row per call (Realtime drives the orb). The SDK Tool
  * Runner loops over Lume's tiered tools; read/low tools call Lume's own
@@ -27,8 +37,8 @@ import { internalOrigin } from '@/lib/http/origin'
  * `approval_action_id`. Finish → `done` (or stays `needs_approval`) /
  * `failed`, with `usage` and the final text as `outcome`.
  *
- * SSE events (`data: <json>\n\n`): run, text, tool_start, tool_end,
- * approval, done, error.
+ * SSE events (`data: <json>\n\n`): run (`{ id, conversation_id }`), text,
+ * tool_start, tool_end, approval, done, error.
  *
  * 503 `agent_not_configured` when `ANTHROPIC_API_KEY` is unset.
  */
@@ -38,7 +48,10 @@ export const runtime = 'nodejs'
 
 const MODEL = 'claude-opus-5-5'
 
-const Body = z.object({ prompt: z.string().trim().min(1).max(4000) })
+const Body = z.object({
+  prompt: z.string().trim().min(1).max(4000),
+  conversation_id: z.string().regex(UUID_RE).optional(),
+})
 
 type SseEvent = Record<string, unknown> & { type: string }
 
@@ -55,7 +68,7 @@ export async function POST(req: Request) {
 
   const body = await parseJsonBody(req, Body, 16 * 1024)
   if (!body.ok) return body.response
-  const prompt = body.data.prompt
+  const message = body.data.prompt
 
   // Runs left `running` by a killed function: close them so the orb and the
   // run log stop showing them as live. Best effort.
@@ -66,8 +79,20 @@ export async function POST(req: Request) {
   }
 
   let runId: string
+  let conversationId: string
+  let prompt = message
   try {
+    if (body.data.conversation_id) {
+      const id = body.data.conversation_id.toLowerCase()
+      const conversation = await getConversation(id)
+      if (!conversation) return NextResponse.json({ error: 'conversation_not_found' }, { status: 404 })
+      conversationId = conversation.id
+      prompt = buildPrompt(contextFromMessages(await getMessages(conversationId)), message)
+    } else {
+      conversationId = (await createConversation(titleFromPrompt(message))).id
+    }
     runId = (await insertAgentRun(prompt, MODEL)).id
+    await insertMessage({ conversation_id: conversationId, role: 'user', text: message, run_id: runId })
   } catch (err) {
     return dbErrorResponse(err, 'api/agent/run')
   }
@@ -88,8 +113,13 @@ export async function POST(req: Request) {
           closed = true
         }
       }
-      send({ type: 'run', id: runId })
-      await executeRun({ runId, prompt, origin, send })
+      send({ type: 'run', id: runId, conversation_id: conversationId })
+      const reply = await executeRun({ runId, prompt, title: message, origin, send })
+      try {
+        await insertMessage({ conversation_id: conversationId, role: 'assistant', run_id: runId, ...reply })
+      } catch (err) {
+        console.error('[api/agent/run] storing the reply failed:', err instanceof Error ? err.message : err)
+      }
       if (!closed) {
         closed = true
         controller.close()
@@ -111,17 +141,38 @@ export async function POST(req: Request) {
   })
 }
 
+/** What the run said and did, stored as the assistant message. */
+interface RunReply {
+  text: string
+  tools: StoredToolEntry[]
+  approvals: StoredApproval[]
+  error: string | null
+}
+
 async function executeRun({
   runId,
   prompt,
+  title,
   origin,
-  send,
+  send: emit,
 }: {
   runId: string
   prompt: string
+  /** The owner's own words (the prompt may carry packed history). */
+  title: string
   origin: string
   send: (e: SseEvent) => void
-}): Promise<void> {
+}): Promise<RunReply> {
+  // Mirror what the browser shows, so a reloaded conversation looks the same.
+  const reply: RunReply = { text: '', tools: [], approvals: [], error: null }
+  const send = (e: SseEvent) => {
+    if (e.type === 'text') reply.text += String(e.delta ?? '')
+    else if (e.type === 'approval') {
+      const a = { action_id: String(e.action_id), deep_link: String(e.deep_link ?? `/actions/${e.action_id}`), summary: (e.summary as string | null) ?? null, tool: String(e.tool ?? '') }
+      reply.approvals = [...reply.approvals.filter((x) => x.action_id !== a.action_id), a]
+    } else if (e.type === 'error') reply.error = String(e.message ?? 'The run failed.')
+    emit(e)
+  }
   const toolCalls: ToolCallEntry[] = []
   let approvalActionId: string | null = null
   const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -232,11 +283,21 @@ async function executeRun({
       type: 'agent.run',
       source: 'lume',
       source_id: runId,
-      title: prompt.slice(0, 120),
+      title: title.slice(0, 120),
       payload: { status, tools: toolCalls.length, approval_action_id: approvalActionId },
     })
   } catch (err) {
     console.error('[api/agent/run] logEvent failed:', err instanceof Error ? err.message : err)
   }
   send({ type: 'done', id: runId, status, usage, approval_action_id: approvalActionId })
+  reply.tools = toolCalls.map((c) => ({
+    id: c.id,
+    name: c.name,
+    tier: c.tier,
+    status: c.status === 'ok' && c.tier === 'high' ? 'awaiting' : c.status,
+    ...(c.ms !== undefined ? { ms: c.ms } : {}),
+    ...(c.error ? { error: c.error } : {}),
+  }))
+  if (status === 'failed' && !reply.error && !reply.text) reply.error = outcome || 'The run failed.'
+  return reply
 }

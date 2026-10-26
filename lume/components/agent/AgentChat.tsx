@@ -1,12 +1,17 @@
 'use client'
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowUp, ChevronRight, KeyRound, RotateCcw, Wrench } from 'lucide-react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { ArrowUp, ChevronRight, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, SquarePen, Wrench } from 'lucide-react'
+import { AgentHistory, useConversationList } from '@/components/agent/AgentHistory'
 import { Markdown } from '@/components/agent/Markdown'
 import { Waveform, type WaveMode } from '@/components/agent/Waveform'
 import { PlanCard } from '@/components/orb/PlanCard'
 import { ToolLog, type ToolLogEntry } from '@/components/orb/ToolLog'
 import { useSpeechRecognition, VoiceInput } from '@/components/orb/VoiceInput'
+import { Button } from '@/components/ui/button'
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useAgentChat, type ChatMessage } from '@/hooks/useAgentChat'
 import { cn } from '@/lib/utils'
 
@@ -29,13 +34,33 @@ function greeting(d = new Date()) {
   return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
 }
 
+const COLLAPSE_KEY = 'lume.agent.history.collapsed'
+
 /**
- * `/agent`: a ChatGPT/Claude-style conversation with the Lume agent. Centered
- * 760px column, messages above, composer pinned at the bottom with a voice
- * waveform (idle pulse / live mic / working shimmer).
+ * `/agent`: a ChatGPT/Claude-style conversation with the Lume agent. History
+ * sidebar on the left (collapsible; a sheet on narrow screens), then a
+ * centered 760px column, messages above, composer pinned at the bottom with a
+ * voice waveform (idle pulse / live mic / working shimmer). The open
+ * conversation lives in `?c=<id>`, so a refresh keeps it.
  */
 export function AgentChat() {
-  const chat = useAgentChat()
+  const router = useRouter()
+  const pathname = usePathname()
+  const params = useSearchParams()
+  const urlId = params.get('c')
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [collapsed, setCollapsed] = useState(false)
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const bump = useCallback(() => setRefreshKey((k) => k + 1), [])
+  const list = useConversationList(refreshKey)
+  const chat = useAgentChat({
+    conversationId: urlId,
+    onConversation: (id) => {
+      router.replace(`${pathname}?c=${id}`, { scroll: false })
+      bump()
+    },
+    onSettled: bump,
+  })
   const speech = useSpeechRecognition()
   const [draft, setDraft] = useState('')
   const [hello, setHello] = useState('Hello')
@@ -45,13 +70,46 @@ export function AgentChat() {
 
   useEffect(() => setHello(greeting()), [])
 
+  useEffect(() => {
+    try {
+      setCollapsed(localStorage.getItem(COLLAPSE_KEY) === '1')
+    } catch {
+      // storage blocked: start expanded
+    }
+  }, [])
+  const toggleCollapsed = () =>
+    setCollapsed((v) => {
+      try {
+        localStorage.setItem(COLLAPSE_KEY, v ? '0' : '1')
+      } catch {
+        // per-viewer convenience only
+      }
+      return !v
+    })
+
+  const newChat = useCallback(() => {
+    if (busy) return
+    chat.reset()
+    setSheetOpen(false)
+    if (urlId) router.push(pathname, { scroll: false })
+    requestAnimationFrame(() => inputRef.current?.focus())
+  }, [busy, chat, urlId, router, pathname])
+
+  const openConversation = useCallback(
+    (id: string) => {
+      setSheetOpen(false)
+      if (id !== chat.conversationId) router.push(`${pathname}?c=${id}`, { scroll: false })
+    },
+    [chat.conversationId, router, pathname]
+  )
+
   const submit = useCallback(
     (text: string) => {
-      if (!text.trim() || busy) return
+      if (!text.trim() || busy || chat.loading) return
       setDraft('')
       void send(text)
     },
-    [busy, send]
+    [busy, chat.loading, send]
   )
 
   // Hand the composer back once a run finishes (it is disabled while one is live).
@@ -99,88 +157,168 @@ export function AgentChat() {
           : 'Thinking…'
       : null
 
-  return (
-    <div className="mx-auto flex min-h-[calc(100dvh-var(--topbar-h)-110px)] w-full max-w-[760px] flex-col">
-      <div className="flex-1" aria-live="polite" aria-busy={busy}>
-        {messages.length === 0 ? (
-          <EmptyState hello={hello} onPick={submit} disabled={busy} />
-        ) : (
-          <ol className="flex flex-col gap-7 pt-2 pb-6" aria-label="Conversation">
-            {messages.map((m) => (
-              <li key={m.id}>
-                <Message m={m} />
-              </li>
-            ))}
-          </ol>
-        )}
-        <div ref={endRef} />
-      </div>
+  const history = (
+    <AgentHistory
+      list={list}
+      activeId={chat.conversationId}
+      busy={busy}
+      onSelect={openConversation}
+      onNew={newChat}
+      onDeletedActive={() => {
+        chat.reset()
+        router.replace(pathname, { scroll: false })
+      }}
+      className="h-full"
+    />
+  )
 
-      <div className="sticky bottom-0 z-10 -mx-2 px-2 pt-10 pb-3">
-        <div className="mb-2 flex items-center justify-center gap-3">
-          <Waveform mode={mode} className="h-11" />
+  return (
+    <div className="flex w-full gap-6">
+      {!collapsed && (
+        <aside className="glass sticky top-[calc(var(--topbar-h)+2rem)] hidden h-[calc(100dvh-var(--topbar-h)-4rem)] w-64 shrink-0 rounded-panel p-3 lg:block">
+          {history}
+        </aside>
+      )}
+      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+        <SheetContent side="left" className="w-72 p-4 pt-12">
+          <SheetTitle className="sr-only">Chat history</SheetTitle>
+          {history}
+        </SheetContent>
+      </Sheet>
+
+      <div className="relative min-w-0 flex-1">
+        <div className="absolute top-0 left-0 z-10 flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="hidden lg:inline-flex"
+            onClick={toggleCollapsed}
+            aria-label={collapsed ? 'Show chat history' : 'Hide chat history'}
+            aria-pressed={!collapsed}
+          >
+            <PanelLeft className="size-4" />
+          </Button>
+          <Button variant="ghost" size="icon-sm" className="lg:hidden" onClick={() => setSheetOpen(true)} aria-label="Show chat history">
+            <PanelLeft className="size-4" />
+          </Button>
+          {/* New chat lives in the sidebar; repeat it here whenever the sidebar is out of view. */}
+          <Button variant="ghost" size="icon-sm" className={cn(!collapsed && 'lg:hidden')} onClick={newChat} disabled={busy} aria-label="New chat">
+            <SquarePen className="size-4" />
+          </Button>
         </div>
-        {status && (
-          <p className="mb-2 truncate text-center text-[12px] text-fg-46" role="status">
-            {status}
-          </p>
-        )}
-        <form
-          className={cn(
-            'glass flex items-end gap-2 rounded-2xl p-2 pl-4 transition-colors focus-within:border-primary/60',
-            speech.listening && 'border-primary/60'
-          )}
-          onSubmit={(e) => {
-            e.preventDefault()
-            submit(draft)
-          }}
-        >
-          <label htmlFor="agent-composer" className="sr-only">
-            Message Lume
-          </label>
-          <textarea
-            id="agent-composer"
-            ref={inputRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+        <div className="mx-auto flex min-h-[calc(100dvh-var(--topbar-h)-110px)] w-full max-w-[760px] flex-col">
+          <div className="flex-1" aria-live="polite" aria-busy={busy || chat.loading}>
+            {chat.notFound ? (
+              <MissingConversation onNew={newChat} />
+            ) : chat.loading ? (
+              <LoadingConversation />
+            ) : messages.length === 0 ? (
+              <EmptyState hello={hello} onPick={submit} disabled={busy} />
+            ) : (
+              <ol className="flex flex-col gap-7 pt-2 pb-6" aria-label="Conversation">
+                {messages.map((m) => (
+                  <li key={m.id}>
+                    <Message m={m} />
+                  </li>
+                ))}
+              </ol>
+            )}
+            <div ref={endRef} />
+          </div>
+
+          <div className="sticky bottom-0 z-10 -mx-2 px-2 pt-10 pb-3">
+            <div className="mb-2 flex items-center justify-center gap-3">
+              <Waveform mode={mode} className="h-11" />
+            </div>
+            {status && (
+              <p className="mb-2 truncate text-center text-[12px] text-fg-46" role="status">
+                {status}
+              </p>
+            )}
+            <form
+              className={cn(
+                'glass flex items-end gap-2 rounded-2xl p-2 pl-4 transition-colors focus-within:border-primary/60',
+                speech.listening && 'border-primary/60'
+              )}
+              onSubmit={(e) => {
                 e.preventDefault()
                 submit(draft)
-              }
-            }}
-            rows={1}
-            maxLength={4000}
-            disabled={busy}
-            placeholder={busy ? 'Lume is working…' : 'Ask Lume anything — press / to focus'}
-            aria-describedby="agent-composer-hint"
-            className="max-h-[220px] min-h-10 flex-1 resize-none bg-transparent py-2 text-[15px] leading-6 text-fg outline-none placeholder:text-fg-24 disabled:opacity-60"
-          />
-          <VoiceInput speech={speech} onFinal={submit} />
-          <button
-            type="submit"
-            disabled={busy || !draft.trim()}
-            aria-label="Send message"
-            className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-[opacity,background-color] outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-35 dark:shadow-(--primary-glow)"
-          >
-            <ArrowUp className="size-4" />
-          </button>
-        </form>
-        <p id="agent-composer-hint" className="mt-2 flex items-center justify-center gap-3 text-[11px] text-fg-24">
-          <span>Enter to send · Shift+Enter for a new line</span>
-          <span aria-hidden>·</span>
-          <span>Anything risky waits for your approval</span>
-          {messages.length > 0 && !busy && (
-            <button type="button" onClick={chat.reset} className="inline-flex items-center gap-1 text-fg-46 hover:text-fg">
-              <RotateCcw className="size-3" /> New chat
-            </button>
-          )}
-        </p>
-        {speech.error && (
-          <p className="mt-1 text-center text-[12px] text-red" role="alert">
-            Microphone: {speech.error}
-          </p>
-        )}
+              }}
+            >
+              <label htmlFor="agent-composer" className="sr-only">
+                Message Lume
+              </label>
+              <textarea
+                id="agent-composer"
+                ref={inputRef}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault()
+                    submit(draft)
+                  }
+                }}
+                rows={1}
+                maxLength={4000}
+                disabled={busy}
+                placeholder={busy ? 'Lume is working…' : 'Ask Lume anything — press / to focus'}
+                aria-describedby="agent-composer-hint"
+                className="max-h-[220px] min-h-10 flex-1 resize-none bg-transparent py-2 focus-visible:outline-none! text-[15px] leading-6 text-fg outline-none placeholder:text-fg-24 disabled:opacity-60"
+              />
+              <VoiceInput speech={speech} onFinal={submit} />
+              <button
+                type="submit"
+                disabled={busy || !draft.trim()}
+                aria-label="Send message"
+                className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-[opacity,background-color] outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-35 dark:shadow-(--primary-glow)"
+              >
+                <ArrowUp className="size-4" />
+              </button>
+            </form>
+            <p id="agent-composer-hint" className="mt-2 flex items-center justify-center gap-3 text-[11px] text-fg-24">
+              <span>Enter to send · Shift+Enter for a new line</span>
+              <span aria-hidden>·</span>
+              <span>Anything risky waits for your approval</span>
+              {messages.length > 0 && !busy && (
+                <button type="button" onClick={newChat} className="inline-flex items-center gap-1 text-fg-46 hover:text-fg">
+                  <RotateCcw className="size-3" /> New chat
+                </button>
+              )}
+            </p>
+            {speech.error && (
+              <p className="mt-1 text-center text-[12px] text-red" role="alert">
+                Microphone: {speech.error}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MissingConversation({ onNew }: { onNew: () => void }) {
+  return (
+    <div className="flex min-h-[46vh] flex-col items-center justify-center text-center" role="status">
+      <MessageSquareDashed className="size-6 text-fg-46" />
+      <h2 className="mt-3 text-[18px] font-semibold text-fg">This chat isn&apos;t here</h2>
+      <p className="mt-1 text-[14px] text-fg-46">It was deleted, or the link is wrong.</p>
+      <Button className="mt-5" onClick={onNew}>
+        Start a new chat
+      </Button>
+    </div>
+  )
+}
+
+function LoadingConversation() {
+  return (
+    <div className="flex flex-col gap-7 pt-2" aria-label="Loading conversation">
+      <Skeleton className="ml-auto h-10 w-2/5 rounded-2xl" />
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-4 w-4/5" />
+        <Skeleton className="h-4 w-3/5" />
+        <Skeleton className="h-4 w-2/3" />
       </div>
     </div>
   )
@@ -229,8 +367,8 @@ function Message({ m }: { m: ChatMessage }) {
           <div>
             <p className="font-medium text-amber">The agent isn&apos;t set up yet</p>
             <p className="mt-0.5 text-fg-70">
-              {m.error} Add <code className="font-mono text-[12px] text-fg">ANTHROPIC_API_KEY</code> to the deployment&apos;s environment and redeploy — the rest
-              of Lume works without it.
+              {m.error} Add <code className="font-mono text-[12px] text-fg">ANTHROPIC_API_KEY</code> to the deployment&apos;s environment and redeploy — the
+              rest of Lume works without it.
             </p>
           </div>
         </div>
@@ -269,13 +407,8 @@ function ThinkingDots() {
   return (
     <div className="flex h-6 items-center gap-1" aria-label="Thinking">
       {[0, 1, 2].map((i) => (
-        <span
-          key={i}
-          className="size-1.5 animate-pulse rounded-full bg-fg-46 motion-reduce:animate-none"
-          style={{ animationDelay: `${i * 160}ms` }}
-        />
+        <span key={i} className="size-1.5 animate-pulse rounded-full bg-fg-46 motion-reduce:animate-none" style={{ animationDelay: `${i * 160}ms` }} />
       ))}
     </div>
   )
 }
-

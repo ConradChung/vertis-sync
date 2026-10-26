@@ -15,10 +15,20 @@ const h = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   fetch: vi.fn(),
   toolRunner: vi.fn(),
+  createConversation: vi.fn(),
+  getConversation: vi.fn(),
+  getMessages: vi.fn(),
+  insertMessage: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/guards', () => ({ requireOwner: h.requireOwner }))
 vi.mock('@/lib/agent/runs', () => ({ insertAgentRun: h.insertAgentRun, updateAgentRun: h.updateAgentRun, failStaleRuns: h.failStaleRuns }))
+vi.mock('@/lib/agent/conversations', () => ({
+  createConversation: h.createConversation,
+  getConversation: h.getConversation,
+  getMessages: h.getMessages,
+  insertMessage: h.insertMessage,
+}))
 vi.mock('@/lib/actions/create', () => ({ createAction: h.createAction }))
 vi.mock('@/lib/db/service', () => ({ logEvent: h.logEvent, isDbError: () => false }))
 vi.mock('@/lib/adapters/telegram', () => ({ sendMessage: h.sendMessage }))
@@ -63,9 +73,11 @@ function fakeRunner(turns: { text: string; call?: { name: string; input: unknown
   }))
 }
 
-function post(prompt: string) {
-  return POST(new Request('https://lume.test/api/agent/run', { method: 'POST', body: JSON.stringify({ prompt }) }))
+function post(prompt: string, extra: Record<string, unknown> = {}) {
+  return POST(new Request('https://lume.test/api/agent/run', { method: 'POST', body: JSON.stringify({ prompt, ...extra }) }))
 }
+
+const CONV = '0f3c2b1a-9d8e-4f7a-8b6c-5d4e3f2a1b0c'
 
 async function events(res: Response) {
   const text = await res.text()
@@ -83,6 +95,10 @@ beforeEach(() => {
   h.failStaleRuns.mockResolvedValue(0)
   h.createAction.mockResolvedValue({ id: 'act-1' })
   h.logEvent.mockResolvedValue(null)
+  h.createConversation.mockResolvedValue({ id: 'conv-new', title: 't', created_at: '', updated_at: '' })
+  h.getConversation.mockResolvedValue({ id: CONV, title: 'Old', created_at: '', updated_at: '' })
+  h.getMessages.mockResolvedValue([])
+  h.insertMessage.mockResolvedValue(undefined)
   process.env.ANTHROPIC_API_KEY = 'test-key'
 })
 
@@ -114,7 +130,7 @@ describe('POST /api/agent/run', () => {
     const res = await post('status?')
     expect(res.headers.get('content-type')).toContain('text/event-stream')
     const ev = await events(res)
-    expect(ev[0]).toEqual({ type: 'run', id: 'run-1' })
+    expect(ev[0]).toEqual({ type: 'run', id: 'run-1', conversation_id: 'conv-new' })
     expect(ev).toContainEqual({ type: 'text', delta: 'All quiet.' })
     expect(ev.at(-1)).toMatchObject({ type: 'done', status: 'done' })
     expect(h.toolRunner.mock.calls[0][0]).toMatchObject({ model: 'claude-opus-5-5', stream: true, thinking: { type: 'adaptive' } })
@@ -202,5 +218,98 @@ describe('POST /api/agent/run', () => {
     const ev = await events(await post('x'))
     expect(ev).toContainEqual({ type: 'error', message: 'boom' })
     expect(h.updateAgentRun.mock.calls.at(-1)![1]).toMatchObject({ status: 'failed', outcome: 'boom' })
+  })
+
+  describe('chat history', () => {
+    it('no conversation_id: creates one titled from the prompt and stores both turns', async () => {
+      fakeRunner([{ text: 'All quiet.' }])
+      const ev = await events(await post('What is waiting on me today?'))
+      expect(h.createConversation).toHaveBeenCalledWith('What is waiting on me today?')
+      expect(h.getConversation).not.toHaveBeenCalled()
+      expect(ev[0]).toMatchObject({ type: 'run', conversation_id: 'conv-new' })
+      expect(h.insertMessage).toHaveBeenNthCalledWith(1, { conversation_id: 'conv-new', role: 'user', text: 'What is waiting on me today?', run_id: 'run-1' })
+      expect(h.insertMessage).toHaveBeenNthCalledWith(2, {
+        conversation_id: 'conv-new',
+        role: 'assistant',
+        run_id: 'run-1',
+        text: 'All quiet.',
+        tools: [],
+        approvals: [],
+        error: null,
+      })
+      // The user turn is stored before the model runs.
+      expect(h.insertMessage.mock.invocationCallOrder[0]).toBeLessThan(h.toolRunner.mock.invocationCallOrder[0])
+    })
+
+    it('with conversation_id: packs the stored turns ahead of the new message (never client-supplied)', async () => {
+      h.getMessages.mockResolvedValue([
+        { role: 'user', text: 'pause campaign A' },
+        { role: 'assistant', text: 'Filed it for approval.' },
+      ])
+      fakeRunner([{ text: 'Done.' }])
+      const ev = await events(await post('and B?', { conversation_id: CONV.toUpperCase() }))
+      expect(h.getConversation).toHaveBeenCalledWith(CONV)
+      expect(h.createConversation).not.toHaveBeenCalled()
+      const sent = h.toolRunner.mock.calls[0][0].messages[0].content as string
+      expect(sent).toContain('Owner: pause campaign A')
+      expect(sent).toContain('Lume: Filed it for approval.')
+      expect(sent.endsWith('Current request:\nand B?')).toBe(true)
+      expect(h.insertAgentRun).toHaveBeenCalledWith(sent, 'claude-opus-5-5')
+      expect(h.insertMessage.mock.calls[0][0]).toMatchObject({ conversation_id: CONV, role: 'user', text: 'and B?' })
+      expect(ev[0]).toMatchObject({ conversation_id: CONV })
+      expect(h.logEvent.mock.calls[0][0]).toMatchObject({ title: 'and B?' })
+    })
+
+    it('404 for a missing or deleted conversation, before any run is recorded', async () => {
+      h.getConversation.mockResolvedValue(null)
+      const res = await post('hi', { conversation_id: CONV })
+      expect(res.status).toBe(404)
+      expect(await res.json()).toEqual({ error: 'conversation_not_found' })
+      expect(h.insertAgentRun).not.toHaveBeenCalled()
+      expect(h.insertMessage).not.toHaveBeenCalled()
+    })
+
+    it('400 for a malformed conversation_id', async () => {
+      expect((await post('hi', { conversation_id: 'nope' })).status).toBe(400)
+    })
+
+    it('stores the tool log (high tier as awaiting) and approval cards with the reply', async () => {
+      fakeRunner([
+        { text: 'Plan: pause it.', call: { name: 'pause_campaign', input: { campaign_id: 'c1' } } },
+        { text: 'Waiting for your approval.' },
+      ])
+      await events(await post('pause c1'))
+      const reply = h.insertMessage.mock.calls.at(-1)![0]
+      expect(reply.text).toBe('Plan: pause it.\n\nWaiting for your approval.')
+      expect(reply.tools).toEqual([expect.objectContaining({ name: 'pause_campaign', tier: 'high', status: 'awaiting' })])
+      expect(reply.tools[0]).not.toHaveProperty('input')
+      expect(reply.approvals).toEqual([{ action_id: 'act-1', deep_link: '/actions/act-1', summary: expect.anything(), tool: 'pause_campaign' }])
+    })
+
+    it('stores the error when the run fails', async () => {
+      h.toolRunner.mockImplementation(() => ({
+        async *[Symbol.asyncIterator]() {
+          throw new Error('boom')
+        },
+      }))
+      await events(await post('x'))
+      expect(h.insertMessage.mock.calls.at(-1)![0]).toMatchObject({ role: 'assistant', text: '', error: 'boom' })
+    })
+
+    it('a failed reply write is logged and the stream still ends cleanly', async () => {
+      h.insertMessage.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('db down'))
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      fakeRunner([{ text: 'ok' }])
+      const ev = await events(await post('hi'))
+      expect(ev.at(-1)).toMatchObject({ type: 'done' })
+    })
+
+    it('a failed conversation create is a 500 and nothing runs', async () => {
+      h.createConversation.mockRejectedValue(new Error('db down'))
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const res = await post('hi')
+      expect(res.status).toBe(500)
+      expect(h.toolRunner).not.toHaveBeenCalled()
+    })
   })
 })
