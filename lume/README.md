@@ -1,12 +1,125 @@
 # lume
 
 Command center over the vertis-sync outbound pipelines. A second, independent
-Next.js app inside this repo; see `docs/lume/2026-10-14-lume-design.md`.
+Next.js app inside this repo; see `docs/lume/2026-10-14-lume-design.md`
+(design), `docs/lume/2026-10-14-lume.md` (plan) and `docs/lume/PR.md`.
+
+Lume is a second door onto the existing pipelines, not a new pipeline: every
+decision it makes goes through the same claim a Telegram tap uses, and every
+spending or outbound step still waits on an explicit approval.
+
+## Run locally
+
+```sh
+cd lume
+npm install
+cp .env.example .env.local   # fill in values (never commit them)
+npm run dev                  # http://localhost:3000
+```
+
+No local Supabase is needed: the app talks to the hosted project
+(`NEXT_PUBLIC_SUPABASE_URL`). Sign-in is a magic link to `LUME_ALLOWED_EMAIL`,
+so `http://localhost:3000/auth/callback` must be on the Supabase Auth redirect
+allowlist (see Owner setup). `/design` renders every component in each state
+from fixtures (owner-gated like every page; no fetches).
+
+Checks: `npm run lint`, `npx tsc --noEmit`, `npx vitest run`, `npm run build`.
+`LUME_SMOKE=1 npm run smoke:db` is a read-only row count against the live DB.
+
+## Secrets
+
+Names only; values live in Vercel (Root Directory `lume`) and `.env.local`.
+`lume/.env.example` lists every name the code reads.
+
+| Name | Where | Used for |
+| --- | --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Vercel | Browser + session client; Realtime |
+| `SUPABASE_SERVICE_ROLE_KEY` | Vercel | Server-only data layer and Storage (`raw-uploads`) |
+| `LUME_ALLOWED_EMAIL` | Vercel | The one account allowed to sign in (middleware + magic-link route) |
+| `LUME_ACTION_SECRET` | Vercel **and** edge secret | `X-Lume-Secret`: Lume → `telegram-inbox` decisions, and `telegram-inbox` → `/api/actions/<id>/execute` after a Telegram `lume_ok` |
+| `LUME_HOOK_SECRET` | Vercel (+ vault `lume_hook_secret`, same value) | `X-Lume-Hook-Secret` on `/api/hooks/gate-opened` and `/api/cron/rotation-tick` (called by pg_net) |
+| `LUME_INTERNAL_SECRET` | Vercel | `Authorization: Bearer` for the agent's tool calls into `/api/*`; also the HMAC key for CSV upload tickets |
+| `LUME_URL` | Vercel **and** edge secret (+ vault `lume_url`) | Public base URL, no trailing slash: deep links in Telegram messages, magic-link origin, and where `telegram-inbox` calls execute. Unset = no deep links and approvals from Telegram execute nothing |
+| `INSTANTLY_WEBHOOK_SECRET` | Vercel | `?secret=` on `/api/webhooks/instantly` |
+| `INSTANTLY_API_KEY` | Vercel | Instantly reads and approved actions; unset = "Instantly not connected" |
+| `ROTATE_CAMPAIGN_ID` | Vercel (optional) | The campaign the Rotate screen marks as `instantly-rotate`'s drain (same name + default as the edge function) |
+| `ANTHROPIC_API_KEY` | Vercel | Orb agent (`/api/agent/run`) |
+| `APIFY_API_TOKEN` | Vercel | Import → Apify pull |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Vercel (copies of the edge values) | Gate pings, approval prompts, ingest prompts; unset = Telegram no-ops with a warning |
+| `LUME_SMOKE` | shell only | Opt-in for `npm run smoke:db` |
+
+## Vault entries (Supabase, one-time, as project owner)
+
+```sql
+select vault.create_secret('https://<lume host>', 'lume_url');
+select vault.create_secret('<same value as LUME_HOOK_SECRET>', 'lume_hook_secret');
+select vault.create_secret('<owner email>', 'lume_owner_email');
+```
+
+`lume_url` + `lume_hook_secret`: `lume_gate_opened()` and
+`lume_rotation_tick()` (pg_cron, every 15 min) return silently until both
+exist. `lume_owner_email`: `lume_is_owner()` gates the RLS read policies on
+`events` / `pending_actions` / `agent_runs` (Realtime); no secret = deny.
+
+## Instantly webhook
+
+Register in Instantly (all events):
+
+```
+https://<lume host>/api/webhooks/instantly?secret=<INSTANTLY_WEBHOOK_SECRET>
+```
+
+Bodies over 128 KB are refused; events are deduped on `webhook_id` and land in
+`events` (Overview feed).
+
+## Telegram deep links
+
+Lume's messages carry links only when `LUME_URL` is set:
+
+- gate ping: `${LUME_URL}/validate?gate=<kind>:<target_id>` (e.g.
+  `/validate?gate=ingest_approval:7db3…`), focusing that gate card;
+- approval prompt: `${LUME_URL}/actions/<pending_action_id>` (plan card with
+  Confirm / Cancel), alongside the `lume_ok:<id>` / `lume_no:<id>` buttons.
+
+## Owner setup
+
+1. Supabase Auth → URL Configuration: add `http://localhost:3000/auth/callback`
+   and `https://<lume host>/auth/callback` to the redirect allowlist.
+2. Create the owner user (Authentication → Users → Add user, the
+   `LUME_ALLOWED_EMAIL` address). The magic-link route never creates users.
+3. Storage bucket `raw-uploads`: set `file_size_limit` to 20 MB and allow the
+   Lume origin(s) in CORS; verify with a > 4.5 MB CSV from the deployed origin
+   (the browser uploads straight to a signed URL).
+4. Vercel: new project on this repo, **Root Directory `lume`**, env vars from
+   the table above. Routes with `maxDuration = 300` (`/api/gates/decide`,
+   `/api/actions/[id]/decide`, `/api/actions/[id]/execute`, `/api/agent/run`)
+   need Fluid compute (Pro); on Hobby they are capped lower.
+5. Edge secrets: `supabase secrets set LUME_ACTION_SECRET=… LUME_URL=…
+   --project-ref rcfrumrbauwvyzfebxck` (then redeploy `telegram-inbox` via
+   `deploy-functions.yml` if it was deployed before they existed).
+6. Vault entries above; register the Instantly webhook.
+
+## What Lume must never bypass
+
+- **The tap.** Every stage still waits on an explicit approval. Gate decisions
+  go through `telegram-inbox` (`X-Lume-Secret` entrypoint) and its conditional
+  PATCH claims; Lume never writes pipeline state itself and never creates
+  `validation_jobs`.
+- **Pending actions.** Push to Instantly, campaign launch, replies, pauses and
+  rule-proposed actions are `pending_actions` rows that execute only after
+  Confirm in Lume or `lume_ok` in Telegram, exactly once (whichever claims
+  first). `/api/gates/decide` refuses `push_go` / `camp_launch` / `lume_ok` /
+  `lume_no` (`needs_confirmation`). The orb agent's high-risk tools only create
+  pending actions.
+- **Notify-only automation.** The rotation tick and the watchdog never act;
+  they create pending actions / send pings.
+- **Secrets** stay in env / vault, never in code or logs.
 
 ## Deploy
 
 In the Vercel project settings, set **Root Directory** to `lume`. `vercel.json`
-here declares the framework; `crons` is filled by later tasks.
+here declares the framework; `crons` stays empty (the rotation tick is
+pg_cron → `/api/cron/rotation-tick`, not a Vercel cron).
 
 Environment variable names are listed in `.env.example`.
 
@@ -83,10 +196,12 @@ Environment variable names are listed in `.env.example`.
 - Import (`/import`): `POST /api/import/{apify,csv,apollo-link}` only create
   the intake. CSV uploads skip the function body (Vercel ~4.5 MB cap):
   `/api/import/csv/sign` returns a signed Storage upload URL for
-  `lume/<uuid>.csv` plus an HMAC `upload_ticket`; the browser uploads with
+  `lume/<uuid>.csv` plus an `upload_ticket` (`<exp>.<HMAC(path|exp)>`, 15 min); the browser uploads with
   `uploadToSignedUrl`, then `/api/import/csv` verifies path + ticket, refuses
   a path already ingested (409), stats/streams the object (≤ 20 MB) and calls
-  `createIngestForStoredObject`. Apify reads items with a 40 MB cap under one
+  `createIngestForStoredObject` (`maxDuration = 90`). A verified upload
+  rejected as too large / not CSV / empty, or whose ingest insert fails, is
+  removed from Storage. Apify reads items with a 40 MB cap under one
   105 s deadline (504 `apify_timeout`). Otherwise the intake — `lib/import/ingest.ts` uploads to `raw-uploads/lume/<uuid>.csv`,
   inserts `telegram_ingests` (`sender_platform='lume'`, `awaiting_approval`)
   and sends telegram-inbox's own prompt/keyboard; Apollo links become
@@ -128,5 +243,3 @@ npm run lint
 npm test           # vitest
 npm run build
 ```
-
-Full README lands in Task 15.
