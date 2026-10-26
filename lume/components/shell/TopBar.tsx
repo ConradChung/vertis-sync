@@ -2,9 +2,12 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useCallback, useEffect } from 'react'
+import { useSWRConfig } from 'swr'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
 import { CommandPalette } from '@/components/shell/CommandPalette'
 import { cn } from '@/lib/utils'
+import { prefetchTab, TAB_KEYS } from '@/lib/prefetch/tabs'
 
 export const TABS = [
   { href: '/overview', label: 'Overview' },
@@ -24,6 +27,28 @@ export const TABS = [
  */
 export function TopBar() {
   const pathname = usePathname()
+  const { cache, mutate } = useSWRConfig()
+  const warm = useCallback(
+    (href: string) => prefetchTab(href, { mutate, hasData: (key) => cache.get(key)?.data !== undefined }),
+    [cache, mutate]
+  )
+
+  // Once the first screen has settled, quietly warm the other tabs so the
+  // first click on each renders from cache (and refreshes in the background).
+  useEffect(() => {
+    const run = () => {
+      for (const href of Object.keys(TAB_KEYS)) if (!pathname.startsWith(href)) warm(href)
+    }
+    const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void }
+    if (w.requestIdleCallback) {
+      const id = w.requestIdleCallback(run, { timeout: 4_000 })
+      return () => w.cancelIdleCallback?.(id)
+    }
+    const t = setTimeout(run, 1_500)
+    return () => clearTimeout(t)
+    // First mount only: later navigations are covered by hover/focus warming.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <header className="glass fixed inset-x-3 top-4 z-30 mx-auto flex h-14 items-center gap-1 rounded-full bg-(--bar-fill) py-2 pr-2 pl-4 shadow-(--bar-shadow) backdrop-blur-xl sm:inset-x-0 sm:w-fit sm:max-w-[calc(100%-2rem)]">
@@ -40,6 +65,8 @@ export function TopBar() {
               key={tab.href}
               href={tab.href}
               aria-current={active ? 'page' : undefined}
+              onPointerEnter={() => warm(tab.href)}
+              onFocus={() => warm(tab.href)}
               className={cn(
                 'relative inline-flex h-9 shrink-0 items-center rounded-full bg-transparent px-3.5 text-sm whitespace-nowrap text-muted-foreground transition-colors outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring max-sm:px-3',
                 active &&
