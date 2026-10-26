@@ -5,31 +5,35 @@ import type { Json, PendingActionKind, PendingActionRow } from '@/lib/db/types'
 
 /**
  * Create a high-risk `pending_actions` row and ask for confirmation in
- * Telegram (`lume_ok` / `lume_no` + a `/actions/<id>` deep link). Task 12
- * builds the decide/execute side; this is only the request.
+ * Telegram (`lume_ok` / `lume_no` + a `/actions/<id>` deep link). This is
+ * only the request; `lib/actions/execute.ts` runs it after a decision.
  *
- * Every payload carries a human `summary`. Job-scoped kinds (everything but
- * the Rotate kinds) carry `job_id` (lowercase uuid, as the DB prints it — the
+ * Every payload carries a human `summary`. Every action about a validation
+ * job (`push_to_instantly`, `launch_campaign`, and any other kind that names
+ * one) carries `job_id` (lowercase uuid, as the DB prints it — the
  * `lume_gates` push_review anti-join compares `payload->>'job_id'` to
- * `id::text`). A second awaiting action of the same kind for the same job is
- * refused with `DuplicateActionError` — checked first, and backed by the
- * unique partial index `pending_actions_one_awaiting_idx` (23505 → the same
- * error).
+ * `id::text`); for the job kinds it is required. A second awaiting action of
+ * the same kind for the same job is refused with `DuplicateActionError` —
+ * checked first, and backed by the unique partial index
+ * `pending_actions_one_awaiting_idx` (23505 → the same error).
  *
- * Rotate kinds are not about a job: `assign_leads` carries `campaign_id`
- * (and, from a rule, `meta.ruleId`); `activate_rule` needs `meta.ruleId`.
- * With a rule id the duplicate check is per (kind, rule), backed by
- * `pending_actions_one_awaiting_rule_idx`. A drag assignment (no rule) is not
- * deduplicated: executing it twice is a no-op on `unique(campaign_id, email)`.
+ * Rule kinds (`activate_rule`, `delete_rule`, and `assign_leads` from a rule)
+ * pass `meta.ruleId`; the duplicate check is then per (kind, rule), backed by
+ * `pending_actions_one_awaiting_rule_idx`. `assign_leads` needs
+ * `payload.campaign_id`. A drag assignment (no rule) is not deduplicated:
+ * executing it twice is a no-op on `unique(campaign_id, email)`.
  *
  * Telegram unconfigured: the row is still created; the prompt is skipped
  * (the adapter logs it) and `telegram_message_id` stays null.
  */
 
+/** Kinds that are always about one validation job. */
+export const JOB_KINDS: ReadonlySet<PendingActionKind> = new Set<PendingActionKind>(['push_to_instantly', 'launch_campaign'])
+
 const LOWER_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
-/** Kinds that are not about a validation job. */
-const JOB_FREE_KINDS: ReadonlySet<PendingActionKind> = new Set<PendingActionKind>(['assign_leads', 'activate_rule'])
+/** Kinds that must name their rule (`meta.ruleId`). */
+const RULE_KINDS: ReadonlySet<PendingActionKind> = new Set<PendingActionKind>(['activate_rule', 'delete_rule'])
 
 export class DuplicateActionError extends Error {
   readonly existingId: string
@@ -59,19 +63,19 @@ export async function createAction(
   meta: CreateActionMeta = {}
 ): Promise<PendingActionRow> {
   const ruleId = meta.ruleId ?? null
-  let jobId: string | null = null
-  if (JOB_FREE_KINDS.has(kind)) {
-    if (kind === 'assign_leads' && (typeof payload.campaign_id !== 'string' || !payload.campaign_id.trim())) {
-      throw new InvalidActionPayloadError('payload.campaign_id is required')
-    }
-    if (kind === 'activate_rule' && (!ruleId || !LOWER_UUID.test(ruleId))) {
-      throw new InvalidActionPayloadError('activate_rule needs meta.ruleId (lowercase uuid)')
-    }
-  } else {
-    if (typeof payload.job_id !== 'string' || !LOWER_UUID.test(payload.job_id)) {
-      throw new InvalidActionPayloadError('payload.job_id must be a lowercase uuid')
-    }
-    jobId = payload.job_id
+  const rawJobId = payload.job_id
+  if (rawJobId === undefined && JOB_KINDS.has(kind)) {
+    throw new InvalidActionPayloadError('payload.job_id must be a lowercase uuid')
+  }
+  if (rawJobId !== undefined && (typeof rawJobId !== 'string' || !LOWER_UUID.test(rawJobId))) {
+    throw new InvalidActionPayloadError('payload.job_id must be a lowercase uuid')
+  }
+  const jobId: string | null = typeof rawJobId === 'string' ? rawJobId : null
+  if (kind === 'assign_leads' && (typeof payload.campaign_id !== 'string' || !payload.campaign_id.trim())) {
+    throw new InvalidActionPayloadError('payload.campaign_id is required')
+  }
+  if (RULE_KINDS.has(kind) && (!ruleId || !LOWER_UUID.test(ruleId))) {
+    throw new InvalidActionPayloadError(`${kind} needs meta.ruleId (lowercase uuid)`)
   }
   if (typeof payload.summary !== 'string' || !payload.summary.trim()) {
     throw new InvalidActionPayloadError('payload.summary is required')

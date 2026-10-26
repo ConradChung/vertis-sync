@@ -25,6 +25,9 @@ vi.mock('@/lib/adapters/telegram', () => ({
   editMessage: (...a: unknown[]) => tg.editMessage(...a),
 }))
 
+const sweep = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/actions/execute', () => ({ sweepStuckActions: (...a: unknown[]) => sweep(...a) }))
+
 import { POST } from '@/app/api/cron/rotation-tick/route'
 
 const SECRET = 'hook-secret-for-tests'
@@ -79,6 +82,8 @@ beforeEach(() => {
   tg.sendActionPrompt.mockResolvedValue({ ok: true, messageId: 77 })
   tg.sendMessage.mockResolvedValue({ ok: true, messageId: 78 })
   tg.editMessage.mockResolvedValue({ ok: true, messageId: 77 })
+  sweep.mockReset()
+  sweep.mockResolvedValue([])
   fetchSpy.mockReset()
   vi.stubGlobal('fetch', fetchSpy)
   vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -216,5 +221,37 @@ describe('POST /api/cron/rotation-tick', () => {
     const res = await tick()
     expect(res.status).toBe(500)
     expect(svc.expireStaleActions).toHaveBeenCalled()
+  })
+
+  it('sweeps approved-but-unexecuted actions on every tick and reports them', async () => {
+    svc.getDueRules.mockResolvedValue([])
+    sweep.mockResolvedValue([
+      { id: ACTION, outcome: { ran: true, status: 'executed', result: {}, error: null } },
+      { id: 'b2', outcome: { ran: false, reason: 'not_claimable', status: 'executing' } },
+      { id: 'c3', outcome: { error: 'boom' } },
+    ])
+    const res = await tick()
+    expect(res.status).toBe(200)
+    expect(sweep).toHaveBeenCalledOnce()
+    expect((sweep.mock.calls[0][0] as Date).toISOString()).toBe(NOW.toISOString())
+    expect((await res.json()).swept).toEqual([
+      { id: ACTION, status: 'executed' },
+      { id: 'b2', status: 'noop:not_claimable' },
+      { id: 'c3', status: 'error: boom' },
+    ])
+  })
+
+  it('a failing sweep is a 500 but the rules still ran', async () => {
+    sweep.mockRejectedValue(new Error('db down'))
+    const res = await tick()
+    expect(res.status).toBe(500)
+    const body = await res.json()
+    expect(body.rules).toEqual([expect.objectContaining({ outcome: 'created' })])
+    expect(body.errors).toEqual([expect.stringContaining('sweep')])
+  })
+
+  it('the sweeper is not called before the hook secret is checked', async () => {
+    await tick('wrong')
+    expect(sweep).not.toHaveBeenCalled()
   })
 })

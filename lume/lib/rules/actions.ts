@@ -22,8 +22,11 @@ import { OWNER_TZ } from '@/lib/time/owner'
  *   `{ campaign_id, leads: [{origin, id}, …] }` (≤ 500, re-resolved against
  *   lume_lead_bank; ones already queued for the campaign are dropped) or a
  *   filter `{ campaign_id, filter }` ("all N matching"). Payload:
- *   `{ campaign_id, campaign_name, leads | filter, count, summary }`. On
- *   confirm the executor inserts lead_bank rows `state='queued'` with
+ *   `{ campaign_id, campaign_name, leads | filter, count, summary }` — the one
+ *   assign_leads shape (the rotation tick adds `order_by`, `rule_id`, …). On
+ *   execute, `lib/actions/execute.ts` resolves the refs, or up to `count`
+ *   filter matches, against lume_lead_bank (skipping ones already queued for
+ *   the campaign) and inserts lead_bank rows `state='queued'` with
  *   `on conflict (campaign_id, email) do nothing`.
  *
  * activate_rule — `{ rule_id }`. The rule must exist, be inactive, and have a
