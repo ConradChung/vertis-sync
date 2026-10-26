@@ -1,9 +1,10 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { GlassCard } from '@/components/ui/glass-card'
+import { LiquidGlass } from '@/components/ui/liquid-glass'
 import { PageHead } from '@/components/shell/PageHead'
 import { StatusBadge } from '@/components/import/StatusBadge'
 import { OrdersTable } from '@/components/import/OrdersTable'
@@ -27,6 +28,18 @@ import type { OverviewInstantly, OverviewPayload } from '@/lib/overview/types'
 const Orb = dynamic(() => import('@/components/orb/Orb'), { ssr: false })
 
 const noop = () => {}
+
+/** Vivid, detailed backdrop so lensing / dimming are visible in the demo. */
+const MEDIA: CSSProperties = {
+  backgroundImage: [
+    'repeating-linear-gradient(115deg, rgba(255,255,255,0.14) 0 2px, transparent 2px 22px)',
+    'radial-gradient(circle at 20% 30%, #f59e0b, transparent 40%)',
+    'radial-gradient(circle at 80% 70%, #06b6d4, transparent 45%)',
+    'linear-gradient(120deg, #7c3aed, #db2777 55%, #0ea5e9)',
+  ].join(','),
+}
+/** What `prefers-reduced-transparency: reduce` resolves the material to. */
+const SOLID: CSSProperties = { ['--lg-fill' as string]: '#16142a', backdropFilter: 'none', WebkitBackdropFilter: 'none' }
 const iso = (minsAgo: number) => new Date(Date.now() - minsAgo * 60_000).toISOString()
 const ID = '7db3d841-252c-4572-95ec-bc110727df8d'
 
@@ -159,6 +172,7 @@ export default function DesignPage() {
       <Section title="Buttons & badges">
         <div className="flex flex-wrap items-center gap-2">
           <Button>Primary</Button>
+          <Button variant="glass">Glass</Button>
           <Button variant="secondary">Secondary</Button>
           <Button variant="destructive">Destructive</Button>
           <Button variant="ghost">Ghost</Button>
@@ -168,6 +182,54 @@ export default function DesignPage() {
           {['awaiting_approval', 'running', 'completed', 'failed', 'denied', null].map((s) => (
             <StatusBadge key={String(s)} status={s} />
           ))}
+        </div>
+      </Section>
+
+      <Section title="Liquid Glass">
+        <p className="max-w-3xl text-[13px] text-fg-70">
+          Navigation and control layer only: top bar, sheets, dialogs, popovers, segmented controls, primary buttons. Content cards use the
+          calm <code className="font-mono text-[12px]">surface</code> card. Lensing (SVG displacement) renders in Chromium; Safari / Firefox get
+          blur + saturate. Hover / press to see the internal glow and flex.
+        </p>
+        <div className="relative overflow-hidden rounded-panel-lg p-6" style={MEDIA}>
+          <div aria-hidden className="pointer-events-none absolute inset-0 grid place-items-center text-[96px] leading-none font-bold tracking-[-4px] text-white/35 select-none">
+            lume lume
+          </div>
+          <div className="relative grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <State label="regular · default">
+              <LiquidGlass interactive className="rounded-[18px] px-4 py-5 text-[13px] font-medium text-fg">
+                Nav bars, sheets, popovers, controls
+              </LiquidGlass>
+            </State>
+            <State label="clear · rich media + dimming">
+              <LiquidGlass variant="clear" interactive className="rounded-[18px] px-4 py-5 text-[15px] font-semibold text-white">
+                Bold, bright content only
+              </LiquidGlass>
+            </State>
+            <State label="tinted · primary action">
+              <LiquidGlass tint interactive className="rounded-[18px] px-4 py-5 text-[13px] font-semibold">
+                Approve
+              </LiquidGlass>
+            </State>
+            <State label="reduced transparency">
+              <LiquidGlass className="rounded-[18px] px-4 py-5 text-[13px] font-medium text-fg" style={SOLID}>
+                Solid fill, rim + shadow kept
+              </LiquidGlass>
+            </State>
+          </div>
+          <div className="relative mt-5 flex flex-wrap items-center gap-2">
+            <Button>Approve</Button>
+            <Button variant="glass">Glass control</Button>
+            <Button variant="ghost">Ghost</Button>
+          </div>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <State label="content card · surface (default)">
+            <GlassCard className="px-[18px] text-[13px] text-fg-70">Cards and tables stay off the glass layer.</GlassCard>
+          </State>
+          <State label="floating panel · glass variant">
+            <GlassCard variant="glass" className="px-[18px] text-[13px] text-fg-70">Only for a panel that floats above content.</GlassCard>
+          </State>
         </div>
       </Section>
 

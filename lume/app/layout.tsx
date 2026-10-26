@@ -3,6 +3,7 @@ import { DM_Sans, JetBrains_Mono } from 'next/font/google'
 import { MotionConfig } from 'motion/react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
+import { LiquidGlassDefs } from '@/components/ui/liquid-glass-defs'
 import './globals.css'
 
 const dmSans = DM_Sans({
@@ -36,6 +37,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en" className={`dark ${dmSans.variable} ${jetbrainsMono.variable}`}>
       <body className="antialiased">
         <div className="backdrop" aria-hidden />
+        {/* Lens filter for Liquid Glass (backdrop-filter: url(#lume-lens)). */}
+        <LiquidGlassDefs />
         {/* reducedMotion="user": every `motion` component honours the OS setting. */}
         <MotionConfig reducedMotion="user">
           <TooltipProvider>{children}</TooltipProvider>

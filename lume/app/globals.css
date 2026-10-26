@@ -115,6 +115,15 @@
   --radius-panel-lg: 20px;
   --topbar-h: 76px;
 
+  /* Liquid Glass */
+  --lg-fill: rgba(24, 22, 44, 0.38);
+  --lg-blur: 18px;
+  --lg-saturate: 1.8;
+  --lg-rim-hi: rgba(255, 255, 255, 0.42);
+  --lg-rim-mid: rgba(255, 255, 255, 0.16);
+  --lg-rim-lo: rgba(255, 255, 255, 0.07);
+  --lg-glow-color: rgba(255, 255, 255, 0.13);
+
   /* shadcn semantic → Lume */
   --background: var(--bg);
   --foreground: var(--fg);
@@ -176,13 +185,103 @@
 /* Recipes                                                             */
 /* ------------------------------------------------------------------ */
 @layer components {
-  /* Glass — exactly per DESIGN.md. Elevated layers only; tables use .surface. */
-  .glass {
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.035));
-    -webkit-backdrop-filter: blur(22px);
-    backdrop-filter: blur(22px);
-    border: 1px solid rgba(255, 255, 255, 0.11);
-    box-shadow: inset 0 1px rgba(255, 255, 255, 0.11);
+  /* ---------------------------------------------------------------- */
+  /* Liquid Glass — the navigation / control layer material.           */
+  /* Layers (back → front), all on one element, no pseudo-elements:     */
+  /*   backdrop  lensing (SVG displacement, Chromium) + blur + saturate */
+  /*   fill      base tint (--lg-fill) + adaptive tint (--lg-tint)      */
+  /*   specular  top-lit sheen + gradient rim (border-box) + inset edge */
+  /*   glow      internal radial glow that blooms on hover / press      */
+  /*   shadow    soft drop shadow that deepens with elevation           */
+  /* Variants: regular (default) · .lg-clear (rich media only, dims    */
+  /* what is behind it) · .lg-tint (primary actions only).             */
+  /* Content (cards, tables) uses .surface-card instead — never glass.  */
+  /* `.glass` is kept as an alias for floating panels (login, sheets).  */
+  /* ---------------------------------------------------------------- */
+  .liquid-glass,
+  .glass,
+  .topbar {
+    --lg-tint: transparent;
+    background:
+      radial-gradient(circle at var(--lg-x, 50%) var(--lg-y, 0%), var(--lg-glow-color) 0%, transparent var(--lg-glow-r)) padding-box,
+      linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.025) 38%, transparent 62%, rgba(255, 255, 255, 0.035)) padding-box,
+      linear-gradient(var(--lg-tint), var(--lg-tint)) padding-box,
+      linear-gradient(var(--lg-fill), var(--lg-fill)) padding-box,
+      linear-gradient(155deg, var(--lg-rim-hi), var(--lg-rim-lo) 32%, var(--lg-rim-lo) 68%, var(--lg-rim-mid)) border-box;
+    border: 1px solid transparent;
+    -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate));
+    backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.2),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.04),
+      0 12px 32px -12px rgba(0, 0, 0, var(--lg-shadow-a)),
+      0 2px 8px -2px rgba(0, 0, 0, calc(var(--lg-shadow-a) * 0.6));
+    transition:
+      transform 0.45s var(--ease-glass),
+      box-shadow 0.35s var(--ease-glass),
+      --lg-glow-r 0.5s var(--ease-glass),
+      --lg-shadow-a 0.35s var(--ease-glass);
+  }
+
+  /* Larger surfaces simulate thicker glass: deeper shadow, richer blur. */
+  .topbar,
+  .lg-thick {
+    --lg-blur: 26px;
+    --lg-shadow-a: 0.5;
+  }
+
+  /* Clear: permanently more transparent, no frosting. Only over rich media,
+     with bold/bright content on top. The backdrop brightness() is the
+     localized dimming layer the variant requires; pair with .lg-scrim on
+     the media for wider footprints. */
+  .lg-clear {
+    --lg-fill: rgba(8, 8, 18, 0.1);
+    --lg-blur: 5px;
+    --lg-saturate: 1.35;
+    -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(0.68);
+    backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(0.68);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  }
+  .lg-scrim {
+    background-image: linear-gradient(180deg, rgba(4, 4, 12, 0.18), rgba(4, 4, 12, 0.5));
+  }
+
+  /* Tint: primary actions only. Adaptive-ish: violet mixed into the glass
+     so the backdrop still reads through. White text ≥ 7:1 on the mix. */
+  .lg-tint {
+    --lg-tint: color-mix(in oklab, var(--violet) 62%, transparent);
+    --lg-rim-hi: rgba(221, 208, 255, 0.6);
+    --lg-glow-color: rgba(221, 208, 255, 0.3);
+    color: #fff;
+  }
+
+  /* Controls (buttons, segmented controls): blur only — lensing a 32 px
+     element is invisible and costs a filter pass. */
+  .lg-control {
+    --lg-blur: 12px;
+    --lg-shadow-a: 0.28;
+    position: relative;
+  }
+
+  /* Interaction: the material flexes and glows from within. */
+  .lg-interactive:hover {
+    --lg-glow-r: 130%;
+    --lg-shadow-a: 0.55;
+  }
+  .lg-interactive:hover:not(:disabled):not([data-disabled]) {
+    transform: scale(1.025);
+  }
+  .lg-interactive:active:not(:disabled):not([data-disabled]) {
+    --lg-glow-r: 180%;
+    transform: scale(0.97);
+    transition-duration: 0.12s;
+  }
+
+  /* Content surface — calm, quiet, no backdrop sampling. Cards & tables. */
+  .surface-card {
+    background: linear-gradient(180deg, rgba(23, 21, 40, 0.78), rgba(15, 14, 27, 0.82));
+    border: 1px solid rgba(255, 255, 255, 0.075);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
   }
 
   /* Reading surface — 94 % opaque for table contrast. */
@@ -191,12 +290,10 @@
     border: 1px solid rgba(255, 255, 255, 0.08);
   }
 
-  /* Fixed top bar: a darker glass so tabs stay legible over any backdrop. */
+  /* Fixed top bar: floats as a rounded Liquid Glass plane (see the
+     unlayered geometry block below) over a scroll-edge dissolve. */
   .topbar {
-    background: rgba(8, 7, 17, 0.72);
-    -webkit-backdrop-filter: blur(20px);
-    backdrop-filter: blur(20px);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+    --lg-fill: rgba(10, 9, 22, 0.5);
   }
 
   /* Mesh-gradient backdrop (slow ~60 s drift). Sits behind everything. */
@@ -310,28 +407,142 @@
   }
 }
 
-/* Solid fallbacks: no backdrop-filter support, or the user asked for less transparency. */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .glass {
-    background: rgba(20, 19, 35, 0.94);
+/* Animatable Liquid Glass parameters (glow bloom + shadow depth). */
+@property --lg-glow-r {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+@property --lg-shadow-a {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0.38;
+}
+
+/* Lensing. LiquidGlassDefs sets data-lg-lens on <html> only where SVG
+   filters work inside backdrop-filter (Chromium). Elsewhere the material
+   falls back to blur + saturate, which is the recipe above. */
+:root[data-lg-lens] :is(.liquid-glass, .glass, .topbar):not(.lg-control, .lg-clear) {
+  -webkit-backdrop-filter: url(#lume-lens) blur(calc(var(--lg-blur) * 0.7)) saturate(var(--lg-saturate));
+  backdrop-filter: url(#lume-lens) blur(calc(var(--lg-blur) * 0.7)) saturate(var(--lg-saturate));
+}
+
+/* Never glass on glass: anything glass nested in glass becomes a fill —
+   a thin overlay that reads as part of the parent material. */
+:is(.liquid-glass, .glass, .topbar) :is(.liquid-glass, .glass) {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  --lg-fill: rgba(255, 255, 255, 0.06);
+  --lg-shadow-a: 0;
+}
+
+/* Floating top bar geometry. Unlayered so it can inset the bar that
+   TopBar.tsx positions with utilities, without touching its markup. */
+.topbar {
+  top: 10px;
+  left: 12px;
+  right: 12px;
+  height: calc(var(--topbar-h) - 14px);
+  border-radius: 20px;
+}
+
+/* Scroll edge effect: content dissolves into the backdrop as it passes
+   under the floating bar, lifting the glass above it. */
+.shell::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto;
+  height: calc(var(--topbar-h) + 26px);
+  z-index: 10;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(7, 7, 17, 0.82), rgba(7, 7, 17, 0.45) 55%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent);
+  mask-image: linear-gradient(180deg, #000 55%, transparent);
+}
+/* Where scroll-driven animations exist, the edge (and the bar's shadow)
+   only appear once content is actually underneath. */
+@supports (animation-timeline: scroll()) {
+  .shell::before {
+    animation: lg-edge-in linear both;
+    animation-timeline: scroll(root);
+    animation-range: 0 90px;
   }
   .topbar {
-    background: rgba(8, 7, 17, 0.96);
+    animation: lg-lift linear both;
+    animation-timeline: scroll(root);
+    animation-range: 0 120px;
   }
 }
-@media (prefers-reduced-transparency: reduce) {
+
+/* No backdrop-filter at all: frosted solids. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .liquid-glass,
   .glass {
-    background: rgba(20, 19, 35, 0.96);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
+    --lg-fill: rgba(20, 19, 35, 0.94);
   }
   .topbar {
-    background: rgba(8, 7, 17, 0.98);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
+    --lg-fill: rgba(8, 7, 17, 0.96);
+  }
+  .lg-clear {
+    --lg-fill: rgba(8, 8, 18, 0.72);
+  }
+}
+
+/* Reduce transparency: solid, opaque material. Shape, rim and shadow stay. */
+@media (prefers-reduced-transparency: reduce) {
+  .liquid-glass,
+  .glass,
+  .topbar,
+  .lg-clear,
+  .shell::before {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+  .liquid-glass,
+  .glass,
+  .lg-clear {
+    --lg-fill: #16142a;
+  }
+  .topbar {
+    --lg-fill: #0d0c1c;
+  }
+  .lg-tint {
+    --lg-tint: #5b3cc4;
+  }
+  .surface-card {
+    background: #12111f;
+  }
+  .shell::before {
+    background: linear-gradient(180deg, #070711 60%, transparent);
   }
   .backdrop {
     background-image: linear-gradient(120deg, #080817, #120d22 48%, #060711);
+  }
+}
+
+/* Increased contrast: predominantly solid, with a contrasting border. */
+@media (prefers-contrast: more) {
+  .liquid-glass,
+  .glass,
+  .topbar,
+  .lg-clear {
+    --lg-fill: #0b0a16;
+    --lg-rim-hi: rgba(255, 255, 255, 0.85);
+    --lg-rim-mid: rgba(255, 255, 255, 0.85);
+    --lg-rim-lo: rgba(255, 255, 255, 0.85);
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    text-shadow: none;
+  }
+  .lg-tint {
+    --lg-tint: #4c2fb0;
+  }
+  .surface-card,
+  .surface {
+    background: #0b0a16;
+    border-color: rgba(255, 255, 255, 0.6);
   }
 }
 
@@ -346,8 +557,15 @@
   .orbit-ring,
   .anim-feed,
   .anim-rise,
-  .anim-shimmer {
+  .anim-shimmer,
+  .shell::before,
+  .topbar {
     animation: none !important;
+  }
+  .lg-interactive,
+  .lg-interactive:hover,
+  .lg-interactive:active {
+    transform: none !important;
   }
   *,
   *::before,
@@ -447,5 +665,21 @@
 @keyframes bar-shimmer {
   to {
     background-position: -200% 0;
+  }
+}
+@keyframes lg-edge-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes lg-lift {
+  from {
+    --lg-shadow-a: 0.3;
+  }
+  to {
+    --lg-shadow-a: 0.7;
   }
 }

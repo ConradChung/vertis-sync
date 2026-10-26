@@ -27,7 +27,7 @@ const tabsListVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-muted",
+        default: "liquid-glass lg-control rounded-[11px]",
         line: "gap-1 bg-transparent",
       },
     },

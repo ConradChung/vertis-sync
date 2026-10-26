@@ -27,7 +27,7 @@ function GlassNodeImpl({ data }: NodeProps<GlassFlowNode>) {
   const a = stage.action
   const disabled = a.type === 'disabled' || busy
   return (
-    <div className="glass w-[150px] rounded-xl px-3 py-2.5 text-fg">
+    <div className="surface-card w-[150px] rounded-xl px-3 py-2.5 text-fg">
       <Handle type="target" position={Position.Left} className="!size-1.5 !border-0 !bg-white/30" />
       <div className="flex items-center justify-between gap-2">
         <span className="text-[12px] font-medium">{stage.label}</span>
