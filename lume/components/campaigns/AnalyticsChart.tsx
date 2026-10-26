@@ -7,6 +7,7 @@ import { NotConnected, ShimmerBar } from '@/components/overview/parts'
 import { lastNDates, seriesOn } from '@/lib/adapters/instantly.map'
 import type { CampaignAnalyticsResponse } from '@/lib/campaigns/types'
 import { cn } from '@/lib/utils'
+import { allZero, lastActiveDate } from '@/lib/campaigns/chart'
 
 const config = {
   sent: { label: 'Sent', color: 'var(--violet)' },
@@ -15,6 +16,7 @@ const config = {
 } satisfies ChartConfig
 
 const fmt = new Intl.NumberFormat('en-US')
+const KEYS = ['sent', 'replies', 'opportunities'] as const
 
 export function AnalyticsChart({
   data,
@@ -33,10 +35,20 @@ export function AnalyticsChart({
     const sent = seriesOn(dates, 'sent', data.daily)
     const replies = seriesOn(dates, 'replies', data.daily)
     const opps = seriesOn(dates, 'opportunities', data.daily)
-    return dates.map((d, i) => ({ date: d.slice(5), sent: sent[i], replies: replies[i], opportunities: opps[i] }))
+    return dates.map((d, i) => ({
+      date: d.slice(5),
+      sent: sent[i],
+      replies: replies[i],
+      opportunities: opps[i],
+    }))
   }, [data, days])
 
-  if (failed && !data) return <p className="py-6 text-[13px] text-fg-46" role="alert">Couldn&apos;t load Instantly analytics.</p>
+  if (failed && !data)
+    return (
+      <p className="py-6 text-[13px] text-fg-46" role="alert">
+        Couldn&apos;t load Instantly analytics.
+      </p>
+    )
   if (!data) return <ShimmerBar className="h-[260px] w-full" />
   if (!data.configured) return <NotConnected className="py-6 text-[13px]" />
 
@@ -49,6 +61,8 @@ export function AnalyticsChart({
     ['Bounced', fmt.format(o.bounced)],
   ]
   const maxStep = Math.max(1, ...data.steps.map((s) => s.sent))
+  const empty = allZero(points, [...KEYS])
+  const lastActive = lastActiveDate(data.daily)
 
   return (
     <div className="space-y-5">
@@ -63,7 +77,9 @@ export function AnalyticsChart({
 
       <div>
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-[13px] font-medium text-fg">Daily</h3>
+          <h3 className="text-[13px] font-medium text-fg">
+            Daily <span className="font-normal text-fg-46">· last {days} days (totals above are all-time)</span>
+          </h3>
           <div className="flex rounded-md border border-white/8 p-0.5 text-[11px]" role="group" aria-label="Range">
             {([7, 30] as const).map((d) => (
               <button
@@ -78,33 +94,35 @@ export function AnalyticsChart({
             ))}
           </div>
         </div>
-        <ChartContainer config={config} className="aspect-auto h-[240px] w-full">
-          <AreaChart data={points} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
-            <defs>
-              {Object.entries(config).map(([k, v]) => (
-                <linearGradient key={k} id={`fill-${k}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={v.color} stopOpacity={0.45} />
-                  <stop offset="95%" stopColor={v.color} stopOpacity={0.02} />
-                </linearGradient>
+        <div className="relative">
+          {empty && (
+            <p className="pointer-events-none absolute inset-x-0 top-1/3 z-10 text-center text-[12px] text-fg-46" data-testid="chart-empty">
+              No sends in the last {days} days
+              {lastActive ? ` — last activity ${lastActive}` : ''}.{days === 7 ? ' Try 30d.' : ''}
+            </p>
+          )}
+          <ChartContainer config={config} className="aspect-auto h-[240px] w-full">
+            <AreaChart data={points} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
+              <defs>
+                {Object.entries(config).map(([k, v]) => (
+                  <linearGradient key={k} id={`fill-${k}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={v.color} stopOpacity={0.45} />
+                    <stop offset="95%" stopColor={v.color} stopOpacity={0.02} />
+                  </linearGradient>
+                ))}
+              </defs>
+              <CartesianGrid vertical={false} strokeOpacity={0.08} />
+              <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} />
+              <YAxis tickLine={false} axisLine={false} width={36} allowDecimals={false} />
+              <ChartTooltip content={<ChartTooltipContent indicator="dot" />} />
+              {/* Overlaid, not stacked: replies/interested are subsets of sent, and Recharts 3
+                drops every stacked series (and the Y axis) when the window is all zeros. */}
+              {KEYS.map((k) => (
+                <Area key={k} dataKey={k} type="monotone" stroke={`var(--color-${k})`} fill={`url(#fill-${k})`} strokeWidth={1.5} />
               ))}
-            </defs>
-            <CartesianGrid vertical={false} strokeOpacity={0.08} />
-            <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} />
-            <YAxis tickLine={false} axisLine={false} width={36} allowDecimals={false} />
-            <ChartTooltip content={<ChartTooltipContent indicator="dot" />} />
-            {(['sent', 'replies', 'opportunities'] as const).map((k) => (
-              <Area
-                key={k}
-                dataKey={k}
-                type="monotone"
-                stackId="a"
-                stroke={`var(--color-${k})`}
-                fill={`url(#fill-${k})`}
-                strokeWidth={1.5}
-              />
-            ))}
-          </AreaChart>
-        </ChartContainer>
+            </AreaChart>
+          </ChartContainer>
+        </div>
       </div>
 
       <div>
