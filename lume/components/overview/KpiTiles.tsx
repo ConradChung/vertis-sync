@@ -48,8 +48,8 @@ function Tile({
   children?: ReactNode
 }) {
   const body = (
-    <GlassCard className={cn('h-full min-h-[148px] gap-0 p-5', href && 'transition-colors hover:bg-white/[0.04]')}>
-      <div className="flex items-center justify-between text-sm font-medium text-muted-foreground">
+    <GlassCard className={cn('h-full min-h-[176px] gap-0 p-5 pb-[76px]', href && 'transition-colors hover:bg-accent')}>
+      <div className="relative z-10 flex items-center justify-between text-sm font-medium text-muted-foreground">
         <span className="inline-flex items-center gap-1.5">
           {label}
           {hint && (
@@ -72,21 +72,22 @@ function Tile({
         )}
       </div>
       {value !== undefined && (
-        <div className="mt-3 mb-1 font-mono text-3xl leading-none font-semibold tracking-tight text-foreground tabular-nums" data-testid="kpi-value">
+        <div className="relative z-10 mt-3 mb-1 font-mono text-3xl leading-none font-semibold tracking-tight text-foreground tabular-nums" data-testid="kpi-value">
           {value}
         </div>
       )}
       {delta && (
-        <div className={cn('text-xs', deltaTone === 'positive' && 'text-lime', deltaTone === 'attention' && 'text-violet-soft', deltaTone === 'muted' && 'text-muted-foreground')}>
+        <div className={cn('relative z-10 text-xs', deltaTone === 'positive' && 'text-positive', deltaTone === 'attention' && 'text-violet-soft', deltaTone === 'muted' && 'text-muted-foreground')}>
           {delta}
         </div>
       )}
-      {children}
-      {spark && <Spark data={spark} tone={sparkTone} className="mt-auto pt-3" label={sparkLabel} />}
+      {children && <div className="relative z-10">{children}</div>}
+      {/* Sparkline: an area chart filling the bottom 40% of the tile. */}
+      {spark && <Spark data={spark} tone={sparkTone} variant="area" className="absolute inset-x-0 bottom-0 h-[40%]" label={sparkLabel} />}
     </GlassCard>
   )
   return href ? (
-    <Link href={href} className="block rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={ariaLabel}>
+    <Link href={href} className="block rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={ariaLabel}>
       {body}
     </Link>
   ) : (
@@ -203,7 +204,7 @@ export function KpiTilesSkeleton() {
   return (
     <div className="grid grid-cols-2 gap-4 lg:grid-cols-4" aria-hidden>
       {[0, 1, 2, 3].map((i) => (
-        <GlassCard key={i} className="min-h-[148px] gap-3 p-5">
+        <GlassCard key={i} className="min-h-[176px] gap-3 p-5">
           <ShimmerBar className="h-3 w-24" />
           <ShimmerBar className="h-7 w-16" />
           <ShimmerBar className="mt-auto h-9 w-full" />

@@ -47,7 +47,7 @@ export function NextRuns({ scheduled }: { scheduled: ScheduledJobWithNext[] }) {
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-foreground">{j.name}</div>
                 <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                  <Badge variant="outline" className="rounded-md font-mono font-normal text-foreground">
+                  <Badge variant="outline" className="rounded-full font-mono font-normal text-foreground">
                     {j.cron}
                   </Badge>
                   <span className="truncate">{RUNNER[j.runner] ?? j.runner}</span>

@@ -17,8 +17,8 @@ import { cn } from '@/lib/utils'
 
 /** Replies and interested leads are signal (lime); bounces are destructive. */
 const KIND: Record<string, { label: string; chip: string }> = {
-  reply: { label: 'Reply', chip: 'bg-lime/10 text-lime' },
-  interested: { label: 'Interested', chip: 'bg-lime/10 text-lime' },
+  reply: { label: 'Reply', chip: 'bg-lime/15 text-positive' },
+  interested: { label: 'Interested', chip: 'bg-lime/15 text-positive' },
   bounce: { label: 'Bounce', chip: 'bg-destructive/15 text-destructive' },
 }
 
@@ -62,7 +62,7 @@ function FeedItem({ ev, campaignName, now }: { ev: EventRow; campaignName: strin
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <span className="truncate font-mono text-sm text-foreground">{ev.lead_email ?? 'Unknown lead'}</span>
-            <Badge className={cn('rounded-md', kind.chip)}>{kind.label}</Badge>
+            <Badge className={cn('rounded-full', kind.chip)}>{kind.label}</Badge>
           </div>
           <time dateTime={ev.created_at} className="shrink-0 font-mono text-xs whitespace-nowrap text-white/25 tabular-nums" suppressHydrationWarning>
             {timeAgo(ev.created_at, now)}
@@ -72,7 +72,7 @@ function FeedItem({ ev, campaignName, now }: { ev: EventRow; campaignName: strin
         {text && <p className="mt-2 line-clamp-2 text-sm leading-snug text-white/70">{text}</p>}
         <div className="mt-2 flex items-center gap-2">
           {campaignName && (
-            <Badge variant="outline" className="max-w-[60%] rounded-md font-normal text-muted-foreground">
+            <Badge variant="outline" className="max-w-[60%] rounded-full font-normal text-muted-foreground">
               <span className="truncate">{campaignName}</span>
             </Badge>
           )}
@@ -133,7 +133,7 @@ export function ReplyFeed({ events, campaignNames }: { events: EventRow[]; campa
         <span className="flex items-center gap-1.5">
           <span className="relative inline-flex size-1.5" aria-hidden>
             <span className="absolute inline-flex size-full animate-ping rounded-full bg-lime opacity-60 motion-reduce:hidden" />
-            <span className="relative inline-flex size-1.5 rounded-full bg-lime" />
+            <span className="relative inline-flex size-1.5 rounded-full bg-lime text-lime shadow-(--dot-glow) light:size-2 light:border-[1.5px] light:border-forest" />
           </span>
           Replies · interested · bounces
         </span>
@@ -148,7 +148,7 @@ export function ReplyFeed({ events, campaignNames }: { events: EventRow[]; campa
             <EmptyDescription>They stream in as Instantly webhooks fire.</EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
-            <Link href="/campaigns" className="text-xs text-violet-soft hover:underline">
+            <Link href="/campaigns" className="text-xs text-primary hover:underline">
               Campaigns →
             </Link>
           </EmptyContent>

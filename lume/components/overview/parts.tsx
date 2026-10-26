@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useState, type HTMLAttributes, type ReactNode } from 'react'
+import { useEffect, useId, useState, type HTMLAttributes, type ReactNode } from 'react'
 import Link from 'next/link'
-import { Line, LineChart, YAxis } from 'recharts'
+import { Area, AreaChart, Line, LineChart, YAxis } from 'recharts'
 import { useReducedMotion } from 'motion/react'
 import { NumberTicker } from '@/components/ui/number-ticker'
 import { ChartContainer, type ChartConfig } from '@/components/ui/chart'
@@ -13,20 +13,24 @@ import { cn } from '@/lib/utils'
 
 /** Shared bits for the Overview cards. */
 
-/** Sparkline colour: violet (brand / neutral trend) or lime (positive / live). */
+/**
+ * Sparkline tone: `lime` = the primary series (lime line in dark, forest-green
+ * line with lime points/area in light) · `violet` = secondary / automation.
+ */
 export type Tone = 'violet' | 'lime'
 
-export const TONE_VAR: Record<Tone, string> = {
-  violet: 'var(--violet)',
-  lime: 'var(--lime)',
+/** Line, area and point colours per tone (all theme tokens). */
+export const TONE_VAR: Record<Tone, { line: string; area: string; point: string }> = {
+  lime: { line: 'var(--chart-line)', area: 'var(--chart-area)', point: 'var(--chart-point)' },
+  violet: { line: 'var(--violet)', area: 'var(--violet)', point: 'var(--violet)' },
 }
 
-/** Status dots: lime healthy · violet needs you · destructive error · white/35 idle. */
+/** Status dots: lime healthy · violet needs you · destructive error · faint idle. */
 const HEALTH: Record<HealthLevel, { color: string; word: string }> = {
   green: { color: 'var(--lime)', word: 'healthy' },
   amber: { color: 'var(--violet)', word: 'needs attention' },
   red: { color: 'var(--destructive)', word: 'error' },
-  idle: { color: 'rgba(255,255,255,0.35)', word: 'no data' },
+  idle: { color: 'var(--fg-35)', word: 'no data' },
 }
 
 const fmt = new Intl.NumberFormat('en-US')
@@ -56,29 +60,71 @@ export function trendTone(data: number[]): Tone {
   return last > first ? 'lime' : 'violet'
 }
 
-/** Single-series recharts sparkline inside shadcn's ChartContainer. */
+/**
+ * Single-series recharts sparkline inside shadcn's ChartContainer. `area`
+ * fills under the line with a colour→transparent gradient and marks the
+ * latest point. In dark the line glows (`--chart-glow`); light has no glow.
+ */
 export function Spark({
   data,
   tone,
   className,
   label,
+  variant = 'line',
 }: {
   data: number[]
   /** Defaults to the sign of the trend. */
   tone?: Tone
   className?: string
   label?: string
+  variant?: 'line' | 'area'
 }) {
+  const gradientId = `spark-${useId().replace(/:/g, '')}`
   if (data.length < 2) return <div className={cn('h-9', className)} aria-hidden />
-  const config: ChartConfig = { v: { label: label ?? 'value', color: TONE_VAR[tone ?? trendTone(data)] } }
+  const c = TONE_VAR[tone ?? trendTone(data)]
+  const config: ChartConfig = { v: { label: label ?? 'value', color: c.line } }
   const rows = data.map((v, i) => ({ i, v }))
+  const last = rows.length - 1
   return (
-    <div className={cn('h-9 w-full', className)} role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
+    <div
+      className={cn('h-9 w-full [&_.recharts-curve]:[filter:var(--chart-glow)]', className)}
+      style={{ color: c.line }}
+      role={label ? 'img' : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+    >
       <ChartContainer config={config} className="aspect-auto h-full w-full" initialDimension={{ width: 240, height: 36 }}>
-        <LineChart data={rows} margin={{ top: 3, right: 2, bottom: 3, left: 2 }} accessibilityLayer={false}>
-          <YAxis hide domain={['dataMin', 'dataMax']} />
-          <Line dataKey="v" type="linear" stroke="var(--color-v)" strokeWidth={1.75} dot={false} isAnimationActive={false} />
-        </LineChart>
+        {variant === 'area' ? (
+          <AreaChart data={rows} margin={{ top: 6, right: 6, bottom: 0, left: 0 }} accessibilityLayer={false}>
+            <defs>
+              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={c.area} stopOpacity={0.35} />
+                <stop offset="100%" stopColor={c.area} stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <YAxis hide domain={[(min: number) => min - (min === 0 ? 0 : min * 0.15), 'dataMax']} />
+            <Area
+              dataKey="v"
+              type="monotone"
+              stroke="var(--color-v)"
+              strokeWidth={1.75}
+              fill={`url(#${gradientId})`}
+              isAnimationActive={false}
+              dot={(p: { index?: number; cx?: number; cy?: number }) =>
+                p.index === last && p.cx != null && p.cy != null ? (
+                  <circle key="last" cx={p.cx} cy={p.cy} r={3} fill={c.point} stroke={c.line} strokeWidth={1.5} />
+                ) : (
+                  <g key={p.index} />
+                )
+              }
+            />
+          </AreaChart>
+        ) : (
+          <LineChart data={rows} margin={{ top: 3, right: 2, bottom: 3, left: 2 }} accessibilityLayer={false}>
+            <YAxis hide domain={['dataMin', 'dataMax']} />
+            <Line dataKey="v" type="linear" stroke="var(--color-v)" strokeWidth={1.75} dot={false} isAnimationActive={false} />
+          </LineChart>
+        )}
       </ChartContainer>
     </div>
   )
@@ -95,8 +141,12 @@ export function HealthDot({ level, reason }: { level: HealthLevel; reason: strin
             role="img"
             aria-label={`${h.word}: ${reason}`}
             tabIndex={0}
-            className="inline-block size-1.5 shrink-0 cursor-help rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            style={{ background: h.color }}
+            className={cn(
+              'inline-block size-1.5 shrink-0 cursor-help rounded-full bg-current shadow-(--dot-glow) outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              // Light: lime sits on a forest-green ring so the dot holds 3:1 on white glass.
+              level === 'green' && 'light:size-2 light:border-[1.5px] light:border-forest'
+            )}
+            style={{ color: h.color }}
           />
         }
       />
@@ -127,7 +177,7 @@ export function SectionTitle({ title, children }: { title: string; children?: Re
 export function NotConnected({ children = 'Instantly not connected — set INSTANTLY_API_KEY', className }: { children?: ReactNode; className?: string }) {
   return (
     <p className={cn('flex items-center gap-2 text-xs leading-snug text-muted-foreground', className)}>
-      <span className="inline-block size-1.5 shrink-0 rounded-full bg-white/35" aria-hidden />
+      <span className="inline-block size-1.5 shrink-0 rounded-full bg-(--fg-35)" aria-hidden />
       {children}
     </p>
   )
@@ -140,11 +190,11 @@ export function EmptyLine({ text, action }: { text: string; action?: { label: st
       <span>{text}</span>
       {action &&
         (action.external ? (
-          <a href={action.href} target="_blank" rel="noreferrer" className="text-xs text-violet-soft hover:underline">
+          <a href={action.href} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">
             {action.label} ↗
           </a>
         ) : (
-          <Link href={action.href} className="text-xs text-violet-soft hover:underline">
+          <Link href={action.href} className="text-xs text-primary hover:underline">
             {action.label} →
           </Link>
         ))}

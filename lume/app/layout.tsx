@@ -4,6 +4,8 @@ import { GeistMono } from 'geist/font/mono'
 import { MotionConfig } from 'motion/react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
+import { AppBackground } from '@/components/theme/AppBackground'
+import { ThemeProvider } from '@/components/theme/ThemeProvider'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -12,21 +14,27 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  colorScheme: 'dark',
-  themeColor: '#000000',
+  colorScheme: 'dark light',
+  themeColor: [
+    { media: '(prefers-color-scheme: dark)', color: '#050505' },
+    { media: '(prefers-color-scheme: light)', color: '#f3f6f0' },
+  ],
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  // Dark mode only: the `dark` class is static so shadcn's `dark:` variants
-  // and `@custom-variant dark` resolve without a theme provider.
+  // next-themes sets `dark` / `light` on <html> before paint (class strategy,
+  // default dark); suppressHydrationWarning covers that attribute change.
   return (
-    <html lang="en" className={`dark ${GeistSans.variable} ${GeistMono.variable}`}>
+    <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`} suppressHydrationWarning>
       <body className="antialiased">
-        {/* reducedMotion="user": every `motion` component honours the OS setting. */}
-        <MotionConfig reducedMotion="user">
-          <TooltipProvider>{children}</TooltipProvider>
-        </MotionConfig>
-        <Toaster theme="dark" position="bottom-right" />
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false} themes={['dark', 'light']} disableTransitionOnChange>
+          <AppBackground />
+          {/* reducedMotion="user": every `motion` component honours the OS setting. */}
+          <MotionConfig reducedMotion="user">
+            <TooltipProvider>{children}</TooltipProvider>
+          </MotionConfig>
+          <Toaster position="bottom-right" />
+        </ThemeProvider>
       </body>
     </html>
   )

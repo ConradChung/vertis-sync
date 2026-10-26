@@ -3,12 +3,12 @@
 @import "shadcn/tailwind.css";
 
 @custom-variant dark (&:is(.dark *));
+@custom-variant light (&:is(.light *));
 
 /* ------------------------------------------------------------------ */
 /* Tokens → Tailwind                                                   */
-/* Lume is dark-only: pure black canvas, four brand colours (black,     */
-/* white, violet, lime) plus one destructive red. Neutrals are white at */
-/* alpha — no grey ramp, no gradients, no glass, no shadows.            */
+/* Two themes (dark "gamer", light "nature") over <AppBackground />.    */
+/* Surfaces use the glass recipe (--glass-fill/-border/-highlight).     */
 /* ------------------------------------------------------------------ */
 @theme inline {
   /* shadcn semantic palette */
@@ -50,6 +50,8 @@
   --color-violet: var(--violet);
   --color-brand: var(--violet);
   --color-lime: var(--lime);
+  --color-forest: var(--forest);
+  --color-positive: var(--positive);
 
   /* Legacy Lume names, remapped onto the four-colour palette so pages that
      still use them stay on-brand until they are restyled:
@@ -97,32 +99,52 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Raw tokens (dark only)                                              */
+/* Raw tokens, per theme (next-themes puts `dark` / `light` on <html>). */
+/* Components only reference tokens. Dark is the default.              */
 /* ------------------------------------------------------------------ */
-:root {
+:root,
+:root.dark {
   color-scheme: dark;
 
   /* Brand */
   --black: #000000;
   --white: #ffffff;
-  --violet: #7d39eb;
+  --violet: #7d39eb; /* automation / agent colour only */
   --lime: #c6ff33;
+  --forest: #1f6b3a;
+  /* Text-safe "positive" colour: lime on dark, forest green on light. */
+  --positive: var(--lime);
 
-  /* Neutrals: white at alpha over black */
+  /* Glass recipe */
+  --glass-fill: rgba(255, 255, 255, 0.05);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-highlight: rgba(255, 255, 255, 0.12);
+  --glass-shadow: 0 0 #0000;
+  /* Overlays (popovers, dialogs, sheets) sit over content, not the
+     background, so they use a denser fill of the same recipe. */
+  --glass-fill-strong: rgba(14, 14, 14, 0.72);
+  --primary-glow: 0 0 24px -6px var(--lime);
+  --dot-glow: 0 0 8px currentColor;
+
+  /* Charts */
+  --chart-line: var(--lime);
+  --chart-area: var(--lime);
+  --chart-point: var(--lime);
+  --chart-glow: drop-shadow(0 0 6px currentColor);
+
+  /* Neutrals: white at alpha */
   --fg: #ffffff;
   --fg-70: rgba(255, 255, 255, 0.7);
   --fg-46: rgba(255, 255, 255, 0.55); /* muted */
-  --fg-24: rgba(255, 255, 255, 0.25); /* faint / dividers */
-  --fg-35: rgba(255, 255, 255, 0.35); /* disabled / manual / idle */
+  --fg-24: rgba(255, 255, 255, 0.3); /* faint */
+  --fg-35: rgba(255, 255, 255, 0.35); /* disabled / idle */
   --line: rgba(255, 255, 255, 0.1);
 
   /* Legacy names → palette */
-  --bg: var(--black);
-  --panel: var(--black);
-  /* rgba(255,255,255,.04) on black, as an opaque colour so sticky headers hide rows. */
-  --surface: #0a0a0a;
-  /* Violet text tint for small links on black (same hue, legible at 11 px). */
-  --violet-soft: color-mix(in oklab, var(--violet) 62%, var(--white));
+  --bg: #050505;
+  --panel: rgba(8, 8, 8, 0.82);
+  --surface: #0c0c0c; /* opaque, so sticky headers hide rows */
+  --violet-soft: color-mix(in oklab, var(--violet) 62%, #ffffff);
   --green: var(--lime);
   --amber: var(--violet);
   --cyan: rgba(255, 255, 255, 0.7);
@@ -132,37 +154,107 @@
   --topbar-h: 56px;
 
   /* shadcn semantic */
-  --background: var(--black);
-  --foreground: var(--white);
-  --card: var(--black);
-  --card-foreground: var(--white);
-  --popover: var(--black);
-  --popover-foreground: var(--white);
-  --primary: var(--white);
-  --primary-foreground: var(--black);
-  --secondary: rgba(255, 255, 255, 0.05);
-  --secondary-foreground: var(--white);
-  --muted: rgba(255, 255, 255, 0.04);
+  --background: #050505;
+  --foreground: #ffffff;
+  --card: var(--glass-fill);
+  --card-foreground: #ffffff;
+  --popover: var(--glass-fill-strong);
+  --popover-foreground: #ffffff;
+  --primary: var(--lime);
+  --primary-foreground: #000000;
+  --secondary: rgba(255, 255, 255, 0.08);
+  --secondary-foreground: #ffffff;
+  --muted: rgba(255, 255, 255, 0.05);
   --muted-foreground: rgba(255, 255, 255, 0.55);
-  --accent: rgba(255, 255, 255, 0.04);
-  --accent-foreground: var(--white);
+  --accent: color-mix(in oklab, var(--lime) 12%, transparent);
+  --accent-foreground: #ffffff;
   --destructive: oklch(0.704 0.191 22.216);
   --border: rgba(255, 255, 255, 0.1);
   --input: rgba(255, 255, 255, 0.15);
-  --ring: var(--violet);
-  --chart-1: var(--violet);
-  --chart-2: var(--lime);
-  --chart-3: var(--white);
+  --ring: var(--lime);
+  --chart-1: var(--lime);
+  --chart-2: var(--violet);
+  --chart-3: #ffffff;
   --chart-4: rgba(255, 255, 255, 0.4);
   --chart-5: var(--destructive);
-  --sidebar: var(--black);
-  --sidebar-foreground: var(--white);
-  --sidebar-primary: var(--violet);
-  --sidebar-primary-foreground: var(--white);
-  --sidebar-accent: rgba(255, 255, 255, 0.04);
-  --sidebar-accent-foreground: var(--white);
+  --sidebar: #050505;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: var(--lime);
+  --sidebar-primary-foreground: #000000;
+  --sidebar-accent: rgba(255, 255, 255, 0.05);
+  --sidebar-accent-foreground: #ffffff;
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
+}
+
+/* Light — "green tech / nature". Lime never carries text here: buttons,
+   links and the active nav use forest green; lime is kept for the focus
+   ring, progress fills, the active-pill underline, status dots and chart
+   points. `--white` is remapped to ink so legacy `*-white/NN` neutrals
+   (hairlines, hover tints, faint text) invert instead of vanishing. */
+:root.light {
+  color-scheme: light;
+
+  --ink: #0f1a12;
+  --white: #0f1a12;
+  --violet: #5b22c4;
+  --positive: var(--forest);
+
+  --glass-fill: rgba(255, 255, 255, 0.6);
+  --glass-border: rgba(255, 255, 255, 0.7);
+  --glass-highlight: rgba(255, 255, 255, 0.9);
+  --glass-shadow: 0 8px 30px -12px rgba(20, 40, 20, 0.25);
+  --glass-fill-strong: rgba(255, 255, 255, 0.86);
+  --primary-glow: 0 0 #0000;
+  --dot-glow: 0 0 #0000;
+
+  --chart-line: var(--forest);
+  --chart-area: var(--lime);
+  --chart-point: var(--lime);
+  --chart-glow: none;
+
+  --fg: #0f1a12;
+  --fg-70: rgba(15, 26, 18, 0.72);
+  --fg-46: rgba(15, 26, 18, 0.6);
+  --fg-24: rgba(15, 26, 18, 0.4);
+  --fg-35: rgba(15, 26, 18, 0.35);
+  --line: rgba(15, 26, 18, 0.1);
+
+  --bg: #f3f6f0;
+  --panel: rgba(255, 255, 255, 0.78);
+  --surface: #eef2ea;
+  --violet-soft: #5b22c4;
+  --green: var(--forest);
+  --amber: #5b22c4;
+  --cyan: rgba(15, 26, 18, 0.72);
+
+  --background: #f3f6f0;
+  --foreground: #0f1a12;
+  --card-foreground: #0f1a12;
+  --popover-foreground: #0f1a12;
+  --primary: var(--forest);
+  --primary-foreground: #ffffff;
+  --secondary: rgba(15, 26, 18, 0.06);
+  --secondary-foreground: #0f1a12;
+  --muted: rgba(15, 26, 18, 0.05);
+  /* Brief: ink/55. Measured 4.2:1 on the glass → raised to /60 for AA. */
+  --muted-foreground: rgba(15, 26, 18, 0.6);
+  --accent: color-mix(in oklab, var(--forest) 10%, transparent);
+  --accent-foreground: #0f1a12;
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: rgba(15, 26, 18, 0.1);
+  --input: rgba(15, 26, 18, 0.16);
+  --ring: var(--lime);
+  --chart-1: var(--forest);
+  --chart-2: #5b22c4;
+  --chart-3: #0f1a12;
+  --chart-4: rgba(15, 26, 18, 0.4);
+  --sidebar: #f3f6f0;
+  --sidebar-foreground: #0f1a12;
+  --sidebar-primary: var(--forest);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgba(15, 26, 18, 0.05);
+  --sidebar-accent-foreground: #0f1a12;
 }
 
 /* ------------------------------------------------------------------ */
@@ -174,17 +266,20 @@
   }
   html {
     @apply font-sans;
-    color-scheme: dark;
+    background-color: var(--background);
   }
+  /* The canvas colour lives on <html>; <body> stays transparent so the
+     fixed -z-10 <AppBackground /> paints above it (a body background would
+     paint over negative-z children). */
   body {
-    @apply bg-background text-foreground;
-    background-color: #000;
+    @apply text-foreground;
+    background: transparent;
     min-height: 100dvh;
     font-size: 14px;
     text-rendering: optimizeLegibility;
   }
   ::selection {
-    background: color-mix(in oklab, var(--violet) 45%, transparent);
+    background: color-mix(in oklab, var(--primary) 35%, transparent);
   }
 }
 
@@ -192,19 +287,26 @@
 /* Recipes                                                             */
 /* ------------------------------------------------------------------ */
 @layer components {
-  /* Flat panels. `.glass` / `.liquid-glass` / `.surface-card` are kept as
-     names so older call sites render as plain flat cards. */
-  .liquid-glass,
+  /* Glass recipe: blur + translucent fill + 1px translucent border + 1px
+     inner top highlight (+ a soft drop shadow in light). `.liquid-glass` /
+     `.surface-card` / `.surface` are older names for the same surface. */
   .glass,
-  .surface-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-  }
-
-  /* Inset / secondary surface (tables). */
+  .liquid-glass,
+  .surface-card,
   .surface {
-    background: var(--card);
-    border: 1px solid var(--border);
+    background: var(--glass-fill);
+    border: 1px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 0 var(--glass-highlight), var(--glass-shadow);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
+    backdrop-filter: blur(24px) saturate(140%);
+  }
+  /* Same recipe, denser fill, for overlays floating over content. */
+  .glass-overlay {
+    background: var(--glass-fill-strong);
+    border: 1px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 0 var(--glass-highlight), 0 16px 40px -16px rgba(0, 0, 0, 0.45);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
+    backdrop-filter: blur(24px) saturate(140%);
   }
 
   /* Page scaffold */
@@ -248,12 +350,20 @@
   }
 }
 
+/* Light mode never shows lime text: legacy `text-lime` call sites fall back
+   to the text-safe positive colour (forest green). Unlayered so it beats the
+   utility. */
+.light .text-lime {
+  color: var(--positive);
+}
+
 /* Reduced motion: switch Lume animations off; collapse anything else. JS
    motion is handled by <MotionConfig reducedMotion="user"> in app/layout.tsx. */
 @media (prefers-reduced-motion: reduce) {
   .anim-feed,
   .anim-rise,
-  .anim-shimmer {
+  .anim-shimmer,
+  .anim-blob {
     animation: none !important;
   }
   *,
@@ -300,6 +410,18 @@
     opacity: 1;
     transform: translateY(0);
   }
+}
+@keyframes blob-drift-a {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(8vw, 6vh, 0) scale(1.08); }
+}
+@keyframes blob-drift-b {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(-7vw, -5vh, 0) scale(1.1); }
+}
+@keyframes blob-drift-c {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.05); }
+  50% { transform: translate3d(-5vw, 7vh, 0) scale(0.95); }
 }
 @keyframes bar-shimmer {
   to {

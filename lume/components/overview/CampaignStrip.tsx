@@ -38,7 +38,7 @@ export function CampaignStrip({
         <EmptyLine text="No campaigns yet." action={{ label: 'Campaigns', href: '/campaigns' }} />
       ) : (
         <Table>
-          <TableHeader className="bg-white/[0.04]">
+          <TableHeader className="bg-(--glass-fill)">
             <TableRow className="hover:bg-transparent">
               <TableHead className="h-8 pl-5 text-xs font-normal text-muted-foreground">Campaign</TableHead>
               <TableHead className="h-8 text-right text-xs font-normal text-muted-foreground">Reply</TableHead>
@@ -47,7 +47,7 @@ export function CampaignStrip({
           </TableHeader>
           <TableBody>
             {campaigns.map((c) => (
-              <TableRow key={`${c.sender}:${c.id}`} className="hover:bg-white/[0.04]">
+              <TableRow key={`${c.sender}:${c.id}`} className="hover:bg-accent">
                 <TableCell className="max-w-0 py-2.5 pl-5">
                   <div className="flex min-w-0 items-center gap-2">
                     <HealthDot level={c.health.level} reason={c.health.reason} />

@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils'
 const label = (s: string) => s.replace(/_/g, ' ')
 
 const BAR: Record<HealthLevel, string> = {
-  green: '[&_[data-slot=progress-indicator]]:bg-lime',
+  green: '[&_[data-slot=progress-indicator]]:bg-lime light:[&_[data-slot=progress-track]]:bg-forest/20',
   amber: '[&_[data-slot=progress-indicator]]:bg-violet',
   red: '[&_[data-slot=progress-indicator]]:bg-destructive',
   idle: '[&_[data-slot=progress-indicator]]:bg-white/35',
@@ -75,7 +75,7 @@ function AccountsTable({ accounts }: { accounts: InstantlyAccount[] }) {
 
   return (
     <Table>
-      <TableHeader className="bg-white/[0.04]">
+      <TableHeader className="bg-(--glass-fill)">
         {table.getHeaderGroups().map((hg) => (
           <TableRow key={hg.id} className="hover:bg-transparent">
             {hg.headers.map((h) => {
@@ -96,7 +96,7 @@ function AccountsTable({ accounts }: { accounts: InstantlyAccount[] }) {
       </TableHeader>
       <TableBody>
         {table.getRowModel().rows.map((row) => (
-          <TableRow key={row.id} className="text-white/70 hover:bg-white/[0.04]">
+          <TableRow key={row.id} className="text-white/70 hover:bg-accent">
             {row.getVisibleCells().map((cell) => (
               <TableCell key={cell.id} className="py-2.5 first:pl-5 last:pr-5">
                 {flexRender(cell.column.columnDef.cell, cell.getContext())}

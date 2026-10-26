@@ -52,7 +52,7 @@ export function OverviewView({
       {error != null && (
         <p className="flex items-center gap-3 text-xs text-muted-foreground" role="status">
           Couldn&apos;t refresh — showing the last data.
-          <button type="button" onClick={onRetry} className="text-violet-soft hover:underline">
+          <button type="button" onClick={onRetry} className="text-primary hover:underline">
             Retry
           </button>
         </p>

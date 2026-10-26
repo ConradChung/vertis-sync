@@ -7,17 +7,17 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // Primary action: white on black. Violet is never a button colour.
-        default: "bg-primary text-primary-foreground hover:bg-primary/85",
+        // Primary action: lime (dark, with glow) / forest green (light). Violet is never a button colour.
+        default: "bg-primary text-primary-foreground hover:bg-primary/85 dark:shadow-(--primary-glow)",
         outline:
           "border-border bg-background bg-clip-padding hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-white/10 aria-expanded:bg-white/10",
+          "bg-secondary text-secondary-foreground hover:bg-foreground/12 aria-expanded:bg-foreground/12",
         ghost:
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
-        link: "text-violet-soft underline-offset-4 hover:underline",
+        link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
         default:
