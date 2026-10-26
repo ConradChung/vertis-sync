@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronDown, Loader2, Maximize2, Workflow } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -21,14 +21,13 @@ function currentConversationId(): string | null {
  * collapse toggle and "Open in Playground" (saves the spec, deduped, and opens
  * it full screen, left to right).
  */
-export function DiagramCard({ diagram }: { diagram: Diagram }) {
+/** Save a diagram (deduped server-side) and open it full screen in the Playground. */
+export function useOpenInPlayground(diagram: Diagram | null) {
   const router = useRouter()
-  const [open, setOpen] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const title = diagram.title || 'Pipeline'
-
-  async function openInPlayground() {
+  const open = useCallback(async () => {
+    if (!diagram) return
     setSaving(true)
     setError(null)
     try {
@@ -36,7 +35,7 @@ export function DiagramCard({ diagram }: { diagram: Diagram }) {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ spec: diagram, title, source_conversation_id: currentConversationId() }),
+        body: JSON.stringify({ spec: diagram, title: diagram.title || 'Pipeline', source_conversation_id: currentConversationId() }),
       })
       const body = (await res.json().catch(() => ({}))) as { diagram?: { id: string } }
       if (!res.ok || !body.diagram) throw new Error(`Could not save (${res.status})`)
@@ -45,7 +44,14 @@ export function DiagramCard({ diagram }: { diagram: Diagram }) {
       setError(err instanceof Error ? err.message : 'Could not open the Playground.')
       setSaving(false)
     }
-  }
+  }, [diagram, router])
+  return { open, saving, error }
+}
+
+export function DiagramCard({ diagram }: { diagram: Diagram }) {
+  const [open, setOpen] = useState(true)
+  const { open: openInPlayground, saving, error } = useOpenInPlayground(diagram)
+  const title = diagram.title || 'Pipeline'
 
   return (
     <section className="diagram-pop glass-overlay -mx-1 my-2 overflow-hidden rounded-panel" aria-label={`Pipeline diagram: ${title}`}>
@@ -79,5 +85,37 @@ export function DiagramCard({ diagram }: { diagram: Diagram }) {
         </p>
       )}
     </section>
+  )
+}
+
+/** The in-chat stand-in for a diagram shown in the side panel ("Pipeline · title · 7 steps — View"). */
+export function DiagramChip({ diagram, active, onView }: { diagram: Diagram | null; active?: boolean; onView: () => void }) {
+  if (!diagram)
+    return (
+      <p className="diagram-pop flex w-fit items-center gap-2 rounded-full border border-dashed border-line px-3 py-1.5 text-[12.5px] text-fg-46" role="status">
+        <Loader2 className="size-3.5 animate-spin text-positive" /> Drawing pipeline…
+      </p>
+    )
+  return (
+    <button
+      type="button"
+      onClick={onView}
+      aria-pressed={!!active}
+      aria-label={`Pipeline · ${diagram.title || 'Untitled'} · ${diagram.nodes.length} steps — ${active ? 'showing in panel' : 'view'}`}
+      className={cn(
+        'diagram-pop group flex w-fit max-w-full items-center gap-2 rounded-full border border-line bg-muted/50 py-1.5 pr-2 pl-1.5 text-left text-[12.5px] transition-colors hover:border-primary/50 hover:bg-muted',
+        active && 'border-primary/60 bg-lime/10'
+      )}
+    >
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-lime/15 text-positive">
+        <Workflow className="size-3.5" />
+      </span>
+      <span className="font-medium text-fg">Pipeline</span>
+      <span className="text-fg-24">·</span>
+      <span className="truncate text-fg-70">{diagram.title || 'Untitled'}</span>
+      <span className="text-fg-24">·</span>
+      <span className="font-mono text-[11px] whitespace-nowrap text-fg-46">{diagram.nodes.length} steps</span>
+      <span className="ml-1 rounded-full bg-primary px-2 py-0.5 text-[11px] font-medium whitespace-nowrap text-primary-foreground">{active ? 'Showing' : 'View'}</span>
+    </button>
   )
 }

@@ -6,7 +6,7 @@ import { ReactFlow, ReactFlowProvider, useReactFlow } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Maximize, Minimize, Minus, Plus, RotateCcw, Scan } from 'lucide-react'
 import { buildFlow, DiagramLegend, pipeNodeTypes } from '@/components/agent/PipelineDiagram'
-import type { Diagram } from '@/lib/agent/diagram'
+import type { Diagram, Direction } from '@/lib/agent/diagram'
 import { cn } from '@/lib/utils'
 
 const FIT = { padding: 0.16, maxZoom: 1.4, duration: 400 }
@@ -56,15 +56,15 @@ function Controls({ fullscreen, onFullscreen }: { fullscreen: boolean; onFullscr
 }
 
 /**
- * Full-screen showcase canvas: left to right, wheel / pinch zoom and pan,
+ * Full-screen showcase canvas (Playground, and the Agent's pipeline panel): left to right by default, wheel / pinch zoom and pan,
  * glass zoom / fit / reset / full-screen controls, hover cards.
  * Remount with a new `key` to replay the entrance when switching pipelines.
  */
-export function PlaygroundCanvas({ diagram, className }: { diagram: Diagram; className?: string }) {
+export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { diagram: Diagram; className?: string; direction?: Direction }) {
   const { resolvedTheme } = useTheme()
   const box = useRef<HTMLDivElement>(null)
   const [fullscreen, setFullscreen] = useState(false)
-  const { nodes, edges } = useMemo(() => buildFlow(diagram, { direction: 'LR', animate: true, hover: true }), [diagram])
+  const { nodes, edges } = useMemo(() => buildFlow(diagram, { direction, animate: true, hover: true }), [diagram, direction])
 
   useEffect(() => {
     const on = () => setFullscreen(document.fullscreenElement === box.current)

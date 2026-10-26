@@ -1,14 +1,17 @@
 'use client'
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { ArrowUp, BookMarked, Brain, ChevronRight, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, SquarePen, Wrench } from 'lucide-react'
+import { ArrowUp, BookMarked, Brain, PanelRight, ChevronRight, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, SquarePen, Wrench } from 'lucide-react'
 import { AgentHistory, useConversationList } from '@/components/agent/AgentHistory'
 import { ManageSkills, SkillCard, SkillMenu, useSkillList } from '@/components/agent/AgentSkills'
 import { Markdown } from '@/components/agent/Markdown'
 import { Waveform } from '@/components/agent/Waveform'
 import { AgentStatus, statusLabel } from '@/components/agent/AgentStatus'
 import { AgentMemory } from '@/components/agent/AgentMemory'
+import { AgentSidePanel, type ReviewSetRef, type SideTab } from '@/components/agent/AgentSidePanel'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
+import { chatDiagrams, REVIEW_TOOLS } from '@/lib/agent/chatDiagrams'
 import { htmlLinksToMarkdown } from '@/lib/agent/linkify'
 import { PlanCard } from '@/components/orb/PlanCard'
 import { ToolLog, type ToolLogEntry } from '@/components/orb/ToolLog'
@@ -61,6 +64,12 @@ export function AgentChat() {
   const [collapsed, setCollapsed] = useState(false)
   const [sheetOpen, setSheetOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [panelTab, setPanelTab] = useState<SideTab>('pipeline')
+  const [activeKey, setActiveKey] = useState<string | null>(null)
+  const [activeSetId, setActiveSetId] = useState<string | null>(null)
+  const [leadsRefresh, setLeadsRefresh] = useState(0)
+  const desktop = useMediaQuery('(min-width: 1024px)')
   const bump = useCallback(() => setRefreshKey((k) => k + 1), [])
   const list = useConversationList(refreshKey)
   const skills = useSkillList(refreshKey)
@@ -81,6 +90,48 @@ export function AgentChat() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const { messages, busy, send } = chat
+
+  // Split screen: diagrams and lead review sets from this conversation live in the right panel.
+  const diagrams = useMemo(() => chatDiagrams(messages), [messages])
+  const latestDiagram = diagrams.at(-1)?.key ?? null
+  const reviewSig = useMemo(
+    () => messages.reduce((n, m) => n + m.tools.filter((t) => REVIEW_TOOLS.has(t.name) && t.status !== 'running').length, 0),
+    [messages]
+  )
+  const sets = useReviewSets(chat.conversationId, reviewSig)
+  const latestSet = sets[0]?.id ?? null
+
+  useEffect(() => {
+    setPanelOpen(false)
+    setActiveKey(null)
+    setActiveSetId(null)
+  }, [chat.conversationId])
+  useEffect(() => {
+    if (!latestDiagram) return
+    setActiveKey(latestDiagram)
+    setPanelTab('pipeline')
+    setPanelOpen(true)
+  }, [latestDiagram])
+  useEffect(() => {
+    if (!latestSet) return
+    setActiveSetId(latestSet)
+    setPanelTab('leads')
+    setPanelOpen(true)
+  }, [latestSet])
+  // The agent loaded or filtered leads: refresh the table and bring it forward.
+  useEffect(() => {
+    if (!reviewSig) return
+    setLeadsRefresh((n) => n + 1)
+    setPanelTab('leads')
+    setPanelOpen(true)
+  }, [reviewSig])
+  const hasPanel = diagrams.length > 0 || sets.length > 0
+  const split = panelOpen && hasPanel
+  const viewDiagram = useCallback((key: string) => {
+    setActiveKey(key)
+    setPanelTab('pipeline')
+    setPanelOpen(true)
+  }, [])
 
   useEffect(() => setHello(greeting()), [])
 
@@ -235,10 +286,22 @@ export function AgentChat() {
           <Button variant="ghost" size="icon-sm" onClick={() => setMemoryOpen(true)} aria-label="Memory" title="What Lume remembers">
             <Brain className="size-4" />
           </Button>
+          {hasPanel && !panelOpen && (
+            <Button variant="outline" size="sm" className="anim-rise ml-1" onClick={() => setPanelOpen(true)}>
+              <PanelRight className="size-3.5" /> Show {diagrams.length ? 'pipeline' : 'leads'}
+            </Button>
+          )}
         </div>
         <AgentMemory open={memoryOpen} onOpenChange={setMemoryOpen} />
         {/* The conversation sits on its own dense glass panel so text stays readable over the wallpaper. */}
-        <div className="glass-overlay mx-auto flex min-h-[calc(100dvh-var(--topbar-h)-110px)] w-full max-w-[820px] flex-col rounded-panel px-5 pt-5 sm:px-8 sm:pt-7">
+        {(() => {
+          const column = (
+        <div
+          className={cn(
+            'glass-overlay flex w-full flex-col rounded-panel px-5 pt-5 sm:px-8 sm:pt-7',
+            split && desktop ? 'split-chat-in min-h-full' : 'mx-auto min-h-[calc(100dvh-var(--topbar-h)-110px)] max-w-[820px]'
+          )}
+        >
           <div className="flex-1" aria-live="polite" aria-busy={busy || chat.loading}>
             {chat.notFound ? (
               <MissingConversation onNew={newChat} />
@@ -250,7 +313,11 @@ export function AgentChat() {
               <ol className="flex flex-col gap-7 pt-2 pb-6" aria-label="Conversation">
                 {messages.map((m) => (
                   <li key={m.id}>
-                    <Message m={m} />
+                    <Message
+                      m={m}
+                      activeFlow={split && activeKey?.startsWith(`${m.id}:`) ? Number(activeKey.split(':').at(-1)) : null}
+                      onViewFlow={(k) => viewDiagram(`${m.id}:${k}`)}
+                    />
                   </li>
                 ))}
               </ol>
@@ -366,9 +433,86 @@ export function AgentChat() {
             )}
           </div>
         </div>
+          )
+          const panel = (
+            <AgentSidePanel
+              tab={panelTab}
+              onTab={setPanelTab}
+              diagrams={diagrams}
+              activeKey={activeKey}
+              onSelectDiagram={setActiveKey}
+              sets={sets}
+              activeSetId={activeSetId}
+              onSelectSet={setActiveSetId}
+              leadsRefresh={leadsRefresh}
+              onClose={() => setPanelOpen(false)}
+            />
+          )
+          if (!split) return column
+          if (!desktop)
+            return (
+              <>
+                {column}
+                <Sheet open onOpenChange={(o) => !o && setPanelOpen(false)}>
+                  <SheetContent side="right" className="w-full max-w-none p-0 sm:max-w-none" showCloseButton={false}>
+                    <SheetTitle className="sr-only">Pipeline and leads</SheetTitle>
+                    {panel}
+                  </SheetContent>
+                </Sheet>
+              </>
+            )
+          return (
+            <div className="h-[calc(100dvh-var(--topbar-h)-4rem)]">
+              <ResizablePanelGroup orientation="horizontal" className="gap-0">
+                <ResizablePanel defaultSize="45" minSize="28">
+                  {column}
+                </ResizablePanel>
+                <ResizableHandle withHandle className="mx-2 bg-transparent" />
+                <ResizablePanel defaultSize="55" minSize="28">
+                  {panel}
+                </ResizablePanel>
+              </ResizablePanelGroup>
+            </div>
+          )
+        })()}
       </div>
     </div>
   )
+}
+
+/** Matches a media query on the client (false during SSR). */
+function useMediaQuery(query: string): boolean {
+  const [on, setOn] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia(query)
+    const update = () => setOn(mq.matches)
+    update()
+    mq.addEventListener('change', update)
+    return () => mq.removeEventListener('change', update)
+  }, [query])
+  return on
+}
+
+/** Lead review sets loaded in this conversation, newest first; refetched after each review tool call. */
+function useReviewSets(conversationId: string | null, sig: number): ReviewSetRef[] {
+  const [sets, setSets] = useState<ReviewSetRef[]>([])
+  useEffect(() => setSets([]), [conversationId])
+  useEffect(() => {
+    if (!conversationId) return
+    let live = true
+    fetch(`/api/review-sets?conversation=${conversationId}`, { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : { sets: [] }))
+      .then((b: { sets?: ReviewSetRef[] }) => {
+        if (!live) return
+        const next = (b.sets ?? []).map((x) => ({ id: x.id, title: x.title }))
+        setSets((prev) => (prev.length === next.length && prev.every((p, i) => p.id === next[i].id && p.title === next[i].title) ? prev : next))
+      })
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [conversationId, sig])
+  return sets
 }
 
 function MissingConversation({ onNew }: { onNew: () => void }) {
@@ -419,7 +563,7 @@ function EmptyState({ hello, onPick, disabled }: { hello: string; onPick: (t: st
   )
 }
 
-function Message({ m }: { m: ChatMessage }) {
+function Message({ m, activeFlow = null, onViewFlow }: { m: ChatMessage; activeFlow?: number | null; onViewFlow?: (k: number) => void }) {
   if (m.role === 'user') {
     return (
       <div className="flex justify-end">
@@ -438,7 +582,7 @@ function Message({ m }: { m: ChatMessage }) {
   return (
     <div className="flex flex-col gap-3">
       {m.tools.length > 0 && <ToolChips tools={m.tools} live={!!m.streaming} />}
-      {m.text && <Markdown text={htmlLinksToMarkdown(m.text)} />}
+      {m.text && <Markdown text={htmlLinksToMarkdown(m.text)} flow={onViewFlow ? { onView: onViewFlow, active: activeFlow } : undefined} />}
       <PlanCard approvals={m.approvals} />
       {m.notConfigured ? (
         <div className="flex items-start gap-3 rounded-panel border border-amber/40 bg-amber/8 px-4 py-3 text-[13px]" role="status">

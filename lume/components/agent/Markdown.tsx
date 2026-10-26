@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from 'react'
-import { DiagramCard } from '@/components/agent/DiagramCard'
+import { DiagramCard, DiagramChip } from '@/components/agent/DiagramCard'
 import { parseDiagram } from '@/lib/agent/diagram'
 
 /**
@@ -133,13 +133,27 @@ export function renderInline(text: string): ReactNode[] {
   })
 }
 
-export function Markdown({ text }: { text: string }) {
+/** In the Agent chat, diagrams live in the side panel: the reply shows a chip that focuses it. */
+export interface FlowChips {
+  onView: (index: number) => void
+  /** Index (among this reply's flow blocks) currently shown in the panel. */
+  active?: number | null
+}
+
+export function Markdown({ text, flow }: { text: string; flow?: FlowChips }) {
+  let flowIdx = -1
   return (
     <div className="flex flex-col gap-3 text-[15px] leading-[1.65] text-fg-70">
       {parseBlocks(text).map((b, i) => {
         switch (b.kind) {
           case 'code':
             if (b.lang === 'flow') {
+              const k = ++flowIdx
+              if (flow) {
+                const d = b.closed ? parseDiagram(b.text) : null
+                if (!b.closed || d?.ok)
+                  return <DiagramChip key={i} diagram={d?.ok ? d.diagram : null} active={flow.active === k} onView={() => flow.onView(k)} />
+              }
               // A pipeline diagram: placeholder while it streams, code if the JSON is bad.
               if (!b.closed)
                 return (

@@ -557,3 +557,30 @@
     filter: none;
   }
 }
+
+/* Agent split screen: the pipeline/leads panel slides in from the right while
+   the chat column eases left. */
+.split-panel-in {
+  animation: split-panel-in 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.split-chat-in {
+  animation: split-chat-in 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes split-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(48px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes split-chat-in {
+  from {
+    transform: translateX(28px);
+  }
+  to {
+    transform: none;
+  }
+}
