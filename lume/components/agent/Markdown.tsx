@@ -143,7 +143,7 @@ export interface FlowChips {
 export function Markdown({ text, flow }: { text: string; flow?: FlowChips }) {
   let flowIdx = -1
   return (
-    <div className="flex flex-col gap-3 text-[15px] leading-[1.65] text-fg-70">
+    <div className="flex min-w-0 flex-col gap-3 text-[15px] leading-[1.65] text-fg-70">
       {parseBlocks(text).map((b, i) => {
         switch (b.kind) {
           case 'code':
@@ -171,7 +171,7 @@ export function Markdown({ text, flow }: { text: string; flow?: FlowChips }) {
             )
           case 'table':
             return (
-              <div key={i} className="overflow-x-auto rounded-control border border-line">
+              <div key={i} className="thin-scroll max-w-full min-w-0 overflow-x-auto rounded-control border border-line">
                 <table className="w-full border-collapse text-left text-[13.5px] leading-5">
                   <thead className="bg-muted/60">
                     <tr>

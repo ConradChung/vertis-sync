@@ -318,7 +318,7 @@ export function AgentChat() {
             ) : (
               <ol className="flex flex-col gap-7 pt-2 pb-6" aria-label="Conversation">
                 {messages.map((m) => (
-                  <li key={m.id}>
+                  <li key={m.id} className="min-w-0">
                     <Message
                       m={m}
                       activeFlow={split && activeKey?.startsWith(`${m.id}:`) ? Number(activeKey.split(':').at(-1)) : null}
@@ -586,7 +586,7 @@ function Message({ m, activeFlow = null, onViewFlow }: { m: ChatMessage; activeF
     )
   }
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-w-0 flex-col gap-3">
       {m.tools.length > 0 && <ToolChips tools={m.tools} live={!!m.streaming} />}
       {m.text && <Markdown text={htmlLinksToMarkdown(m.text)} flow={onViewFlow ? { onView: onViewFlow, active: activeFlow } : undefined} />}
       <PlanCard approvals={m.approvals} />

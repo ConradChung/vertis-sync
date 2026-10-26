@@ -58,6 +58,9 @@ function Controls({ fullscreen, onFullscreen }: { fullscreen: boolean; onFullscr
 
 /** Steps shown on open for long pipelines; the Fit button shows them all. */
 const INITIAL_FIT_NODES = 7
+const INITIAL_FIT_NODES_TB = 4
+/** Never open a pipeline smaller than this; pan or Fit to see the rest. */
+const INITIAL_MIN_ZOOM = 0.7
 
 /** Width the details sheet takes over the canvas (px, capped by the canvas width). */
 const SHEET_W = 380
@@ -108,10 +111,16 @@ export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { dia
   // Long pipelines open on their first steps at a readable zoom (Fit shows everything).
   const initialFit = useMemo(
     () =>
-      order.length > INITIAL_FIT_NODES
-        ? { padding: FIT.padding, maxZoom: FIT.maxZoom, nodes: order.slice(0, INITIAL_FIT_NODES).map((id) => ({ id })) }
-        : { padding: FIT.padding, maxZoom: FIT.maxZoom },
-    [order]
+      // Vertical (narrow panels) shows fewer steps up front so labels stay legible.
+      order.length > (direction === 'TB' ? INITIAL_FIT_NODES_TB : INITIAL_FIT_NODES)
+        ? {
+            padding: FIT.padding,
+            maxZoom: FIT.maxZoom,
+            minZoom: INITIAL_MIN_ZOOM,
+            nodes: order.slice(0, direction === 'TB' ? INITIAL_FIT_NODES_TB : INITIAL_FIT_NODES).map((id) => ({ id })),
+          }
+        : { padding: FIT.padding, maxZoom: FIT.maxZoom, minZoom: INITIAL_MIN_ZOOM },
+    [order, direction]
   )
   const byId = useMemo(() => new Map(diagram.nodes.map((n) => [n.id, n])), [diagram])
 
