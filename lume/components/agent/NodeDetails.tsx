@@ -149,16 +149,30 @@ export function NodeDetails({
         </div>
       </Section>
     )
-  if (d.inputs?.length || d.outputs?.length)
+  if (d.inputs?.length && d.outputs?.length)
     sections.push(
       <Section key="io" title="Inputs → Outputs" index={i++}>
         <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-2 text-[12px]">
-          <ul className="space-y-1 text-fg-70">{(d.inputs ?? ['—']).map((x) => <li key={x}>{x}</li>)}</ul>
+          <ul className="space-y-1 text-fg-70">{d.inputs.map((x) => <li key={x}>{x}</li>)}</ul>
           <ArrowRight className="mt-0.5 size-3.5 text-fg-46" />
-          <ul className="space-y-1 text-fg">{(d.outputs ?? ['—']).map((x) => <li key={x}>{x}</li>)}</ul>
+          <ul className="space-y-1 text-fg">{d.outputs.map((x) => <li key={x}>{x}</li>)}</ul>
         </div>
       </Section>
     )
+  else if (d.inputs?.length || d.outputs?.length) {
+    const only = (d.inputs ?? d.outputs)!
+    sections.push(
+      <Section key="io" title={d.inputs?.length ? 'Inputs' : 'Outputs'} index={i++}>
+        <div className="flex flex-wrap gap-1.5">
+          {only.map((x) => (
+            <span key={x} className={chip}>
+              {x}
+            </span>
+          ))}
+        </div>
+      </Section>
+    )
+  }
   if (d.data?.length)
     sections.push(
       <Section key="data" title="Data" index={i++}>

@@ -56,6 +56,9 @@ function Controls({ fullscreen, onFullscreen }: { fullscreen: boolean; onFullscr
   )
 }
 
+/** Steps shown on open for long pipelines; the Fit button shows them all. */
+const INITIAL_FIT_NODES = 7
+
 /** Width the details sheet takes over the canvas (px, capped by the canvas width). */
 const SHEET_W = 380
 
@@ -69,7 +72,8 @@ function FocusSelected({ id, boxWidth }: { id: string | null; boxWidth: number }
     if (!id) return
     const n = rf.getNode(id)
     if (!n) return
-    const zoom = rf.getZoom()
+    // Zoom in to a readable level when the whole pipeline was fitted small.
+    const zoom = Math.max(rf.getZoom(), 0.95)
     const sheet = Math.min(SHEET_W, boxWidth * 0.9)
     const visible = Math.max(boxWidth - sheet, boxWidth * 0.35)
     // setCenter centres on the whole canvas; shift right so the node lands mid-way in the visible area.
@@ -96,10 +100,19 @@ export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { dia
   const [boxWidth, setBoxWidth] = useState(0)
   const flow = useMemo(() => buildFlow(diagram, { direction, animate: true, hover: true, clickable: true }), [diagram, direction])
   const nodes = useMemo<PipeNode[]>(
-    () => (selected ? flow.nodes.map((n) => (n.id === selected ? { ...n, data: { ...n.data, selected: true } } : n)) : flow.nodes),
+    // While the sheet is open: ring the selected step and turn hover previews off so they never cover the sheet.
+    () => (selected ? flow.nodes.map((n) => ({ ...n, data: { ...n.data, hover: false, selected: n.id === selected } })) : flow.nodes),
     [flow.nodes, selected]
   )
   const order = useMemo(() => flowOrder(diagram), [diagram])
+  // Long pipelines open on their first steps at a readable zoom (Fit shows everything).
+  const initialFit = useMemo(
+    () =>
+      order.length > INITIAL_FIT_NODES
+        ? { padding: FIT.padding, maxZoom: FIT.maxZoom, nodes: order.slice(0, INITIAL_FIT_NODES).map((id) => ({ id })) }
+        : { padding: FIT.padding, maxZoom: FIT.maxZoom },
+    [order]
+  )
   const byId = useMemo(() => new Map(diagram.nodes.map((n) => [n.id, n])), [diagram])
 
   // Close the sheet when a different pipeline is shown (not on every re-render of the same one).
@@ -147,7 +160,7 @@ export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { dia
           onNodeClick={onNodeClick}
           onPaneClick={close}
           fitView
-          fitViewOptions={{ padding: FIT.padding, maxZoom: FIT.maxZoom }}
+          fitViewOptions={initialFit}
           minZoom={0.2}
           maxZoom={2.5}
           nodesDraggable={false}
@@ -174,7 +187,8 @@ export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { dia
           onPrev={at > 0 ? prev : null}
           onNext={at >= 0 && at < order.length - 1 ? next : null}
           onClose={close}
-          className="absolute top-3 right-3 bottom-3 z-20 w-[min(380px,calc(100%-1.5rem))]"
+          // Stops above the zoom controls and legend so they stay usable.
+          className="absolute top-3 right-3 bottom-[4.5rem] z-20 w-[min(380px,calc(100%-1.5rem))]"
         />
       )}
     </div>

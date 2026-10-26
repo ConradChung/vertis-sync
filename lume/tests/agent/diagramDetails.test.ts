@@ -75,6 +75,6 @@ describe('diagram details', () => {
   })
 
   it('orders nodes by flow (rank, then row) for next / previous', () => {
-    expect(flowOrder(base)).toEqual(['icp', 'maps', 'apollo', 'review'])
+    expect(flowOrder(diagramSchema.parse(base))).toEqual(['icp', 'maps', 'apollo', 'review'])
   })
 })
