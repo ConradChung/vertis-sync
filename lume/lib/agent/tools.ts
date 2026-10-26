@@ -301,6 +301,17 @@ const SPECS: Built[] = [
 
   tiered(
     {
+      name: 'open_website',
+      description:
+        "Open a public web page from Lume's server and read it: title, meta description, readable text (up to 20k chars) and the site's own links " +
+        '(use them to open About, Customers, Pricing or Careers next). Accepts a bare domain like "d3.com". Use it when web_fetch fails or is blocked.',
+      inputSchema: z.object({ url: z.string().min(3).max(2000) }),
+      run: async ({ url }, { call }) => call(`/api/web/page?url=${encodeURIComponent(url)}`) as Promise<ToolResult>,
+    },
+    'read'
+  ),
+  tiered(
+    {
       name: 'search_apify_store',
       description:
         'Search the Apify Store for actors (scrapers) that can source leads, e.g. "google maps roofers" or "linkedin company employees". ' +

@@ -8,6 +8,7 @@ import { ManageSkills, SkillCard, SkillMenu, useSkillList } from '@/components/a
 import { Markdown } from '@/components/agent/Markdown'
 import { Waveform } from '@/components/agent/Waveform'
 import { AgentStatus, statusLabel } from '@/components/agent/AgentStatus'
+import { htmlLinksToMarkdown } from '@/lib/agent/linkify'
 import { PlanCard } from '@/components/orb/PlanCard'
 import { ToolLog, type ToolLogEntry } from '@/components/orb/ToolLog'
 import { useSpeechRecognition, VoiceInput } from '@/components/orb/VoiceInput'
@@ -431,7 +432,7 @@ function Message({ m }: { m: ChatMessage }) {
   return (
     <div className="flex flex-col gap-3">
       {m.tools.length > 0 && <ToolChips tools={m.tools} live={!!m.streaming} />}
-      {m.text && <Markdown text={m.text} />}
+      {m.text && <Markdown text={htmlLinksToMarkdown(m.text)} />}
       <PlanCard approvals={m.approvals} />
       {m.notConfigured ? (
         <div className="flex items-start gap-3 rounded-panel border border-amber/40 bg-amber/8 px-4 py-3 text-[13px]" role="status">

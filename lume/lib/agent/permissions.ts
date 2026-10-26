@@ -16,6 +16,7 @@ export type ToolTier = 'read' | 'low' | 'high'
 export const TOOL_TIERS = {
   list_orders: 'read', get_validation_queue: 'read', list_campaigns: 'read', campaign_stats: 'read',
   list_rules: 'read', list_scheduled_jobs: 'read', inbox_health: 'read',
+  open_website: 'read',
   search_apify_store: 'read', get_actor_input_schema: 'read', get_actor_run: 'read', rank_campaigns: 'read',
   get_campaign_sequence: 'read', list_skills: 'read', get_skill: 'read',
   create_order: 'low', draft_reply: 'low', create_rotation_rule: 'low', notify: 'low', import_actor_run: 'low', save_skill: 'low',
