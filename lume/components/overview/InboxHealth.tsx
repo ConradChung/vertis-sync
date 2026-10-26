@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils'
 const label = (s: string) => s.replace(/_/g, ' ')
 
 const BAR: Record<HealthLevel, string> = {
-  green: '[&_[data-slot=progress-indicator]]:bg-lime light:[&_[data-slot=progress-track]]:bg-forest/20',
+  green: '[&_[data-slot=progress-indicator]]:bg-lime light:[&_[data-slot=progress-track]]:bg-olive/20',
   amber: '[&_[data-slot=progress-indicator]]:bg-violet',
   red: '[&_[data-slot=progress-indicator]]:bg-destructive',
   idle: '[&_[data-slot=progress-indicator]]:bg-white/35',

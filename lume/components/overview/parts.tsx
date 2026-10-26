@@ -14,8 +14,8 @@ import { cn } from '@/lib/utils'
 /** Shared bits for the Overview cards. */
 
 /**
- * Sparkline tone: `lime` = the primary series (lime line in dark, forest-green
- * line with lime points/area in light) · `violet` = secondary / automation.
+ * Sparkline tone: `lime` = the primary series (lime line in dark; deeper-lime
+ * #5C8000 line with lime points/area in light) · `violet` = secondary / automation.
  */
 export type Tone = 'violet' | 'lime'
 
@@ -53,8 +53,8 @@ export function useNow(intervalMs: number): number {
 }
 
 /**
- * Default sparkline tone: always the theme primary (lime in dark, forest
- * green in light). Violet is reserved for agent/automation series, which
+ * Default sparkline tone: always the theme primary (lime; a deeper-lime line
+ * in light). Violet is reserved for agent/automation series, which
  * must ask for it explicitly.
  */
 export function trendTone(data: number[]): Tone {
@@ -82,6 +82,8 @@ export function Spark({
   variant?: 'line' | 'area'
 }) {
   const gradientId = `spark-${useId().replace(/:/g, '')}`
+  // Draw in on mount (~800 ms ease-out) and tween on data change; static under reduced motion.
+  const animate = !useReducedMotion()
   if (data.length < 2) return <div className={cn('h-9', className)} aria-hidden />
   const c = TONE_VAR[tone ?? trendTone(data)]
   const config: ChartConfig = { v: { label: label ?? 'value', color: c.line } }
@@ -111,7 +113,9 @@ export function Spark({
               stroke="var(--color-v)"
               strokeWidth={1.75}
               fill={`url(#${gradientId})`}
-              isAnimationActive={false}
+              isAnimationActive={animate}
+              animationDuration={800}
+              animationEasing="ease-out"
               dot={(p: { index?: number; cx?: number; cy?: number }) =>
                 p.index === last && p.cx != null && p.cy != null ? (
                   <circle key="last" cx={p.cx} cy={p.cy} r={3} fill={c.point} stroke={c.line} strokeWidth={1.5} />
@@ -124,7 +128,7 @@ export function Spark({
         ) : (
           <LineChart data={rows} margin={{ top: 3, right: 2, bottom: 3, left: 2 }} accessibilityLayer={false}>
             <YAxis hide domain={['dataMin', 'dataMax']} />
-            <Line dataKey="v" type="linear" stroke="var(--color-v)" strokeWidth={1.75} dot={false} isAnimationActive={false} />
+            <Line dataKey="v" type="linear" stroke="var(--color-v)" strokeWidth={1.75} dot={false} isAnimationActive={animate} animationDuration={800} animationEasing="ease-out" />
           </LineChart>
         )}
       </ChartContainer>
@@ -145,8 +149,8 @@ export function HealthDot({ level, reason }: { level: HealthLevel; reason: strin
             tabIndex={0}
             className={cn(
               'inline-block size-1.5 shrink-0 cursor-help rounded-full bg-current shadow-(--dot-glow) outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              // Light: lime sits on a forest-green ring so the dot holds 3:1 on white glass.
-              level === 'green' && 'light:size-2 light:border-[1.5px] light:border-forest'
+              // Light: lime sits on a thin olive ring so the dot holds 3:1 on white glass.
+              level === 'green' && 'light:size-2 light:border-[1.5px] light:border-olive'
             )}
             style={{ color: h.color }}
           />
@@ -192,11 +196,11 @@ export function EmptyLine({ text, action }: { text: string; action?: { label: st
       <span>{text}</span>
       {action &&
         (action.external ? (
-          <a href={action.href} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">
+          <a href={action.href} target="_blank" rel="noreferrer" className="text-xs link-accent hover:underline">
             {action.label} ↗
           </a>
         ) : (
-          <Link href={action.href} className="text-xs text-primary hover:underline">
+          <Link href={action.href} className="text-xs link-accent hover:underline">
             {action.label} →
           </Link>
         ))}

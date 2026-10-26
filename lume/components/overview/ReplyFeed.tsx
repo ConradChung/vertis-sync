@@ -133,7 +133,7 @@ export function ReplyFeed({ events, campaignNames }: { events: EventRow[]; campa
         <span className="flex items-center gap-1.5">
           <span className="relative inline-flex size-1.5" aria-hidden>
             <span className="absolute inline-flex size-full animate-ping rounded-full bg-lime opacity-60 motion-reduce:hidden" />
-            <span className="relative inline-flex size-1.5 rounded-full bg-lime text-lime shadow-(--dot-glow) light:size-2 light:border-[1.5px] light:border-forest" />
+            <span className="relative inline-flex size-1.5 rounded-full bg-lime text-lime shadow-(--dot-glow) light:size-2 light:border-[1.5px] light:border-olive" />
           </span>
           Replies · interested · bounces
         </span>
@@ -148,7 +148,7 @@ export function ReplyFeed({ events, campaignNames }: { events: EventRow[]; campa
             <EmptyDescription>They stream in as Instantly webhooks fire.</EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
-            <Link href="/campaigns" className="text-xs text-primary hover:underline">
+            <Link href="/campaigns" className="text-xs link-accent hover:underline">
               Campaigns →
             </Link>
           </EmptyContent>

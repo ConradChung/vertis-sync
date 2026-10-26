@@ -7,8 +7,9 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // Primary action: lime (dark, with glow) / forest green (light). Violet is never a button colour.
-        default: "bg-primary text-primary-foreground hover:bg-primary/85 dark:shadow-(--primary-glow)",
+        // Primary action: lime fill in both themes (black/ink text); glow in dark, thin olive edge in light.
+        // Violet is never a button colour.
+        default: "bg-primary text-primary-foreground hover:bg-primary/85 dark:shadow-(--primary-glow) light:border-(--lime-edge)",
         outline:
           "border-border bg-background bg-clip-padding hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
@@ -17,7 +18,7 @@ const buttonVariants = cva(
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
-        link: "text-primary underline-offset-4 hover:underline",
+        link: "link-accent underline-offset-4 hover:underline",
       },
       size: {
         default:

@@ -16,12 +16,12 @@ export function overviewRelevant({ table, record }: RealtimeChange): boolean {
 
 /**
  * Database half of the Overview (`GET /api/overview`). Revalidates on
- * Realtime inserts the page shows, at most once per 5 s, plus a slow poll.
+ * Realtime inserts the page shows, at most once per 5 s, plus a 30 s poll.
  * Event types it never renders (rotation runs, sends) do not refetch.
  */
 export function useOverview() {
   const swr = useSWR<OverviewPayload>('/api/overview', fetchJson, {
-    refreshInterval: 60_000,
+    refreshInterval: 30_000,
     keepPreviousData: true,
   })
   useRealtimeInvalidate(() => void swr.mutate(), {

@@ -51,6 +51,8 @@
   --color-brand: var(--violet);
   --color-lime: var(--lime);
   --color-forest: var(--forest);
+  --color-olive: var(--olive);
+  --color-link: var(--link);
   --color-positive: var(--positive);
 
   /* Legacy Lume names, remapped onto the four-colour palette so pages that
@@ -111,9 +113,15 @@
   --white: #ffffff;
   --violet: #7d39eb; /* automation / agent colour only */
   --lime: #c6ff33;
-  --forest: #1f6b3a;
-  /* Text-safe "positive" colour: lime on dark, forest green on light. */
+  --forest: #1f6b3a; /* fallback only; no longer a visible primary */
+  /* Olive: lime's text-safe partner on light surfaces (5.7:1 on glass). */
+  --olive: #4a6b00;
+  /* Text-safe "positive" colour: lime on dark, olive on light. */
   --positive: var(--lime);
+  /* Inline links: lime on dark; ink + lime underline on light (.link-accent). */
+  --link: var(--lime);
+  /* Thin dark edge for lime fills / focus on light; none on dark. */
+  --lime-edge: transparent;
 
   /* Glass recipe */
   --glass-fill: rgba(255, 255, 255, 0.05);
@@ -124,6 +132,9 @@
      background, so they use a denser fill of the same recipe. */
   --glass-fill-strong: rgba(14, 14, 14, 0.72);
   --primary-glow: 0 0 24px -6px var(--lime);
+  /* Floating tab bar */
+  --bar-fill: rgba(255, 255, 255, 0.07);
+  --bar-shadow: inset 0 1px 0 0 var(--glass-highlight), 0 12px 32px -12px rgba(0, 0, 0, 0.7);
   --dot-glow: 0 0 8px currentColor;
 
   /* Charts */
@@ -151,7 +162,7 @@
   --red: var(--destructive);
 
   --radius: 0.5rem;
-  --topbar-h: 56px;
+  --topbar-h: 68px; /* floating bar: 16 px offset + 52 px pill */
 
   /* shadcn semantic */
   --background: #050505;
@@ -187,18 +198,21 @@
   --sidebar-ring: var(--ring);
 }
 
-/* Light — "green tech / nature". Lime never carries text here: buttons,
-   links and the active nav use forest green; lime is kept for the focus
-   ring, progress fills, the active-pill underline, status dots and chart
-   points. `--white` is remapped to ink so legacy `*-white/NN` neutrals
-   (hairlines, hover tints, faint text) invert instead of vanishing. */
+/* Light — "green tech / nature". Primary is still lime, but only as a FILL
+   with ink text (15:1) and a thin olive edge. Lime never carries text here:
+   links are ink with a lime underline, positive text is olive, chart lines
+   are a deeper lime (#5C8000) with lime area + points. `--white` is
+   remapped to ink so legacy `*-white/NN` neutrals (hairlines, hover tints,
+   faint text) invert instead of vanishing. */
 :root.light {
   color-scheme: light;
 
   --ink: #0f1a12;
   --white: #0f1a12;
   --violet: #5b22c4;
-  --positive: var(--forest);
+  --positive: var(--olive);
+  --link: #0f1a12;
+  --lime-edge: var(--olive);
 
   --glass-fill: rgba(255, 255, 255, 0.6);
   --glass-border: rgba(255, 255, 255, 0.7);
@@ -206,9 +220,11 @@
   --glass-shadow: 0 8px 30px -12px rgba(20, 40, 20, 0.25);
   --glass-fill-strong: rgba(255, 255, 255, 0.86);
   --primary-glow: 0 0 #0000;
+  --bar-fill: rgba(255, 255, 255, 0.55);
+  --bar-shadow: inset 0 1px 0 0 var(--glass-highlight), 0 10px 30px -12px rgba(20, 40, 20, 0.3);
   --dot-glow: 0 0 #0000;
 
-  --chart-line: var(--forest);
+  --chart-line: #5c8000; /* 4.2:1 on glass */
   --chart-area: var(--lime);
   --chart-point: var(--lime);
   --chart-glow: none;
@@ -224,7 +240,7 @@
   --panel: rgba(255, 255, 255, 0.78);
   --surface: #eef2ea;
   --violet-soft: #5b22c4;
-  --green: var(--forest);
+  --green: var(--olive);
   --amber: #5b22c4;
   --cyan: rgba(15, 26, 18, 0.72);
 
@@ -232,27 +248,27 @@
   --foreground: #0f1a12;
   --card-foreground: #0f1a12;
   --popover-foreground: #0f1a12;
-  --primary: var(--forest);
-  --primary-foreground: #ffffff;
+  --primary: var(--lime);
+  --primary-foreground: #0f1a12;
   --secondary: rgba(15, 26, 18, 0.06);
   --secondary-foreground: #0f1a12;
   --muted: rgba(15, 26, 18, 0.05);
   /* Brief: ink/55. Measured 4.2:1 on the glass → raised to /60 for AA. */
   --muted-foreground: rgba(15, 26, 18, 0.6);
-  --accent: color-mix(in oklab, var(--forest) 10%, transparent);
+  --accent: color-mix(in oklab, var(--lime) 22%, transparent);
   --accent-foreground: #0f1a12;
   --destructive: oklch(0.577 0.245 27.325);
   --border: rgba(15, 26, 18, 0.1);
   --input: rgba(15, 26, 18, 0.16);
   --ring: var(--lime);
-  --chart-1: var(--forest);
+  --chart-1: #5c8000;
   --chart-2: #5b22c4;
   --chart-3: #0f1a12;
   --chart-4: rgba(15, 26, 18, 0.4);
   --sidebar: #f3f6f0;
   --sidebar-foreground: #0f1a12;
-  --sidebar-primary: var(--forest);
-  --sidebar-primary-foreground: #ffffff;
+  --sidebar-primary: var(--lime);
+  --sidebar-primary-foreground: #0f1a12;
   --sidebar-accent: rgba(15, 26, 18, 0.05);
   --sidebar-accent-foreground: #0f1a12;
 }
@@ -351,10 +367,30 @@
 }
 
 /* Light mode never shows lime text: legacy `text-lime` call sites fall back
-   to the text-safe positive colour (forest green). Unlayered so it beats the
-   utility. */
+   to olive, stray `text-primary` to ink. Unlayered so they beat utilities. */
 .light .text-lime {
   color: var(--positive);
+}
+.light .text-primary {
+  color: var(--foreground);
+}
+
+/* Inline text links: lime on dark; ink with a lime underline on light. */
+.link-accent {
+  color: var(--link);
+}
+.light .link-accent {
+  text-decoration-line: underline;
+  text-decoration-color: var(--lime);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+
+/* Focus on light: the lime ring alone is 1.1:1, so add a 1px olive outline
+   just outside it (olive is 5.7:1 on glass). */
+.light :focus-visible {
+  outline: 1px solid var(--olive) !important;
+  outline-offset: 3px;
 }
 
 /* Reduced motion: switch Lume animations off; collapse anything else. JS
@@ -378,7 +414,7 @@
 /* Responsive shell */
 @media (max-width: 640px) {
   :root {
-    --topbar-h: 96px;
+    --topbar-h: 68px;
   }
   .shell {
     padding: calc(var(--topbar-h) + 1.5rem) 1rem 2rem;

@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
+import { useReducedMotion } from 'motion/react'
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts'
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
 import { NotConnected, ShimmerBar } from '@/components/overview/parts'
@@ -29,6 +30,8 @@ export function AnalyticsChart({
   days: 7 | 30
   onDays: (d: 7 | 30) => void
 }) {
+  // Series draw in (~800 ms ease-out) and tween when the window/data changes.
+  const animate = !useReducedMotion()
   const points = useMemo(() => {
     if (!data?.configured) return []
     const dates = lastNDates(new Date(), days)
@@ -118,7 +121,7 @@ export function AnalyticsChart({
               {/* Overlaid, not stacked: replies/interested are subsets of sent, and Recharts 3
                 drops every stacked series (and the Y axis) when the window is all zeros. */}
               {KEYS.map((k) => (
-                <Area key={k} dataKey={k} type="monotone" stroke={`var(--color-${k})`} fill={`url(#fill-${k})`} strokeWidth={1.5} />
+                <Area key={k} dataKey={k} type="monotone" stroke={`var(--color-${k})`} fill={`url(#fill-${k})`} strokeWidth={1.5} isAnimationActive={animate} animationDuration={800} animationEasing="ease-out" />
               ))}
             </AreaChart>
           </ChartContainer>

@@ -21,11 +21,11 @@ export function AppBackground() {
           fill
           priority
           sizes="100vw"
-          className="object-cover object-[70%_center] opacity-30"
+          className="scale-105 object-cover object-[70%_center] opacity-25 blur-[8px]"
         />
-        <div className="anim-blob absolute -top-[22vw] -left-[18vw] size-[52vw] rounded-full bg-lime/12 blur-3xl [animation:blob-drift-a_80s_ease-in-out_infinite]" />
-        <div className="anim-blob absolute -top-[16vw] -right-[20vw] size-[46vw] rounded-full bg-[#7d39eb]/18 blur-3xl [animation:blob-drift-b_90s_ease-in-out_infinite]" />
-        <div className="anim-blob absolute -right-[14vw] -bottom-[26vw] size-[58vw] rounded-full bg-[#7d39eb]/18 blur-3xl [animation:blob-drift-c_70s_ease-in-out_infinite]" />
+        <div className="anim-blob absolute -top-[22vw] -left-[18vw] size-[52vw] rounded-full bg-lime/10 blur-[120px] [animation:blob-drift-a_80s_ease-in-out_infinite]" />
+        <div className="anim-blob absolute -top-[16vw] -right-[20vw] size-[46vw] rounded-full bg-[#7d39eb]/14 blur-[120px] [animation:blob-drift-b_90s_ease-in-out_infinite]" />
+        <div className="anim-blob absolute -right-[14vw] -bottom-[26vw] size-[58vw] rounded-full bg-[#7d39eb]/14 blur-[120px] [animation:blob-drift-c_70s_ease-in-out_infinite]" />
         <div
           className="absolute inset-0"
           style={{
@@ -45,10 +45,10 @@ export function AppBackground() {
           fill
           loading="eager"
           sizes="100vw"
-          className="scale-125 object-cover object-[50%_60%] blur-sm"
+          className="scale-125 object-cover object-[50%_60%] blur-[20px]"
         />
         {/* Literal white: Tailwind `white` is remapped to ink in light mode. */}
-        <div className="absolute inset-0 bg-[#ffffff]/55" />
+        <div className="absolute inset-0 bg-[#ffffff]/58" />
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_55%,rgba(15,26,18,0.10)_100%)]" />
       </div>
     </div>
