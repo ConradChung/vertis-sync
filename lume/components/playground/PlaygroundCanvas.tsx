@@ -2,14 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from 'next-themes'
-import { MiniMap, ReactFlow, ReactFlowProvider, useReactFlow } from '@xyflow/react'
+import { ReactFlow, ReactFlowProvider, useReactFlow } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Maximize, Minimize, Minus, Plus, RotateCcw, Scan } from 'lucide-react'
-import { buildFlow, DiagramLegend, pipeNodeTypes, STATUS } from '@/components/agent/PipelineDiagram'
+import { buildFlow, DiagramLegend, pipeNodeTypes } from '@/components/agent/PipelineDiagram'
 import type { Diagram } from '@/lib/agent/diagram'
 import { cn } from '@/lib/utils'
 
-const FIT = { padding: 0.18, maxZoom: 1.15, duration: 400 }
+const FIT = { padding: 0.16, maxZoom: 1.4, duration: 400 }
 
 function ControlButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
   return (
@@ -55,11 +55,9 @@ function Controls({ fullscreen, onFullscreen }: { fullscreen: boolean; onFullscr
   )
 }
 
-const MINI_FILL: Record<string, string> = { done: 'var(--chart-line)', active: 'var(--chart-line)', idle: 'var(--fg-24)', unused: 'transparent' }
-
 /**
  * Full-screen showcase canvas: left to right, wheel / pinch zoom and pan,
- * glass zoom / fit / reset / full-screen controls, minimap, hover cards.
+ * glass zoom / fit / reset / full-screen controls, hover cards.
  * Remount with a new `key` to replay the entrance when switching pipelines.
  */
 export function PlaygroundCanvas({ diagram, className }: { diagram: Diagram; className?: string }) {
@@ -105,16 +103,6 @@ export function PlaygroundCanvas({ diagram, className }: { diagram: Diagram; cla
           colorMode={resolvedTheme === 'light' ? 'light' : 'dark'}
           style={{ background: 'transparent' }}
         >
-          <MiniMap
-            pannable
-            zoomable
-            position="top-right"
-            className="!m-4 !rounded-xl !border !border-line !bg-(--glass-fill-strong) max-md:!hidden"
-            maskColor="color-mix(in oklab, var(--bg) 55%, transparent)"
-            nodeColor={(n) => MINI_FILL[STATUS[(n.data as { node: Diagram['nodes'][number] }).node.state]] ?? 'var(--fg-24)'}
-            nodeStrokeColor="var(--fg-24)"
-            nodeBorderRadius={6}
-          />
           <Controls fullscreen={fullscreen} onFullscreen={toggleFullscreen} />
         </ReactFlow>
       </ReactFlowProvider>

@@ -129,3 +129,28 @@ describe('canonicalJson', () => {
     expect(canonicalJson({ b: 1, a: [{ y: 2, x: undefined, z: 'q' }] })).toBe(canonicalJson({ a: [{ z: 'q', y: 2 }], b: 1 }))
   })
 })
+
+describe('feeder chains', () => {
+  it('keeps the trunk straight and runs a lead bank → cron chain beside it', () => {
+    const ids = ['import', 'validate', 'enrich', 'push', 'send', 'reply', 'bank', 'cron']
+    const p = Object.fromEntries(
+      layoutDiagram({
+        nodes: ids.map((id) => ({ id, label: id, kind: 'step' as const, state: 'planned' as const })),
+        edges: [
+          { from: 'import', to: 'validate' },
+          { from: 'validate', to: 'enrich' },
+          { from: 'enrich', to: 'push' },
+          { from: 'push', to: 'send' },
+          { from: 'send', to: 'reply' },
+          { from: 'bank', to: 'cron' },
+          { from: 'cron', to: 'send' },
+        ],
+      }).map((x) => [x.id, x])
+    )
+    expect(p.cron.rank).toBe(p.send.rank - 1)
+    expect(p.bank.rank).toBe(p.send.rank - 2)
+    expect(new Set(['import', 'validate', 'enrich', 'push'].map((id) => p[id].row)).size).toBe(1)
+    expect(p.bank.row).toBe(p.cron.row)
+    expect(p.bank.row).not.toBe(p.enrich.row)
+  })
+})
