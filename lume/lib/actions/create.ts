@@ -1,6 +1,8 @@
 import 'server-only'
 import { findAwaitingAction, findAwaitingRuleAction, insertPendingAction, isDbError, setActionMessageId } from '@/lib/db/service'
 import { sendActionPrompt } from '@/lib/adapters/telegram'
+import { CAMPAIGN_ACTION_KEY, isCampaignActionKind, parseCampaignPayload } from '@/lib/actions/payloads'
+import { findAwaitingActionBy } from '@/lib/campaigns/service'
 import type { Json, PendingActionKind, PendingActionRow } from '@/lib/db/types'
 
 /**
@@ -22,6 +24,15 @@ import type { Json, PendingActionKind, PendingActionRow } from '@/lib/db/types'
  * `pending_actions_one_awaiting_rule_idx`. `assign_leads` needs
  * `payload.campaign_id`. A drag assignment (no rule) is not deduplicated:
  * executing it twice is a no-op on `unique(campaign_id, email)`.
+ *
+ * Campaign kinds (`send_reply`, `pause_campaign`, `resume_campaign`,
+ * `create_campaign`): the payload is validated (and cleaned, `summary` filled
+ * when absent) by `parseCampaignPayload` in `lib/actions/payloads.ts` — the
+ * same validator the API route uses. One awaiting action per kind and
+ * `CAMPAIGN_ACTION_KEY` value (pause/resume per campaign, send_reply per
+ * reply_to_uuid, create_campaign per source campaign); pause/resume and
+ * send_reply are backed by the partial unique indexes from migration
+ * `lume_pending_actions_campaign_unique` (23505 → the same error).
  *
  * Telegram unconfigured: the row is still created; the prompt is skipped
  * (the adapter logs it) and `telegram_message_id` stays null.
@@ -63,6 +74,14 @@ export async function createAction(
   meta: CreateActionMeta = {}
 ): Promise<PendingActionRow> {
   const ruleId = meta.ruleId ?? null
+  let campaignKey: { field: string; value: string } | null = null
+  if (isCampaignActionKind(kind)) {
+    const parsed = parseCampaignPayload(kind, payload)
+    if (!parsed.ok) throw new InvalidActionPayloadError(parsed.error)
+    payload = parsed.payload
+    const field = CAMPAIGN_ACTION_KEY[kind]
+    campaignKey = { field, value: String(payload[field]) }
+  }
   const rawJobId = payload.job_id
   if (rawJobId === undefined && JOB_KINDS.has(kind)) {
     throw new InvalidActionPayloadError('payload.job_id must be a lowercase uuid')
@@ -82,7 +101,13 @@ export async function createAction(
   }
 
   const findExisting = () =>
-    jobId ? findAwaitingAction(kind, jobId) : ruleId ? findAwaitingRuleAction(kind, ruleId) : Promise.resolve(null)
+    jobId
+      ? findAwaitingAction(kind, jobId)
+      : ruleId
+        ? findAwaitingRuleAction(kind, ruleId)
+        : campaignKey
+          ? findAwaitingActionBy(kind, campaignKey.field, campaignKey.value)
+          : Promise.resolve(null)
 
   const existing = await findExisting()
   if (existing) throw new DuplicateActionError(existing.id)
@@ -97,7 +122,7 @@ export async function createAction(
       rule_id: ruleId,
     })
   } catch (err) {
-    // pending_actions_one_awaiting_idx / _rule_idx: a concurrent request won the race.
+    // pending_actions_one_awaiting_idx / _rule_idx / the campaign indexes: a concurrent request won the race.
     if (isDbError(err) && err.code === '23505') {
       const winner = await findExisting().catch(() => null)
       throw new DuplicateActionError(winner?.id ?? '')

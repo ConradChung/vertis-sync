@@ -13,6 +13,10 @@ import {
   type InstantlyCampaign,
   type InstantlyCampaignDetail,
   type SequenceStep,
+  mapSteps,
+  mapThreads,
+  type InboxThread,
+  type StepPoint,
 } from '@/lib/adapters/instantly.map'
 
 /**
@@ -189,4 +193,17 @@ export async function listCampaignDetails(): Promise<InstantlyCampaignDetail[]> 
 /** First steps of a campaign's sequence (read-only preview). */
 export async function getCampaignSequence(campaignId: string, limit = 3): Promise<SequenceStep[]> {
   return mapCampaignSequence(await instantlyGet(`/campaigns/${encodeURIComponent(campaignId)}`), limit)
+}
+
+/** Per-step totals for one campaign (Task 13). Read-only. */
+export async function getStepAnalytics(campaignId: string): Promise<StepPoint[]> {
+  return mapSteps(await instantlyGet('/campaigns/analytics/steps', { campaign_id: campaignId }))
+}
+
+/**
+ * One campaign's newest 100 emails grouped into threads (Task 13). Read-only:
+ * replying goes through a `send_reply` pending action, never from here.
+ */
+export async function listCampaignThreads(campaignId: string): Promise<InboxThread[]> {
+  return mapThreads(await instantlyGet('/emails', { campaign_id: campaignId, limit: String(PAGE_SIZE) }))
 }

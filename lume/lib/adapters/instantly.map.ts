@@ -262,3 +262,153 @@ export function mapCampaignSequence(body: unknown, limit = 3): SequenceStep[] {
   }
   return out
 }
+
+// Step analytics (Task 13)
+
+export interface StepPoint {
+  /** 1-based sequence step. */
+  step: number
+  sent: number
+  opened: number
+  replies: number
+  opportunities: number
+}
+
+/** `/campaigns/analytics/steps` → one point per step (variants summed), ascending. */
+export function mapSteps(body: unknown): StepPoint[] {
+  const by = new Map<number, StepPoint>()
+  for (const it of itemsOf(body)) {
+    if (!isObj(it)) continue
+    const raw = num(it, 'step')
+    if (raw === null || raw < 0) continue
+    const step = Math.floor(raw) + 1
+    const p = by.get(step) ?? { step, sent: 0, opened: 0, replies: 0, opportunities: 0 }
+    p.sent += num(it, 'sent') ?? 0
+    p.opened += num(it, 'unique_opened', 'opened') ?? 0
+    p.replies += num(it, 'unique_replies', 'replies') ?? 0
+    p.opportunities += num(it, 'unique_opportunities', 'opportunities') ?? 0
+    by.set(step, p)
+  }
+  return [...by.values()].sort((a, b) => a.step - b.step)
+}
+
+// ---------------------------------------------------------------------------
+// Emails / inbox (Task 13)
+
+export interface InboxMessage {
+  id: string
+  direction: 'in' | 'out'
+  from: string | null
+  to: string | null
+  subject: string | null
+  text: string
+  at: string | null
+  /** The sending account on our side (needed to reply). */
+  eaccount: string | null
+}
+
+export interface InboxThread {
+  thread_id: string
+  /** The other party (lead) address. */
+  lead: string | null
+  subject: string | null
+  last_at: string | null
+  preview: string
+  unread: boolean
+  messages: InboxMessage[]
+  /** Latest inbound message to reply to; null when the lead never wrote. */
+  reply: { reply_to_uuid: string; eaccount: string; subject: string | null } | null
+}
+
+const MAX_TEXT = 4000
+
+function htmlToText(html: string): string {
+  return html
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h\d)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function emailText(o: Raw): string {
+  const body = isObj(o.body) ? o.body : {}
+  const html = str(body, 'html')
+  const text = str(body, 'text') ?? (html ? htmlToText(html) : null) ?? str(o, 'content_preview') ?? ''
+  return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}…` : text
+}
+
+type MappedEmail = InboxMessage & { thread_id: string; lead: string | null; unread: boolean }
+
+/** One `/emails` item → a message; unknown shapes → null. `ue_type` 2 = received. */
+export function mapEmail(it: unknown): MappedEmail | null {
+  if (!isObj(it)) return null
+  const id = str(it, 'id')
+  if (!id) return null
+  const from = str(it, 'from_address_email')
+  const eaccount = str(it, 'eaccount')
+  const ue = num(it, 'ue_type')
+  const direction: 'in' | 'out' = ue === 2 || (ue === null && !!from && !!eaccount && from !== eaccount) ? 'in' : 'out'
+  const toRaw = it.to_address_email_list
+  const to = Array.isArray(toRaw)
+    ? toRaw.filter((x): x is string => typeof x === 'string').join(', ') || null
+    : str(it, 'to_address_email_list')
+  return {
+    id,
+    thread_id: str(it, 'thread_id') ?? id,
+    direction,
+    from,
+    to,
+    subject: str(it, 'subject'),
+    text: emailText(it),
+    at: str(it, 'timestamp_email', 'timestamp_created'),
+    eaccount,
+    lead: str(it, 'lead') ?? (direction === 'in' ? from : to),
+    unread: it.is_unread === true || it.is_unread === 1,
+  }
+}
+
+/** Group `/emails` items into threads: newest thread first, messages oldest first. */
+export function mapThreads(body: unknown): InboxThread[] {
+  const by = new Map<string, MappedEmail[]>()
+  for (const raw of itemsOf(body)) {
+    const m = mapEmail(raw)
+    if (!m) continue
+    const list = by.get(m.thread_id) ?? []
+    list.push(m)
+    by.set(m.thread_id, list)
+  }
+  const out: InboxThread[] = []
+  for (const [thread_id, list] of by) {
+    list.sort((a, b) => (a.at ?? '').localeCompare(b.at ?? ''))
+    const last = list[list.length - 1]
+    const lastIn = [...list].reverse().find((m) => m.direction === 'in' && m.eaccount)
+    out.push({
+      thread_id,
+      lead: list.find((m) => m.lead)?.lead ?? null,
+      subject: list[0].subject,
+      last_at: last.at,
+      preview: last.text.replace(/\s+/g, ' ').slice(0, 140),
+      unread: list.some((m) => m.unread),
+      messages: list.map(({ id, direction, from, to, subject, text, at, eaccount }) => ({
+        id,
+        direction,
+        from,
+        to,
+        subject,
+        text,
+        at,
+        eaccount,
+      })),
+      reply: lastIn ? { reply_to_uuid: lastIn.id, eaccount: lastIn.eaccount!, subject: lastIn.subject } : null,
+    })
+  }
+  return out.sort((a, b) => (b.last_at ?? '').localeCompare(a.last_at ?? ''))
+}

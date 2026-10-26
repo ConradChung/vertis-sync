@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireOwner } from '@/lib/auth/guards'
 import { createAction, DuplicateActionError, InvalidActionPayloadError } from '@/lib/actions/create'
+import { CAMPAIGN_ACTION_KINDS, parseCampaignPayload, type CampaignActionKind } from '@/lib/actions/payloads'
 import { getRule } from '@/lib/actions/store'
 import { parseCallbackData } from '@/lib/adapters/pipeline.actions'
 import { getPushPreview } from '@/lib/adapters/instantlyPush'
@@ -26,8 +27,11 @@ import { buildActivateRule, buildAssignLeads, rotateActionBody, type RotateBuild
  * company_barrier, company_strict, eligible, summary }. Task 12's executor
  * compares the job's current columns to it before sending push_go.
  *
- * The other kinds take a strict, per-kind payload (unknown keys dropped) and
- * get a server-written summary.
+ * The campaign kinds (`send_reply`, `pause_campaign`, `resume_campaign`,
+ * `create_campaign`) are validated by `parseCampaignPayload`
+ * (lib/actions/payloads.ts — the same validator createAction runs); the
+ * other kinds take a strict, per-kind payload here. Unknown keys are dropped
+ * and the summary is always server-written.
  */
 
 const JobBody = z.object({
@@ -35,35 +39,23 @@ const JobBody = z.object({
   payload: z.looseObject({ job_id: z.string().regex(UUID_RE) }),
 })
 
-const id = z.string().trim().min(1).max(128)
-const optText = z.string().trim().max(500).optional()
 const OtherBody = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('decide_gate'),
     payload: z.object({ callback_data: z.string().min(1).max(128), job_id: z.string().regex(UUID_RE).optional() }),
   }),
   z.object({ kind: z.literal('delete_rule'), payload: z.object({ rule_id: z.string().regex(UUID_RE) }) }),
-  z.object({
-    kind: z.literal('send_reply'),
-    payload: z.object({
-      eaccount: z.email().max(320),
-      reply_to_uuid: id,
-      subject: optText,
-      body: z.string().trim().min(1).max(20000),
-      to: optText,
-    }),
-  }),
-  z.object({ kind: z.literal('pause_campaign'), payload: z.object({ campaign_id: id, campaign_name: optText }) }),
-  z.object({ kind: z.literal('resume_campaign'), payload: z.object({ campaign_id: id, campaign_name: optText }) }),
-  z.object({
-    kind: z.literal('create_campaign'),
-    payload: z.object({ source_campaign_id: id, source_name: optText, name: z.string().trim().min(1).max(200) }),
-  }),
 ])
+
+// Campaign kinds: the payload is checked by parseCampaignPayload below.
+const CampaignBody = z.object({
+  kind: z.enum(CAMPAIGN_ACTION_KINDS),
+  payload: z.record(z.string(), z.unknown()),
+})
 
 // assign_leads / activate_rule: rotateActionBody (lib/rules/actions.ts) — one
 // payload shape for drag-drop, the rotation tick and the agent.
-const Body = z.union([JobBody, rotateActionBody, OtherBody])
+const Body = z.union([JobBody, rotateActionBody, OtherBody, CampaignBody])
 
 // Gate steps that need their own confirmation flow never ride on decide_gate.
 const NOT_VIA_DECIDE_GATE: ReadonlySet<string> = new Set(['push_go', 'camp_launch', 'lume_ok', 'lume_no'])
@@ -91,37 +83,6 @@ async function buildOther(b: Other): Promise<Built> {
       if (!rule) return { error: 'rule_not_found', status: 404 }
       return { payload: { rule_id: ruleId, summary: `Delete rotation rule “${rule.name}” (${rule.cron})` }, ruleId }
     }
-    case 'send_reply': {
-      const p = b.payload
-      const preview = p.body.length > 140 ? `${p.body.slice(0, 140)}…` : p.body
-      return {
-        payload: {
-          eaccount: p.eaccount,
-          reply_to_uuid: p.reply_to_uuid,
-          body: p.body,
-          ...(p.subject ? { subject: p.subject } : {}),
-          summary: `Reply from ${p.eaccount}${p.to ? ` to ${p.to}` : ''}: “${preview}”`,
-        },
-      }
-    }
-    case 'pause_campaign':
-    case 'resume_campaign': {
-      const verb = b.kind === 'pause_campaign' ? 'Pause' : 'Resume'
-      return {
-        payload: {
-          campaign_id: b.payload.campaign_id,
-          summary: `${verb} campaign ${b.payload.campaign_name ?? b.payload.campaign_id}`,
-        },
-      }
-    }
-    case 'create_campaign':
-      return {
-        payload: {
-          source_campaign_id: b.payload.source_campaign_id,
-          name: b.payload.name,
-          summary: `Create campaign “${b.payload.name}” as a copy of ${b.payload.source_name ?? b.payload.source_campaign_id}`,
-        },
-      }
   }
 }
 
@@ -148,6 +109,16 @@ export async function POST(req: Request) {
       const action = await createAction(data.kind, built.payload, requestedBy, { ruleId: built.ruleId ?? null })
       return NextResponse.json(
         { ok: true, action: { id: action.id, kind: action.kind, summary: built.payload.summary } },
+        { status: 201 }
+      )
+    }
+    if ((CAMPAIGN_ACTION_KINDS as readonly string[]).includes(body.data.kind)) {
+      const kind = body.data.kind as CampaignActionKind
+      const parsed = parseCampaignPayload(kind, body.data.payload, { trustSummary: false })
+      if (!parsed.ok) return NextResponse.json({ error: 'invalid_payload' }, { status: 400 })
+      const action = await createAction(kind, parsed.payload, requestedBy)
+      return NextResponse.json(
+        { ok: true, action: { id: action.id, kind: action.kind, summary: action.payload?.summary ?? parsed.payload.summary } },
         { status: 201 }
       )
     }
