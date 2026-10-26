@@ -76,7 +76,7 @@ export interface AgentTool {
   run: (input: any) => Promise<ToolResult>
 }
 
-type RouteCall = (path: string, init?: { method?: 'GET' | 'POST'; body?: unknown }) => Promise<unknown>
+type RouteCall = (path: string, init?: { method?: 'GET' | 'POST' | 'DELETE'; body?: unknown }) => Promise<unknown>
 
 interface RunSpec<S extends z.ZodType> {
   name: ToolName
@@ -311,6 +311,49 @@ const SPECS: Built[] = [
       run: async ({ url }, { call }) => call(`/api/web/page?url=${encodeURIComponent(url)}`) as Promise<ToolResult>,
     },
     'read'
+  ),
+  tiered(
+    {
+      name: 'search_past_chats',
+      description:
+        'Search earlier Agent conversations (message text and titles, case-insensitive) for context: a client, an ICP agreed before, an actor used, a decision. Returns snippets with conversation ids and titles.',
+      inputSchema: z.object({ query: z.string().min(2).max(200) }),
+      run: async ({ query }, { call }) => call(`/api/agent/past-chats?q=${encodeURIComponent(query)}`) as Promise<ToolResult>,
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'remember',
+      description:
+        'Save one durable thing learned in chat so future chats know it: a client and their offer (client), an agreed ICP or target (fact), a standing preference or "never do X" (preference), or a decision (decision). ' +
+        'One short self-contained sentence with names. Save sparingly: never transient status, numbers that change, or anything already saved.',
+      inputSchema: z.object({ kind: z.enum(['preference', 'fact', 'client', 'decision']), content: z.string().min(3).max(500) }),
+      run: async ({ kind, content }, { call, deps }) =>
+        call('/api/agent/memory', { method: 'POST', body: { kind, content, conversation_id: deps.conversationId ?? null } }) as Promise<ToolResult>,
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'forget',
+      description: 'Remove a saved memory that is wrong or no longer true: by memory_id, or by a phrase it contains (if several match, they are listed instead of removed).',
+      inputSchema: z
+        .object({ memory_id: uuid.optional(), match: z.string().min(3).max(200).optional() })
+        .refine((v) => !!v.memory_id !== !!v.match, 'memory_id or match'),
+      run: async ({ memory_id, match }, { call }) => {
+        let id = memory_id
+        if (!id) {
+          const { memories } = (await call('/api/agent/memory')) as { memories: { id: string; kind: string; content: string }[] }
+          const hits = memories.filter((m) => m.content.toLowerCase().includes(match!.toLowerCase()))
+          if (hits.length !== 1) return { status: hits.length ? 'ambiguous' : 'not_found', candidates: hits.slice(0, 10) }
+          id = hits[0].id
+        }
+        await call(`/api/agent/memory/${id}`, { method: 'DELETE' })
+        return { status: 'forgotten', memory_id: id }
+      },
+    },
+    'low'
   ),
   tiered(
     {

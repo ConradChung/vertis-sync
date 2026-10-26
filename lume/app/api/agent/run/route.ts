@@ -9,6 +9,8 @@ import { buildPrompt } from '@/lib/agent/chat'
 import { createConversation, getConversation, getMessages, insertMessage } from '@/lib/agent/conversations'
 import { contextFromMessages, titleFromPrompt, type StoredApproval, type StoredToolEntry } from '@/lib/agent/history'
 import { SYSTEM_PROMPT } from '@/lib/agent/prompt'
+import { loadKnowledge } from '@/lib/agent/memory'
+import { withKnowledge } from '@/lib/agent/memoryModel'
 import { skillContext } from '@/lib/agent/skillModel'
 import { createSkill, findSkillByName, getSkill, listSkills, markSkillRun } from '@/lib/agent/skills'
 import { toRunnableTools, type ToolHooks } from '@/lib/agent/runnable'
@@ -135,7 +137,12 @@ export async function POST(req: Request) {
         }
       }
       send({ type: 'run', id: runId, conversation_id: conversationId })
-      const reply = await executeRun({ runId, prompt, title: message, origin, conversationId, send })
+      // Saved memories + recent chat titles ride in the user turn, so the system prompt stays cached.
+      const knowledge = await loadKnowledge(conversationId).catch((err) => {
+        console.error('[api/agent/run] memory load failed:', err instanceof Error ? err.message : err)
+        return ''
+      })
+      const reply = await executeRun({ runId, prompt: withKnowledge(knowledge, prompt), title: message, origin, conversationId, send })
       try {
         await insertMessage({ conversation_id: conversationId, role: 'assistant', run_id: runId, ...reply })
       } catch (err) {

@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   fetch: vi.fn(),
   toolRunner: vi.fn(),
+  loadKnowledge: vi.fn(),
   createConversation: vi.fn(),
   getConversation: vi.fn(),
   getMessages: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock('@/lib/agent/skills', () => ({
   createSkill: vi.fn(),
 }))
 vi.mock('@/lib/actions/create', () => ({ createAction: h.createAction }))
+vi.mock('@/lib/agent/memory', () => ({ loadKnowledge: h.loadKnowledge }))
 vi.mock('@/lib/db/service', () => ({ logEvent: h.logEvent, isDbError: () => false }))
 vi.mock('@/lib/adapters/telegram', () => ({ sendMessage: h.sendMessage }))
 vi.mock('@anthropic-ai/sdk', () => {
@@ -108,6 +110,7 @@ beforeEach(() => {
   h.getConversation.mockResolvedValue({ id: CONV, title: 'Old', created_at: '', updated_at: '' })
   h.getMessages.mockResolvedValue([])
   h.insertMessage.mockResolvedValue(undefined)
+  h.loadKnowledge.mockResolvedValue('')
   process.env.ANTHROPIC_API_KEY = 'test-key'
 })
 
@@ -132,6 +135,16 @@ describe('POST /api/agent/run', () => {
     expect(await res.json()).toMatchObject({ error: 'agent_not_configured' })
     expect(h.insertAgentRun).not.toHaveBeenCalled()
     expect(h.toolRunner).not.toHaveBeenCalled()
+  })
+
+  it('puts saved memories in the user turn, not the system prompt', async () => {
+    h.loadKnowledge.mockResolvedValueOnce('What Lume knows (saved):\n- [client] Kaspen sells PM growth')
+    fakeRunner([{ text: 'ok' }])
+    await (await post('plan Kaspen')).text()
+    const params = h.toolRunner.mock.calls.at(-1)![0]
+    expect(params.messages[0].content).toMatch(/^What Lume knows[\s\S]*Kaspen sells PM growth[\s\S]*plan Kaspen$/)
+    expect(String(params.system)).not.toContain('Kaspen sells')
+    expect(h.insertAgentRun.mock.calls.at(-1)![0]).not.toContain('What Lume knows')
   })
 
   it('streams text and finishes done with usage', async () => {

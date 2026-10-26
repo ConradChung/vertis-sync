@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { ArrowUp, BookMarked, ChevronRight, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, SquarePen, Wrench } from 'lucide-react'
+import { ArrowUp, BookMarked, Brain, ChevronRight, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, SquarePen, Wrench } from 'lucide-react'
 import { AgentHistory, useConversationList } from '@/components/agent/AgentHistory'
 import { ManageSkills, SkillCard, SkillMenu, useSkillList } from '@/components/agent/AgentSkills'
 import { Markdown } from '@/components/agent/Markdown'
 import { Waveform } from '@/components/agent/Waveform'
 import { AgentStatus, statusLabel } from '@/components/agent/AgentStatus'
+import { AgentMemory } from '@/components/agent/AgentMemory'
 import { htmlLinksToMarkdown } from '@/lib/agent/linkify'
 import { PlanCard } from '@/components/orb/PlanCard'
 import { ToolLog, type ToolLogEntry } from '@/components/orb/ToolLog'
@@ -59,6 +60,7 @@ export function AgentChat() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [collapsed, setCollapsed] = useState(false)
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [memoryOpen, setMemoryOpen] = useState(false)
   const bump = useCallback(() => setRefreshKey((k) => k + 1), [])
   const list = useConversationList(refreshKey)
   const skills = useSkillList(refreshKey)
@@ -230,7 +232,11 @@ export function AgentChat() {
           <Button variant="ghost" size="icon-sm" className={cn(!collapsed && 'lg:hidden')} onClick={newChat} disabled={busy} aria-label="New chat">
             <SquarePen className="size-4" />
           </Button>
+          <Button variant="ghost" size="icon-sm" onClick={() => setMemoryOpen(true)} aria-label="Memory" title="What Lume remembers">
+            <Brain className="size-4" />
+          </Button>
         </div>
+        <AgentMemory open={memoryOpen} onOpenChange={setMemoryOpen} />
         {/* The conversation sits on its own dense glass panel so text stays readable over the wallpaper. */}
         <div className="glass-overlay mx-auto flex min-h-[calc(100dvh-var(--topbar-h)-110px)] w-full max-w-[820px] flex-col rounded-panel px-5 pt-5 sm:px-8 sm:pt-7">
           <div className="flex-1" aria-live="polite" aria-busy={busy || chat.loading}>
