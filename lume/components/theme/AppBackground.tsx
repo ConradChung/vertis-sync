@@ -13,7 +13,7 @@ const GRAIN =
 export function AppBackground() {
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
-      {/* Dark — "gamer": #050505, topo contours, drifting glow blobs, grain, grid. */}
+      {/* Dark — "gamer": #050505, topo contours, faint lime/neutral glow, grain, grid. Black + lime only. */}
       <div className="absolute inset-0 hidden bg-[#050505] dark:block">
         <Image
           src="/bg/dark-topo.jpg"
@@ -21,11 +21,11 @@ export function AppBackground() {
           fill
           priority
           sizes="100vw"
-          className="scale-105 object-cover object-[70%_center] opacity-25 blur-[8px]"
+          className="scale-105 object-cover object-[70%_center] opacity-25 blur-[3px]"
         />
         <div className="anim-blob absolute -top-[22vw] -left-[18vw] size-[52vw] rounded-full bg-lime/10 blur-[120px] [animation:blob-drift-a_80s_ease-in-out_infinite]" />
-        <div className="anim-blob absolute -top-[16vw] -right-[20vw] size-[46vw] rounded-full bg-[#7d39eb]/14 blur-[120px] [animation:blob-drift-b_90s_ease-in-out_infinite]" />
-        <div className="anim-blob absolute -right-[14vw] -bottom-[26vw] size-[58vw] rounded-full bg-[#7d39eb]/14 blur-[120px] [animation:blob-drift-c_70s_ease-in-out_infinite]" />
+        <div className="anim-blob absolute -top-[16vw] -right-[20vw] size-[46vw] rounded-full bg-white/[0.04] blur-[120px] [animation:blob-drift-b_90s_ease-in-out_infinite]" />
+        <div className="anim-blob absolute -right-[14vw] -bottom-[26vw] size-[58vw] rounded-full bg-lime/[0.06] blur-[120px] [animation:blob-drift-c_70s_ease-in-out_infinite]" />
         <div
           className="absolute inset-0"
           style={{
@@ -45,7 +45,7 @@ export function AppBackground() {
           fill
           loading="eager"
           sizes="100vw"
-          className="scale-125 object-cover object-[50%_60%] blur-[20px]"
+          className="scale-125 object-cover object-[50%_60%] blur-[9px]"
         />
         {/* Literal white: Tailwind `white` is remapped to ink in light mode. */}
         <div className="absolute inset-0 bg-[#ffffff]/58" />

@@ -11,9 +11,10 @@ import { cn } from '@/lib/utils'
 import { allZero, lastActiveDate } from '@/lib/campaigns/chart'
 
 const config = {
-  sent: { label: 'Sent', color: 'var(--violet)' },
-  replies: { label: 'Replies', color: 'var(--green)' },
-  opportunities: { label: 'Interested', color: 'var(--amber)' },
+  // Black / white / lime only: sent neutral, replies primary, interested full foreground.
+  sent: { label: 'Sent', color: 'var(--fg-46)' },
+  replies: { label: 'Replies', color: 'var(--chart-line)' },
+  opportunities: { label: 'Interested', color: 'var(--fg)' },
 } satisfies ChartConfig
 
 const fmt = new Intl.NumberFormat('en-US')

@@ -111,7 +111,10 @@
   /* Brand */
   --black: #000000;
   --white: #ffffff;
-  --violet: #7d39eb; /* automation / agent colour only */
+  /* `--violet` is a legacy NAME: the palette is black / white / lime (+ red)
+     only, so the old automation/agent/"needs you" accent is now a neutral —
+     near-white in dark, ink in light. Every `*-violet*` class follows it. */
+  --violet: #e8e8e8;
   --lime: #c6ff33;
   --forest: #1f6b3a; /* fallback only; no longer a visible primary */
   /* Olive: lime's text-safe partner on light surfaces (5.7:1 on glass). */
@@ -155,14 +158,14 @@
   --bg: #050505;
   --panel: rgba(8, 8, 8, 0.82);
   --surface: #0c0c0c; /* opaque, so sticky headers hide rows */
-  --violet-soft: color-mix(in oklab, var(--violet) 62%, #ffffff);
+  --violet-soft: rgba(255, 255, 255, 0.82);
   --green: var(--lime);
   --amber: var(--violet);
   --cyan: rgba(255, 255, 255, 0.7);
   --red: var(--destructive);
 
   --radius: 0.5rem;
-  --topbar-h: 68px; /* floating bar: 16 px offset + 52 px pill */
+  --topbar-h: 72px; /* floating bar: 16 px offset + 56 px pill */
 
   /* shadcn semantic */
   --background: #050505;
@@ -184,7 +187,7 @@
   --input: rgba(255, 255, 255, 0.15);
   --ring: var(--lime);
   --chart-1: var(--lime);
-  --chart-2: var(--violet);
+  --chart-2: rgba(255, 255, 255, 0.6);
   --chart-3: #ffffff;
   --chart-4: rgba(255, 255, 255, 0.4);
   --chart-5: var(--destructive);
@@ -209,10 +212,11 @@
 
   --ink: #0f1a12;
   --white: #0f1a12;
-  --violet: #5b22c4;
+  --violet: #0f1a12;
   --positive: var(--olive);
   --link: #0f1a12;
-  --lime-edge: var(--olive);
+  /* Light-grey edge on lime fills (never black). */
+  --lime-edge: rgba(15, 26, 18, 0.12);
 
   --glass-fill: rgba(255, 255, 255, 0.6);
   --glass-border: rgba(255, 255, 255, 0.7);
@@ -239,9 +243,9 @@
   --bg: #f3f6f0;
   --panel: rgba(255, 255, 255, 0.78);
   --surface: #eef2ea;
-  --violet-soft: #5b22c4;
+  --violet-soft: #0f1a12;
   --green: var(--olive);
-  --amber: #5b22c4;
+  --amber: #0f1a12;
   --cyan: rgba(15, 26, 18, 0.72);
 
   --background: #f3f6f0;
@@ -259,10 +263,11 @@
   --accent-foreground: #0f1a12;
   --destructive: oklch(0.577 0.245 27.325);
   --border: rgba(15, 26, 18, 0.1);
-  --input: rgba(15, 26, 18, 0.16);
-  --ring: var(--lime);
+  --input: rgba(15, 26, 18, 0.12);
+  /* Slightly deeper lime so the keyboard ring reads on white glass. */
+  --ring: #a8e01a;
   --chart-1: #5c8000;
-  --chart-2: #5b22c4;
+  --chart-2: rgba(15, 26, 18, 0.55);
   --chart-3: #0f1a12;
   --chart-4: rgba(15, 26, 18, 0.4);
   --sidebar: #f3f6f0;
@@ -326,10 +331,17 @@
   }
 
   /* Page scaffold */
+  /* Full-width page: fluid with side padding, capped only on ultra-wide. */
   .shell {
-    max-width: 80rem; /* max-w-7xl */
+    width: 100%;
+    max-width: 1920px;
     margin: 0 auto;
-    padding: calc(var(--topbar-h) + 2rem) 1.5rem 2rem;
+    padding: calc(var(--topbar-h) + 2rem) 2.5rem 2rem;
+  }
+  @media (max-width: 1023px) {
+    .shell {
+      padding-inline: 1.5rem;
+    }
   }
   .brand {
     display: inline-flex;
@@ -386,10 +398,10 @@
   text-underline-offset: 4px;
 }
 
-/* Focus on light: the lime ring alone is 1.1:1, so add a 1px olive outline
-   just outside it (olive is 5.7:1 on glass). */
+/* Keyboard focus on light: the (deeper) lime ring plus a light-grey 1px
+   offset outline — soft by design (owner: no dark outlines). */
 .light :focus-visible {
-  outline: 1px solid var(--olive) !important;
+  outline: 1px solid rgba(15, 26, 18, 0.18) !important;
   outline-offset: 3px;
 }
 
@@ -414,7 +426,7 @@
 /* Responsive shell */
 @media (max-width: 640px) {
   :root {
-    --topbar-h: 68px;
+    --topbar-h: 72px;
   }
   .shell {
     padding: calc(var(--topbar-h) + 1.5rem) 1rem 2rem;

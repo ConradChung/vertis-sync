@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils'
 
 /**
  * Sparkline tone: `lime` = the primary series (lime line in dark; deeper-lime
- * #5C8000 line with lime points/area in light) · `violet` = secondary / automation.
+ * #5C8000 line with lime points/area in light) · `violet` = legacy name for the neutral secondary (white in dark, ink in light).
  */
 export type Tone = 'violet' | 'lime'
 
@@ -25,7 +25,7 @@ export const TONE_VAR: Record<Tone, { line: string; area: string; point: string 
   violet: { line: 'var(--violet)', area: 'var(--violet)', point: 'var(--violet)' },
 }
 
-/** Status dots: lime healthy · violet needs you · destructive error · faint idle. */
+/** Status dots: lime healthy · neutral (`--violet`) needs you · destructive error · faint idle. */
 const HEALTH: Record<HealthLevel, { color: string; word: string }> = {
   green: { color: 'var(--lime)', word: 'healthy' },
   amber: { color: 'var(--violet)', word: 'needs attention' },

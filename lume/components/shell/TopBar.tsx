@@ -24,13 +24,13 @@ export function TopBar() {
   const pathname = usePathname()
 
   return (
-    <header className="glass fixed inset-x-3 top-4 z-30 mx-auto flex h-13 items-center gap-1 rounded-full bg-(--bar-fill) py-1.5 pr-1.5 pl-4 shadow-(--bar-shadow) backdrop-blur-xl sm:inset-x-0 sm:w-fit sm:max-w-[calc(100%-2rem)]">
+    <header className="glass fixed inset-x-3 top-4 z-30 mx-auto flex h-14 items-center gap-1 rounded-full bg-(--bar-fill) py-2 pr-2 pl-4 shadow-(--bar-shadow) backdrop-blur-xl sm:inset-x-0 sm:w-fit sm:max-w-[calc(100%-2rem)]">
       <Link href="/overview" className="brand mr-2 shrink-0" aria-label="Lume home">
         <span className="inline-block size-3 rounded-[3px] bg-primary dark:shadow-(--primary-glow) light:ring-1 light:ring-(--lime-edge)" aria-hidden />
         <span className="max-sm:sr-only">lume</span>
       </Link>
 
-      <nav aria-label="Primary" className="nav flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <nav aria-label="Primary" className="nav -my-2 flex min-w-0 flex-1 items-center gap-0.5 py-2 max-sm:-mx-1 max-sm:overflow-x-auto max-sm:px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {TABS.map((tab) => {
           const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`)
           return (
@@ -39,9 +39,9 @@ export function TopBar() {
               href={tab.href}
               aria-current={active ? 'page' : undefined}
               className={cn(
-                'relative inline-flex h-9 shrink-0 items-center rounded-full px-3.5 text-sm whitespace-nowrap text-muted-foreground transition-colors outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring max-sm:px-3',
+                'relative inline-flex h-9 shrink-0 items-center rounded-full bg-transparent px-3.5 text-sm whitespace-nowrap text-muted-foreground transition-colors outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring max-sm:px-3',
                 active &&
-                  'bg-primary font-medium text-primary-foreground hover:bg-primary hover:text-primary-foreground dark:shadow-(--primary-glow) light:ring-1 light:ring-(--lime-edge)'
+                  'bg-primary font-medium text-primary-foreground hover:bg-primary hover:text-primary-foreground dark:shadow-(--primary-glow) max-sm:shadow-none light:ring-1 light:ring-(--lime-edge)'
               )}
             >
               {tab.label}

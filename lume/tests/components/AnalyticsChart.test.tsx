@@ -63,9 +63,9 @@ describe('AnalyticsChart', () => {
   it('config colors resolve through the ChartStyle vars', () => {
     const { container } = render(<AnalyticsChart data={payload([])} failed={false} days={7} onDays={() => {}} />)
     const css = container.querySelector('[data-slot=chart] style')?.innerHTML ?? ''
-    expect(css).toContain('--color-sent: var(--violet)')
-    expect(css).toContain('--color-replies: var(--green)')
-    expect(css).toContain('--color-opportunities: var(--amber)')
+    expect(css).toContain('--color-sent: var(--fg-46)')
+    expect(css).toContain('--color-replies: var(--chart-line)')
+    expect(css).toContain('--color-opportunities: var(--fg)')
   })
 })
 
