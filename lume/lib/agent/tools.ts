@@ -353,7 +353,8 @@ const SPECS: Built[] = [
       name: 'rank_campaigns',
       description:
         'Past campaigns ranked by reply rate (then opportunities), only those with enough sends to trust the rate. ' +
-        'Use it to recommend which campaign to duplicate for a new launch, quoting the numbers.',
+        'Use it after launch to compare performance, or when the owner asks which past campaign worked best. ' +
+        'Never use it to pick a template for a new campaign: a new campaign has no copy, leads or sends to rank yet.',
       inputSchema: z.object({
         min_sent: z.number().int().min(0).max(100_000).optional().describe('default 100'),
         limit: z.number().int().min(1).max(20).optional(),
@@ -585,7 +586,9 @@ const SPECS: Built[] = [
   tiered(
     {
       name: 'duplicate_campaign',
-      description: "Create a new Instantly campaign copying a source campaign's schedule, sending accounts and daily limit.",
+      description:
+        "Create a new Instantly campaign that copies a source campaign's settings: sending inboxes, schedule and daily limit (not its performance, and the copy is replaced afterwards with update_campaign_sequence). " +
+        'Pick the source by which inboxes and schedule fit the new campaign, and describe it to the owner as "copy settings from <campaign>".',
       inputSchema: z.object({
         source_campaign_id: id,
         name: z.string().min(1).max(200),
