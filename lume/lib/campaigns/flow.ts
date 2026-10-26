@@ -72,7 +72,7 @@ export function buildStages(input: {
 
   const jobsUsed = jobs.length > 0
   const bankUsed = counts.bank_total > 0 || counts.rotated > 0
-  const unusedHint = 'Not used — leads come from the lead bank'
+  const unusedHint = 'Not used: fed by the lead bank'
   // A main-path stage is lit when it has output or a later main-path stage does (it was passed).
   const path = [counts.imported, counts.validated, counts.enriched, counts.pushed]
   const reached = (i: number) => path.slice(i).some((n) => n > 0)

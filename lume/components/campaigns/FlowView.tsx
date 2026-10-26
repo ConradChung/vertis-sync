@@ -15,9 +15,12 @@ import type { CampaignFlowResponse, FlowStage } from '@/lib/campaigns/types'
 const nodeTypes = { glass: GlassNode, feeder: FeederNode }
 
 const COL = 196
-const BRANCH_Y = 230
+const BRANCH_Y = 200
 const FEEDER_GAP = 138
 const fmt = new Intl.NumberFormat('en-US')
+// Non-draggable, non-selectable nodes get pointer-events: none from React Flow,
+// which made the Run buttons, links and tooltips inside them unclickable.
+const INTERACTIVE = { pointerEvents: 'all' as const }
 const LIT = new Set<FlowStage['status']>(['done', 'active', 'waiting'])
 
 function edgeStyle(from: FlowStage['status'], to: FlowStage['status']) {
@@ -70,10 +73,11 @@ export function FlowView({
       position: { x: i * COL, y: 0 },
       data: { stage, busy, onRun },
       draggable: false,
+      style: INTERACTIVE,
     }))
     if (!hasBranch) return main
     const branch: (GlassFlowNode | FeederFlowNode)[] = [
-      { id: 'bank', type: 'glass', position: { x: COL * 0.5, y: BRANCH_Y }, data: { stage: data.bank, busy, onRun }, draggable: false },
+      { id: 'bank', type: 'glass', position: { x: COL * 0.5, y: BRANCH_Y }, data: { stage: data.bank, busy, onRun }, draggable: false, style: INTERACTIVE },
       ...data.feeders.map(
         (feeder, k): FeederFlowNode => ({
           id: feeder.id,
@@ -81,6 +85,7 @@ export function FlowView({
           position: { x: COL * 1.75, y: BRANCH_Y + k * FEEDER_GAP },
           data: { feeder },
           draggable: false,
+          style: INTERACTIVE,
         })
       ),
     ]
@@ -125,7 +130,7 @@ export function FlowView({
       {data.instantly === 'error' && <p className="text-[11px] text-amber">Instantly unreachable — send/reply counts unavailable</p>}
       <div
         className="w-full overflow-hidden rounded-xl border border-border bg-(--glass-fill)"
-        style={{ height: hasBranch ? Math.min(560, 300 + Math.max(1, data.feeders.length) * 120) : 220 }}
+        style={{ height: hasBranch ? Math.min(540, 270 + Math.max(1, data.feeders.length) * 120) : 220 }}
         aria-label="Campaign flow"
       >
         <ReactFlow

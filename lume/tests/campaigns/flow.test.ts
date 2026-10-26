@@ -33,7 +33,7 @@ describe('buildStages', () => {
     const counts = sumCounts([], { sent: 1266, replies: 4 }, SOURCES)
     const st = buildStages({ counts, gates: [], jobs: [], campaignStatus: 'active' })
     expect(status(st)).toEqual({ import: 'unused', validate: 'unused', enrich: 'unused', push: 'unused', send: 'active', reply: 'done' })
-    expect(st[0].hint).toBe('Not used — leads come from the lead bank')
+    expect(st[0].hint).toBe('Not used: fed by the lead bank')
     expect(st.find((s) => s.id === 'send')).toMatchObject({ label: 'Emails sent', hint: 'active · 1,000 leads in campaign' })
     expect(st.find((s) => s.id === 'send')!.source).toMatch(/^From Instantly/)
     for (const s of st) expect(s.source.length).toBeGreaterThan(10)
