@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { requireOwner } from '@/lib/auth/guards'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { withSet, type SetCtx } from '@/lib/review/http'
 import { keptApolloCsv } from '@/lib/review/export'
@@ -10,7 +11,9 @@ import { loadRows } from '@/lib/review/store'
  */
 export async function GET(req: Request, ctx: SetCtx) {
   try {
-    const r = await withSet(req, ctx)
+    const auth = await requireOwner(req)
+    if (!auth.ok) return auth.response
+    const r = await withSet(ctx)
     if (!r.ok) return r.response
     const { csv, rows } = keptApolloCsv(await loadRows(r.set.id))
     if (!rows) return NextResponse.json({ error: 'nothing_kept' }, { status: 422 })

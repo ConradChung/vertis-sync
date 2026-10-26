@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { requireOwner } from '@/lib/auth/guards'
 import { z } from 'zod'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { parseJsonBody } from '@/lib/http/json'
@@ -12,7 +13,9 @@ const Body = z
 
 export async function POST(req: Request, ctx: SetCtx) {
   try {
-    const r = await withSet(req, ctx)
+    const auth = await requireOwner(req)
+    if (!auth.ok) return auth.response
+    const r = await withSet(ctx)
     if (!r.ok) return r.response
     const body = await parseJsonBody(req, Body, 64 * 1024)
     if (!body.ok) return body.response
