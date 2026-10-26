@@ -47,6 +47,7 @@ describe('buildTools', () => {
       activate_campaign: { job_id: JOB },
       duplicate_campaign: { source_campaign_id: 'c1', name: 'copy' },
       delete_rule: { rule_id: JOB },
+      run_apify_actor: { actor_id: 'compass/crawler-google-places', input: { q: 'roofers' }, inputs_confirmed_by_owner: true },
     }
     const { fetch, createAction, tool } = setup()
     for (const [name, tier] of Object.entries(TOOL_TIERS)) {
@@ -165,6 +166,61 @@ describe('buildTools', () => {
     const { notify, tool } = setup()
     await expect(tool('notify').run({ text: 'done' })).resolves.toEqual({ status: 'sent' })
     expect(notify).toHaveBeenCalledWith('Lume agent: done')
+  })
+})
+
+describe('Apify and campaign-launch tools', () => {
+  const json = (body: unknown) => new Response(JSON.stringify(body))
+
+  it('search_apify_store and get_actor_input_schema are reads on Lume routes', async () => {
+    const { fetch, tool } = setup()
+    fetch.mockImplementation(async () => json({ actors: [] }))
+    await tool('search_apify_store').run({ query: 'google maps roofers', limit: 3 })
+    expect(fetch.mock.calls[0][0]).toBe('https://lume.test/api/apify/store?q=google%20maps%20roofers&limit=3')
+    await tool('get_actor_input_schema').run({ actor_id: 'compass/crawler-google-places' })
+    expect(fetch.mock.calls[1][0]).toBe('https://lume.test/api/apify/actor?id=compass%2Fcrawler-google-places')
+    expect(tool('get_actor_input_schema').description).toMatch(/ASK the owner/)
+  })
+
+  it('run_apify_actor needs the owner-confirmed flag and files run_actor without the flag in the payload', async () => {
+    const { tool, prepare, fetch } = setup()
+    const t = tool('run_apify_actor')
+    expect(() => t.inputSchema.parse({ actor_id: 'a/b', input: {} })).toThrow()
+    expect(() => t.inputSchema.parse({ actor_id: 'a/b', input: {}, inputs_confirmed_by_owner: true, max_charge_usd: 25 })).toThrow()
+    await t.run(t.inputSchema.parse({ actor_id: 'a/b', input: { q: 1 }, max_charge_usd: 5, inputs_confirmed_by_owner: true }))
+    expect(prepare).toHaveBeenCalledWith({ kind: 'run_actor', payload: { actor_id: 'a/b', input: { q: 1 }, max_charge_usd: 5 } })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('import_actor_run stages a finished run through /api/import/apify, and waits on a running one', async () => {
+    const { fetch, tool } = setup()
+    fetch
+      .mockResolvedValueOnce(json({ status: 'RUNNING', dataset_id: 'DS1', item_count: 10 }))
+      .mockResolvedValueOnce(json({ status: 'SUCCEEDED', dataset_id: 'DS1', item_count: 812 }))
+      .mockResolvedValueOnce(json({ job_id: 'j1' }))
+    expect(await tool('import_actor_run').run({ run_id: 'RUN12345' })).toMatchObject({ status: 'not_ready', run_status: 'RUNNING' })
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(await tool('import_actor_run').run({ run_id: 'RUN12345' })).toMatchObject({ status: 'staged', partial: false })
+    const [url, init] = fetch.mock.calls[2]
+    expect(url).toBe('https://lume.test/api/import/apify')
+    expect(JSON.parse(init.body)).toEqual({ dataset_id: 'DS1' })
+  })
+
+  it('rank_campaigns ranks by reply rate over campaigns with enough sends', async () => {
+    const { tool } = setup(
+      json({
+        instantly: 'ok',
+        campaigns: [
+          { name: 'Small', instantly_id: 'c0', status: 'active', sent: 20, replies: 5, reply_rate: 25, opportunities: 1, bounced: 0 },
+          { name: 'Roofers Q3', instantly_id: 'c1', status: 'active', sent: 1200, replies: 49, reply_rate: 4.1, opportunities: 6, bounced: 24 },
+          { name: 'Solar', instantly_id: 'c2', status: 'paused', sent: 900, replies: 18, reply_rate: 2, opportunities: 2, bounced: 9 },
+        ],
+      })
+    )
+    const out = (await tool('rank_campaigns').run({})) as { ranked: { name: string; bounce_rate_pct: number }[]; considered: number }
+    expect(out.ranked.map((r) => r.name)).toEqual(['Roofers Q3', 'Solar'])
+    expect(out.ranked[0].bounce_rate_pct).toBe(2)
+    expect(out.considered).toBe(2)
   })
 })
 

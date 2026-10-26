@@ -273,7 +273,111 @@ const SPECS: Built[] = [
     'read'
   ),
 
+  tiered(
+    {
+      name: 'search_apify_store',
+      description:
+        'Search the Apify Store for actors (scrapers) that can source leads, e.g. "google maps roofers" or "linkedin company employees". ' +
+        'Returns a ranked shortlist: id (username/name), title, rating, users (30 days), 30-day success rate, pricing model and price, ' +
+        'and whether Lume can run it under the $20 cap per run (runnable). Recommend 2-3 runnable ones with reasons.',
+      inputSchema: z.object({
+        query: z.string().min(2).max(200),
+        limit: z.number().int().min(1).max(20).optional(),
+      }),
+      run: async ({ query, limit }, { call }) =>
+        call(`/api/apify/store?q=${encodeURIComponent(query)}&limit=${limit ?? 8}`) as Promise<ToolResult>,
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'get_actor_input_schema',
+      description:
+        "An Apify actor's input fields (required first, then the ones it suggests values for), its pricing and whether a run fits the $20 cap. " +
+        'ALWAYS call this before run_apify_actor, then show the owner the required and important fields with a suggested value for each ' +
+        '(from the default, the prefill or the owner\'s goal) and ASK the owner for the inputs. Wait for their answer; never invent inputs.',
+      inputSchema: z.object({ actor_id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}[/~][A-Za-z0-9][A-Za-z0-9._-]{0,99}$/, 'username/name') }),
+      run: async ({ actor_id }, { call }) => call(`/api/apify/actor?id=${encodeURIComponent(actor_id)}`) as Promise<ToolResult>,
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'get_actor_run',
+      description:
+        "Status of an Apify actor run started by an approved run_apify_actor (the run_id is in the action's result; ask the owner or check the action page if unknown): status, items so far, cost so far, limits.",
+      inputSchema: z.object({ run_id: z.string().regex(/^[A-Za-z0-9]{8,40}$/, 'Apify run id') }),
+      run: async ({ run_id }, { call }) => call(`/api/apify/runs/${encodeURIComponent(run_id)}`) as Promise<ToolResult>,
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'rank_campaigns',
+      description:
+        'Past campaigns ranked by reply rate (then opportunities), only those with enough sends to trust the rate. ' +
+        'Use it to recommend which campaign to duplicate for a new launch, quoting the numbers.',
+      inputSchema: z.object({
+        min_sent: z.number().int().min(0).max(100_000).optional().describe('default 100'),
+        limit: z.number().int().min(1).max(20).optional(),
+      }),
+      run: async ({ min_sent, limit }, { call }) => {
+        const table = (await call('/api/campaigns?with=analytics')) as {
+          campaigns?: { name: string; instantly_id: string | null; status: string; sent: number | null; replies: number | null; reply_rate: number | null; opportunities: number | null; bounced: number | null }[]
+          instantly?: string
+        }
+        const floor = min_sent ?? 100
+        const rows = (table.campaigns ?? []).filter((c) => (c.sent ?? 0) >= floor && c.reply_rate !== null)
+        rows.sort((a, b) => (b.reply_rate ?? 0) - (a.reply_rate ?? 0) || (b.opportunities ?? 0) - (a.opportunities ?? 0))
+        return {
+          instantly: table.instantly ?? null,
+          min_sent: floor,
+          ranked: rows.slice(0, limit ?? 5).map((c) => ({
+            name: c.name,
+            campaign_id: c.instantly_id,
+            status: c.status,
+            sent: c.sent,
+            replies: c.replies,
+            reply_rate_pct: c.reply_rate,
+            opportunities: c.opportunities,
+            bounce_rate_pct: c.sent && c.bounced !== null ? Math.round((c.bounced / c.sent) * 1000) / 10 : null,
+          })),
+          considered: rows.length,
+        }
+      },
+    },
+    'read'
+  ),
+
   // low ----------------------------------------------------------------------
+  tiered(
+    {
+      name: 'import_actor_run',
+      description:
+        "Bring a finished Apify run's results into Lume's Import flow. This only stages them: the import waits at the usual Approve/Deny ingest gate " +
+        'and then goes through validation; nothing is pushed to Instantly. Works for a SUCCEEDED run, or a timed-out/aborted one that has items (partial results).',
+      inputSchema: z.object({ run_id: z.string().regex(/^[A-Za-z0-9]{8,40}$/, 'Apify run id') }),
+      run: async ({ run_id }, { call }) => {
+        const run = (await call(`/api/apify/runs/${encodeURIComponent(run_id)}`)) as {
+          status: string
+          dataset_id: string | null
+          item_count: number | null
+        }
+        const finished = run.status === 'SUCCEEDED' || ((run.status === 'TIMED-OUT' || run.status === 'ABORTED') && (run.item_count ?? 0) > 0)
+        if (!finished) return { status: 'not_ready', run_status: run.status, item_count: run.item_count, note: 'Import once the run has finished.' }
+        if (!run.dataset_id) return { status: 'no_dataset', run_status: run.status }
+        const imported = await call('/api/import/apify', { method: 'POST', body: { dataset_id: run.dataset_id } })
+        return {
+          status: 'staged',
+          run_status: run.status,
+          partial: run.status !== 'SUCCEEDED',
+          imported,
+          note: 'Waiting at the ingest gate (Approve/Deny in Lume Validate or Telegram).',
+        }
+      },
+    },
+    'low'
+  ),
   tiered(
     {
       name: 'create_order',
@@ -454,6 +558,30 @@ const SPECS: Built[] = [
         source_campaign_id,
         name,
         ...(campaign_name ? { campaign_name } : {}),
+      }),
+    },
+    'high'
+  ),
+  tiered(
+    {
+      name: 'run_apify_actor',
+      description:
+        'Propose an Apify actor run to source leads. Only after get_actor_input_schema AND the owner has answered with the inputs in this chat: ' +
+        'pass exactly the inputs they agreed (field names from the schema; no invented fields or values). ' +
+        'The server validates the input against the actor schema and caps the run at $20 (or the lower max_charge_usd); ' +
+        'the approval shows the actor, the inputs, the cost estimate and the cap. After approval the run starts; check it with get_actor_run.',
+      inputSchema: z.object({
+        actor_id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}[/~][A-Za-z0-9][A-Za-z0-9._-]{0,99}$/, 'username/name'),
+        input: z.record(z.string(), z.unknown()).describe('the actor input the owner confirmed'),
+        max_charge_usd: z.number().positive().max(20).optional().describe('budget for this run, at most 20 (default 20)'),
+        expected_items: z.number().int().positive().max(1_000_000).optional().describe('results the owner expects, for the estimate'),
+        inputs_confirmed_by_owner: z.literal(true).describe('true only if the owner answered with or approved these exact inputs in this chat'),
+      }),
+      payload: ({ actor_id, input, max_charge_usd, expected_items }) => ({
+        actor_id,
+        input: input as Json,
+        ...(max_charge_usd !== undefined ? { max_charge_usd } : {}),
+        ...(expected_items !== undefined ? { expected_items } : {}),
       }),
     },
     'high'
