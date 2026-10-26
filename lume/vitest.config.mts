@@ -4,6 +4,9 @@ import { fileURLToPath } from 'node:url'
 
 export default defineConfig({
   plugins: [react()],
+  // Components may import plain CSS (e.g. React Flow's stylesheet); skip the app's
+  // Tailwind PostCSS pipeline in tests.
+  css: { postcss: { plugins: [] } },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('.', import.meta.url)),

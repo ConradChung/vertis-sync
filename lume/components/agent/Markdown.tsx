@@ -1,4 +1,6 @@
 import { Fragment, type ReactNode } from 'react'
+import { PipelineDiagram } from '@/components/agent/PipelineDiagram'
+import { parseDiagram } from '@/lib/agent/diagram'
 
 /**
  * A tiny, safe Markdown subset for streamed agent replies: paragraphs, `-`/`*`
@@ -10,7 +12,7 @@ import { Fragment, type ReactNode } from 'react'
 type Block =
   | { kind: 'p'; lines: string[] }
   | { kind: 'ul' | 'ol'; items: string[] }
-  | { kind: 'code'; text: string }
+  | { kind: 'code'; text: string; lang: string; closed: boolean }
   | { kind: 'h'; level: number; text: string }
   | { kind: 'table'; head: string[]; align: Align[]; rows: string[][] }
 
@@ -40,11 +42,13 @@ export function parseBlocks(src: string): Block[] {
   while (i < lines.length) {
     const line = lines[i]
     if (/^\s*```/.test(line)) {
+      const lang = (/^\s*```\s*([\w-]*)/.exec(line)?.[1] ?? '').toLowerCase()
       const body: string[] = []
       i++
       while (i < lines.length && !/^\s*```/.test(lines[i])) body.push(lines[i++])
+      const closed = i < lines.length
       i++ // closing fence (or past the end while streaming)
-      out.push({ kind: 'code', text: body.join('\n') })
+      out.push({ kind: 'code', text: body.join('\n'), lang, closed })
       continue
     }
     const h = /^(#{1,4})\s+(.*)$/.exec(line)
@@ -135,6 +139,17 @@ export function Markdown({ text }: { text: string }) {
       {parseBlocks(text).map((b, i) => {
         switch (b.kind) {
           case 'code':
+            if (b.lang === 'flow') {
+              // A pipeline diagram: placeholder while it streams, code if the JSON is bad.
+              if (!b.closed)
+                return (
+                  <p key={i} className="flex items-center gap-2 rounded-control border border-dashed border-line px-3 py-2 text-[12.5px] text-fg-46" role="status">
+                    <span className="size-1.5 animate-pulse rounded-full bg-positive" /> Drawing diagram…
+                  </p>
+                )
+              const d = parseDiagram(b.text)
+              if (d.ok) return <PipelineDiagram key={i} diagram={d.diagram} />
+            }
             return (
               <pre key={i} className="overflow-x-auto rounded-control border border-line bg-muted p-3 font-mono text-[12.5px] leading-5 text-fg">
                 <code>{b.text}</code>

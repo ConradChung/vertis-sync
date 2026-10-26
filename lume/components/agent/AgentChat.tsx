@@ -251,7 +251,7 @@ export function AgentChat() {
             <div ref={endRef} />
           </div>
 
-          <div className="sticky bottom-0 z-10 -mx-5 rounded-b-panel bg-[var(--glass-fill-strong)] px-5 pt-3 pb-4 sm:-mx-8 sm:px-8">
+          <div className="sticky bottom-0 z-10 -mx-5 rounded-b-panel bg-[var(--glass-fill-strong)] px-5 pt-3 pb-4 backdrop-blur-xl sm:-mx-8 sm:px-8">
             {speech.listening ? (
               <>
                 <div className="mb-2 flex items-center justify-center gap-3">

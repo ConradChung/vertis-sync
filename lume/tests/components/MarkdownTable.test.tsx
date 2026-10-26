@@ -32,3 +32,10 @@ describe('Markdown tables', () => {
     expect(screen.getByText('Bold').tagName).toBe('STRONG')
   })
 })
+
+describe('Markdown flow fences', () => {
+  it('keeps the fence language and whether it closed', () => {
+    expect(parseBlocks('```flow\n{}\n```')[0]).toMatchObject({ kind: 'code', lang: 'flow', closed: true })
+    expect(parseBlocks('```flow\n{"nodes":')[0]).toMatchObject({ kind: 'code', lang: 'flow', closed: false })
+  })
+})
