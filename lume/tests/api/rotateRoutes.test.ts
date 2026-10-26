@@ -216,6 +216,19 @@ describe('POST /api/actions — Rotate kinds', () => {
     expect(svc.insertPendingAction.mock.calls[0][0].payload).toMatchObject({ filter: { icp_status: 'fit' }, count: 312 })
   })
 
+  it('assign_leads with a filter and limit caps count at the matching total (the agent path)', async () => {
+    svc.countCandidates.mockResolvedValue(312)
+    const res = await actionsPOST(req('/api/actions', { kind: 'assign_leads', payload: { campaign_id: CAMP, filter: {}, limit: 50 } }))
+    expect(res.status).toBe(201)
+    const payload = svc.insertPendingAction.mock.calls[0][0].payload
+    expect(payload).toMatchObject({ campaign_id: CAMP, filter: {}, count: 50 })
+    expect(payload).not.toHaveProperty('limit')
+    expect(payload.summary).toMatch(/^Assign 50 of 312 matching leads → /)
+    svc.insertPendingAction.mockClear()
+    await actionsPOST(req('/api/actions', { kind: 'assign_leads', payload: { campaign_id: CAMP, filter: {}, limit: 1000 } }))
+    expect(svc.insertPendingAction.mock.calls[0][0].payload.count).toBe(312)
+  })
+
   it('assign_leads: 409 when nothing is left to assign, 404 for an unknown campaign', async () => {
     svc.countCandidates.mockResolvedValue(0)
     expect((await actionsPOST(req('/api/actions', { kind: 'assign_leads', payload: { campaign_id: CAMP, filter: {} } }))).status).toBe(409)

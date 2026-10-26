@@ -21,7 +21,8 @@ import { OWNER_TZ } from '@/lib/time/owner'
  * assign_leads — a drop on a campaign card. Either explicit leads
  *   `{ campaign_id, leads: [{origin, id}, …] }` (≤ 500, re-resolved against
  *   lume_lead_bank; ones already queued for the campaign are dropped) or a
- *   filter `{ campaign_id, filter }` ("all N matching"). Payload:
+ *   filter `{ campaign_id, filter, limit? }` ("all N matching", or the first
+ *   `limit` of them — `count` is capped at the matching total). Payload:
  *   `{ campaign_id, campaign_name, leads | filter, count, summary }` — the one
  *   assign_leads shape (the rotation tick adds `order_by`, `rule_id`, …). On
  *   execute, `lib/actions/execute.ts` resolves the refs, or up to `count`
@@ -49,6 +50,8 @@ export const assignLeadsPayload = z.union([
   z.strictObject({
     campaign_id: z.string().regex(CAMPAIGN_ID_RE),
     filter: ruleFilterSchema,
+    /** Take at most this many of the matches (the agent's "up to N"); default all. */
+    limit: z.number().int().min(1).max(100_000).optional(),
   }),
 ])
 
@@ -88,8 +91,9 @@ export async function buildAssignLeads(p: z.infer<typeof assignLeadsPayload>): P
     }
   }
 
-  const count = await countCandidates(p.filter, p.campaign_id)
-  if (!count) return { ok: false, status: 409, error: 'nothing_to_assign' }
+  const total = await countCandidates(p.filter, p.campaign_id)
+  if (!total) return { ok: false, status: 409, error: 'nothing_to_assign' }
+  const count = p.limit ? Math.min(p.limit, total) : total
   return {
     ok: true,
     payload: {
@@ -97,7 +101,10 @@ export async function buildAssignLeads(p: z.infer<typeof assignLeadsPayload>): P
       campaign_name: name,
       filter: p.filter as Record<string, Json>,
       count,
-      summary: `Assign ${fmt.format(count)} leads → ${name} (${summarizeFilter(p.filter)})`,
+      summary:
+        count < total
+          ? `Assign ${fmt.format(count)} of ${fmt.format(total)} matching leads → ${name} (${summarizeFilter(p.filter)})`
+          : `Assign ${fmt.format(count)} leads → ${name} (${summarizeFilter(p.filter)})`,
     },
   }
 }

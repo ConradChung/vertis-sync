@@ -1,16 +1,9 @@
 'use client'
 
 import Link from 'next/link'
-import dynamic from 'next/dynamic'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import type { OrbState } from '@/components/orb/Orb'
-
-// WebGL only exists in the browser; render a same-size placeholder on the server.
-const Orb = dynamic(() => import('@/components/orb/Orb'), {
-  ssr: false,
-  loading: () => <div className="orb-placeholder" aria-hidden />,
-})
+import { AgentOrb } from '@/components/orb/AgentOrb'
 
 export const TABS = [
   { href: '/overview', label: 'Overview' },
@@ -20,12 +13,7 @@ export const TABS = [
   { href: '/campaigns', label: 'Campaigns' },
 ] as const
 
-export type TopBarProps = {
-  /** Agent state for the orb. Task 14 wires this to `agent_runs`. */
-  orbState?: OrbState
-}
-
-export function TopBar({ orbState = 'idle' }: TopBarProps) {
+export function TopBar() {
   const pathname = usePathname()
 
   return (
@@ -53,9 +41,7 @@ export function TopBar({ orbState = 'idle' }: TopBarProps) {
         })}
       </nav>
 
-      <div className="orb-button ml-auto">
-        <Orb compact state={orbState} />
-      </div>
+      <AgentOrb />
     </header>
   )
 }
