@@ -17,6 +17,7 @@ export const TABS = [
   { href: '/campaigns', label: 'Campaigns' },
   { href: '/crm', label: 'CRM' },
   { href: '/agent', label: 'Agent' },
+  { href: '/playground', label: 'Playground' },
 ] as const
 
 /**

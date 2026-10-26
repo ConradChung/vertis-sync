@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
-import { Kanban, Megaphone, Package, Repeat, User } from 'lucide-react'
+import { Kanban, Megaphone, Package, Repeat, User, Workflow } from 'lucide-react'
 import {
   Command,
   CommandDialog,
@@ -120,6 +120,9 @@ export function CommandPalette() {
             </CommandItem>
             <CommandItem value="campaigns list" onSelect={() => go('/campaigns')}>
               <Megaphone strokeWidth={1.75} /> Campaigns
+            </CommandItem>
+            <CommandItem value="playground pipelines diagrams showcase" onSelect={() => go('/playground')}>
+              <Workflow strokeWidth={1.75} /> Playground — pipelines
             </CommandItem>
           </CommandGroup>
           {campaigns.size > 0 && (
