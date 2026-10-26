@@ -52,29 +52,6 @@ export async function findDeal(campaignId: string, email: string): Promise<CrmDe
   return (res.data as CrmDeal | null) ?? null
 }
 
-/** Latest reply text per deal (for card snippets). */
-export async function getReplySnippets(dealIds: string[]): Promise<Record<string, string>> {
-  if (!dealIds.length) return {}
-  const sb = createServiceClient()
-  const out: Record<string, string> = {}
-  for (let i = 0; i < dealIds.length; i += 200) {
-    const res = await sb
-      .from('crm_activities')
-      .select('deal_id,payload,occurred_at')
-      .in('deal_id', dealIds.slice(i, i + 200))
-      .eq('kind', 'replied')
-      .order('occurred_at', { ascending: false })
-      .limit(1000)
-    if (res.error) fail('getReplySnippets', res.error)
-    for (const r of (res.data ?? []) as { deal_id: string; payload: Record<string, Json> }[]) {
-      if (out[r.deal_id]) continue
-      const t = replyText(r.payload)
-      if (t) out[r.deal_id] = t
-    }
-  }
-  return out
-}
-
 /** The readable text of a reply payload (Instantly webhook body or adapter shape). */
 export function replyText(p: Record<string, Json> | null | undefined): string | null {
   if (!p) return null
@@ -100,17 +77,54 @@ export async function getFollowupIds(campaignId: string | 'all'): Promise<string
   return ((res.data ?? []) as { id: string }[]).map((r) => r.id)
 }
 
-/** Reply activity timestamps since `sinceIso` for the rail sparkline. */
-export async function getReplyStamps(dealIds: string[] | 'all', sinceIso: string): Promise<string[]> {
+export interface ReplyRow {
+  deal_id: string
+  payload: Record<string, Json> | null
+  occurred_at: string
+}
+
+export const RECENT_REPLY_LIMIT = 2000
+
+/**
+ * Newest reply activities across every deal, in one indexed query
+ * (`crm_activities_kind_idx`). Replies are a small fraction of deals, so the
+ * board takes snippets and the sparkline from this instead of chunking
+ * `.in(deal_id, ...)` lookups over every card.
+ */
+export async function getRecentReplies(limit = RECENT_REPLY_LIMIT): Promise<ReplyRow[]> {
   const sb = createServiceClient()
-  let q = sb.from('crm_activities').select('occurred_at').eq('kind', 'replied').gte('occurred_at', sinceIso)
-  if (dealIds !== 'all') {
-    if (!dealIds.length) return []
-    q = q.in('deal_id', dealIds.slice(0, 1000))
+  const res = await sb
+    .from('crm_activities')
+    .select('deal_id,payload,occurred_at')
+    .eq('kind', 'replied')
+    .order('occurred_at', { ascending: false })
+    .limit(limit)
+  if (res.error) fail('getRecentReplies', res.error)
+  return (res.data ?? []) as ReplyRow[]
+}
+
+/**
+ * Snippets (latest readable reply per deal) and sparkline stamps (replies
+ * since `sinceIso`) from newest-first reply rows. `dealIds` limits both to
+ * the board's deals; `null` keeps every row (the all-campaigns rail counts
+ * every reply).
+ */
+export function summariseReplies(
+  rows: ReplyRow[],
+  dealIds: Set<string> | null,
+  sinceIso: string
+): { snippets: Record<string, string>; stamps: string[] } {
+  const snippets: Record<string, string> = {}
+  const stamps: string[] = []
+  const since = Date.parse(sinceIso)
+  for (const r of rows) {
+    if (dealIds && !dealIds.has(r.deal_id)) continue
+    if (Date.parse(r.occurred_at) >= since) stamps.push(r.occurred_at)
+    if (snippets[r.deal_id]) continue
+    const t = replyText(r.payload)
+    if (t) snippets[r.deal_id] = t
   }
-  const res = await q.limit(5000)
-  if (res.error) fail('getReplyStamps', res.error)
-  return ((res.data ?? []) as { occurred_at: string }[]).map((r) => r.occurred_at)
+  return { snippets, stamps }
 }
 
 export async function getActivities(dealId: string, limit = 200): Promise<CrmActivity[]> {

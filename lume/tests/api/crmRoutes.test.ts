@@ -10,16 +10,16 @@ const crm = vi.hoisted(() => ({
   getDeal: vi.fn(),
   getFollowupIds: vi.fn(),
   getAwaitingCloses: vi.fn(),
-  getReplySnippets: vi.fn(),
-  getReplyStamps: vi.fn(),
+  getRecentReplies: vi.fn(),
   getActivities: vi.fn(),
   getLeadRow: vi.fn(),
   setStage: vi.fn(),
   updateDeal: vi.fn(),
   searchDeals: vi.fn(),
 }))
-vi.mock('@/lib/crm/service', () => ({
+vi.mock('@/lib/crm/service', async () => ({
   ...crm,
+  summariseReplies: (await vi.importActual<typeof import('@/lib/crm/service')>('@/lib/crm/service')).summariseReplies,
   withSnippets: (deals: { id: string }[], s: Record<string, string>) => deals.map((d) => ({ ...d, snippet: s[d.id] ?? null })),
 }))
 
@@ -140,8 +140,12 @@ describe('GET routes', () => {
     const d2 = deal({ id: '6b7f2d1e-3c4a-4e8b-9f0a-1b2c3d4e5f61', email: 'bo@example.com', stage: 'Contacted', owner: 'me' })
     crm.getDeals.mockResolvedValue([d1, d2])
     crm.getFollowupIds.mockResolvedValue([d2.id])
-    crm.getReplySnippets.mockResolvedValue({ [DEAL]: 'Sounds good' })
-    crm.getReplyStamps.mockResolvedValue([new Date().toISOString()])
+    // Newest first; a reply on another campaign's deal is ignored for this board.
+    crm.getRecentReplies.mockResolvedValue([
+      { deal_id: 'other-deal', payload: { text: 'Not ours' }, occurred_at: new Date().toISOString() },
+      { deal_id: DEAL, payload: { text: 'Sounds good' }, occurred_at: new Date().toISOString() },
+      { deal_id: DEAL, payload: { text: 'Older reply' }, occurred_at: '2020-01-01T00:00:00Z' },
+    ])
     const res = await boardGET(new Request(`http://localhost/api/crm/board?campaign=${CAMP}`))
     expect(res.status).toBe(200)
     const b = await res.json()
@@ -153,6 +157,8 @@ describe('GET routes', () => {
     expect(b.campaigns).toEqual([{ id: CAMP, name: 'Kaspen Q4' }])
     expect(b.owners).toEqual(['me'])
     expect(crm.getDeals).toHaveBeenCalledWith(CAMP)
+    // one reply query for the whole board, not one per chunk of deal ids
+    expect(crm.getRecentReplies).toHaveBeenCalledTimes(1)
   })
 
   it('board refuses a malformed campaign', async () => {
