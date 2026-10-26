@@ -118,7 +118,7 @@ function Column({
       aria-label={`${stage.name}: ${count}`}
       data-testid="crm-column"
       className={cn(
-        'glass flex w-[264px] shrink-0 flex-col rounded-xl transition-colors',
+        'glass flex w-[264px] shrink-0 flex-col overflow-hidden rounded-xl transition-colors',
         active && 'ring-1 ring-border',
         isOver && 'bg-accent ring-1 ring-ring'
       )}
@@ -132,7 +132,7 @@ function Column({
           {conversion === null ? '' : `${conversion}%`}
         </span>
       </header>
-      <div className="flex max-h-[560px] min-h-[120px] flex-col gap-2 overflow-y-auto p-2">
+      <div className="thin-scroll flex max-h-[560px] min-h-[120px] flex-col gap-2 overflow-y-auto p-2">
         {shown.map((d) => (
           <DraggableCard key={d.id} deal={d} awaiting={!!awaiting[d.id]} showCampaign={showCampaign} campaignName={campaignName} now={now} onOpen={onOpen} />
         ))}

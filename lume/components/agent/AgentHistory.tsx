@@ -121,7 +121,7 @@ export function AgentHistory({ list, activeId, busy, onSelect, onNew, onDeletedA
         <SquarePen className="size-4" /> New chat
       </Button>
 
-      <div className="-mx-1 mt-4 min-h-0 flex-1 overflow-y-auto px-1 pb-2">
+      <div className="thin-scroll -mx-1 mt-4 min-h-0 flex-1 overflow-y-auto px-1 pb-2">
         {items === null ? (
           <div className="flex flex-col gap-2" aria-label="Loading history">
             {[0, 1, 2, 3].map((i) => (

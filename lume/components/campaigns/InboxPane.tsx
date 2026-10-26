@@ -37,7 +37,7 @@ export function InboxPane({
 
   return (
     <div className="grid min-h-[360px] gap-3 md:grid-cols-[260px_1fr]">
-      <ul className="max-h-[480px] overflow-y-auto rounded-lg border border-white/8" aria-label="Threads">
+      <ul className="thin-scroll max-h-[480px] overflow-y-auto rounded-lg border border-white/8" aria-label="Threads">
         {data.threads.map((t) => (
           <li key={t.thread_id}>
             <button
@@ -92,7 +92,7 @@ function ThreadView({ thread, campaignId, campaignName }: { thread: InboxThread;
         <p className="truncate text-[13px] font-medium text-fg">{thread.subject ?? '(no subject)'}</p>
         <p className="truncate text-[11px] text-fg-46">{thread.lead}</p>
       </div>
-      <ol className="max-h-[340px] flex-1 space-y-3 overflow-y-auto px-4 py-3">
+      <ol className="thin-scroll max-h-[340px] flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {thread.messages.map((m) => (
           <li key={m.id} className={cn('max-w-[85%] rounded-lg px-3 py-2 text-[12px]', m.direction === 'in' ? 'bg-white/6' : 'ml-auto bg-primary/15')}>
             <p className="mb-1 text-[10px] text-fg-46">

@@ -253,7 +253,7 @@ export function AgentChat() {
   return (
     <div className="flex w-full gap-6">
       {!collapsed && (
-        <aside className="glass sticky top-[calc(var(--topbar-h)+2rem)] hidden h-[calc(100dvh-var(--topbar-h)-4rem)] w-64 shrink-0 rounded-panel p-3 lg:block">
+        <aside className="glass sticky top-[calc(var(--topbar-h)+2rem)] hidden h-[calc(100dvh-var(--topbar-h)-4rem)] w-64 shrink-0 overflow-hidden rounded-panel p-3 lg:block">
           {history}
         </aside>
       )}
@@ -298,11 +298,17 @@ export function AgentChat() {
           const column = (
         <div
           className={cn(
-            'glass-overlay flex w-full flex-col rounded-panel px-5 pt-5 sm:px-8 sm:pt-7',
-            split && desktop ? 'split-chat-in min-h-full' : 'mx-auto min-h-[calc(100dvh-var(--topbar-h)-110px)] max-w-[820px]'
+            // Fixed-height rounded panel: only the messages scroll (inside the clip), so the
+            // corners stay rounded at any scroll position and nothing passes behind the composer.
+            'glass-overlay flex w-full flex-col overflow-hidden rounded-panel',
+            split && desktop ? 'split-chat-in h-full' : 'mx-auto h-[calc(100dvh-var(--topbar-h)-110px)] max-w-[820px]'
           )}
         >
-          <div className="flex-1" aria-live="polite" aria-busy={busy || chat.loading}>
+          <div
+            className="thin-scroll scroll-fade-bottom min-h-0 flex-1 overflow-y-auto px-5 pt-5 sm:px-8 sm:pt-7"
+            aria-live="polite"
+            aria-busy={busy || chat.loading}
+          >
             {chat.notFound ? (
               <MissingConversation onNew={newChat} />
             ) : chat.loading ? (
@@ -325,7 +331,7 @@ export function AgentChat() {
             <div ref={endRef} />
           </div>
 
-          <div className="sticky bottom-0 z-10 -mx-5 rounded-b-panel bg-[var(--glass-fill-strong)] px-5 pt-3 pb-4 backdrop-blur-xl sm:-mx-8 sm:px-8">
+          <div className="shrink-0 border-t border-line bg-[var(--glass-fill-strong)] px-5 pt-3 pb-4 sm:px-8">
             {speech.listening ? (
               <>
                 <div className="mb-2 flex items-center justify-center gap-3">

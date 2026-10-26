@@ -190,7 +190,7 @@ export function LeadsPanel({ setId, refreshKey }: { setId: string; refreshKey: n
 
       {error && <p className="px-4 pb-2 text-[12px] text-destructive" role="alert">{error}</p>}
 
-      <div className="min-h-0 flex-1 overflow-auto px-2">
+      <div className="thin-scroll min-h-0 flex-1 overflow-auto px-2">
         <Table className="text-[12.5px]">
           <TableHeader className="sticky top-0 z-[1] bg-[var(--glass-fill-strong)] backdrop-blur-md">
             <TableRow>
