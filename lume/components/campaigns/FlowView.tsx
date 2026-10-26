@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useTheme } from 'next-themes'
 import { ReactFlow, type Edge } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { GlassNode, type GlassFlowNode } from '@/components/campaigns/GlassNode'
@@ -29,6 +30,7 @@ export function FlowView({
   onOpenInbox: () => void
 }) {
   const router = useRouter()
+  const { resolvedTheme } = useTheme()
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<NoticeState | null>(null)
 
@@ -60,7 +62,7 @@ export function FlowView({
         source: data!.stages[i].id,
         target: s.id,
         animated: s.status === 'active' || s.status === 'waiting',
-        style: { stroke: 'rgba(255,255,255,0.25)' },
+        style: { stroke: 'var(--fg-24)' },
       })),
     [data]
   )
@@ -72,7 +74,7 @@ export function FlowView({
     <div className="space-y-3">
       {data.instantly === 'not_configured' && <NotConnected>Instantly not connected — send/reply counts unavailable</NotConnected>}
       {data.instantly === 'error' && <p className="text-[11px] text-amber">Instantly unreachable — send/reply counts unavailable</p>}
-      <div className="h-[200px] w-full overflow-hidden rounded-lg border border-white/8" aria-label="Campaign flow">
+      <div className="h-[200px] w-full overflow-hidden rounded-xl border border-border bg-(--glass-fill)" aria-label="Campaign flow">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -84,7 +86,7 @@ export function FlowView({
           elementsSelectable={false}
           zoomOnScroll={false}
           panOnScroll={false}
-          colorMode="dark"
+          colorMode={resolvedTheme === 'light' ? 'light' : 'dark'}
           style={{ background: 'transparent' }}
         />
       </div>

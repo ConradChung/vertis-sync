@@ -112,7 +112,7 @@ export function RotateScreen() {
   }
 
   return (
-    <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setDragging(null)}>
+    <DndContext id="rotate-dnd" sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setDragging(null)}>
       <div className="flex flex-col gap-5">
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
           <LeadBank

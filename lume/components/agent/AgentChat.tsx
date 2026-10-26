@@ -116,7 +116,7 @@ export function AgentChat() {
         <div ref={endRef} />
       </div>
 
-      <div className="sticky bottom-0 z-10 -mx-2 px-2 pt-10 pb-3 bg-background">
+      <div className="sticky bottom-0 z-10 -mx-2 px-2 pt-10 pb-3">
         <div className="mb-2 flex items-center justify-center gap-3">
           <Waveform mode={mode} className="h-11" />
         </div>
@@ -127,8 +127,8 @@ export function AgentChat() {
         )}
         <form
           className={cn(
-            'flex items-end gap-2 rounded-lg border border-border bg-card p-2 pl-4 transition-colors focus-within:border-violet',
-            speech.listening && 'border-violet/60'
+            'glass flex items-end gap-2 rounded-2xl p-2 pl-4 transition-colors focus-within:border-primary/60',
+            speech.listening && 'border-primary/60'
           )}
           onSubmit={(e) => {
             e.preventDefault()
@@ -161,7 +161,7 @@ export function AgentChat() {
             type="submit"
             disabled={busy || !draft.trim()}
             aria-label="Send message"
-            className="grid size-9 shrink-0 place-items-center rounded-full bg-violet text-white transition-opacity disabled:opacity-35"
+            className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-35 dark:shadow-(--primary-glow)"
           >
             <ArrowUp className="size-4" />
           </button>
@@ -198,7 +198,7 @@ function EmptyState({ hello, onPick, disabled }: { hello: string; onPick: (t: st
             type="button"
             disabled={disabled}
             onClick={() => onPick(s)}
-            className="rounded-full border border-line bg-white/4 px-3.5 py-2 text-[13px] text-fg-70 transition-colors hover:border-violet/40 hover:bg-white/8 hover:text-fg disabled:opacity-50"
+            className="rounded-full border border-(--glass-border) bg-(--glass-fill) px-3.5 py-2 backdrop-blur-md text-[13px] text-fg-70 transition-colors hover:border-primary/50 hover:bg-white/8 hover:text-fg disabled:opacity-50"
           >
             {s}
           </button>

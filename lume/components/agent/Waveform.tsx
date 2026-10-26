@@ -90,7 +90,7 @@ export function Waveform({ mode, className }: { mode: WaveMode; className?: stri
           }}
           className={cn(
             'block h-full w-1 origin-center rounded-full transition-colors duration-500',
-            mode === 'listening' ? 'bg-white' : mode === 'thinking' ? 'bg-violet' : 'bg-white/30'
+            mode === 'listening' ? 'bg-white' : mode === 'thinking' ? 'bg-primary' : 'bg-white/30'
           )}
           style={{ transform: `scaleY(${base(i)})` }}
         />

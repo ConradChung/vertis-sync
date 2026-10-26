@@ -88,7 +88,7 @@ export function CampaignTable({
                   aria-selected={selectedKey === r.key}
                   className={cn(
                     'cursor-pointer border-b border-white/8 last:border-b-0 hover:bg-white/4 focus-visible:bg-white/6 focus-visible:outline-none',
-                    selectedKey === r.key && 'bg-violet/8'
+                    selectedKey === r.key && 'bg-accent'
                   )}
                 >
                   <td className="px-[18px] py-[10px]">

@@ -46,7 +46,7 @@ export function InboxPane({
               aria-current={t.thread_id === thread.thread_id}
               className={cn(
                 'w-full border-b border-white/8 px-3 py-2.5 text-left last:border-b-0 hover:bg-white/4',
-                t.thread_id === thread.thread_id && 'bg-violet/10'
+                t.thread_id === thread.thread_id && 'bg-accent'
               )}
             >
               <div className="flex items-center justify-between gap-2">
@@ -94,7 +94,7 @@ function ThreadView({ thread, campaignId, campaignName }: { thread: InboxThread;
       </div>
       <ol className="max-h-[340px] flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {thread.messages.map((m) => (
-          <li key={m.id} className={cn('max-w-[85%] rounded-lg px-3 py-2 text-[12px]', m.direction === 'in' ? 'bg-white/6' : 'ml-auto bg-violet/15')}>
+          <li key={m.id} className={cn('max-w-[85%] rounded-lg px-3 py-2 text-[12px]', m.direction === 'in' ? 'bg-white/6' : 'ml-auto bg-primary/15')}>
             <p className="mb-1 text-[10px] text-fg-46">
               {m.direction === 'in' ? m.from : `${m.eaccount ?? m.from ?? 'us'}`} · {relTime(m.at)}
             </p>

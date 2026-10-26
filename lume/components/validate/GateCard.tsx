@@ -70,7 +70,7 @@ export function GateCard({ gate, focused, busy, countOpen, onAction, onCountOpen
       className={cn(
         'gap-3 px-4 outline-none transition-[border-color] duration-200',
         'focus-visible:ring-2 focus-visible:ring-ring',
-        focused && 'border-violet'
+        focused && 'border-primary ring-2 ring-primary/60'
       )}
     >
       <div className="flex items-start justify-between gap-3">

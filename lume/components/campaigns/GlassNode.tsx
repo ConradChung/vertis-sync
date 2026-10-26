@@ -15,8 +15,8 @@ export type GlassFlowNode = Node<GlassNodeData, 'glass'>
 const DOT: Record<FlowStage['status'], string> = {
   idle: 'bg-fg-24',
   waiting: 'bg-amber animate-pulse',
-  active: 'bg-cyan animate-pulse',
-  done: 'bg-green',
+  active: 'bg-lime animate-pulse',
+  done: 'bg-lime light:ring-1 light:ring-olive',
 }
 
 const fmt = new Intl.NumberFormat('en-US')
@@ -44,7 +44,7 @@ function GlassNodeImpl({ data }: NodeProps<GlassFlowNode>) {
         onClick={() => onRun(stage)}
         className={cn(
           'nodrag mt-2 w-full rounded-md border px-2 py-1 text-[11px] transition-colors',
-          disabled ? 'cursor-not-allowed border-white/6 text-fg-24' : 'border-violet/40 bg-violet/15 text-violet-soft hover:bg-violet/25'
+          disabled ? 'cursor-not-allowed border-white/6 text-fg-24' : 'border-primary/40 bg-accent text-fg hover:bg-primary/25'
         )}
       >
         {a.label}

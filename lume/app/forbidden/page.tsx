@@ -12,7 +12,7 @@ export const metadata: Metadata = { title: 'Forbidden' }
 export default function ForbiddenPage() {
   return (
     <main className="grid min-h-dvh place-items-center p-6">
-      <section className="glass w-full max-w-sm rounded-panel-lg p-7 text-center">
+      <section className="glass w-full max-w-sm rounded-2xl p-7 text-center">
         <div className="eyebrow">403</div>
         <h1 className="mt-2 text-2xl font-semibold tracking-[-0.5px]">Not your Lume</h1>
         <p className="mt-2 text-sm text-fg-46">

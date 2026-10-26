@@ -15,7 +15,7 @@ export function StatusBadge({ status, className }: { status: string | null; clas
     <span
       data-tone={tone}
       className={cn(
-        'inline-flex h-5 items-center rounded-full border px-2 text-[11px] font-medium whitespace-nowrap capitalize',
+        'inline-flex h-5 items-center rounded-full px-2 text-[11px] font-medium whitespace-nowrap capitalize',
         TONE[tone],
         className
       )}

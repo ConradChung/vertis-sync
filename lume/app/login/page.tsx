@@ -17,8 +17,11 @@ const CALLBACK_ERRORS: Record<string, string> = {
 export default function LoginPage() {
   return (
     <main className="grid min-h-dvh place-items-center p-6">
-      <section className="glass w-full max-w-sm rounded-panel-lg p-7">
-        <div className="brand text-[26px]">lume</div>
+      <section className="glass w-full max-w-sm rounded-2xl p-7">
+        <div className="brand text-[26px]">
+          <span className="inline-block size-4 rounded-[4px] bg-primary dark:shadow-(--primary-glow) light:ring-1 light:ring-(--lime-edge)" aria-hidden />
+          lume
+        </div>
         <h1 className="mt-5 text-xl font-semibold tracking-[-0.5px]">Sign in</h1>
         <p className="mt-1 text-sm text-fg-46">A magic link goes to the owner&apos;s email.</p>
         {/* useSearchParams needs a Suspense boundary for static prerendering. */}

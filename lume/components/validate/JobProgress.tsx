@@ -17,7 +17,7 @@ const COUNT_TONES: { key: keyof Job['counts']; label: string; tone: string }[] =
   { key: 'pending', label: 'pending', tone: 'text-cyan' },
 ]
 
-function Bar({ value, total, label, tone = 'bg-violet' }: { value: number; total: number; label: string; tone?: string }) {
+function Bar({ value, total, label, tone = 'bg-primary' }: { value: number; total: number; label: string; tone?: string }) {
   const pct = total > 0 ? Math.min(100, Math.round((value / total) * 100)) : 0
   return (
     <div>

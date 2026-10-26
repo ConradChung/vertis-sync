@@ -100,9 +100,9 @@ function CampaignCard({
       ref={setNodeRef}
       className={cn(
         'surface-card relative flex flex-col gap-2 rounded-panel px-[16px] py-[14px] transition-[box-shadow,transform] duration-150',
-        selected && 'ring-1 ring-violet/50',
-        active && 'ring-1 ring-dashed ring-violet/30',
-        isOver && 'scale-[1.01] ring-2 ring-violet'
+        selected && 'ring-2 ring-primary/60',
+        active && 'ring-1 ring-dashed ring-primary/40',
+        isOver && 'scale-[1.01] ring-2 ring-primary'
       )}
     >
       <button type="button" onClick={onSelect} className="flex items-start justify-between gap-2 text-left" aria-pressed={selected}>
@@ -142,7 +142,7 @@ function CampaignCard({
         </button>
       </div>
       {isOver && (
-        <div className="pointer-events-none absolute inset-0 grid place-items-center rounded-panel bg-violet/10 text-[12px] font-medium text-fg">
+        <div className="pointer-events-none absolute inset-0 grid place-items-center rounded-panel bg-accent text-[12px] font-medium text-fg">
           Drop to ask for confirmation
         </div>
       )}

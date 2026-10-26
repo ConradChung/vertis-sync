@@ -142,7 +142,7 @@ function Bundle({ drag, disabled }: { drag: DragLeads; disabled: boolean }) {
       {...listeners}
       aria-label={`Drag ${dragLabel(drag)} onto a campaign`}
       className={cn(
-        'inline-flex h-7 cursor-grab touch-none items-center gap-1.5 rounded-[10px] border border-violet/30 bg-violet/12 px-2.5 text-[12px] text-violet-soft active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40',
+        'inline-flex h-7 cursor-grab touch-none items-center gap-1.5 rounded-[10px] border border-primary/40 bg-accent px-2.5 text-[12px] text-fg active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40',
         isDragging && 'opacity-50'
       )}
     >
@@ -172,7 +172,7 @@ function LeadRow({
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `lead:${refKey(ref)}`, data: drag })
   const name = [row.first_name, row.last_name].filter(Boolean).join(' ')
   return (
-    <tr className={cn('border-t border-line/60', isSel && 'bg-violet/[.06]', isDragging && 'opacity-50')}>
+    <tr className={cn('border-t border-line/60', isSel && 'bg-accent', isDragging && 'opacity-50')}>
       <td className="px-2 py-1.5">
         <input
           type="checkbox"

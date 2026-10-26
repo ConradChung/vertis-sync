@@ -89,8 +89,9 @@
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
   --radius-control: var(--radius);
-  --radius-panel: var(--radius);
-  --radius-panel-lg: var(--radius);
+  /* Panels match the glass cards (rounded-xl / rounded-2xl). */
+  --radius-panel: calc(var(--radius) * 1.5);
+  --radius-panel-lg: calc(var(--radius) * 2);
 
   /* Motion */
   --ease-glass: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -157,7 +158,7 @@
   /* Legacy names → palette */
   --bg: #050505;
   --panel: rgba(8, 8, 8, 0.82);
-  --surface: #0c0c0c; /* opaque, so sticky headers hide rows */
+  --surface: rgba(16, 16, 16, 0.82); /* sticky headers: dense + blurred so rows hide */
   --violet-soft: rgba(255, 255, 255, 0.82);
   --green: var(--lime);
   --amber: var(--violet);
@@ -242,7 +243,7 @@
 
   --bg: #f3f6f0;
   --panel: rgba(255, 255, 255, 0.78);
-  --surface: #eef2ea;
+  --surface: rgba(240, 244, 236, 0.88);
   --violet-soft: #0f1a12;
   --green: var(--olive);
   --amber: #0f1a12;
@@ -380,6 +381,12 @@
 
 /* Light mode never shows lime text: legacy `text-lime` call sites fall back
    to olive, stray `text-primary` to ink. Unlayered so they beat utilities. */
+/* Sticky table headers etc. sit over scrolling rows: blur what passes under. */
+.bg-surface {
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+
 .light .text-lime {
   color: var(--positive);
 }

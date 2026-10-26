@@ -132,7 +132,7 @@ export function VoiceInput({ speech, onFinal }: { speech: Speech; onFinal: (text
       title={speech.listening ? 'Stop' : 'Speak (or hold space)'}
       className={cn(
         'grid size-9 shrink-0 place-items-center rounded-full border border-line text-fg-70 transition-colors hover:bg-white/8 hover:text-fg',
-        speech.listening && 'border-violet bg-violet/20 text-fg'
+        speech.listening && 'border-primary bg-accent text-fg'
       )}
     >
       {speech.listening ? <MicOff className="size-4" /> : <Mic className="size-4" />}

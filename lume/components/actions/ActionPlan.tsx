@@ -23,8 +23,8 @@ export interface ActionView {
 
 const TONE: Record<string, string> = {
   awaiting: 'bg-amber/12 text-amber border-amber/25',
-  approved: 'bg-violet/12 text-violet-soft border-violet/25',
-  executing: 'bg-violet/12 text-violet-soft border-violet/25',
+  approved: 'bg-lime/15 text-positive border-transparent',
+  executing: 'bg-lime/15 text-positive border-transparent',
   executed: 'bg-green/12 text-green border-green/25',
   rejected: 'bg-white/[.04] text-fg-46 border-line',
   expired: 'bg-white/[.04] text-fg-46 border-line',

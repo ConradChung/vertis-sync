@@ -29,7 +29,7 @@ export function Switch({
         aria-hidden
         className={cn(
           'relative inline-flex h-[18px] w-[30px] shrink-0 rounded-full border transition-colors duration-200',
-          checked ? 'border-violet/70 bg-violet/70' : 'border-white/15 bg-white/8'
+          checked ? 'border-primary bg-primary' : 'border-white/15 bg-white/8'
         )}
       >
         <span

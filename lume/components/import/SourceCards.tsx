@@ -42,7 +42,7 @@ function CardShell({ icon, title, sub, children, label }: { icon: ReactNode; tit
   return (
     <GlassCard className="gap-3 px-[18px]" role="region" aria-label={label}>
       <div className="flex items-start gap-3">
-        <span className="grid size-8 shrink-0 place-items-center rounded-[10px] bg-violet/15 text-violet-soft" aria-hidden>
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-(--glass-border) bg-(--glass-fill) text-foreground" aria-hidden>
           {icon}
         </span>
         <div className="min-w-0">
@@ -264,7 +264,7 @@ function CsvCard({ onCreated }: SourceCardsProps) {
         aria-busy={busy || undefined}
         className={cn(
           'flex flex-col items-center justify-center gap-1.5 rounded-[12px] border border-dashed border-line px-3 py-5 text-center text-[12px] text-fg-46 transition-colors',
-          over && 'border-violet bg-violet/10 text-fg',
+          over && 'border-primary bg-accent text-fg',
           busy && 'cursor-not-allowed'
         )}
       >

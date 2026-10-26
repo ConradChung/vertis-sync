@@ -139,7 +139,7 @@ export function AnalyticsChart({
               <li key={s.step} className="grid grid-cols-[56px_1fr_auto] items-center gap-3 text-[12px]">
                 <span className="text-fg-46">Step {s.step}</span>
                 <div className="h-2 overflow-hidden rounded-full bg-white/6">
-                  <div className="h-full rounded-full bg-violet" style={{ width: `${(s.sent / maxStep) * 100}%` }} />
+                  <div className="h-full rounded-full bg-primary" style={{ width: `${(s.sent / maxStep) * 100}%` }} />
                 </div>
                 <span className="font-mono text-fg-46 tabular-nums">
                   {fmt.format(s.sent)} sent · {fmt.format(s.replies)} replies
