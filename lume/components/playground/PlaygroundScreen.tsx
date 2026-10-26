@@ -27,6 +27,7 @@ import type { CampaignFlowResponse, CampaignTableResponse } from '@/lib/campaign
 import { buildCatalog, pickInitial } from '@/lib/playground/catalog'
 import { flowToDiagram, skillToDiagram } from '@/lib/playground/convert'
 import { parseRef, refKey, type PlaygroundRef, type SavedDiagram } from '@/lib/playground/model'
+import { PHONE_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 
 const opts = { revalidateOnFocus: false }
 
@@ -61,6 +62,7 @@ export function PlaygroundScreen() {
   const router = useRouter()
   const pathname = usePathname()
   const params = useSearchParams()
+  const phone = useMediaQuery(PHONE_QUERY)
   const savedSwr = useSWR<{ diagrams: SavedDiagram[] }>('/api/playground/diagrams', fetchJson, opts)
   const skillsSwr = useSWR<{ skills: Skill[] }>('/api/agent/skills', fetchJson, opts)
   const campaignsSwr = useSWR<CampaignTableResponse>('/api/campaigns?with=analytics', fetchJson, opts)
@@ -92,12 +94,12 @@ export function PlaygroundScreen() {
           <p className="text-[11px] tracking-[0.18em] text-fg-46 uppercase">Showcase</p>
           <h1 className="text-[26px] font-semibold tracking-tight text-fg">Playground</h1>
         </div>
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2 max-sm:w-full">
           {catalogLoading ? (
             <Skeleton className="h-9 w-72 rounded-control" />
           ) : (
             <Select items={items} value={selectedKey} onValueChange={(v) => v && select(String(v))}>
-              <SelectTrigger aria-label="Pipeline" className="glass w-[min(22rem,80vw)] text-[13px]">
+              <SelectTrigger aria-label="Pipeline" className="glass w-[min(22rem,80vw)] text-[13px] max-sm:h-10 max-sm:min-w-0 max-sm:flex-1">
                 <Workflow className="size-3.5 text-fg-46" />
                 <SelectValue placeholder="Choose a pipeline" />
               </SelectTrigger>
@@ -130,9 +132,10 @@ export function PlaygroundScreen() {
         </div>
       </div>
 
-      <div className="h-[calc(100dvh-var(--topbar-h)-11rem)] min-h-[420px]">
+      {/* Phones: the canvas fills the space above the bottom bar and the flow runs top to bottom. */}
+      <div className="h-[calc(100dvh-var(--topbar-h)-11rem)] min-h-[420px] max-sm:h-[calc(100dvh-var(--topbar-h)-var(--bottombar-h)-10.5rem)] max-sm:min-h-[360px]">
         {diagram ? (
-          <PlaygroundCanvas key={selectedKey} diagram={diagram} className="h-full" />
+          <PlaygroundCanvas key={`${selectedKey}:${phone ? 'TB' : 'LR'}`} diagram={diagram} direction={phone ? 'TB' : 'LR'} className="h-full" />
         ) : loading || catalogLoading ? (
           <Skeleton className="h-full w-full rounded-panel" />
         ) : (
@@ -183,6 +186,7 @@ function SavedActions({ id, title, onChanged, onDeleted }: { id: string; title: 
       <Button
         variant="outline"
         size="icon-sm"
+        className="max-sm:size-10"
         aria-label="Rename diagram"
         onClick={() => {
           setDraft(title)
@@ -191,7 +195,7 @@ function SavedActions({ id, title, onChanged, onDeleted }: { id: string; title: 
       >
         <Pencil className="size-3.5" />
       </Button>
-      <Button variant="outline" size="icon-sm" aria-label="Delete diagram" onClick={() => setDeleting(true)}>
+      <Button variant="outline" size="icon-sm" className="max-sm:size-10" aria-label="Delete diagram" onClick={() => setDeleting(true)}>
         <Trash2 className="size-3.5" />
       </Button>
 

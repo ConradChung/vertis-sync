@@ -23,6 +23,7 @@ import { useCrmBoard } from '@/hooks/useCrm'
 import { patchDeal, patchErrorText, type PatchBody } from '@/lib/crm/client'
 import { requiresApproval } from '@/lib/crm/stages'
 import type { CrmBoardResponse, CrmDealCard } from '@/lib/crm/types'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 
 export const OPEN_PALETTE_EVENT = 'lume:open-palette'
 
@@ -55,6 +56,8 @@ export function CrmWorkspace({
 }) {
   const board = useCrmBoard(campaignId)
   const [view, setView] = useState<View>('board')
+  // Below md the rail stacks above the board (the resizable split needs width).
+  const narrow = useMediaQuery('(max-width: 767.98px)')
   const [openId, setOpenId] = useState<string | null>(initialDealId ?? null)
   useEffect(() => {
     if (initialDealId) setOpenId(initialDealId)
@@ -168,6 +171,35 @@ export function CrmWorkspace({
         <LoadingSkeleton />
       ) : (
         <>
+          {narrow ? (
+            <div className="space-y-3">
+              <CrmRail data={data} />
+              <div className="min-w-0">
+                {data.deals.length === 0 ? (
+                  <NoDeals all={all} />
+                ) : view === 'board' ? (
+                  <CrmBoard
+                    deals={data.deals}
+                    stages={data.stages}
+                    awaiting={data.awaiting_close}
+                    showCampaign={all}
+                    campaignName={campaignName}
+                    onOpen={(d) => setOpenId(d.id)}
+                    onMove={onMove}
+                  />
+                ) : (
+                  <CrmTable
+                    deals={data.deals}
+                    stages={data.stages}
+                    owners={data.owners}
+                    showCampaign={all}
+                    campaignName={campaignName}
+                    onOpen={(d) => setOpenId(d.id)}
+                  />
+                )}
+              </div>
+            </div>
+          ) : (
           <ResizablePanelGroup orientation="horizontal" className="min-h-[520px] gap-0 max-md:flex-col">
             <ResizablePanel defaultSize={240} minSize={200} maxSize={380} className="max-md:w-full">
               <div className="h-full pr-3 max-md:pr-0 max-md:pb-3">
@@ -202,6 +234,7 @@ export function CrmWorkspace({
               </div>
             </ResizablePanel>
           </ResizablePanelGroup>
+          )}
           <FollowupsTable
             rows={data.followups}
             showCampaign={all}

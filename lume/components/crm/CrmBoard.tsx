@@ -118,7 +118,7 @@ function Column({
       aria-label={`${stage.name}: ${count}`}
       data-testid="crm-column"
       className={cn(
-        'glass flex w-[264px] shrink-0 flex-col overflow-hidden rounded-xl transition-colors',
+        'glass flex w-[264px] shrink-0 snap-start flex-col overflow-hidden rounded-xl transition-colors max-sm:w-[82vw]',
         active && 'ring-1 ring-border',
         isOver && 'bg-accent ring-1 ring-ring'
       )}

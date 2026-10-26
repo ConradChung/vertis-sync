@@ -125,7 +125,7 @@ function CampaignDetail({ row }: { row: CampaignTableRow }) {
         </p>
       ) : (
         <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
-          <TabsList>
+          <TabsList className="max-w-full overflow-x-auto [scrollbar-width:none]">
             <TabsTrigger value="analytics">Analytics</TabsTrigger>
             <TabsTrigger value="flow">Flow</TabsTrigger>
             <TabsTrigger value="sequence">Sequence</TabsTrigger>
