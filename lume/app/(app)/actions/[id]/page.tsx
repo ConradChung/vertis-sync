@@ -10,6 +10,39 @@ import type { Json } from '@/lib/db/types'
 export const metadata: Metadata = { title: 'Confirm action' }
 export const dynamic = 'force-dynamic'
 
+const usd = (v: Json | undefined) => (typeof v === 'number' ? `$${v.toFixed(2)}` : '—')
+const show = (v: Json) => {
+  const s = Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(', ') : typeof v === 'string' ? v : JSON.stringify(v)
+  return s.length > 400 ? `${s.slice(0, 400)}…` : s
+}
+
+/** An Apify run: actor, cost, cap, then every input field the owner agreed to, then the run once started. */
+function runActorDetails(payload: Record<string, Json>, result: Record<string, Json> | null): [string, string][] {
+  const out: [string, string][] = [
+    ['actor', `${payload.actor_title ?? ''} (${payload.actor_id ?? '—'})`],
+    ['pricing', String(payload.pricing_model ?? '—').replaceAll('_', ' ').toLowerCase()],
+    ['estimate', `${usd(payload.estimate_usd)}${payload.estimate_note ? ` — ${payload.estimate_note}` : ''}`],
+    ['hard cap', `${usd(payload.budget_usd)} (limit ${usd(payload.cap_usd)} per run, enforced by Apify)`],
+  ]
+  const o = payload.options
+  if (o && typeof o === 'object' && !Array.isArray(o)) {
+    const lim = [`timeout ${Math.round(Number(o.timeout) / 60)} min`]
+    if (typeof o.maxItems === 'number') lim.push(`max ${o.maxItems.toLocaleString('en-US')} charged results`)
+    if (typeof o.memory === 'number') lim.push(`${o.memory} MB memory`)
+    out.push(['limits', lim.join(' · ')])
+  }
+  if (typeof payload.expected_items === 'number') out.push(['expected results', payload.expected_items.toLocaleString('en-US')])
+  const input = payload.input
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    for (const [k, v] of Object.entries(input)) out.push([`input · ${k}`, show(v)])
+  }
+  if (result && typeof result.run_id === 'string') {
+    out.push(['run', `${result.run_id} (${result.status ?? '—'})`])
+    if (typeof result.console_url === 'string') out.push(['console', result.console_url])
+  }
+  return out
+}
+
 /** Payload fields worth showing; the lead list and reply body are summarised. */
 function details(payload: Record<string, Json>): [string, string][] {
   const out: [string, string][] = []
@@ -39,7 +72,7 @@ export default async function ActionPage({ params }: { params: Promise<{ id: str
     id: row.id,
     kind: row.kind,
     summary: typeof row.payload?.summary === 'string' ? row.payload.summary : row.kind,
-    details: details(row.payload),
+    details: row.kind === 'run_actor' ? runActorDetails(row.payload ?? {}, (row.result as Record<string, Json> | null) ?? null) : details(row.payload),
     requestedBy: row.requested_by,
     status: row.status,
     decidedVia: row.decided_via,

@@ -11,6 +11,9 @@ import { sendMessage } from '@/lib/adapters/telegram'
 import { actionLink } from '@/lib/adapters/telegram.messages'
 import { getPushJob, logEvent } from '@/lib/db/service'
 import { getDeal, setStage } from '@/lib/crm/service'
+import { startRun } from '@/lib/adapters/apify'
+import { checkRunActor, tightenOptions } from '@/lib/apify/service'
+import type { RunOptions } from '@/lib/apify/pricing'
 import type { Json, PendingActionRow } from '@/lib/db/types'
 import { nextRun } from '@/lib/rules/nextRun'
 import { parseRuleFilter } from '@/lib/rules/filter'
@@ -204,6 +207,43 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
     const from = await setStage(dealId, stage, 'user', str(p.reason), { via: 'pending_action' })
     if (from === null) throw new ActionFailure('deal not found')
     return { deal_id: dealId, from, to: stage }
+  },
+
+  /**
+   * Start the Apify run the owner confirmed. Re-checks first (actor still
+   * there, input still valid against its schema, pricing still cappable) and
+   * starts with options never looser than the confirmed ones, so the $20 cap
+   * holds even if the actor's pricing changed in between. Apify enforces the
+   * limits on the run itself; results are imported separately (Import gate).
+   */
+  async run_actor(p) {
+    const actorId = need(p, 'actor_id')
+    const input = p.input && typeof p.input === 'object' && !Array.isArray(p.input) ? (p.input as Record<string, unknown>) : null
+    const confirmed = p.options as unknown as RunOptions | null
+    if (!input) throw new ActionFailure('payload.input is missing')
+    if (!confirmed || typeof confirmed.maxTotalChargeUsd !== 'number' || typeof confirmed.timeout !== 'number') {
+      throw new ActionFailure('payload.options is missing')
+    }
+    const cap = typeof p.cap_usd === 'number' ? p.cap_usd : 0
+    if (!(confirmed.maxTotalChargeUsd > 0) || confirmed.maxTotalChargeUsd > cap) throw new ActionFailure('confirmed budget exceeds the cap')
+    const check = await checkRunActor({
+      actor_id: actorId,
+      input,
+      max_charge_usd: confirmed.maxTotalChargeUsd,
+      expected_items: typeof p.expected_items === 'number' ? p.expected_items : undefined,
+    })
+    if (!check.ok) throw new ActionFailure(`re-check failed: ${check.error}`, { actor_id: actorId })
+    const options = tightenOptions(confirmed, String(p.pricing_model ?? ''), check.plan)
+    if (typeof options === 'string') throw new ActionFailure(options, { actor_id: actorId })
+    const run = await startRun(actorId, input, options)
+    return {
+      actor_id: actorId,
+      run_id: run.id,
+      status: run.status,
+      dataset_id: run.datasetId,
+      console_url: run.consoleUrl,
+      options: options as unknown as Json,
+    }
   },
 
   async create_campaign(p) {

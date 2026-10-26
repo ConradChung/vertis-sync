@@ -35,6 +35,10 @@ import { CRM_CLOSE_KIND, parseCrmClosePayload } from '@/lib/crm/actions'
  * send_reply are backed by the partial unique indexes from migration
  * `lume_pending_actions_campaign_unique` (23505 → the same error).
  *
+ * `run_actor` (an Apify actor run): the snapshot from `buildActionRequest`
+ * (validated input + capped options); one awaiting per `input_hash`, backed
+ * by `pending_actions_one_awaiting_run_actor_idx`.
+ *
  * Telegram unconfigured: the row is still created; the prompt is skipped
  * (the adapter logs it) and `telegram_message_id` stays null.
  */
@@ -63,6 +67,19 @@ export class InvalidActionPayloadError extends Error {
   }
 }
 
+const isObj = (v: Json | undefined) => !!v && typeof v === 'object' && !Array.isArray(v)
+
+/** A `run_actor` snapshot must carry what the executor and the card read (lib/apify/service.ts runActorPayload). */
+function runActorPayloadError(p: Record<string, Json>): string | null {
+  if (typeof p.actor_id !== 'string' || !p.actor_id) return 'payload.actor_id is required'
+  if (!isObj(p.input)) return 'payload.input must be an object'
+  const o = p.options as Record<string, Json> | null
+  if (!isObj(o) || typeof o!.maxTotalChargeUsd !== 'number' || typeof o!.timeout !== 'number') return 'payload.options needs maxTotalChargeUsd and timeout'
+  if (typeof p.cap_usd !== 'number' || (o!.maxTotalChargeUsd as number) > p.cap_usd) return 'payload.options exceed the cap'
+  if (typeof p.input_hash !== 'string' || !/^[0-9a-f]{32}$/.test(p.input_hash)) return 'payload.input_hash is required'
+  return null
+}
+
 export interface CreateActionMeta {
   agentRunId?: string | null
   ruleId?: string | null
@@ -88,6 +105,11 @@ export async function createAction(
     if (!parsed.ok) throw new InvalidActionPayloadError(parsed.error)
     payload = parsed.payload
     campaignKey = { field: 'deal_id', value: String(payload.deal_id) }
+  } else if (kind === 'run_actor') {
+    // One awaiting run per identical request (pending_actions_one_awaiting_run_actor_idx).
+    const err = runActorPayloadError(payload)
+    if (err) throw new InvalidActionPayloadError(err)
+    campaignKey = { field: 'input_hash', value: String(payload.input_hash) }
   }
   const rawJobId = payload.job_id
   if (rawJobId === undefined && JOB_KINDS.has(kind)) {

@@ -25,7 +25,7 @@ export function PlanCard({ approvals }: { approvals: PendingApproval[] }) {
       <ul className="flex flex-col gap-2">
         {approvals.map((a) => (
           <li key={a.action_id} className="flex items-center justify-between gap-3 text-[13px]">
-            <span className="min-w-0 flex-1 text-fg-70">
+            <span className="min-w-0 flex-1 whitespace-pre-line text-fg-70">
               <span className="font-mono text-[11px] text-fg-46">{a.tool}</span>
               <br />
               {a.summary ?? 'Review this action'}

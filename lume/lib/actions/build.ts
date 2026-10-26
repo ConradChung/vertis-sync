@@ -9,6 +9,8 @@ import { getCampaignByExternalId, getInstantlyEmailEvent, getPushJob, PUSH_REVIE
 import type { Json, PendingActionKind } from '@/lib/db/types'
 import { UUID_RE } from '@/lib/http/json'
 import { buildActivateRule, buildAssignLeads, rotateActionBody } from '@/lib/rules/actions'
+import { ACTOR_ID_RE, checkRunActor, runActorPayload } from '@/lib/apify/service'
+import { ACTOR_RUN_CAP_USD } from '@/lib/apify/pricing'
 
 /**
  * Turn a requested action `{ kind, payload }` into the snapshot the owner
@@ -24,6 +26,9 @@ import { buildActivateRule, buildAssignLeads, rotateActionBody } from '@/lib/rul
  *  activate_rule      { rule_id, rule_name, campaign_id, cron, tz, first_run, summary }
  *  delete_rule        { rule_id, summary }
  *  decide_gate        { callback_data, target_id, job_id?, summary }
+ *  run_actor          { actor_id, input, max_charge_usd?, expected_items? } →
+ *                     lib/apify/service.ts: input validated against the
+ *                     actor's schema, run options capped at $20, summary
  *  send_reply / pause_campaign / resume_campaign / create_campaign:
  *                     lib/actions/payloads.ts, with the display extras
  *                     written here (`withServerExtras`): the campaign name
@@ -51,8 +56,18 @@ const CampaignBody = z.object({
   payload: z.record(z.string(), z.unknown()),
 })
 
+const RunActorBody = z.object({
+  kind: z.literal('run_actor'),
+  payload: z.object({
+    actor_id: z.string().regex(ACTOR_ID_RE),
+    input: z.record(z.string(), z.unknown()),
+    max_charge_usd: z.number().positive().max(ACTOR_RUN_CAP_USD).optional(),
+    expected_items: z.number().int().positive().max(1_000_000).optional(),
+  }),
+})
+
 /** Shape check for `POST /api/actions`; `buildActionRequest` validates each payload fully. */
-export const ActionRequestBody = z.union([JobBody, rotateActionBody, OtherBody, CampaignBody])
+export const ActionRequestBody = z.union([JobBody, rotateActionBody, OtherBody, RunActorBody, CampaignBody])
 export type ActionRequest = z.infer<typeof ActionRequestBody>
 
 export type ActionBuild =
@@ -103,6 +118,13 @@ export async function buildActionRequest(input: unknown): Promise<ActionBuild> {
         payload: { rule_id: ruleId, summary: `Delete rotation rule “${rule.name}” (${rule.cron})` },
         ruleId,
       }
+    }
+    case 'run_actor': {
+      const r = req.payload
+      const input = JSON.parse(JSON.stringify(r.input)) as Record<string, unknown>
+      const check = await checkRunActor({ ...r, input })
+      if (!check.ok) return fail(check.status, check.error)
+      return { ok: true, kind: req.kind, payload: runActorPayload({ ...r, input }, check.brief, check.plan) }
     }
     case 'push_to_instantly':
     case 'launch_campaign':
