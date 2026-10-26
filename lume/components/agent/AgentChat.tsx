@@ -6,7 +6,8 @@ import { ArrowUp, BookMarked, ChevronRight, KeyRound, MessageSquareDashed, Panel
 import { AgentHistory, useConversationList } from '@/components/agent/AgentHistory'
 import { ManageSkills, SkillCard, SkillMenu, useSkillList } from '@/components/agent/AgentSkills'
 import { Markdown } from '@/components/agent/Markdown'
-import { Waveform, type WaveMode } from '@/components/agent/Waveform'
+import { Waveform } from '@/components/agent/Waveform'
+import { AgentStatus, statusLabel } from '@/components/agent/AgentStatus'
 import { PlanCard } from '@/components/orb/PlanCard'
 import { ToolLog, type ToolLogEntry } from '@/components/orb/ToolLog'
 import { useSpeechRecognition, VoiceInput } from '@/components/orb/VoiceInput'
@@ -180,17 +181,6 @@ export function AgentChat() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const mode: WaveMode = speech.listening ? 'listening' : busy ? 'thinking' : 'idle'
-  const status = speech.listening
-    ? speech.transcript || 'Listening…'
-    : busy
-      ? chat.acting
-        ? 'Running a tool…'
-        : chat.streaming
-          ? 'Writing…'
-          : 'Thinking…'
-      : null
-
   const history = (
     <AgentHistory
       list={list}
@@ -240,7 +230,8 @@ export function AgentChat() {
             <SquarePen className="size-4" />
           </Button>
         </div>
-        <div className="mx-auto flex min-h-[calc(100dvh-var(--topbar-h)-110px)] w-full max-w-[760px] flex-col">
+        {/* The conversation sits on its own dense glass panel so text stays readable over the wallpaper. */}
+        <div className="glass-overlay mx-auto flex min-h-[calc(100dvh-var(--topbar-h)-110px)] w-full max-w-[820px] flex-col rounded-panel px-5 pt-5 sm:px-8 sm:pt-7">
           <div className="flex-1" aria-live="polite" aria-busy={busy || chat.loading}>
             {chat.notFound ? (
               <MissingConversation onNew={newChat} />
@@ -260,14 +251,22 @@ export function AgentChat() {
             <div ref={endRef} />
           </div>
 
-          <div className="sticky bottom-0 z-10 -mx-2 px-2 pt-10 pb-3">
-            <div className="mb-2 flex items-center justify-center gap-3">
-              <Waveform mode={mode} className="h-11" />
-            </div>
-            {status && (
-              <p className="mb-2 truncate text-center text-[12px] text-fg-46" role="status">
-                {status}
-              </p>
+          <div className="sticky bottom-0 z-10 -mx-5 rounded-b-panel bg-[var(--glass-fill-strong)] px-5 pt-3 pb-4 sm:-mx-8 sm:px-8">
+            {speech.listening ? (
+              <>
+                <div className="mb-2 flex items-center justify-center gap-3">
+                  <Waveform mode="listening" className="h-11" />
+                </div>
+                <p className="mb-2 truncate text-center text-[12px] text-fg-46" role="status">
+                  {speech.transcript || 'Listening…'}
+                </p>
+              </>
+            ) : (
+              <AgentStatus
+                active={busy}
+                label={statusLabel({ runningTool: chat.runningTool, liveStatus: chat.liveStatus, streaming: chat.streaming })}
+                className="mb-3"
+              />
             )}
             {picked && (
               <SkillCard
@@ -429,11 +428,9 @@ function Message({ m }: { m: ChatMessage }) {
       </div>
     )
   }
-  const waiting = m.streaming && !m.text && !m.tools.length && !m.error
   return (
     <div className="flex flex-col gap-3">
       {m.tools.length > 0 && <ToolChips tools={m.tools} live={!!m.streaming} />}
-      {waiting && <ThinkingDots />}
       {m.text && <Markdown text={m.text} />}
       <PlanCard approvals={m.approvals} />
       {m.notConfigured ? (
@@ -478,12 +475,3 @@ function ToolChips({ tools, live }: { tools: ToolLogEntry[]; live: boolean }) {
   )
 }
 
-function ThinkingDots() {
-  return (
-    <div className="flex h-6 items-center gap-1" aria-label="Thinking">
-      {[0, 1, 2].map((i) => (
-        <span key={i} className="size-1.5 animate-pulse rounded-full bg-fg-46 motion-reduce:animate-none" style={{ animationDelay: `${i * 160}ms` }} />
-      ))}
-    </div>
-  )
-}

@@ -17,6 +17,8 @@ export interface ChatMessage {
   /** 503 agent_not_configured: rendered as a notice, not an error. */
   notConfigured?: boolean
   streaming?: boolean
+  /** Live status from the run (e.g. a server-side web search); cleared when text or a tool arrives. */
+  status?: string
   /** A saved skill sent with this message (shown on the bubble; not stored). */
   skill?: { name: string; mode: SkillMode }
 }
@@ -39,6 +41,10 @@ export interface AgentChat {
   conversationId: string | null
   /** A tool is executing in the live run. */
   acting: boolean
+  /** Name of the client tool running in the live run, if any. */
+  runningTool: string | null
+  /** Live status line from the run (server-side web tools). */
+  liveStatus: string | null
   /** Assistant text is arriving for the live run. */
   streaming: boolean
   send: (text: string, skill?: SkillRef) => Promise<void>
@@ -61,10 +67,13 @@ const nextId = () => `m${Date.now().toString(36)}${(seq++).toString(36)}`
 export function applyAgentEvent(m: ChatMessage, e: AgentEvent): ChatMessage {
   switch (e.type) {
     case 'text':
-      return { ...m, text: m.text + String(e.delta ?? '') }
+      return { ...m, status: undefined, text: m.text + String(e.delta ?? '') }
+    case 'status':
+      return { ...m, status: String(e.label ?? '') || undefined }
     case 'tool_start':
       return {
         ...m,
+        status: undefined,
         tools: [...m.tools, { id: String(e.id), name: String(e.name), tier: e.tier as ToolLogEntry['tier'], status: 'running' }],
       }
     case 'tool_end':
@@ -241,6 +250,8 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
     notFound,
     conversationId: current,
     acting: !!live?.tools.some((t) => t.status === 'running'),
+    runningTool: live?.tools.findLast((t) => t.status === 'running')?.name ?? null,
+    liveStatus: live?.status ?? null,
     streaming: !!live?.text,
     send,
     reset,

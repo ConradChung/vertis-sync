@@ -274,6 +274,12 @@ async function executeRun({
     for await (const messageStream of runner) {
       if (turn++ > 0) send({ type: 'text', delta: '\n\n' })
       messageStream.on('text', (delta) => send({ type: 'text', delta }))
+      // Server-side web tools run on Anthropic's side; surface them live as a status line.
+      messageStream.on('streamEvent', (ev) => {
+        if (ev.type !== 'content_block_start' || ev.content_block.type !== 'server_tool_use') return
+        const name = ev.content_block.name
+        send({ type: 'status', label: name === 'web_search' ? 'Searching the web' : name === 'web_fetch' ? 'Reading a web page' : 'Working' })
+      })
       const message = await messageStream.finalMessage()
       usage.input_tokens += message.usage.input_tokens ?? 0
       usage.output_tokens += message.usage.output_tokens ?? 0

@@ -4,7 +4,7 @@ import { Fragment, type ReactNode } from 'react'
  * A tiny, safe Markdown subset for streamed agent replies: paragraphs, `-`/`*`
  * and `1.` lists, ``` fences (an unclosed fence renders as code while it
  * streams), `#` headings, inline `code`, **bold**, *italic* and [links](url)
- * (http(s) and same-site paths only). Builds React nodes — never raw HTML.
+ * (http(s) and same-site paths only), and GFM | tables |. Builds React nodes — never raw HTML.
  */
 
 type Block =
@@ -12,6 +12,26 @@ type Block =
   | { kind: 'ul' | 'ol'; items: string[] }
   | { kind: 'code'; text: string }
   | { kind: 'h'; level: number; text: string }
+  | { kind: 'table'; head: string[]; align: Align[]; rows: string[][] }
+
+type Align = 'left' | 'center' | 'right'
+
+/** Any line with a cell divider; only treated as a table after a header + separator pair. */
+const TABLE_ROW = /\|/
+const TABLE_SEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/
+
+/** Split `| a | b |` into trimmed cells (escaped `\|` stays in the cell). */
+export function splitRow(line: string): string[] {
+  const inner = line.trim().replace(/^\|/, '').replace(/\|$/, '')
+  return inner.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'))
+}
+
+function alignOf(cell: string): Align {
+  const c = cell.trim()
+  if (c.startsWith(':') && c.endsWith(':')) return 'center'
+  if (c.endsWith(':')) return 'right'
+  return 'left'
+}
 
 export function parseBlocks(src: string): Block[] {
   const out: Block[] = []
@@ -33,6 +53,19 @@ export function parseBlocks(src: string): Block[] {
       i++
       continue
     }
+    // GFM table: a header row followed by a | --- | separator. Rows stream in as they arrive.
+    if (TABLE_ROW.test(line) && i + 1 < lines.length && TABLE_SEP.test(lines[i + 1])) {
+      const head = splitRow(line)
+      const align = splitRow(lines[i + 1]).map(alignOf)
+      i += 2
+      const rows: string[][] = []
+      while (i < lines.length && TABLE_ROW.test(lines[i])) {
+        const cells = splitRow(lines[i++])
+        rows.push(head.map((_, k) => cells[k] ?? ''))
+      }
+      out.push({ kind: 'table', head, align, rows })
+      continue
+    }
     if (/^\s*[-*•]\s+/.test(line) || /^\s*\d+[.)]\s+/.test(line)) {
       const kind = /^\s*\d+[.)]\s+/.test(line) ? 'ol' : 'ul'
       const re = kind === 'ol' ? /^\s*\d+[.)]\s+/ : /^\s*[-*•]\s+/
@@ -46,7 +79,7 @@ export function parseBlocks(src: string): Block[] {
       continue
     }
     const para: string[] = []
-    while (i < lines.length && lines[i].trim() && !/^\s*```/.test(lines[i]) && !/^\s*([-*•]|\d+[.)])\s+/.test(lines[i]) && !/^#{1,4}\s/.test(lines[i]))
+    while (i < lines.length && lines[i].trim() && !(TABLE_ROW.test(lines[i]) && TABLE_SEP.test(lines[i + 1] ?? '')) && !/^\s*```/.test(lines[i]) && !/^\s*([-*•]|\d+[.)])\s+/.test(lines[i]) && !/^#{1,4}\s/.test(lines[i]))
       para.push(lines[i++])
     out.push({ kind: 'p', lines: para })
   }
@@ -106,6 +139,33 @@ export function Markdown({ text }: { text: string }) {
               <pre key={i} className="overflow-x-auto rounded-control border border-line bg-muted p-3 font-mono text-[12.5px] leading-5 text-fg">
                 <code>{b.text}</code>
               </pre>
+            )
+          case 'table':
+            return (
+              <div key={i} className="overflow-x-auto rounded-control border border-line">
+                <table className="w-full border-collapse text-left text-[13.5px] leading-5">
+                  <thead className="bg-muted/60">
+                    <tr>
+                      {b.head.map((c, k) => (
+                        <th key={k} style={{ textAlign: b.align[k] }} className="border-b border-line px-3 py-2 text-[12px] font-medium tracking-wide whitespace-nowrap text-fg-70 uppercase">
+                          {renderInline(c)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {b.rows.map((r, j) => (
+                      <tr key={j} className="border-b border-line last:border-0 hover:bg-muted/40">
+                        {r.map((c, k) => (
+                          <td key={k} style={{ textAlign: b.align[k] }} className="px-3 py-2 align-top text-fg tabular-nums">
+                            {renderInline(c)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )
           case 'h':
             return (
