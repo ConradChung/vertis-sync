@@ -428,6 +428,12 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+  /* Loading spinners carry status, so they keep turning (essential motion). */
+  .animate-spin,
+  [data-slot='spinner'] {
+    animation-duration: 1s !important;
+    animation-iteration-count: infinite !important;
+  }
 }
 
 /* Responsive shell */
@@ -481,5 +487,123 @@
 @keyframes bar-shimmer {
   to {
     background-position: -200% 0;
+  }
+}
+
+/* ── Pipeline diagrams (Agent card + Playground) ──────────────────────────
+   Card springs in (scale .96 + lift), nodes stagger in by rank, edges draw
+   (solid) or fade (dashed / animated). Delays come from inline styles. */
+.diagram-pop {
+  animation: diagram-pop 520ms cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+.diagram-node-in {
+  animation: diagram-node-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.diagram-edge-draw .react-flow__edge-path {
+  stroke-dasharray: 1600;
+  stroke-dashoffset: 1600;
+  animation: diagram-edge-draw 900ms ease-out forwards;
+  animation-delay: inherit;
+}
+.diagram-edge-fade .react-flow__edge-path,
+.diagram-edge-draw .react-flow__edge-text,
+.diagram-edge-fade .react-flow__edge-text,
+.diagram-edge-draw .react-flow__edge-textbg,
+.diagram-edge-fade .react-flow__edge-textbg {
+  animation: diagram-fade 500ms ease-out both;
+  animation-delay: inherit;
+}
+.diagram-switch {
+  animation: diagram-switch 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+/* Edge stagger: the <g> carries the delay, its path/label inherit it. */
+.diagram-d-0 { animation-delay: 120ms; }
+.diagram-d-1 { animation-delay: 210ms; }
+.diagram-d-2 { animation-delay: 300ms; }
+.diagram-d-3 { animation-delay: 390ms; }
+.diagram-d-4 { animation-delay: 480ms; }
+.diagram-d-5 { animation-delay: 570ms; }
+.diagram-d-6 { animation-delay: 660ms; }
+.diagram-d-7 { animation-delay: 750ms; }
+.diagram-d-8 { animation-delay: 840ms; }
+.diagram-d-9 { animation-delay: 930ms; }
+.diagram-d-10 { animation-delay: 1020ms; }
+.diagram-d-11 { animation-delay: 1110ms; }
+.diagram-d-12 { animation-delay: 1200ms; }
+.diagram-d-13 { animation-delay: 1290ms; }
+.diagram-d-14 { animation-delay: 1380ms; }
+.diagram-d-15 { animation-delay: 1470ms; }
+@keyframes diagram-pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes diagram-node-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes diagram-edge-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes diagram-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes diagram-switch {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+/* Reduced motion: diagram animations are off by default (one hook, below).
+   `html[data-motion='full']` is an opt-in override that brings them back even
+   under the OS setting — it beats the global 0.01ms collapse above. */
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-motion='full']) :is(.diagram-pop, .diagram-node-in, .diagram-switch),
+  html:not([data-motion='full']) :is(.diagram-edge-draw, .diagram-edge-fade) :is(.react-flow__edge-path, .react-flow__edge-text, .react-flow__edge-textbg) {
+    animation: none !important;
+    stroke-dashoffset: 0 !important;
+  }
+  html:not([data-motion='full']) .diagram-edge-draw .react-flow__edge-path {
+    stroke-dasharray: none;
+  }
+  html[data-motion='full'] .diagram-pop {
+    animation-duration: 520ms !important;
+  }
+  html[data-motion='full'] .diagram-node-in {
+    animation-duration: 420ms !important;
+  }
+  html[data-motion='full'] .diagram-switch {
+    animation-duration: 480ms !important;
+  }
+  html[data-motion='full'] .diagram-edge-draw .react-flow__edge-path {
+    animation-duration: 900ms !important;
+  }
+  html[data-motion='full'] :is(.diagram-edge-draw, .diagram-edge-fade) :is(.react-flow__edge-text, .react-flow__edge-textbg),
+  html[data-motion='full'] .diagram-edge-fade .react-flow__edge-path {
+    animation-duration: 500ms !important;
   }
 }

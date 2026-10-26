@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DIAGRAM_MAX_NODES, layoutDiagram, parseDiagram } from '@/lib/agent/diagram'
+import { canonicalJson, DIAGRAM_MAX_NODES, layoutDiagram, parseDiagram, placeDiagram } from '@/lib/agent/diagram'
 
 const sample = {
   title: 'Kaspen',
@@ -85,5 +85,47 @@ describe('layoutDiagram', () => {
     const out = layoutDiagram({ nodes, edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'a' }] })
     expect(out).toHaveLength(2)
     expect(layoutDiagram({ nodes, edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'a' }] })).toEqual(out)
+  })
+})
+
+describe('placeDiagram directions', () => {
+  const d = {
+    nodes: [
+      { id: 'a', label: 'A', kind: 'source' as const, state: 'done' as const },
+      { id: 'b', label: 'B', kind: 'step' as const, state: 'done' as const },
+      { id: 'c', label: 'C', kind: 'campaign' as const, state: 'planned' as const },
+      { id: 'd', label: 'D', kind: 'campaign' as const, state: 'planned' as const },
+    ],
+    edges: [
+      { from: 'a', to: 'b' },
+      { from: 'b', to: 'c' },
+      { from: 'b', to: 'd' },
+    ],
+  }
+
+  it('LR puts ranks on x and branches on y', () => {
+    const { placed, ranks, breadth } = placeDiagram(d, 'LR')
+    const p = Object.fromEntries(placed.map((n) => [n.id, n]))
+    expect(ranks).toBe(3)
+    expect(breadth).toBe(2)
+    expect(p.a.x).toBeLessThan(p.b.x)
+    expect(p.c.x).toBe(p.d.x)
+    expect(p.c.y).not.toBe(p.d.y)
+  })
+
+  it('TB puts ranks on y and spreads branches sideways', () => {
+    const { placed } = placeDiagram(d, 'TB')
+    const p = Object.fromEntries(placed.map((n) => [n.id, n]))
+    expect(p.a.y).toBeLessThan(p.b.y)
+    expect(p.b.y).toBeLessThan(p.c.y)
+    expect(p.c.y).toBe(p.d.y)
+    expect(p.c.x).toBeLessThan(p.d.x)
+    expect(p.a.x).toBe(0)
+  })
+})
+
+describe('canonicalJson', () => {
+  it('ignores key order and undefined values', () => {
+    expect(canonicalJson({ b: 1, a: [{ y: 2, x: undefined, z: 'q' }] })).toBe(canonicalJson({ a: [{ z: 'q', y: 2 }], b: 1 }))
   })
 })

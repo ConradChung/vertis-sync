@@ -2,10 +2,12 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@/components/agent/PipelineDiagram', () => ({
   PipelineDiagram: ({ diagram }: { diagram: { nodes: { label: string }[] } }) => (
     <div data-testid="diagram">{diagram.nodes.map((n) => n.label).join(',')}</div>
   ),
+  DiagramLegend: () => null,
 }))
 
 import { Markdown } from '@/components/agent/Markdown'

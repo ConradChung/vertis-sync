@@ -124,3 +124,47 @@ export function layoutDiagram(d: Pick<Diagram, 'nodes' | 'edges'>): Placed[] {
   }
   return ids.map((id) => ({ id, rank: rank.get(id)!, row: row.get(id)! }))
 }
+
+export type Direction = 'LR' | 'TB'
+
+/** Spacing per direction: LR = ranks are columns; TB = ranks are rows, branches spread sideways. */
+export const SPACING: Record<Direction, { rank: number; cross: number }> = {
+  LR: { rank: 200, cross: 104 },
+  TB: { rank: 128, cross: 196 },
+}
+
+export interface Positioned extends Placed {
+  x: number
+  y: number
+}
+
+/**
+ * Pixel positions for a direction. LR: x = rank, y = row (branches stack
+ * vertically). TB: y = rank, x = row (branches spread horizontally), so the
+ * chat card reads top to bottom. `ranks` / `breadth` size the canvas.
+ */
+export function placeDiagram(d: Pick<Diagram, 'nodes' | 'edges'>, direction: Direction = 'LR'): { placed: Positioned[]; ranks: number; breadth: number } {
+  const s = SPACING[direction]
+  const base = layoutDiagram(d)
+  const placed = base.map((p) =>
+    direction === 'LR' ? { ...p, x: p.rank * s.rank, y: p.row * s.cross } : { ...p, x: p.row * s.cross, y: p.rank * s.rank }
+  )
+  const ranks = Math.max(0, ...base.map((p) => p.rank)) + 1
+  const perRank = new Map<number, number>()
+  for (const p of base) perRank.set(p.rank, (perRank.get(p.rank) ?? 0) + 1)
+  return { placed, ranks, breadth: Math.max(1, ...perRank.values()) }
+}
+
+/** Key-order-independent JSON, so identical specs hash the same (dedupe on save). */
+export function canonicalJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(',')}]`
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>
+    return `{${Object.keys(o)
+      .filter((k) => o[k] !== undefined)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonicalJson(o[k])}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(v)
+}

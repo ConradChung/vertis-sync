@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from 'react'
-import { PipelineDiagram } from '@/components/agent/PipelineDiagram'
+import { DiagramCard } from '@/components/agent/DiagramCard'
 import { parseDiagram } from '@/lib/agent/diagram'
 
 /**
@@ -148,7 +148,7 @@ export function Markdown({ text }: { text: string }) {
                   </p>
                 )
               const d = parseDiagram(b.text)
-              if (d.ok) return <PipelineDiagram key={i} diagram={d.diagram} />
+              if (d.ok) return <DiagramCard key={i} diagram={d.diagram} />
             }
             return (
               <pre key={i} className="overflow-x-auto rounded-control border border-line bg-muted p-3 font-mono text-[12.5px] leading-5 text-fg">
