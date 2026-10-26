@@ -89,9 +89,13 @@ describe('chatDiagrams', () => {
     ])
   })
 
-  it('picks the panel direction from its shape', () => {
+  it('picks the direction that fits the panel best', () => {
     expect(directionFor(900, 500)).toBe('LR')
     expect(directionFor(500, 800)).toBe('TB')
+    const chain = { nodes: Array.from({ length: 10 }, (_, i) => ({ id: `n${i}`, label: 'x', kind: 'step' as const, state: 'planned' as const })), edges: Array.from({ length: 9 }, (_, i) => ({ from: `n${i}`, to: `n${i + 1}` })) }
+    expect(directionFor(700, 800, chain)).toBe('TB')
+    const short = { nodes: chain.nodes.slice(0, 3), edges: chain.edges.slice(0, 2) }
+    expect(directionFor(1200, 500, short)).toBe('LR')
   })
 })
 
@@ -128,7 +132,9 @@ describe('Agent split screen', () => {
     expect(within(panel).getByRole('tab', { name: /Leads/ }).getAttribute('aria-selected')).toBe('true')
     expect(within(panel).getByText(/6 kept/)).toBeTruthy()
     expect(within(panel).getByText('Exclude: no website')).toBeTruthy()
-    expect(within(panel).getByRole('link', { name: 'Export kept for Apollo' }).getAttribute('href')).toBe(`/api/review-sets/${SET}/export`)
+    const exp = within(panel).getByLabelText('Export kept for Apollo')
+    expect(exp.tagName).toBe('A')
+    expect(exp.getAttribute('href')).toBe(`/api/review-sets/${SET}/export`)
   })
 
   it('undoes a filter chip and excludes picked rows from the Leads tab', async () => {

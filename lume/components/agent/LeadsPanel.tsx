@@ -124,14 +124,15 @@ export function LeadsPanel({ setId, refreshKey }: { setId: string; refreshKey: n
           </div>
         )}
         <div className="flex-1" />
-        <Button
-          size="sm"
-          render={<a href={`/api/review-sets/${setId}/export`} download />}
-          disabled={!s?.kept}
-          aria-label="Export kept for Apollo"
-        >
-          <Download className="size-3.5" /> Export kept for Apollo
-        </Button>
+        {s?.kept ? (
+          <Button size="sm" nativeButton={false} render={<a href={`/api/review-sets/${setId}/export`} download />} aria-label="Export kept for Apollo">
+            <Download className="size-3.5" /> Export kept for Apollo
+          </Button>
+        ) : (
+          <Button size="sm" disabled aria-label="Export kept for Apollo">
+            <Download className="size-3.5" /> Export kept for Apollo
+          </Button>
+        )}
       </div>
 
       {filters.length > 0 && (

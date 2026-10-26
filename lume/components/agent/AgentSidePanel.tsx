@@ -8,7 +8,7 @@ import { PlaygroundCanvas } from '@/components/playground/PlaygroundCanvas'
 import { Button } from '@/components/ui/button'
 import { SimpleSelect } from '@/components/ui/simple-select'
 import type { ChatDiagram } from '@/lib/agent/chatDiagrams'
-import type { Direction } from '@/lib/agent/diagram'
+import { placeDiagram, SPACING, type Diagram, type Direction } from '@/lib/agent/diagram'
 import { cn } from '@/lib/utils'
 
 export type SideTab = 'pipeline' | 'leads'
@@ -18,22 +18,39 @@ export interface ReviewSetRef {
   title: string
 }
 
-/** Wide panels draw left to right, narrow ones top to bottom. */
-export function directionFor(width: number, height: number): Direction {
-  return height > 0 && width / height >= 1.15 ? 'LR' : 'TB'
+/**
+ * Pick the direction that lets the diagram fit the panel at the larger scale
+ * (wide panels and short pipelines go left to right; tall panels and long
+ * chains top to bottom). Without a diagram, fall back to the panel's shape.
+ */
+export function directionFor(width: number, height: number, diagram?: Pick<Diagram, 'nodes' | 'edges'> | null): Direction {
+  if (!(width > 0 && height > 0)) return 'TB'
+  if (!diagram?.nodes.length) return width / height >= 1.15 ? 'LR' : 'TB'
+  const scale = (dir: Direction) => {
+    const { ranks, breadth } = placeDiagram(diagram, dir)
+    const s = SPACING[dir]
+    const w = dir === 'LR' ? ranks * s.rank : breadth * s.cross
+    const h = dir === 'LR' ? breadth * s.cross : ranks * s.rank
+    // The canvas never zooms past 1.4, so beyond that both fit equally well.
+    return Math.min(1.4, width / Math.max(w, 1), height / Math.max(h, 1))
+  }
+  const lr = scale('LR')
+  const tb = scale('TB')
+  if (Math.abs(lr - tb) <= 0.05 * Math.max(lr, tb)) return width / height >= 1.15 ? 'LR' : 'TB'
+  return lr > tb ? 'LR' : 'TB'
 }
 
-function useDirection() {
+function useDirection(diagram: Diagram | null) {
   const ref = useRef<HTMLDivElement>(null)
-  const [dir, setDir] = useState<Direction>('TB')
+  const [box, setBox] = useState({ w: 0, h: 0 })
   useEffect(() => {
     const el = ref.current
     if (!el || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(([e]) => setDir(directionFor(e.contentRect.width, e.contentRect.height)))
+    const ro = new ResizeObserver(([e]) => setBox({ w: Math.round(e.contentRect.width), h: Math.round(e.contentRect.height) }))
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
-  return { ref, dir }
+  return { ref, dir: directionFor(box.w, box.h, diagram) }
 }
 
 /**
@@ -68,7 +85,7 @@ export function AgentSidePanel({
 }) {
   const active = diagrams.find((d) => d.key === activeKey) ?? diagrams.at(-1) ?? null
   const { open: openInPlayground, saving } = useOpenInPlayground(active?.diagram ?? null)
-  const { ref, dir } = useDirection()
+  const { ref, dir } = useDirection(active?.diagram ?? null)
   const showTab: SideTab = tab === 'leads' && activeSetId ? 'leads' : diagrams.length ? 'pipeline' : activeSetId ? 'leads' : 'pipeline'
 
   const tabBtn = (t: SideTab, label: string, Icon: typeof Workflow, count: number) => (

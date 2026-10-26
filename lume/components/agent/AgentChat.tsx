@@ -265,7 +265,7 @@ export function AgentChat() {
       </Sheet>
 
       <div className="relative min-w-0 flex-1">
-        <div className="absolute top-0 left-0 z-10 flex items-center gap-1">
+        <div className={cn('z-10 flex items-center gap-1', split && desktop ? 'mb-2' : 'absolute top-0 left-0')}>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -454,7 +454,7 @@ export function AgentChat() {
               <>
                 {column}
                 <Sheet open onOpenChange={(o) => !o && setPanelOpen(false)}>
-                  <SheetContent side="right" className="w-full max-w-none p-0 sm:max-w-none" showCloseButton={false}>
+                  <SheetContent side="right" className="w-full! max-w-none! p-0" showCloseButton={false}>
                     <SheetTitle className="sr-only">Pipeline and leads</SheetTitle>
                     {panel}
                   </SheetContent>
@@ -462,7 +462,7 @@ export function AgentChat() {
               </>
             )
           return (
-            <div className="h-[calc(100dvh-var(--topbar-h)-4rem)]">
+            <div className="h-[calc(100dvh-var(--topbar-h)-6.5rem)]">
               <ResizablePanelGroup orientation="horizontal" className="gap-0">
                 <ResizablePanel defaultSize="45" minSize="28">
                   {column}
