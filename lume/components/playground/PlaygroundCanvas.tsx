@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from 'next-themes'
-import { ReactFlow, ReactFlowProvider, useReactFlow } from '@xyflow/react'
+import { ReactFlow, ReactFlowProvider, useReactFlow, type NodeMouseHandler } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Maximize, Minimize, Minus, Plus, RotateCcw, Scan } from 'lucide-react'
-import { buildFlow, DiagramLegend, pipeNodeTypes } from '@/components/agent/PipelineDiagram'
-import type { Diagram, Direction } from '@/lib/agent/diagram'
+import { NodeDetails } from '@/components/agent/NodeDetails'
+import { buildFlow, DiagramLegend, NODE_W, pipeNodeTypes, type PipeNode } from '@/components/agent/PipelineDiagram'
+import { flowOrder, type Diagram, type Direction } from '@/lib/agent/diagram'
 import { cn } from '@/lib/utils'
 
 const FIT = { padding: 0.16, maxZoom: 1.4, duration: 400 }
@@ -55,16 +56,55 @@ function Controls({ fullscreen, onFullscreen }: { fullscreen: boolean; onFullscr
   )
 }
 
+/** Width the details sheet takes over the canvas (px, capped by the canvas width). */
+const SHEET_W = 380
+
+/**
+ * Keeps the selected node in view beside the open details sheet: centres it in
+ * the canvas area left of the sheet, at the current zoom.
+ */
+function FocusSelected({ id, boxWidth }: { id: string | null; boxWidth: number }) {
+  const rf = useReactFlow()
+  useEffect(() => {
+    if (!id) return
+    const n = rf.getNode(id)
+    if (!n) return
+    const zoom = rf.getZoom()
+    const sheet = Math.min(SHEET_W, boxWidth * 0.9)
+    const visible = Math.max(boxWidth - sheet, boxWidth * 0.35)
+    // setCenter centres on the whole canvas; shift right so the node lands mid-way in the visible area.
+    const offset = (boxWidth / 2 - visible / 2) / zoom
+    const h = n.measured?.height ?? 80
+    void rf.setCenter(n.position.x + NODE_W / 2 + offset, n.position.y + h / 2, { zoom, duration: 350 })
+  }, [id, boxWidth, rf])
+  return null
+}
+
 /**
  * Full-screen showcase canvas (Playground, and the Agent's pipeline panel): left to right by default, wheel / pinch zoom and pan,
- * glass zoom / fit / reset / full-screen controls, hover cards.
- * Remount with a new `key` to replay the entrance when switching pipelines.
+ * glass zoom / fit / reset / full-screen controls, hover cards. Clicking a
+ * node opens its details sheet (why, how, tools, actors, data, owner, cost,
+ * risks, decisions, links) over the right of the canvas; ← / → step through
+ * the flow and Esc closes. Remount with a new `key` to replay the entrance
+ * when switching pipelines.
  */
 export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { diagram: Diagram; className?: string; direction?: Direction }) {
   const { resolvedTheme } = useTheme()
   const box = useRef<HTMLDivElement>(null)
   const [fullscreen, setFullscreen] = useState(false)
-  const { nodes, edges } = useMemo(() => buildFlow(diagram, { direction, animate: true, hover: true }), [diagram, direction])
+  const [selected, setSelected] = useState<string | null>(null)
+  const [boxWidth, setBoxWidth] = useState(0)
+  const flow = useMemo(() => buildFlow(diagram, { direction, animate: true, hover: true, clickable: true }), [diagram, direction])
+  const nodes = useMemo<PipeNode[]>(
+    () => (selected ? flow.nodes.map((n) => (n.id === selected ? { ...n, data: { ...n.data, selected: true } } : n)) : flow.nodes),
+    [flow.nodes, selected]
+  )
+  const order = useMemo(() => flowOrder(diagram), [diagram])
+  const byId = useMemo(() => new Map(diagram.nodes.map((n) => [n.id, n])), [diagram])
+
+  // Close the sheet when a different pipeline is shown (not on every re-render of the same one).
+  const sig = useMemo(() => diagram.nodes.map((n) => n.id).join('|'), [diagram])
+  useEffect(() => setSelected(null), [sig])
 
   useEffect(() => {
     const on = () => setFullscreen(document.fullscreenElement === box.current)
@@ -72,10 +112,25 @@ export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { dia
     return () => document.removeEventListener('fullscreenchange', on)
   }, [])
 
+  useEffect(() => {
+    const el = box.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(([e]) => setBoxWidth(Math.round(e.contentRect.width)))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   const toggleFullscreen = () => {
     if (document.fullscreenElement) void document.exitFullscreen?.()
     else void box.current?.requestFullscreen?.().catch(() => {})
   }
+
+  const onNodeClick = useCallback<NodeMouseHandler>((_e, n) => setSelected((cur) => (cur === n.id ? null : n.id)), [])
+  const close = useCallback(() => setSelected(null), [])
+  const at = selected ? order.indexOf(selected) : -1
+  const prev = useCallback(() => at > 0 && setSelected(order[at - 1]), [at, order])
+  const next = useCallback(() => at >= 0 && at < order.length - 1 && setSelected(order[at + 1]), [at, order])
+  const node = selected ? byId.get(selected) : undefined
 
   return (
     <div
@@ -87,8 +142,10 @@ export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { dia
       <ReactFlowProvider>
         <ReactFlow
           nodes={nodes}
-          edges={edges}
+          edges={flow.edges}
           nodeTypes={pipeNodeTypes}
+          onNodeClick={onNodeClick}
+          onPaneClick={close}
           fitView
           fitViewOptions={{ padding: FIT.padding, maxZoom: FIT.maxZoom }}
           minZoom={0.2}
@@ -104,11 +161,22 @@ export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { dia
           style={{ background: 'transparent' }}
         >
           <Controls fullscreen={fullscreen} onFullscreen={toggleFullscreen} />
+          <FocusSelected id={selected} boxWidth={boxWidth} />
         </ReactFlow>
       </ReactFlowProvider>
       <div className="glass pointer-events-none absolute bottom-4 left-4 z-10 rounded-full px-3 py-1.5">
         <DiagramLegend />
       </div>
+      {node && (
+        <NodeDetails
+          node={node}
+          position={{ index: at + 1, total: order.length }}
+          onPrev={at > 0 ? prev : null}
+          onNext={at >= 0 && at < order.length - 1 ? next : null}
+          onClose={close}
+          className="absolute top-3 right-3 bottom-3 z-20 w-[min(380px,calc(100%-1.5rem))]"
+        />
+      )}
     </div>
   )
 }

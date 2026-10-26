@@ -6,11 +6,70 @@ import { z } from 'zod'
  * several edges out of (or into) one node. Parsing never throws.
  */
 
-export const DIAGRAM_MAX_NODES = 30
-export const DIAGRAM_MAX_EDGES = 60
+export const DIAGRAM_MAX_NODES = 40
+export const DIAGRAM_MAX_EDGES = 80
+/** Per-node `details` budget (JSON chars); larger details are dropped, not the diagram. */
+export const DETAILS_MAX_CHARS = 1500
+/** Whole-spec budget (JSON chars). */
+export const DIAGRAM_MAX_CHARS = 40_000
 
 export const DIAGRAM_KINDS = ['source', 'step', 'gate', 'campaign', 'cron', 'note'] as const
 export const DIAGRAM_STATES = ['done', 'current', 'planned', 'skipped'] as const
+
+const text = (n: number) => z.string().trim().min(1).max(n)
+/** Lume deep link (/campaigns?…) or an external http(s) URL. */
+const href = z
+  .string()
+  .trim()
+  .max(500)
+  .refine((u) => (u.startsWith('/') && !u.startsWith('//')) || /^https?:\/\//i.test(u), 'link must be a /path or http(s) URL')
+/** A list the model may also send as one string. */
+const list = (item: z.ZodType<string>, max: number) =>
+  z.preprocess((v) => (typeof v === 'string' ? [v] : v), z.array(item).max(max))
+
+/**
+ * Optional elaboration per node, shown in the details sidebar (Playground and
+ * the Agent's pipeline panel): why the step exists, how it runs, the tools,
+ * actors and data behind it, who acts, cost, risks and open decisions.
+ */
+export const detailsSchema = z.object({
+  why: text(700).optional(),
+  how: list(text(260), 12).optional(),
+  tools: list(text(60), 12).optional(),
+  actors: z
+    .array(
+      z.object({
+        id: text(120),
+        name: text(120).optional(),
+        price: text(100).optional(),
+        fields: list(text(40), 20).optional(),
+        url: href.optional(),
+      })
+    )
+    .max(6)
+    .optional(),
+  inputs: list(text(100), 16).optional(),
+  outputs: list(text(100), 16).optional(),
+  data: z
+    .array(z.object({ label: text(60), value: z.coerce.string().trim().min(1).max(200), source: href.optional() }))
+    .max(16)
+    .optional(),
+  /** Who acts: Lume, Conrad tap (an approval) or Conrad manual. */
+  owner: text(40).optional(),
+  approval: z.boolean().optional(),
+  cost: text(100).optional(),
+  eta: text(80).optional(),
+  risks: list(text(240), 8).optional(),
+  decision: list(text(300), 6).optional(),
+  links: z.array(z.object({ label: text(80), url: href })).max(10).optional(),
+})
+export type DiagramDetails = z.infer<typeof detailsSchema>
+
+const detailsField = detailsSchema
+  .refine((d) => JSON.stringify(d).length <= DETAILS_MAX_CHARS, 'details too large')
+  .optional()
+  // A malformed or oversized details object drops only that node's details.
+  .catch(undefined)
 
 const nodeSchema = z.object({
   id: z.string().trim().min(1).max(60),
@@ -18,6 +77,7 @@ const nodeSchema = z.object({
   detail: z.string().trim().max(160).optional(),
   kind: z.enum(DIAGRAM_KINDS).catch('step').default('step'),
   state: z.enum(DIAGRAM_STATES).catch('planned').default('planned'),
+  details: detailsField,
 })
 
 const edgeSchema = z.object({
@@ -33,6 +93,7 @@ export const diagramSchema = z
     edges: z.array(edgeSchema).max(DIAGRAM_MAX_EDGES).default([]),
   })
   .refine((d) => new Set(d.nodes.map((n) => n.id)).size === d.nodes.length, 'duplicate node ids')
+  .refine((d) => JSON.stringify(d).length <= DIAGRAM_MAX_CHARS, 'diagram too large')
   .refine((d) => {
     const ids = new Set(d.nodes.map((n) => n.id))
     return d.edges.every((e) => ids.has(e.from) && ids.has(e.to) && e.from !== e.to)
@@ -42,7 +103,21 @@ export type Diagram = z.infer<typeof diagramSchema>
 export type DiagramNode = Diagram['nodes'][number]
 export type DiagramEdge = Diagram['edges'][number]
 
+/** True when a node has anything to show in the details sidebar. */
+export function hasDetails(n: Pick<DiagramNode, 'details'>): boolean {
+  return !!n.details && Object.values(n.details).some((v) => (Array.isArray(v) ? v.length > 0 : v !== undefined && v !== ''))
+}
+
+/** Nodes in reading order (rank, then row), for next / previous in the sidebar. */
+export function flowOrder(d: Pick<Diagram, 'nodes' | 'edges'>): string[] {
+  return layoutDiagram(d)
+    .map((p, i) => ({ ...p, i }))
+    .sort((a, b) => a.rank - b.rank || a.row - b.row || a.i - b.i)
+    .map((p) => p.id)
+}
+
 export function parseDiagram(text: string): { ok: true; diagram: Diagram } | { ok: false; error: string } {
+  if (text.length > DIAGRAM_MAX_CHARS * 1.5) return { ok: false, error: 'diagram too large' }
   let raw: unknown
   try {
     raw = JSON.parse(text)

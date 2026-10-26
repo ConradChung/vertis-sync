@@ -4,11 +4,11 @@ import { memo, useMemo, type CSSProperties } from 'react'
 import { useTheme } from 'next-themes'
 import { Handle, Position, ReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { CalendarClock, Database, Flag, GitFork, Megaphone, StickyNote, Workflow, type LucideIcon } from 'lucide-react'
+import { CalendarClock, Database, Flag, GitFork, Info, Megaphone, StickyNote, Workflow, type LucideIcon } from 'lucide-react'
 import { NODE_TONE, StatusBadge } from '@/components/campaigns/GlassNode'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import type { FlowStage } from '@/lib/campaigns/types'
-import { placeDiagram, SPACING, type Diagram, type DiagramNode, type Direction } from '@/lib/agent/diagram'
+import { hasDetails, placeDiagram, SPACING, type Diagram, type DiagramNode, type Direction } from '@/lib/agent/diagram'
 import { cn } from '@/lib/utils'
 
 export const NODE_W = 168
@@ -31,10 +31,19 @@ export const KIND_ICON: Record<DiagramNode['kind'], LucideIcon> = {
   note: StickyNote,
 }
 
-type PipeData = { node: DiagramNode; direction: Direction; delay: number | null; hover: boolean }
+type PipeData = {
+  node: DiagramNode
+  direction: Direction
+  delay: number | null
+  hover: boolean
+  /** Interactive canvases: the node opens the details sidebar on click. */
+  clickable?: boolean
+  /** The node whose details are open (lime ring). */
+  selected?: boolean
+}
 export type PipeNode = Node<PipeData, 'pipe'>
 
-function NodeBody({ n }: { n: DiagramNode }) {
+function NodeBody({ n, affordance }: { n: DiagramNode; affordance?: boolean }) {
   const status = STATUS[n.state]
   const Icon = n.kind === 'gate' && n.state === 'current' ? Flag : KIND_ICON[n.kind]
   return (
@@ -53,21 +62,38 @@ function NodeBody({ n }: { n: DiagramNode }) {
           {n.detail}
         </p>
       )}
-      <p className="mt-1 text-[9.5px] tracking-wide text-fg-24 uppercase">{n.kind}</p>
+      <div className="mt-1 flex items-center justify-between">
+        <p className="text-[9.5px] tracking-wide text-fg-24 uppercase">{n.kind}</p>
+        {affordance && (
+          <span className="inline-flex items-center gap-0.5 text-[9.5px] text-fg-46" aria-hidden>
+            <Info className="size-2.5" /> details
+          </span>
+        )}
+      </div>
     </>
   )
 }
 
 function PipeNodeImpl({ data }: NodeProps<PipeNode>) {
-  const { node: n, direction, delay, hover } = data
+  const { node: n, direction, delay, hover, clickable, selected } = data
   const status = STATUS[n.state]
   const tb = direction === 'TB'
   const handle = '!size-1.5 !border-0 !bg-(--chart-line)/60'
   const style: CSSProperties = { width: NODE_W, ...(delay !== null ? { animationDelay: `${delay}ms` } : {}) }
   const card = (
-    <div className={cn('surface-card rounded-xl border px-3 py-2.5 text-fg', NODE_TONE[status], delay !== null && 'diagram-node-in')} style={style}>
+    <div
+      className={cn(
+        'surface-card rounded-xl border px-3 py-2.5 text-fg transition-shadow',
+        NODE_TONE[status],
+        delay !== null && 'diagram-node-in',
+        clickable && 'cursor-pointer hover:border-(--chart-line)/70',
+        selected && 'ring-2 ring-lime ring-offset-2 ring-offset-transparent'
+      )}
+      style={style}
+      data-selected={selected || undefined}
+    >
       <Handle type="target" position={tb ? Position.Top : Position.Left} className={handle} />
-      <NodeBody n={n} />
+      <NodeBody n={n} affordance={clickable && hasDetails(n)} />
       <Handle type="source" position={tb ? Position.Bottom : Position.Right} className={handle} />
     </div>
   )
@@ -83,6 +109,8 @@ function PipeNodeImpl({ data }: NodeProps<PipeNode>) {
           {n.kind} · {n.state}
         </p>
         {n.detail && <p className="mt-2 text-fg-70">{n.detail}</p>}
+        {n.details?.why && <p className="mt-2 line-clamp-3 text-fg-46">{n.details.why}</p>}
+        {clickable && <p className="mt-2 text-[10.5px] text-fg-46">Click for full details</p>}
       </HoverCardContent>
     </HoverCard>
   )
@@ -102,10 +130,12 @@ export interface BuildOptions {
   animate?: boolean
   /** Hover cards with each node's detail (Playground). */
   hover?: boolean
+  /** Nodes open the details sidebar on click. */
+  clickable?: boolean
 }
 
 /** React Flow nodes + edges for a diagram, laid out in a direction. */
-export function buildFlow(diagram: Diagram, { direction = 'LR', animate = false, hover = false }: BuildOptions = {}) {
+export function buildFlow(diagram: Diagram, { direction = 'LR', animate = false, hover = false, clickable = false }: BuildOptions = {}) {
   const { placed, ranks, breadth } = placeDiagram(diagram, direction)
   const byId = new Map(diagram.nodes.map((n) => [n.id, n]))
   const rankOf = new Map(placed.map((p) => [p.id, p.rank]))
@@ -113,7 +143,7 @@ export function buildFlow(diagram: Diagram, { direction = 'LR', animate = false,
     id: p.id,
     type: 'pipe',
     position: { x: p.x, y: p.y },
-    data: { node: byId.get(p.id)!, direction, delay: animate ? 120 + p.rank * 90 : null, hover },
+    data: { node: byId.get(p.id)!, direction, delay: animate ? 120 + p.rank * 90 : null, hover, clickable },
     draggable: false,
     selectable: false,
   }))

@@ -24,7 +24,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const auth = await requireOwnerSession(req)
   if (!auth.ok) return auth.response
-  const body = await parseJsonBody(req, newDiagramSchema, 64 * 1024)
+  const body = await parseJsonBody(req, newDiagramSchema, 96 * 1024)
   if (!body.ok) return body.response
   try {
     const { diagram, created } = await saveDiagram(body.data)
