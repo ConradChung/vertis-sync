@@ -16,6 +16,8 @@ export interface KpiData {
   pending_gates: number
   /** Gates opened per owner-zone day (`lume.gate_ping`). */
   gates_opened_7d: number[]
+  /** CRM deals whose next action is past due; counted into Pending approvals. */
+  crm_followups_due?: number
 }
 
 const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 })
@@ -138,6 +140,8 @@ export function KpiTiles({
   const live = instantly?.configured && !instantly.error ? instantly : null
   const sentDelta = live ? vsAverage(live.sent_7d ?? []) : undefined
   const dash = <span className="text-white/25">—</span>
+  const followups = data.crm_followups_due ?? 0
+  const pending = data.pending_gates + followups
 
   return (
     <section aria-label="Key numbers" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -165,10 +169,14 @@ export function KpiTiles({
       <Tile
         label="Pending approvals"
         href="/validate"
-        ariaLabel={`Pending approvals: ${data.pending_gates}. Open Validate`}
-        value={<Num value={data.pending_gates} />}
-        delta={data.pending_gates > 0 ? 'Needs attention' : 'All clear'}
-        deltaTone={data.pending_gates > 0 ? 'attention' : 'muted'}
+        ariaLabel={
+          followups > 0
+            ? `Pending approvals: ${pending}, including ${followups} CRM follow-up${followups === 1 ? '' : 's'} due. Open Validate`
+            : `Pending approvals: ${pending}. Open Validate`
+        }
+        value={<Num value={pending} />}
+        delta={followups > 0 ? `${followups} CRM follow-up${followups === 1 ? '' : 's'} due` : pending > 0 ? 'Needs attention' : 'All clear'}
+        deltaTone={pending > 0 ? 'attention' : 'muted'}
         spark={data.gates_opened_7d}
         sparkLabel="Approvals opened per day, last 7 days"
       />

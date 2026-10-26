@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireSecret } from '@/lib/auth/guards'
 import { mapInstantlyWebhook, WEBHOOK_MAX_BODY_BYTES } from '@/lib/adapters/instantlyWebhook'
 import { logEvent } from '@/lib/db/service'
+import { ingestInstantlyEvent } from '@/lib/crm/ingest'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { readBodyCapped } from '@/lib/http/readBody'
 
@@ -11,6 +12,12 @@ import { readBodyCapped } from '@/lib/http/readBody'
  * upsert on `webhook_id` ignores a replayed delivery, and the answer after
  * auth is always `200 {ok:true}` (duplicate or not) so Instantly stops
  * retrying. A database failure is a 500 so it does retry.
+ *
+ * CRM: reply / interested / bounce / sent (and opens) also land on the lead's
+ * deal (`lib/crm/ingest.ts`: activity deduped on webhook_id, forward-only
+ * auto-advance logged as `lume.crm_stage_auto`). That runs for duplicates too
+ * (idempotent) and never changes the answer: a CRM failure is logged, the
+ * event is already stored.
  */
 export async function POST(req: Request) {
   const auth = requireSecret(req, { query: 'secret' }, 'INSTANTLY_WEBHOOK_SECRET')
@@ -29,7 +36,13 @@ export async function POST(req: Request) {
   }
 
   try {
-    const inserted = await logEvent(mapInstantlyWebhook(body as Record<string, unknown>))
+    const ev = mapInstantlyWebhook(body as Record<string, unknown>)
+    const inserted = await logEvent(ev)
+    try {
+      await ingestInstantlyEvent(ev)
+    } catch (err) {
+      console.error('[api/webhooks/instantly] crm ingest failed:', err instanceof Error ? err.message : err)
+    }
     return NextResponse.json({ ok: true, duplicate: inserted === null })
   } catch (err) {
     return dbErrorResponse(err, 'api/webhooks/instantly')
