@@ -102,7 +102,7 @@ const lastFinish = () => store.finishAction.mock.calls.at(-1)!
 describe('executeAction dispatch table', () => {
   it('has a handler for every kind the DB allows', () => {
     expect(EXECUTABLE_KINDS.sort()).toEqual([
-      'activate_rule', 'assign_leads', 'create_campaign', 'decide_gate', 'delete_rule', 'launch_campaign',
+      'activate_rule', 'assign_leads', 'create_campaign', 'crm_close_deal', 'decide_gate', 'delete_rule', 'launch_campaign',
       'pause_campaign', 'push_to_instantly', 'resume_campaign', 'send_reply',
     ])
   })

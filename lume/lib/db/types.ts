@@ -128,6 +128,8 @@ export interface Overview {
   bounces_24h: number
   active_jobs: number
   lead_bank_queued: number
+  /** Open CRM deals whose next action is past due (view lume_crm_followups). Optional: older RPC versions lack it. */
+  crm_followups_due?: number
   events_last_at: string | null
   recent_events: EventRow[]
 }
@@ -172,6 +174,7 @@ export type PendingActionKind =
   | 'create_campaign'
   | 'decide_gate'
   | 'delete_rule'
+  | 'crm_close_deal'
 
 export type PendingActionStatus =
   | 'awaiting'

@@ -4,6 +4,7 @@ import { sendActionPrompt } from '@/lib/adapters/telegram'
 import { CAMPAIGN_ACTION_KEY, isCampaignActionKind, parseCampaignPayload } from '@/lib/actions/payloads'
 import { findAwaitingActionBy } from '@/lib/campaigns/service'
 import type { Json, PendingActionKind, PendingActionRow } from '@/lib/db/types'
+import { CRM_CLOSE_KIND, parseCrmClosePayload } from '@/lib/crm/actions'
 
 /**
  * Create a high-risk `pending_actions` row and ask for confirmation in
@@ -81,6 +82,12 @@ export async function createAction(
     payload = parsed.payload
     const field = CAMPAIGN_ACTION_KEY[kind]
     campaignKey = { field, value: String(payload[field]) }
+  } else if (kind === CRM_CLOSE_KIND) {
+    // One awaiting close per deal (pending_actions_one_awaiting_deal_idx).
+    const parsed = parseCrmClosePayload(payload)
+    if (!parsed.ok) throw new InvalidActionPayloadError(parsed.error)
+    payload = parsed.payload
+    campaignKey = { field: 'deal_id', value: String(payload.deal_id) }
   }
   const rawJobId = payload.job_id
   if (rawJobId === undefined && JOB_KINDS.has(kind)) {

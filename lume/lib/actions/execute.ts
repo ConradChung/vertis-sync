@@ -10,6 +10,7 @@ import {
 import { sendMessage } from '@/lib/adapters/telegram'
 import { actionLink } from '@/lib/adapters/telegram.messages'
 import { getPushJob, logEvent } from '@/lib/db/service'
+import { getDeal, setStage } from '@/lib/crm/service'
 import type { Json, PendingActionRow } from '@/lib/db/types'
 import { nextRun } from '@/lib/rules/nextRun'
 import { parseRuleFilter } from '@/lib/rules/filter'
@@ -191,6 +192,18 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
     const id = need(p, 'campaign_id')
     await resumeCampaign(id)
     return { campaign_id: id, resumed: true }
+  },
+
+  /** Won/Lost, confirmed: apply with crm_set_stage() (stage + reason + activity). */
+  async crm_close_deal(p) {
+    const dealId = need(p, 'deal_id')
+    const stage = need(p, 'stage')
+    if (stage !== 'Won' && stage !== 'Lost') throw new ActionFailure(`not a closing stage: ${stage}`)
+    const deal = await getDeal(dealId)
+    if (!deal) throw new ActionFailure('deal not found')
+    const from = await setStage(dealId, stage, 'user', str(p.reason), { via: 'pending_action' })
+    if (from === null) throw new ActionFailure('deal not found')
+    return { deal_id: dealId, from, to: stage }
   },
 
   async create_campaign(p) {

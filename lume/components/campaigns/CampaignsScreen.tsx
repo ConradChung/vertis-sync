@@ -11,6 +11,7 @@ import { AnalyticsChart } from '@/components/campaigns/AnalyticsChart'
 import { CampaignTable } from '@/components/campaigns/CampaignTable'
 import { FlowView } from '@/components/campaigns/FlowView'
 import { InboxPane } from '@/components/campaigns/InboxPane'
+import { CrmWorkspace } from '@/components/crm/CrmWorkspace'
 import {
   requestCampaignAction,
   useCampaignAnalytics,
@@ -21,7 +22,7 @@ import {
 import type { CampaignActionKind } from '@/lib/actions/payloads'
 import type { CampaignTableRow } from '@/lib/campaigns/types'
 
-type Tab = 'analytics' | 'flow' | 'inbox'
+type Tab = 'analytics' | 'flow' | 'inbox' | 'crm'
 
 export function CampaignsScreen() {
   const table = useCampaignTable()
@@ -127,6 +128,7 @@ function CampaignDetail({ row }: { row: CampaignTableRow }) {
             <TabsTrigger value="analytics">Analytics</TabsTrigger>
             <TabsTrigger value="flow">Flow</TabsTrigger>
             <TabsTrigger value="inbox">Inbox</TabsTrigger>
+            <TabsTrigger value="crm">CRM</TabsTrigger>
           </TabsList>
           <TabsContent value="analytics" className="pt-3">
             <AnalyticsChart data={analytics.data} failed={!!analytics.error} days={days} onDays={setDays} />
@@ -136,6 +138,15 @@ function CampaignDetail({ row }: { row: CampaignTableRow }) {
           </TabsContent>
           <TabsContent value="inbox" className="pt-3">
             <InboxPane data={inbox.data} failed={!!inbox.error} campaignId={id} campaignName={row.name} />
+          </TabsContent>
+          <TabsContent value="crm" className="pt-3">
+            {tab === 'crm' && (
+              <CrmWorkspace
+                campaignId={id}
+                campaignLabel={row.name}
+                crumbs={[{ label: 'Campaigns', href: '/campaigns' }, { label: row.name, href: `/crm?campaign=${encodeURIComponent(id)}` }, { label: 'CRM' }]}
+              />
+            )}
           </TabsContent>
         </Tabs>
       )}
