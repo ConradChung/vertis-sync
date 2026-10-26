@@ -29,8 +29,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body className="antialiased">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false} themes={['dark', 'light']} disableTransitionOnChange>
           <AppBackground />
-          {/* reducedMotion="user": every `motion` component honours the OS setting. */}
-          <MotionConfig reducedMotion="user">
+          {/* reducedMotion="never": the owner chose to always animate, ignoring the OS setting. */}
+          <MotionConfig reducedMotion="never">
             <TooltipProvider>{children}</TooltipProvider>
           </MotionConfig>
           <Toaster position="bottom-right" />

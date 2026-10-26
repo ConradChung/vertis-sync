@@ -3,7 +3,7 @@
 import { useEffect, useId, useState, type HTMLAttributes, type ReactNode } from 'react'
 import Link from 'next/link'
 import { Area, AreaChart, Line, LineChart, YAxis } from 'recharts'
-import { useReducedMotion } from 'motion/react'
+import { useReducedMotion } from '@/lib/motion'
 import { NumberTicker } from '@/components/ui/number-ticker'
 import { ChartContainer, type ChartConfig } from '@/components/ui/chart'
 import { Skeleton } from '@/components/ui/skeleton'

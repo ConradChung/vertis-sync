@@ -2,7 +2,7 @@
 
 import { AnimatedNumber } from '@/components/ui/animated-number'
 import { useMemo, type ReactNode } from 'react'
-import { useReducedMotion } from 'motion/react'
+import { useReducedMotion } from '@/lib/motion'
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts'
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
 import { NotConnected, ShimmerBar } from '@/components/overview/parts'

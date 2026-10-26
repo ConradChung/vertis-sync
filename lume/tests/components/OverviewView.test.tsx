@@ -9,8 +9,11 @@ vi.mock('@/components/ui/number-ticker', () => ({
 }))
 
 let reduceMotion = true
+// Lume always animates (lib/motion returns false). These tests pin the static
+// render path so assertions don't race the count-up / list-in animations.
+vi.mock('@/lib/motion', () => ({ useReducedMotion: () => reduceMotion }))
 beforeAll(() => {
-  // jsdom has no matchMedia; motion's useReducedMotion reads it.
+  // jsdom has no matchMedia; some libraries still read it.
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
     value: (q: string) => ({

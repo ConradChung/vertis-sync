@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useReducedMotion } from 'motion/react'
+import { useReducedMotion } from '@/lib/motion'
 import { AnimatedList } from '@/components/ui/animated-list'
 import Link from 'next/link'
 import { ArrowUpRight, Inbox } from 'lucide-react'

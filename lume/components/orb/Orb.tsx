@@ -15,7 +15,7 @@
 
 import { Canvas, useFrame } from '@react-three/fiber'
 import { Environment, Lightformer, MeshTransmissionMaterial } from '@react-three/drei'
-import { useReducedMotion } from 'motion/react'
+import { useReducedMotion } from '@/lib/motion'
 import { useMemo, useRef } from 'react'
 import { Color, type Mesh } from 'three'
 

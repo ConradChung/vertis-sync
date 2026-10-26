@@ -412,29 +412,8 @@
   outline-offset: 3px;
 }
 
-/* Reduced motion: switch Lume animations off; collapse anything else. JS
-   motion is handled by <MotionConfig reducedMotion="user"> in app/layout.tsx. */
-@media (prefers-reduced-motion: reduce) {
-  .anim-feed,
-  .anim-rise,
-  .anim-shimmer,
-  .anim-blob {
-    animation: none !important;
-  }
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
-  /* Loading spinners carry status, so they keep turning (essential motion). */
-  .animate-spin,
-  [data-slot='spinner'] {
-    animation-duration: 1s !important;
-    animation-iteration-count: infinite !important;
-  }
-}
+/* Motion: Lume always animates — the owner chose to ignore the OS "Reduce
+   motion" setting (see lib/motion.ts and MotionConfig in app/layout.tsx). */
 
 /* Responsive shell */
 @media (max-width: 640px) {
@@ -576,34 +555,5 @@
     opacity: 1;
     transform: none;
     filter: none;
-  }
-}
-/* Reduced motion: diagram animations are off by default (one hook, below).
-   `html[data-motion='full']` is an opt-in override that brings them back even
-   under the OS setting — it beats the global 0.01ms collapse above. */
-@media (prefers-reduced-motion: reduce) {
-  html:not([data-motion='full']) :is(.diagram-pop, .diagram-node-in, .diagram-switch),
-  html:not([data-motion='full']) :is(.diagram-edge-draw, .diagram-edge-fade) :is(.react-flow__edge-path, .react-flow__edge-text, .react-flow__edge-textbg) {
-    animation: none !important;
-    stroke-dashoffset: 0 !important;
-  }
-  html:not([data-motion='full']) .diagram-edge-draw .react-flow__edge-path {
-    stroke-dasharray: none;
-  }
-  html[data-motion='full'] .diagram-pop {
-    animation-duration: 520ms !important;
-  }
-  html[data-motion='full'] .diagram-node-in {
-    animation-duration: 420ms !important;
-  }
-  html[data-motion='full'] .diagram-switch {
-    animation-duration: 480ms !important;
-  }
-  html[data-motion='full'] .diagram-edge-draw .react-flow__edge-path {
-    animation-duration: 900ms !important;
-  }
-  html[data-motion='full'] :is(.diagram-edge-draw, .diagram-edge-fade) :is(.react-flow__edge-text, .react-flow__edge-textbg),
-  html[data-motion='full'] .diagram-edge-fade .react-flow__edge-path {
-    animation-duration: 500ms !important;
   }
 }

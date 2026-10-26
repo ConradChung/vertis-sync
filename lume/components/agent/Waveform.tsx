@@ -1,24 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { useMicLevel } from '@/hooks/useMicLevel'
+import { useReducedMotion } from '@/lib/motion'
 import { cn } from '@/lib/utils'
 
 export type WaveMode = 'idle' | 'listening' | 'thinking'
 
 const BARS = 28
-
-function usePrefersReducedMotion() {
-  const [reduced, setReduced] = useState(false)
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const on = () => setReduced(mq.matches)
-    on()
-    mq.addEventListener('change', on)
-    return () => mq.removeEventListener('change', on)
-  }, [])
-  return reduced
-}
 
 /** Resting shape: a soft hump, tallest in the middle. */
 const base = (i: number) => {
@@ -30,12 +19,12 @@ const base = (i: number) => {
  * Wispr Flow–style voice bars. Idle: a slow breathing pulse. Listening: bars
  * follow the live mic level (AnalyserNode). Thinking: a travelling shimmer.
  * Heights are written straight to the DOM from one rAF loop (no re-renders);
- * `prefers-reduced-motion` gets static bars.
+ * Always animated (owner choice; see `lib/motion`).
  */
 export function Waveform({ mode, className }: { mode: WaveMode; className?: string }) {
   const bars = useRef<(HTMLSpanElement | null)[]>([])
   const levels = useRef<number[]>(Array.from({ length: BARS }, (_, i) => base(i)))
-  const reduced = usePrefersReducedMotion()
+  const reduced = useReducedMotion()
   const mic = useMicLevel(mode === 'listening' && !reduced, BARS)
 
   useEffect(() => {

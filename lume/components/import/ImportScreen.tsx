@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useReducedMotion } from 'motion/react'
+import { useReducedMotion } from '@/lib/motion'
 import { OrderRail } from '@/components/import/OrderRail'
 import { OrdersTable } from '@/components/import/OrdersTable'
 import { SourceCards } from '@/components/import/SourceCards'

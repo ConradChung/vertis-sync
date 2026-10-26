@@ -1,12 +1,12 @@
 'use client'
 
-import { useReducedMotion } from 'motion/react'
+import { useReducedMotion } from '@/lib/motion'
 import { NumberTicker } from '@/components/ui/number-ticker'
 import { cn } from '@/lib/utils'
 
 /**
- * A count-up number (NumberTicker) that renders the plain, formatted value
- * under prefers-reduced-motion. Always tabular. `decimals` fixes the
+ * A count-up number (NumberTicker); always animates (owner choice, see
+ * `lib/motion`). Always tabular. `decimals` fixes the
  * fraction digits; prefix/suffix (e.g. "%") stay static beside it.
  */
 export function AnimatedNumber({
