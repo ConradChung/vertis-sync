@@ -6,7 +6,7 @@ import { parseJsonBody } from '@/lib/http/json'
 import { MAX_CSV_BYTES, sniffCsvHeader } from '@/lib/import/csv'
 import { ingestBody, intakeErrorResponse } from '@/lib/import/errors'
 import { createIngestForStoredObject } from '@/lib/import/ingest'
-import { scanObject, statObject } from '@/lib/import/storage'
+import { removeObject, scanObject, statObject } from '@/lib/import/storage'
 import { LUME_UPLOAD_PATH, verifyUploadTicket } from '@/lib/import/ticket'
 
 /**
@@ -18,15 +18,23 @@ import { LUME_UPLOAD_PATH, verifyUploadTicket } from '@/lib/import/ticket'
  *    again while streaming);
  *  - the header reads as CSV and there is at least one data row → 400.
  * Then `createIngestForStoredObject` — the same approval prompt as Telegram.
+ * A verified upload rejected by the size/CSV checks, or whose ingest row
+ * cannot be written, is removed from Storage (best effort).
  */
 
-export const maxDuration = 60
+// The streamed scan alone may take up to 60 s.
+export const maxDuration = 90
 
 const Body = z.object({
   storage_path: z.string().max(64),
   filename: z.string().trim().min(1).max(255),
   upload_ticket: z.string().max(128),
 })
+
+async function reject(path: string, error: string, status: number) {
+  await removeObject(path)
+  return NextResponse.json({ error }, { status })
+}
 
 export async function POST(req: Request) {
   const auth = await requireOwner(req)
@@ -46,15 +54,23 @@ export async function POST(req: Request) {
 
     const stat = await statObject(path)
     if (!stat) return NextResponse.json({ error: 'upload_missing' }, { status: 404 })
-    if (stat.size > MAX_CSV_BYTES) return NextResponse.json({ error: 'too_large' }, { status: 413 })
+    if (stat.size > MAX_CSV_BYTES) return reject(path, 'too_large', 413)
 
     const scan = await scanObject(path, MAX_CSV_BYTES)
     if (scan === undefined) return NextResponse.json({ error: 'upload_missing' }, { status: 404 })
-    if (scan === null) return NextResponse.json({ error: 'too_large' }, { status: 413 })
-    if (!sniffCsvHeader(scan.head)) return NextResponse.json({ error: 'not_csv' }, { status: 400 })
-    if (scan.rows === 0) return NextResponse.json({ error: 'empty_csv' }, { status: 400 })
+    if (scan === null) return reject(path, 'too_large', 413)
+    if (!sniffCsvHeader(scan.head)) return reject(path, 'not_csv', 400)
+    if (scan.rows === 0) return reject(path, 'empty_csv', 400)
 
-    const result = await createIngestForStoredObject(path, filename, scan.head, scan.rows, { source: 'csv' })
+    let result
+    try {
+      result = await createIngestForStoredObject(path, filename, scan.head, scan.rows, { source: 'csv' })
+    } catch (err) {
+      // Only the ingest insert throws; no row points at the object, so drop
+      // it — unless a duplicate key says another ingest now owns this path.
+      if ((err as { code?: unknown } | null)?.code !== '23505') await removeObject(path)
+      throw err
+    }
     return NextResponse.json(ingestBody(result))
   } catch (err) {
     return intakeErrorResponse(err, 'api/import/csv')

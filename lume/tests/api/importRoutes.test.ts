@@ -39,7 +39,7 @@ vi.mock('@/lib/db/service', () => ({
   ...svc,
   isDbError: () => false,
 }))
-const storage = vi.hoisted(() => ({ readObjectHead: vi.fn(), statObject: vi.fn(), scanObject: vi.fn(), createSignedUpload: vi.fn() }))
+const storage = vi.hoisted(() => ({ readObjectHead: vi.fn(), statObject: vi.fn(), scanObject: vi.fn(), createSignedUpload: vi.fn(), removeObject: vi.fn() }))
 vi.mock('@/lib/import/storage', () => ({
   ...storage,
   StorageError: class StorageError extends Error {},
@@ -48,7 +48,7 @@ vi.mock('@/lib/import/storage', () => ({
 import { POST as apifyPOST } from '@/app/api/import/apify/route'
 import { POST as csvPOST } from '@/app/api/import/csv/route'
 import { POST as signPOST } from '@/app/api/import/csv/sign/route'
-import { uploadTicket } from '@/lib/import/ticket'
+import { UPLOAD_TICKET_TTL_MS, uploadTicket, verifyUploadTicket } from '@/lib/import/ticket'
 import { POST as apolloPOST } from '@/app/api/import/apollo-link/route'
 import { GET as ordersGET } from '@/app/api/orders/route'
 
@@ -142,7 +142,7 @@ describe('POST /api/import/csv/sign', () => {
     const body = await res.json()
     expect(body.path).toMatch(/^lume\/[0-9a-f-]{36}\.csv$/)
     expect(body.token).toBe('tok')
-    expect(body.upload_ticket).toBe(uploadTicket(body.path))
+    expect(verifyUploadTicket(body.path, body.upload_ticket)).toBe(true)
     expect(storage.createSignedUpload).toHaveBeenCalledWith(body.path)
   })
 
@@ -190,6 +190,54 @@ describe('POST /api/import/csv (stored object)', () => {
     expect((await submit({ upload_ticket: 'f'.repeat(64) })).status).toBe(403)
     expect((await submit({ upload_ticket: 'nothex' })).status).toBe(403)
     expect(svc.findIngestByStoragePath).not.toHaveBeenCalled()
+  })
+
+  it('403 on an expired ticket (15 min) or a tampered expiry', async () => {
+    const issued = Date.now() - UPLOAD_TICKET_TTL_MS - 1000
+    expect((await submit({ upload_ticket: uploadTicket(PATH, issued) })).status).toBe(403)
+    const [exp, mac] = uploadTicket(PATH).split('.')
+    expect((await submit({ upload_ticket: `${Number(exp) + 60_000}.${mac}` })).status).toBe(403)
+    expect(svc.findIngestByStoragePath).not.toHaveBeenCalled()
+  })
+
+  it('verifyUploadTicket: valid until exp, not after', () => {
+    const t0 = 1_700_000_000_000
+    const t = uploadTicket(PATH, t0)
+    expect(verifyUploadTicket(PATH, t, t0 + UPLOAD_TICKET_TTL_MS)).toBe(true)
+    expect(verifyUploadTicket(PATH, t, t0 + UPLOAD_TICKET_TTL_MS + 1)).toBe(false)
+    expect(verifyUploadTicket(PATH, t.split('.')[1], t0)).toBe(false)
+  })
+
+  it('removes the uploaded object when it is rejected (too large, not CSV, empty, insert failure)', async () => {
+    svc.findIngestByStoragePath.mockResolvedValue(null)
+    storage.statObject.mockResolvedValueOnce({ size: 20 * 1024 * 1024 + 1 })
+    expect((await submit()).status).toBe(413)
+    storage.statObject.mockResolvedValue({ size: 10 })
+    storage.scanObject.mockResolvedValueOnce(null)
+    expect((await submit()).status).toBe(413)
+    storage.scanObject.mockResolvedValueOnce({ head: new Uint8Array([80, 75, 3, 4, 0, 0]), rows: 3, bytes: 6 })
+    expect((await submit()).status).toBe(400)
+    storage.scanObject.mockResolvedValueOnce(scan('email\n', 0))
+    expect((await submit()).status).toBe(400)
+    expect(storage.removeObject).toHaveBeenCalledTimes(4)
+    storage.scanObject.mockResolvedValueOnce(scan('email\na@x.com\n', 1))
+    ingest.createIngestForStoredObject.mockRejectedValueOnce(new Error('insert failed'))
+    expect((await submit()).status).toBeGreaterThanOrEqual(500)
+    expect(storage.removeObject).toHaveBeenCalledTimes(5)
+    expect(storage.removeObject).toHaveBeenLastCalledWith(PATH)
+  })
+
+  it('keeps the object when the upload is missing, already ingested, or the insert hit a duplicate key', async () => {
+    svc.findIngestByStoragePath.mockResolvedValueOnce({ id: ID })
+    expect((await submit()).status).toBe(409)
+    svc.findIngestByStoragePath.mockResolvedValue(null)
+    storage.statObject.mockResolvedValueOnce(null)
+    expect((await submit()).status).toBe(404)
+    storage.statObject.mockResolvedValue({ size: 10 })
+    storage.scanObject.mockResolvedValueOnce(scan('email\na@x.com\n', 1))
+    ingest.createIngestForStoredObject.mockRejectedValueOnce(Object.assign(new Error('dup'), { code: '23505' }))
+    await submit()
+    expect(storage.removeObject).not.toHaveBeenCalled()
   })
 
   it('409 when an ingest already points at the object', async () => {

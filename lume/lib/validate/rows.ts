@@ -54,15 +54,25 @@ function pick(data: Record<string, unknown>, keys: readonly string[]): { key: st
   return { key: present ?? keys[0], value: null }
 }
 
+/** Header spellings (lowercased, spaces/`_`/`-` removed) that also count as each name field. */
+const NAME_ALIASES: Record<NameField, readonly string[]> = {
+  first_name: ['firstname', 'fname', 'first', 'givenname'],
+  last_name: ['lastname', 'lname', 'last', 'surname', 'familyname'],
+  company_name: ['companyname', 'company', 'organization', 'organisation'],
+}
+
+const squash = (s: string) => s.trim().toLowerCase().replace(/[\s_-]+/g, '')
+
 /**
  * Candidate keys for a name field: the job's own CSV header (from
- * `column_order`) when one matches a standard key case-insensitively, then
+ * `column_order`) when one matches a standard key or a known alias
+ * (`fname`, `Last`, `surname`, ...) ignoring case, spaces, `_` and `-`, then
  * the standard keys.
  */
 export function nameKeysFor(field: NameField, columns: readonly string[] = []): string[] {
   const std = NAME_KEYS[field] as readonly string[]
-  const wanted = new Set(std.map((k) => k.toLowerCase()))
-  const fromJob = columns.filter((c) => wanted.has(c.trim().toLowerCase()))
+  const wanted = new Set([...std.map(squash), ...NAME_ALIASES[field]])
+  const fromJob = columns.filter((c) => wanted.has(squash(c)))
   return [...new Set([...fromJob, ...std])]
 }
 

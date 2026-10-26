@@ -11,8 +11,8 @@ import { uploadTicket } from '@/lib/import/ticket'
  * Step 1 of a CSV upload. Vercel caps function request bodies at ~4.5 MB, so
  * the browser uploads the file straight to Storage: this route checks the
  * declared name and size, picks the path (`lume/<uuid>.csv`), and returns a
- * one-time signed upload URL plus an `upload_ticket` (HMAC of the path) that
- * step 2 (`POST /api/import/csv`) requires.
+ * one-time signed upload URL plus an `upload_ticket` (`<exp>.<HMAC(path|exp)>`,
+ * valid 15 min) that step 2 (`POST /api/import/csv`) requires.
  */
 
 const Body = z.object({

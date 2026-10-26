@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mergeRowData, toRowView } from '@/lib/validate/rows'
+import { mergeRowData, nameKeysFor, toRowView } from '@/lib/validate/rows'
 
 const raw = (row_data: Record<string, unknown> | null, extra: Record<string, unknown> = {}) => ({
   id: 'r1',
@@ -37,5 +37,29 @@ describe('mergeRowData', () => {
   it('keeps other keys', () => {
     expect(mergeRowData({ a: 1, b: 'x' }, { b: 'y', c: null })).toEqual({ a: 1, b: 'y', c: null })
     expect(mergeRowData(null, { b: 'y' })).toEqual({ b: 'y' })
+  })
+})
+
+describe('nameKeysFor', () => {
+  it('matches short and odd header spellings from the job columns first', () => {
+    const cols = ['fname', 'LName', 'Organization', 'email']
+    expect(nameKeysFor('first_name', cols)[0]).toBe('fname')
+    expect(nameKeysFor('last_name', cols)[0]).toBe('LName')
+    expect(nameKeysFor('company_name', cols)[0]).toBe('Organization')
+    expect(nameKeysFor('first_name', ['First'])[0]).toBe('First')
+    expect(nameKeysFor('last_name', ['last'])[0]).toBe('last')
+    expect(nameKeysFor('first_name', ['first-name'])[0]).toBe('first-name')
+  })
+  it('falls back to the standard keys and ignores unrelated headers', () => {
+    expect(nameKeysFor('first_name', ['email', 'firstly'])).toEqual(['First Name', 'first_name'])
+  })
+  it('toRowView reads a fname/lname row', () => {
+    const v = toRowView(
+      { id: 'r', row_index: 0, email: 'a@x.com', status: 'valid', validation_result: null, enrichment_status: null, instantly_status: null, row_data: { fname: 'Ada', lname: 'Lovelace' } },
+      ['fname', 'lname', 'email']
+    )
+    expect(v.first_name).toBe('Ada')
+    expect(v.last_name).toBe('Lovelace')
+    expect(v.name_keys.first_name).toBe('fname')
   })
 })

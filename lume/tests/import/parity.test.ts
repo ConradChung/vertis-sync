@@ -26,15 +26,18 @@ function constLine(src: string, name: string): string {
   return m![0]
 }
 
-/** Whitespace-, `export`- and arrow-paren-insensitive. */
+/** Whitespace-, comment-, semicolon-, `export`- and arrow-paren-insensitive. */
 const norm = (s: string) =>
   s
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:'"])\/\/.*$/gm, '$1')
     .replace(/^export /gm, '')
     .replace(/\((\w+)\)\s*=>/g, '$1 =>')
+    .replace(/;/g, '')
     .replace(/\s+/g, '')
 
 describe('telegram-inbox parity', () => {
-  it.each(['normalizeHeader', 'detectEmailColumn'])('function %s matches', (name) => {
+  it.each(['normalizeHeader', 'detectEmailColumn', 'parseCSVRow', 'headerFromBytes', 'countDataRows'])('function %s matches', (name) => {
     expect(norm(fn(LUME, name))).toBe(norm(fn(UPSTREAM, name)))
   })
   it.each(['DROPPED_COLUMNS', 'TIER1_NAMES', 'PERSONAL_SUBSTRINGS'])('const %s matches', (name) => {
