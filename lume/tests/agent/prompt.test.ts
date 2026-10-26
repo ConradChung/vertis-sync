@@ -13,7 +13,7 @@ describe('planning playbook', () => {
       '1. Confirm the target.',
       '2. ICP research',
       '3. Lead source.',
-      '4. Enrichment decision.',
+      '4. Review, filter, then enrich.',
       '5. Validation.',
       '6. Copy.',
       '7. Campaign setup.',
@@ -23,10 +23,12 @@ describe('planning playbook', () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order)
   })
 
-  it('offers manual and API Apollo enrichment, both behind the owner', () => {
-    at('export_for_apollo')
-    at('enrich_with_apollo')
-    expect(SYSTEM_PROMPT).toMatch(/Conrad must confirm one before anything happens/)
+  it('reviews and filters in chat, then a manual Apollo export; no Apollo API', () => {
+    expect(at('load_actor_results')).toBeLessThan(at('export_for_apollo'))
+    at('filter_leads')
+    expect(SYSTEM_PROMPT).toMatch(/only when Conrad asks/)
+    expect(SYSTEM_PROMPT).toMatch(/Never send anything to Apollo/)
+    expect(SYSTEM_PROMPT).not.toMatch(/enrich_with_apollo/)
   })
 
   it('never ranks campaigns before a launch exists', () => {

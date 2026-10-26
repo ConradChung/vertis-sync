@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import type { Json, PendingActionKind } from '@/lib/db/types'
 import { HIGH_RISK_KIND, TOOL_TIERS, type ToolName, type ToolTier } from '@/lib/agent/permissions'
+import { FilterCriteria } from '@/lib/review/model'
+import { APOLLO_STEPS } from '@/lib/apollo/records'
 import { describeStep, newSkillSchema, placeholdersIn, skillStepSchema, skillVariableSchema, type NewSkill, type Skill } from '@/lib/agent/skillModel'
 
 /**
@@ -309,6 +311,104 @@ const SPECS: Built[] = [
       run: async ({ url }, { call }) => call(`/api/web/page?url=${encodeURIComponent(url)}`) as Promise<ToolResult>,
     },
     'read'
+  ),
+  tiered(
+    {
+      name: 'load_actor_results',
+      description:
+        "Copy a finished Apify run's results (or a dataset, or a validation job's rows) into a lead review set (≤ 5,000 rows) so they can be inspected and filtered here before anything goes to Apollo. " +
+        'Returns the set id, counts, coverage (website, phone, email, LinkedIn) and breakdowns by category, city and state. Opens the Leads panel next to the chat.',
+      inputSchema: z
+        .object({
+          run_id: z.string().regex(/^[A-Za-z0-9]{8,40}$/).optional(),
+          dataset_id: z.string().regex(/^[A-Za-z0-9]{8,40}$/).optional(),
+          job_id: uuid.optional(),
+          title: z.string().max(200).optional().describe('e.g. "Roofers · Austin (Google Maps)"'),
+        })
+        .refine((v) => [v.run_id, v.dataset_id, v.job_id].filter(Boolean).length === 1, 'exactly one of run_id, dataset_id, job_id'),
+      run: async ({ run_id, dataset_id, job_id, title }, { call, deps }) => {
+        const source = run_id ? { kind: 'run', id: run_id } : dataset_id ? { kind: 'dataset', id: dataset_id } : { kind: 'job', id: job_id!.toLowerCase() }
+        return call('/api/review-sets', { method: 'POST', body: { source, conversation_id: deps.conversationId ?? null, ...(title ? { title } : {}) } }) as Promise<ToolResult>
+      },
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'review_leads',
+      description:
+        'Read a lead review set: a page of rows (name, category, city, state, website/domain, phone, rating, reviews, LinkedIn, email; idx is the row number) plus the summary over kept rows. ' +
+        'Filter the page by status (kept, excluded, all), a search string, category or city. Use it to show the owner a table and to spot junk (wrong categories, franchises, closed or tiny businesses, duplicates).',
+      inputSchema: z.object({
+        set_id: uuid,
+        status: z.enum(['kept', 'excluded', 'all']).optional(),
+        q: z.string().max(120).optional(),
+        category: z.string().max(120).optional(),
+        city: z.string().max(120).optional(),
+        page: z.number().int().min(0).max(1000).optional(),
+        page_size: z.number().int().min(1).max(100).optional(),
+      }),
+      run: async ({ set_id, status, q, category, city, page, page_size }, { call }) => {
+        const params = new URLSearchParams({ status: status ?? 'kept', page: String(page ?? 0), page_size: String(page_size ?? 25) })
+        if (q) params.set('q', q)
+        if (category) params.set('category', category)
+        if (city) params.set('city', city)
+        const [summary, items] = await Promise.all([call(`/api/review-sets/${set_id}`), call(`/api/review-sets/${set_id}/items?${params}`)])
+        return { ...(summary as Record<string, unknown>), page: items } as ToolResult
+      },
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'filter_leads',
+      description:
+        "Exclude rows from a lead review set by structured criteria, ONLY after the owner asked for that filter. action 'exclude' drops kept rows that match; 'keep_only' drops kept rows that do not match. " +
+        'Criteria combine with AND. Returns before/after counts, the new summary and a sample of what was dropped; quote them. Reversible with restore_leads (filter id).',
+      inputSchema: z.object({
+        set_id: uuid,
+        action: z.enum(['exclude', 'keep_only']),
+        criteria: FilterCriteria,
+        reason: z.string().max(300).optional().describe("the owner's words, e.g. \"no website\""),
+      }),
+      run: async ({ set_id, action, criteria, reason }, { call }) =>
+        call(`/api/review-sets/${set_id}/filter`, { method: 'POST', body: { action, criteria, ...(reason ? { reason } : {}) } }) as Promise<ToolResult>,
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'restore_leads',
+      description: 'Undo exclusions in a lead review set: one filter (filter_id), specific rows (item_ids = idx values), or all.',
+      inputSchema: z
+        .object({ set_id: uuid, filter_id: z.string().max(40).optional(), item_ids: z.array(z.number().int().min(0)).max(5000).optional(), all: z.boolean().optional() })
+        .refine((v) => !!v.filter_id || !!v.item_ids?.length || v.all === true, 'filter_id, item_ids or all'),
+      run: async ({ set_id, ...what }, { call }) => call(`/api/review-sets/${set_id}/restore`, { method: 'POST', body: what }) as Promise<ToolResult>,
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'export_for_apollo',
+      description:
+        "Export ONLY the kept rows of a lead review set as a CSV in Apollo's import columns, for the owner to enrich manually in Apollo (find decision makers' emails and LinkedIn). " +
+        'Returns a download link and the steps; nothing is sent to Apollo. The enriched file comes back through Import (CSV) and the usual gates.',
+      inputSchema: z.object({ set_id: uuid }),
+      run: async ({ set_id }, { call }) => {
+        const r = (await call(`/api/review-sets/${set_id}`)) as { set: { title: string }; summary: { kept: number; coverage: Record<string, number> } }
+        if (!r.summary.kept) return { status: 'nothing_kept', note: 'Every row is excluded; restore some first.' }
+        return {
+          status: 'ready',
+          download: `/api/review-sets/${set_id}/export`,
+          rows: r.summary.kept,
+          coverage: r.summary.coverage,
+          title: r.set.title,
+          steps: APOLLO_STEPS,
+          note: 'Give the owner the download link as a Markdown link and the steps. Lume does not send anything to Apollo.',
+        }
+      },
+    },
+    'low'
   ),
   tiered(
     {
