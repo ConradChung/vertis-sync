@@ -76,7 +76,7 @@ describe('reading and converting', () => {
 
   it('without refs (agent rewrite) the same position is the comparison', () => {
     const orig = readInstantlySteps(BODY)
-    const edit: EditStep[] = toEditSteps(orig).map((s) => ({ ...s, variants: s.variants.map(({ ref: _r, ...v }) => v) }))
+    const edit: EditStep[] = toEditSteps(orig).map((s) => ({ ...s, variants: s.variants.map((v) => ({ subject: v.subject, body: v.body, disabled: v.disabled })) }))
     const out = toInstantlySteps(edit, orig)
     expect(out[0].variants[0].body).toBe(orig[0].variants[0].body)
   })

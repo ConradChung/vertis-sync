@@ -96,7 +96,7 @@ function RuleRow({ r, busyId, onEdit, onActivate, onPause, onDelete }: { r: Rule
   const last = lastResultLabel(r.last_result)
   const next = r.active ? (r.next_run_at ?? nextRun(r.cron)) : null
   return (
-    <tr className="border-t border-line/60 align-top">
+    <tr id={`rule-${r.id}`} className="scroll-mt-24 border-t border-line/60 align-top target:bg-accent">
       <td className="px-[18px] py-2">
         <div className="font-medium text-fg">{r.name}</div>
         <div className="text-[11px] text-fg-46">→ {r.campaign_name ?? r.campaign_id}</div>

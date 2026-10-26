@@ -51,7 +51,7 @@ export interface CampaignJob {
   created_at: string
 }
 
-export type StageId = 'import' | 'validate' | 'enrich' | 'push' | 'send' | 'reply'
+export type StageId = 'import' | 'validate' | 'enrich' | 'push' | 'send' | 'reply' | 'bank'
 
 export type StageAction =
   | { type: 'link'; href: string; label: string }
@@ -63,19 +63,72 @@ export interface FlowStage {
   id: StageId
   label: string
   count: number | null
-  /** idle = nothing yet; waiting = a gate is open for you; active = running; done = has output. */
-  status: 'idle' | 'waiting' | 'active' | 'done'
+  /**
+   * done = completed or passed (lit); active = running now (the current stage);
+   * waiting = a gate is open for you (current); idle = not reached yet;
+   * unused = this path does not feed the campaign.
+   */
+  status: 'idle' | 'waiting' | 'active' | 'done' | 'unused'
   hint: string | null
+  /** Where the number comes from (info tooltip). */
+  source: string
   action: StageAction
 }
 
 export interface FlowCounts {
+  /** validation_jobs linked to the campaign: rows, valid, enriched, pushed. */
   imported: number
   validated: number
   enriched: number
   pushed: number
+  /** Instantly analytics: emails sent (every step) and replies. */
   sent: number | null
   replies: number | null
+  /** lead_bank rows for the campaign, and those still queued. */
+  bank_total: number
+  bank_queued: number
+  /** Leads the rotation pushed into Instantly (sum of rotation_runs.pushed). */
+  rotated: number
+  /** Leads in the Instantly campaign after the latest rotation, when known. */
+  in_campaign: number | null
+}
+
+/** Something that feeds leads into the campaign on a schedule (the Flow's forked branch). */
+export interface FlowFeeder {
+  id: string
+  /** rule = a Lume rotation rule; system = the instantly-rotate pg_cron jobs. */
+  kind: 'rule' | 'system'
+  name: string
+  /** Plain English, owner time zone. */
+  schedule: string
+  cron: string[]
+  active: boolean
+  next_run: string | null
+  last_run: string | null
+  last_result: string
+  /** Leads added: the rule's last batch, or the rotation's lifetime total. */
+  leads_added: number | null
+  leads_added_label: string
+  href: string
+}
+
+export interface LeadSources {
+  bank: Record<string, number>
+  runs: {
+    count: number
+    pushed: number
+    first_at: string | null
+    last: {
+      ran_at: string
+      pushed: number | null
+      deleted: number | null
+      archived: number | null
+      in_instantly_after: number | null
+      note: string | null
+      errors: number
+    } | null
+  } | null
+  crons: { name: string; schedule: string; active: boolean }[]
 }
 
 /** `GET /api/campaigns/[id]/flow` */
@@ -88,5 +141,9 @@ export interface CampaignFlowResponse {
   counts: FlowCounts
   jobs: CampaignJob[]
   gates: GateRow[]
+  /** Main path: Import → Validate → Enrich → Push → Send → Reply. */
   stages: FlowStage[]
+  /** Branch: the campaign's lead bank, fed into Send by the feeders. */
+  bank: FlowStage
+  feeders: FlowFeeder[]
 }

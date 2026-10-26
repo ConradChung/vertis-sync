@@ -1,8 +1,8 @@
 import 'server-only'
 import { createServiceClient } from '@/lib/supabase/service'
 import { DbError } from '@/lib/db/service'
-import type { PendingActionKind, PendingActionRow } from '@/lib/db/types'
-import type { CampaignJob } from '@/lib/campaigns/types'
+import type { PendingActionKind, PendingActionRow, RotationRuleRow } from '@/lib/db/types'
+import type { CampaignJob, LeadSources } from '@/lib/campaigns/types'
 
 /**
  * Campaigns screen queries (Task 13). Kept apart from `lib/db/service.ts`
@@ -62,4 +62,21 @@ export async function getLastActivity(campaignIds: string[]): Promise<Record<str
     if (!out[r.campaign_id]) out[r.campaign_id] = r.created_at
   }
   return out
+}
+
+/** Lead bank counts by state, the rotation_runs log and the instantly-rotate schedules (`lume_campaign_lead_sources`). */
+export async function getLeadSources(campaignId: string): Promise<LeadSources> {
+  const sb = createServiceClient()
+  const res = await sb.rpc('lume_campaign_lead_sources', { p_campaign: campaignId })
+  if (res.error) throw new DbError('getLeadSources', res.error)
+  const d = (res.data ?? {}) as Partial<LeadSources>
+  return { bank: d.bank ?? {}, runs: d.runs ?? null, crons: d.crons ?? [] }
+}
+
+/** Rotation rules that feed this campaign. */
+export async function getCampaignRules(campaignId: string): Promise<RotationRuleRow[]> {
+  const sb = createServiceClient()
+  const res = await sb.from('rotation_rules').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: true })
+  if (res.error) throw new DbError('getCampaignRules', res.error)
+  return (res.data ?? []) as RotationRuleRow[]
 }

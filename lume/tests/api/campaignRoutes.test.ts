@@ -18,10 +18,12 @@ vi.mock('@/lib/db/service', () => ({
   isDbError: () => false,
   DbError: class extends Error {},
 }))
-const camp = vi.hoisted(() => ({ getCampaignJobs: vi.fn(), getLastActivity: vi.fn() }))
+const camp = vi.hoisted(() => ({ getCampaignJobs: vi.fn(), getLastActivity: vi.fn(), getLeadSources: vi.fn(), getCampaignRules: vi.fn() }))
 vi.mock('@/lib/campaigns/service', () => ({
   getCampaignJobs: (...a: unknown[]) => camp.getCampaignJobs(...a),
   getLastActivity: (...a: unknown[]) => camp.getLastActivity(...a),
+  getLeadSources: (...a: unknown[]) => camp.getLeadSources(...a),
+  getCampaignRules: (...a: unknown[]) => camp.getCampaignRules(...a),
 }))
 
 import { GET as tableGET } from '@/app/api/campaigns/route'
@@ -71,6 +73,8 @@ beforeEach(() => {
   svc.getQueuedCounts.mockReset().mockResolvedValue({})
   camp.getCampaignJobs.mockReset().mockResolvedValue([])
   camp.getLastActivity.mockReset().mockResolvedValue({ [CID]: '2026-10-24T12:00:00Z' })
+  camp.getLeadSources.mockReset().mockResolvedValue({ bank: {}, runs: null, crons: [] })
+  camp.getCampaignRules.mockReset().mockResolvedValue([])
 })
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -171,13 +175,32 @@ describe('GET /api/campaigns/[id]/flow', () => {
     svc.getGatesForTargets.mockResolvedValue([{ kind: 'push_review', target_table: 'validation_jobs', target_id: JOB, title: 'Push a.csv' }])
     const body = await (await flowGET(req(`/api/campaigns/${CID}/flow`), ctx())).json()
     expect(camp.getCampaignJobs).toHaveBeenCalledWith(CID)
-    expect(body.counts).toEqual({ imported: 120, validated: 70, enriched: 50, pushed: 10, sent: 200, replies: 5 })
+    expect(body.counts).toEqual({ imported: 120, validated: 70, enriched: 50, pushed: 10, sent: 200, replies: 5, bank_total: 0, bank_queued: 0, rotated: 0, in_campaign: null })
+    expect(body.feeders).toEqual([])
+    expect(body.bank).toMatchObject({ id: 'bank', count: 0, status: 'idle' })
     expect(body.campaign_status).toBe('active')
     const byId = Object.fromEntries(body.stages.map((s: { id: string }) => [s.id, s]))
     expect(Object.keys(byId)).toEqual(['import', 'validate', 'enrich', 'push', 'send', 'reply'])
     expect(byId.push).toMatchObject({ status: 'waiting', action: { type: 'link', href: `/validate?gate=push_review:${JOB}` } })
     expect(byId.validate.action.type).toBe('disabled')
     expect(byId.send.action).toEqual({ type: 'pending', kind: 'pause_campaign', label: 'Pause' })
+  })
+
+  it('a rotation-fed campaign: bank branch + auto-rotation feeder, validation path marked unused', async () => {
+    vi.stubGlobal('fetch', instantlyMock().fn)
+    camp.getCampaignJobs.mockResolvedValue([])
+    svc.getGatesForTargets.mockResolvedValue([])
+    camp.getLeadSources.mockResolvedValue({
+      bank: { active: 994, queued: 993, completed: 69, replied: 2, bounced: 26, skipped: 128 },
+      runs: { count: 35, pushed: 1101, first_at: '2026-10-09T07:42:51Z', last: { ran_at: '2026-10-26T01:00:19Z', pushed: 1, deleted: 1, archived: 0, in_instantly_after: 1000, note: 'rotate', errors: 0 } },
+      crons: [{ name: 'instantly-rotate-am', schedule: '0 13 * * *', active: true }, { name: 'instantly-rotate-pm', schedule: '0 1 * * *', active: true }],
+    })
+    const body = await (await flowGET(req(`/api/campaigns/${CID}/flow`), ctx())).json()
+    expect(body.counts).toMatchObject({ imported: 0, bank_total: 2212, bank_queued: 993, rotated: 1101, in_campaign: 1000, sent: 200 })
+    expect(body.stages.slice(0, 4).map((s: { status: string }) => s.status)).toEqual(['unused', 'unused', 'unused', 'unused'])
+    expect(body.bank).toMatchObject({ status: 'done', count: 2212 })
+    expect(body.feeders).toHaveLength(1)
+    expect(body.feeders[0]).toMatchObject({ kind: 'system', name: 'Auto-rotation', leads_added: 1101, active: true })
   })
 
   it('Instantly unconfigured → db counts only, send/reply null', async () => {
