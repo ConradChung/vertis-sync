@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Maximize2, Table2, Workflow, X } from 'lucide-react'
+import { ChevronLeft, Loader2, Maximize2, Table2, Workflow, X } from 'lucide-react'
 import { useOpenInPlayground } from '@/components/agent/DiagramCard'
 import { LeadsPanel } from '@/components/agent/LeadsPanel'
 import { PlaygroundCanvas } from '@/components/playground/PlaygroundCanvas'
@@ -96,7 +96,7 @@ export function AgentSidePanel({
       disabled={!count}
       onClick={() => onTab(t)}
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] text-fg-46 transition-colors disabled:opacity-40',
+        'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] text-fg-46 transition-colors disabled:opacity-40 max-sm:h-9 max-sm:px-3.5 max-sm:text-[13.5px]',
         showTab === t ? 'bg-primary text-primary-foreground' : 'hover:text-fg'
       )}
     >
@@ -107,7 +107,11 @@ export function AgentSidePanel({
 
   return (
     <section className={cn('split-panel-in glass-overlay flex h-full min-h-0 flex-col overflow-hidden rounded-panel', className)} aria-label="Pipeline and leads">
-      <header className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
+      <header className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 max-sm:pt-[calc(env(safe-area-inset-top)+0.5rem)]">
+        {/* Phones: the panel is a full-screen sheet, so lead with an explicit way back to the chat. */}
+        <Button variant="ghost" size="sm" onClick={onClose} className="-ml-1 h-10 gap-1 px-2 sm:hidden" aria-label="Back to chat">
+          <ChevronLeft className="size-4" /> Chat
+        </Button>
         <div className="flex rounded-full border border-line p-0.5" role="tablist" aria-label="Panel view">
           {tabBtn('pipeline', 'Pipeline', Workflow, diagrams.length)}
           {tabBtn('leads', 'Leads', Table2, sets.length)}
@@ -139,7 +143,7 @@ export function AgentSidePanel({
             <span className="max-xl:sr-only">Open in Playground</span>
           </Button>
         )}
-        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close panel">
+        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close panel" className="max-sm:hidden">
           <X className="size-4" />
         </Button>
       </header>
@@ -150,7 +154,7 @@ export function AgentSidePanel({
         ) : active?.diagram ? (
           <>
             {active.diagram.title && (
-              <p className="pointer-events-none absolute top-3 left-4 z-10 text-[12px] font-medium tracking-wide text-fg-46 uppercase">{active.diagram.title}</p>
+              <p className="pointer-events-none absolute top-3 left-4 z-10 text-[12px] font-medium tracking-wide text-fg-46 uppercase max-sm:hidden">{active.diagram.title}</p>
             )}
             <PlaygroundCanvas key={`${active.key}:${dir}`} diagram={active.diagram} direction={dir} className="h-full rounded-none border-0 bg-transparent shadow-none" />
           </>

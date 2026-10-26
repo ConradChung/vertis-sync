@@ -270,7 +270,7 @@ export function NodeDetails({
           type="button"
           onClick={onClose}
           aria-label="Close details"
-          className="rounded-full p-1 text-fg-46 transition-colors hover:bg-white/10 hover:text-fg light:hover:bg-black/5"
+          className="rounded-full p-1 text-fg-46 transition-colors hover:bg-white/10 hover:text-fg max-sm:grid max-sm:size-10 max-sm:place-items-center light:hover:bg-black/5"
         >
           <X className="size-4" />
         </button>
@@ -287,7 +287,7 @@ export function NodeDetails({
           type="button"
           onClick={onPrev ?? undefined}
           disabled={!onPrev}
-          className="inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:text-fg disabled:opacity-35"
+          className="inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:text-fg disabled:opacity-35 max-sm:h-10 max-sm:px-3 max-sm:text-[14px]"
           aria-label="Previous step"
         >
           <ChevronLeft className="size-3.5" /> Prev
@@ -299,7 +299,7 @@ export function NodeDetails({
           type="button"
           onClick={onNext ?? undefined}
           disabled={!onNext}
-          className="inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:text-fg disabled:opacity-35"
+          className="inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors hover:text-fg disabled:opacity-35 max-sm:h-10 max-sm:px-3 max-sm:text-[14px]"
           aria-label="Next step"
         >
           Next <ChevronRight className="size-3.5" />

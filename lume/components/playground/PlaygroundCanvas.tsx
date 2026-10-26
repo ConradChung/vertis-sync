@@ -9,6 +9,7 @@ import { NodeDetails } from '@/components/agent/NodeDetails'
 import { buildFlow, DiagramLegend, NODE_W, pipeNodeTypes, type PipeNode } from '@/components/agent/PipelineDiagram'
 import { flowOrder, type Diagram, type Direction } from '@/lib/agent/diagram'
 import { cn } from '@/lib/utils'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 
 const FIT = { padding: 0.16, maxZoom: 1.4, duration: 400 }
 
@@ -19,7 +20,7 @@ function ControlButton({ label, onClick, children }: { label: string; onClick: (
       onClick={onClick}
       aria-label={label}
       title={label}
-      className="flex size-8 items-center justify-center rounded-full text-fg-70 transition-colors hover:bg-white/10 hover:text-fg focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:outline-none light:hover:bg-black/5"
+      className="flex size-8 items-center justify-center rounded-full text-fg-70 max-sm:size-10 transition-colors hover:bg-white/10 hover:text-fg focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:outline-none light:hover:bg-black/5"
     >
       {children}
     </button>
@@ -29,7 +30,7 @@ function ControlButton({ label, onClick, children }: { label: string; onClick: (
 function Controls({ fullscreen, onFullscreen }: { fullscreen: boolean; onFullscreen: () => void }) {
   const rf = useReactFlow()
   return (
-    <div className="glass absolute right-4 bottom-4 z-10 flex items-center gap-0.5 rounded-full p-1" role="toolbar" aria-label="Diagram controls">
+    <div className="glass absolute right-4 bottom-4 z-10 flex items-center gap-0.5 rounded-full p-1 max-sm:right-3 max-sm:bottom-3" role="toolbar" aria-label="Diagram controls">
       <ControlButton label="Zoom out" onClick={() => rf.zoomOut({ duration: 200 })}>
         <Minus className="size-4" />
       </ControlButton>
@@ -61,6 +62,8 @@ const INITIAL_FIT_NODES = 7
 const INITIAL_FIT_NODES_TB = 4
 /** Never open a pipeline smaller than this; pan or Fit to see the rest. */
 const INITIAL_MIN_ZOOM = 0.7
+/** Vertical layouts are used on narrow screens (phones, the split panel): open a little larger. */
+const INITIAL_MIN_ZOOM_TB = 0.85
 
 /** Width the details sheet takes over the canvas (px, capped by the canvas width). */
 const SHEET_W = 380
@@ -101,7 +104,9 @@ export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { dia
   const [fullscreen, setFullscreen] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [boxWidth, setBoxWidth] = useState(0)
-  const flow = useMemo(() => buildFlow(diagram, { direction, animate: true, hover: true, clickable: true }), [diagram, direction])
+  // Touch screens get no hover previews (a tap would pop one over the sheet); tapping opens details.
+  const touch = useMediaQuery('(hover: none)')
+  const flow = useMemo(() => buildFlow(diagram, { direction, animate: true, hover: !touch, clickable: true }), [diagram, direction, touch])
   const nodes = useMemo<PipeNode[]>(
     // While the sheet is open: ring the selected step and turn hover previews off so they never cover the sheet.
     () => (selected ? flow.nodes.map((n) => ({ ...n, data: { ...n.data, hover: false, selected: n.id === selected } })) : flow.nodes),
@@ -116,10 +121,10 @@ export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { dia
         ? {
             padding: FIT.padding,
             maxZoom: FIT.maxZoom,
-            minZoom: INITIAL_MIN_ZOOM,
+            minZoom: direction === 'TB' ? INITIAL_MIN_ZOOM_TB : INITIAL_MIN_ZOOM,
             nodes: order.slice(0, direction === 'TB' ? INITIAL_FIT_NODES_TB : INITIAL_FIT_NODES).map((id) => ({ id })),
           }
-        : { padding: FIT.padding, maxZoom: FIT.maxZoom, minZoom: INITIAL_MIN_ZOOM },
+        : { padding: FIT.padding, maxZoom: FIT.maxZoom, minZoom: direction === 'TB' ? INITIAL_MIN_ZOOM_TB : INITIAL_MIN_ZOOM },
     [order, direction]
   )
   const byId = useMemo(() => new Map(diagram.nodes.map((n) => [n.id, n])), [diagram])
@@ -186,7 +191,8 @@ export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { dia
           <FocusSelected id={selected} boxWidth={boxWidth} />
         </ReactFlow>
       </ReactFlowProvider>
-      <div className="glass pointer-events-none absolute bottom-4 left-4 z-10 rounded-full px-3 py-1.5">
+      {/* Phones: the legend moves to the top so it never collides with the zoom controls. */}
+      <div className="glass pointer-events-none absolute bottom-4 left-4 z-10 rounded-full px-3 py-1.5 max-sm:top-3 max-sm:bottom-auto max-sm:left-3 max-sm:px-2.5 max-sm:py-1">
         <DiagramLegend />
       </div>
       {node && (
@@ -196,8 +202,8 @@ export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { dia
           onPrev={at > 0 ? prev : null}
           onNext={at >= 0 && at < order.length - 1 ? next : null}
           onClose={close}
-          // Stops above the zoom controls and legend so they stay usable.
-          className="absolute top-3 right-3 bottom-[4.5rem] z-20 w-[min(380px,calc(100%-1.5rem))]"
+          // Stops above the zoom controls and legend so they stay usable; on phones it covers the canvas (opaque).
+          className="absolute top-3 right-3 bottom-[4.5rem] z-20 w-[min(380px,calc(100%-1.5rem))] max-sm:inset-0 max-sm:w-full max-sm:rounded-none max-sm:border-0 max-sm:bg-(--bg)"
         />
       )}
     </div>

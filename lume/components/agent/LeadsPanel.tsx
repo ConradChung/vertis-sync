@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import type { ReviewRow, ReviewSummary } from '@/lib/review/model'
 import { cn } from '@/lib/utils'
+import { PHONE_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
 
 interface AppliedFilter {
   id: string
@@ -38,6 +39,8 @@ export function LeadsPanel({ setId, refreshKey }: { setId: string; refreshKey: n
   const [q, setQ] = useState('')
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(0)
+  // Phones get a card list instead of the six-column table.
+  const phone = useMediaQuery(PHONE_QUERY)
   const [picked, setPicked] = useState<Set<number>>(new Set())
   const [error, setError] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
@@ -165,7 +168,7 @@ export function LeadsPanel({ setId, refreshKey }: { setId: string; refreshKey: n
               role="tab"
               aria-selected={status === v}
               onClick={() => setStatus(v)}
-              className={cn('rounded-full px-2.5 py-0.5 capitalize text-fg-46 transition-colors', status === v && 'bg-primary text-primary-foreground')}
+              className={cn('rounded-full px-2.5 py-0.5 capitalize text-fg-46 transition-colors max-sm:h-9 max-sm:px-3.5 max-sm:text-[13px]', status === v && 'bg-primary text-primary-foreground')}
             >
               {v}
             </button>
@@ -173,7 +176,7 @@ export function LeadsPanel({ setId, refreshKey }: { setId: string; refreshKey: n
         </div>
         <div className="relative min-w-40 flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-fg-46" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, category, city, domain" aria-label="Search leads" className="h-8 pl-8 text-[12.5px]" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, category, city, domain" aria-label="Search leads" className="h-8 pl-8 text-[12.5px] max-sm:h-10" />
         </div>
         {picked.size > 0 && (
           <Button
@@ -190,6 +193,42 @@ export function LeadsPanel({ setId, refreshKey }: { setId: string; refreshKey: n
 
       {error && <p className="px-4 pb-2 text-[12px] text-destructive" role="alert">{error}</p>}
 
+      {phone ? (
+        <ul className="thin-scroll min-h-0 flex-1 divide-y divide-line overflow-y-auto" aria-label="Leads">
+          {rows.map((r) => (
+            <li key={r.idx} className={cn('flex items-start gap-3 px-4 py-3', r.status === 'excluded' && 'opacity-55', picked.has(r.idx) && 'bg-muted/50')}>
+              <label className="-m-2 grid size-10 shrink-0 place-items-center">
+                <Checkbox checked={picked.has(r.idx)} onCheckedChange={() => toggle(r.idx)} aria-label={`Select ${r.item.name ?? `row ${r.idx}`}`} />
+              </label>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className={cn('truncate text-[14px] font-medium text-fg', r.status === 'excluded' && 'line-through')}>{r.item.name ?? '—'}</p>
+                  {r.item.rating !== null && (
+                    <span className="inline-flex shrink-0 items-center gap-1 text-[12px] tabular-nums text-fg-70">
+                      <Star className="size-3 text-positive" />
+                      {r.item.rating.toFixed(1)}
+                      <span className="text-fg-46">({r.item.reviews_count ?? 0})</span>
+                    </span>
+                  )}
+                </div>
+                <p className="truncate font-mono text-[11px] text-fg-46">{r.status === 'excluded' ? r.excluded_reason : r.item.domain ?? 'no website'}</p>
+                <div className="mt-1 flex items-center justify-between gap-2 text-[12.5px] text-fg-70">
+                  <span className="truncate">{[r.item.category, [r.item.city, r.item.state].filter(Boolean).join(', ')].filter(Boolean).join(' · ') || '—'}</span>
+                  <span className="flex shrink-0 items-center gap-1.5 text-fg-24">
+                    <Globe className={cn('size-3.5', (r.item.website || r.item.domain) && 'text-positive')} aria-label={r.item.domain ? 'website' : 'no website'} />
+                    <Phone className={cn('size-3.5', r.item.phone && 'text-positive')} aria-label={r.item.phone ? 'phone' : 'no phone'} />
+                    <Mail className={cn('size-3.5', r.item.email && 'text-positive')} aria-label={r.item.email ? 'email' : 'no email'} />
+                    <Linkedin className={cn('size-3.5', r.item.linkedin_url && 'text-positive')} aria-label={r.item.linkedin_url ? 'LinkedIn' : 'no LinkedIn'} />
+                  </span>
+                </div>
+              </div>
+            </li>
+          ))}
+          {meta && rows.length === 0 && (
+            <li className="py-10 text-center text-[13px] text-fg-46">{query ? 'No rows match that search.' : status === 'excluded' ? 'Nothing excluded yet.' : 'No rows.'}</li>
+          )}
+        </ul>
+      ) : (
       <div className="thin-scroll min-h-0 flex-1 overflow-auto px-2">
         <Table className="text-[12.5px]">
           <TableHeader className="sticky top-0 z-[1] bg-[var(--glass-fill-strong)] backdrop-blur-md">
@@ -253,17 +292,18 @@ export function LeadsPanel({ setId, refreshKey }: { setId: string; refreshKey: n
           </TableBody>
         </Table>
       </div>
+      )}
 
       <div className="flex items-center justify-between border-t border-line px-4 py-2 text-[11.5px] text-fg-46">
         <span>
           {total ? `${page * PAGE + 1}–${Math.min(total, (page + 1) * PAGE)} of ${total}` : '0 rows'}
         </span>
         <span className="flex items-center gap-1">
-          <Button variant="ghost" size="icon-xs" disabled={page === 0} onClick={() => setPage((p) => p - 1)} aria-label="Previous page">
+          <Button variant="ghost" size="icon-xs" className="max-sm:size-10" disabled={page === 0} onClick={() => setPage((p) => p - 1)} aria-label="Previous page">
             <ChevronLeft className="size-3.5" />
           </Button>
           {page + 1}/{pages}
-          <Button variant="ghost" size="icon-xs" disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)} aria-label="Next page">
+          <Button variant="ghost" size="icon-xs" className="max-sm:size-10" disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)} aria-label="Next page">
             <ChevronRight className="size-3.5" />
           </Button>
         </span>

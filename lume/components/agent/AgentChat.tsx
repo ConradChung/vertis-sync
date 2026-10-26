@@ -70,6 +70,7 @@ export function AgentChat() {
   const [activeSetId, setActiveSetId] = useState<string | null>(null)
   const [leadsRefresh, setLeadsRefresh] = useState(0)
   const desktop = useMediaQuery('(min-width: 1024px)')
+  const phone = useMediaQuery('(max-width: 639.98px)')
   const bump = useCallback(() => setRefreshKey((k) => k + 1), [])
   const list = useConversationList(refreshKey)
   const skills = useSkillList(refreshKey)
@@ -110,20 +111,21 @@ export function AgentChat() {
     if (!latestDiagram) return
     setActiveKey(latestDiagram)
     setPanelTab('pipeline')
-    setPanelOpen(true)
+    // On phones the panel is a full-screen sheet: don't cover the chat unasked (the chip / Show button opens it).
+    if (!onPhone()) setPanelOpen(true)
   }, [latestDiagram])
   useEffect(() => {
     if (!latestSet) return
     setActiveSetId(latestSet)
     setPanelTab('leads')
-    setPanelOpen(true)
+    if (!onPhone()) setPanelOpen(true)
   }, [latestSet])
   // The agent loaded or filtered leads: refresh the table and bring it forward.
   useEffect(() => {
     if (!reviewSig) return
     setLeadsRefresh((n) => n + 1)
     setPanelTab('leads')
-    setPanelOpen(true)
+    if (!onPhone()) setPanelOpen(true)
   }, [reviewSig])
   const hasPanel = diagrams.length > 0 || sets.length > 0
   const split = panelOpen && hasPanel
@@ -265,7 +267,8 @@ export function AgentChat() {
       </Sheet>
 
       <div className="relative min-w-0 flex-1">
-        <div className={cn('z-10 flex items-center gap-1', split && desktop ? 'mb-2' : 'absolute top-0 left-0')}>
+        {/* Toolbar floats beside the centred chat on wide screens; below lg it is its own row so it never covers messages. */}
+        <div className={cn('z-10 flex items-center gap-1', split && desktop ? 'mb-2' : 'mb-2 lg:absolute lg:top-0 lg:left-0 lg:mb-0')}>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -276,18 +279,18 @@ export function AgentChat() {
           >
             <PanelLeft className="size-4" />
           </Button>
-          <Button variant="ghost" size="icon-sm" className="lg:hidden" onClick={() => setSheetOpen(true)} aria-label="Show chat history">
+          <Button variant="ghost" size="icon-sm" className="max-sm:size-10 lg:hidden" onClick={() => setSheetOpen(true)} aria-label="Show chat history">
             <PanelLeft className="size-4" />
           </Button>
           {/* New chat lives in the sidebar; repeat it here whenever the sidebar is out of view. */}
-          <Button variant="ghost" size="icon-sm" className={cn(!collapsed && 'lg:hidden')} onClick={newChat} disabled={busy} aria-label="New chat">
+          <Button variant="ghost" size="icon-sm" className={cn('max-sm:size-10', !collapsed && 'lg:hidden')} onClick={newChat} disabled={busy} aria-label="New chat">
             <SquarePen className="size-4" />
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={() => setMemoryOpen(true)} aria-label="Memory" title="What Lume remembers">
+          <Button variant="ghost" size="icon-sm" className="max-sm:size-10" onClick={() => setMemoryOpen(true)} aria-label="Memory" title="What Lume remembers">
             <Brain className="size-4" />
           </Button>
           {hasPanel && !panelOpen && (
-            <Button variant="outline" size="sm" className="anim-rise ml-1" onClick={() => setPanelOpen(true)}>
+            <Button variant="outline" size="sm" className="anim-rise ml-1 max-sm:h-10" onClick={() => setPanelOpen(true)}>
               <PanelRight className="size-3.5" /> Show {diagrams.length ? 'pipeline' : 'leads'}
             </Button>
           )}
@@ -301,11 +304,14 @@ export function AgentChat() {
             // Fixed-height rounded panel: only the messages scroll (inside the clip), so the
             // corners stay rounded at any scroll position and nothing passes behind the composer.
             'glass-overlay flex w-full flex-col overflow-hidden rounded-panel',
-            split && desktop ? 'split-chat-in h-full' : 'mx-auto h-[calc(100dvh-var(--topbar-h)-110px)] max-w-[820px]'
+            split && desktop
+              ? 'split-chat-in h-full'
+              : // Phones: visual viewport (shrinks with the keyboard) minus header, bottom bar, padding and the toolbar row.
+                'mx-auto h-[calc(var(--vvh,100dvh)-var(--topbar-h)-var(--bottombar-h)-4.75rem)] max-w-[820px] sm:h-[calc(100dvh-var(--topbar-h)-6.75rem)] lg:h-[calc(100dvh-var(--topbar-h)-110px)]'
           )}
         >
           <div
-            className="thin-scroll scroll-fade-bottom min-h-0 flex-1 overflow-y-auto px-5 pt-5 sm:px-8 sm:pt-7"
+            className="thin-scroll scroll-fade-bottom min-h-0 flex-1 overflow-y-auto px-4 pt-4 sm:px-8 sm:pt-7"
             aria-live="polite"
             aria-busy={busy || chat.loading}
           >
@@ -331,7 +337,7 @@ export function AgentChat() {
             <div ref={endRef} />
           </div>
 
-          <div className="shrink-0 border-t border-line bg-[var(--glass-fill-strong)] px-5 pt-3 pb-4 sm:px-8">
+          <div className="shrink-0 border-t border-line bg-[var(--glass-fill-strong)] px-3 pt-2.5 pb-3 sm:px-8 sm:pt-3 sm:pb-4">
             {speech.listening ? (
               <>
                 <div className="mb-2 flex items-center justify-center gap-3">
@@ -406,7 +412,9 @@ export function AgentChat() {
                     ? 'Lume is working…'
                     : picked && attach === 'reference'
                       ? `Ask with “${picked.name}” as reference…`
-                      : 'Ask Lume anything — press / to focus'
+                      : phone
+                        ? 'Ask Lume anything'
+                        : 'Ask Lume anything — press / to focus'
                 }
                 aria-describedby="agent-composer-hint"
                 className="max-h-[220px] min-h-10 flex-1 resize-none bg-transparent py-2 focus-visible:outline-none! text-[15px] leading-6 text-fg outline-none placeholder:text-fg-24 disabled:opacity-60"
@@ -421,7 +429,7 @@ export function AgentChat() {
                 <ArrowUp className="size-4" />
               </button>
             </form>
-            <p id="agent-composer-hint" className="mt-2 flex items-center justify-center gap-3 text-[11px] text-fg-24">
+            <p id="agent-composer-hint" className="mt-2 flex items-center justify-center gap-3 text-[11px] text-fg-24 max-sm:sr-only">
               <span>Enter to send · Shift+Enter for a new line</span>
               <span aria-hidden>·</span>
               <span>Anything risky waits for your approval</span>
@@ -486,10 +494,13 @@ export function AgentChat() {
   )
 }
 
+const onPhone = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 639.98px)').matches
+
 /** Matches a media query on the client (false during SSR). */
 function useMediaQuery(query: string): boolean {
   const [on, setOn] = useState(false)
   useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
     const mq = window.matchMedia(query)
     const update = () => setOn(mq.matches)
     update()

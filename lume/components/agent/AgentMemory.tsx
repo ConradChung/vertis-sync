@@ -36,7 +36,7 @@ export function AgentMemory({ open, onOpenChange }: { open: boolean; onOpenChang
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-[22rem] max-w-full p-5 pt-12 sm:w-[26rem]">
+      <SheetContent side="right" className="w-full max-w-full p-5 pt-[calc(env(safe-area-inset-top)+3rem)] sm:w-[26rem] sm:pt-12">
         <SheetTitle className="flex items-center gap-2 text-[15px]">
           <Brain className="size-4 text-positive" /> Memory
         </SheetTitle>
