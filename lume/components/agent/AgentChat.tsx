@@ -116,7 +116,7 @@ export function AgentChat() {
         <div ref={endRef} />
       </div>
 
-      <div className="sticky bottom-0 z-10 -mx-2 px-2 pt-10 pb-3 backdrop-blur-xl mask-[linear-gradient(to_top,black_78%,transparent)]">
+      <div className="sticky bottom-0 z-10 -mx-2 px-2 pt-10 pb-3 bg-background">
         <div className="mb-2 flex items-center justify-center gap-3">
           <Waveform mode={mode} className="h-11" />
         </div>
@@ -127,7 +127,7 @@ export function AgentChat() {
         )}
         <form
           className={cn(
-            'glass flex items-end gap-2 rounded-[22px] border border-line p-2 pl-4 transition-colors focus-within:border-violet/50',
+            'flex items-end gap-2 rounded-lg border border-border bg-card p-2 pl-4 transition-colors focus-within:border-violet',
             speech.listening && 'border-violet/60'
           )}
           onSubmit={(e) => {

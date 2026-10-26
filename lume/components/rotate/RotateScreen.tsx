@@ -188,7 +188,7 @@ export function RotateScreen() {
       />
       <DragOverlay dropAnimation={null}>
         {dragging ? (
-          <div className="glass rounded-[10px] px-3 py-1.5 text-[12px] font-medium text-fg shadow-lg">Assign {dragLabel(dragging)}</div>
+          <div className="glass rounded-[10px] px-3 py-1.5 text-[12px] font-medium text-fg">Assign {dragLabel(dragging)}</div>
         ) : null}
       </DragOverlay>
     </DndContext>

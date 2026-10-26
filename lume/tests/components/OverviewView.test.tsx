@@ -92,16 +92,16 @@ describe('OverviewView', () => {
     render(<OverviewView data={data} instantly={instantly} />)
     expect(screen.getByRole('link', { name: 'Pending approvals: 2. Open Validate' })).toBeTruthy()
     expect(screen.getAllByTestId('kpi-value').map((n) => n.textContent)).toEqual(['684', '3', '2', '4'])
-    // campaign strip: name, rate, amber dot with words, plus an icon
+    // campaign strip: name, rate, violet needs-attention dot with words, plus an icon
     const strip = screen.getByLabelText('Campaigns')
     expect(within(strip).getByText('Kaspen PM')).toBeTruthy()
     expect(within(strip).getByText('0.5%')).toBeTruthy()
     // the feed resolves campaign ids to names from the strip
     expect(within(screen.getByLabelText('Live reply feed')).getAllByText('Kaspen PM').length).toBe(3)
-    expect(screen.getByRole('img', { name: 'amber: Reply rate 0.5% is under 1%' })).toBeTruthy()
-    // inbox health: both accounts, the banned one red
+    expect(screen.getByRole('img', { name: 'needs attention: Reply rate 0.5% is under 1%' })).toBeTruthy()
+    // inbox health: both accounts, the banned one flagged as an error
     expect(screen.getByText('kaspen@outlook.com')).toBeTruthy()
-    expect(screen.getByRole('img', { name: 'red: warmup banned' })).toBeTruthy()
+    expect(screen.getByRole('img', { name: 'error: warmup banned' })).toBeTruthy()
     // next runs + agent activity
     expect(screen.getByText('pipeline-watchdog')).toBeTruthy()
     expect(screen.getByText(/^in [12]m/)).toBeTruthy()
@@ -132,13 +132,13 @@ describe('OverviewView', () => {
 })
 
 describe('ReplyFeed', () => {
-  it('shows chip, email, title, first line, and Open ↗ only for Instantly events', () => {
+  it('shows chip, email, title, first line, and Open only for Instantly events', () => {
     render(<ReplyFeed events={data.reply_feed} campaignNames={{ 'ic-1': 'Kaspen PM' }} />)
     expect(screen.getByText('lead1@northstar.com')).toBeTruthy()
     expect(screen.getByText('Happy to talk 1')).toBeTruthy()
     expect(screen.queryByText('second line')).toBeNull()
     expect(screen.getAllByText('Kaspen PM').length).toBe(3)
-    const opens = screen.getAllByRole('link', { name: 'Open ↗' })
+    const opens = screen.getAllByRole('link', { name: 'Open' })
     expect(opens).toHaveLength(2) // the telegram-sourced event has none
     expect(opens.map((a) => a.getAttribute('href'))).toContain('https://app.instantly.ai/app/unibox?thread=1')
     expect(opens.map((a) => a.getAttribute('href'))).toContain('https://app.instantly.ai/app/unibox?search=lead2%40northstar.com')

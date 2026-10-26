@@ -68,9 +68,9 @@ export function GateCard({ gate, focused, busy, countOpen, onAction, onCountOpen
       data-focused={focused || undefined}
       onFocus={onFocusCard}
       className={cn(
-        'gap-3 px-4 outline-none transition-[border-color,box-shadow] duration-200',
+        'gap-3 px-4 outline-none transition-[border-color] duration-200',
         'focus-visible:ring-2 focus-visible:ring-ring',
-        focused && 'border-violet/60 shadow-[inset_0_1px_rgba(255,255,255,.11),0_0_0_1px_rgba(139,92,246,.35)]'
+        focused && 'border-violet'
       )}
     >
       <div className="flex items-start justify-between gap-3">

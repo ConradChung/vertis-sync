@@ -60,7 +60,7 @@ export function FlowView({
         source: data!.stages[i].id,
         target: s.id,
         animated: s.status === 'active' || s.status === 'waiting',
-        style: { stroke: 'rgba(196,181,253,0.45)' },
+        style: { stroke: 'rgba(255,255,255,0.25)' },
       })),
     [data]
   )

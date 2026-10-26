@@ -33,8 +33,8 @@ export function OverviewView({
 }) {
   if (!data && error) {
     return (
-      <GlassCard className="flex-row items-center justify-between px-[18px]" role="alert">
-        <span className="text-[13px] text-fg-70">Couldn&apos;t load the overview.</span>
+      <GlassCard className="flex-row items-center justify-between px-5" role="alert">
+        <span className="text-sm text-white/70">Couldn&apos;t load the overview.</span>
         <Button size="sm" variant="secondary" onClick={onRetry}>
           Retry
         </Button>
@@ -50,9 +50,9 @@ export function OverviewView({
   return (
     <div className="flex flex-col gap-4">
       {error != null && (
-        <p className="flex items-center gap-3 text-[12px] text-amber" role="status">
+        <p className="flex items-center gap-3 text-xs text-muted-foreground" role="status">
           Couldn&apos;t refresh — showing the last data.
-          <button type="button" onClick={onRetry} className="text-violet-soft hover:text-fg">
+          <button type="button" onClick={onRetry} className="text-violet-soft hover:underline">
             Retry
           </button>
         </p>
@@ -65,7 +65,7 @@ export function OverviewView({
           <AgentActivity events={data.agent_activity} />
         </div>
       </div>
-      <div className="grid gap-4 lg:grid-cols-[1.2fr_.8fr]">
+      <div className="grid items-start gap-4 lg:grid-cols-[1.2fr_.8fr]">
         <InboxHealth instantly={instantly} failed={instantlyFailed} />
         <NextRuns scheduled={data.scheduled_jobs} />
       </div>
@@ -83,7 +83,7 @@ export function OverviewSkeleton() {
       </div>
       <div className="grid gap-4 lg:grid-cols-[1.2fr_.8fr]">
         {[0, 1].map((i) => (
-          <GlassCard key={i} className="gap-3 px-[18px]" aria-hidden>
+          <GlassCard key={i} className="gap-3 p-5" aria-hidden>
             <ShimmerBar className="h-3 w-28" />
             <ShimmerBar className="h-3 w-full" />
             <ShimmerBar className="h-3 w-5/6" />

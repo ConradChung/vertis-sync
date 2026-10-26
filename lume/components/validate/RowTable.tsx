@@ -15,11 +15,11 @@ import { cn } from '@/lib/utils'
 const fmt = new Intl.NumberFormat('en-US')
 
 const STATUS_PILL: Record<string, string> = {
-  valid: 'bg-green/13 text-[#86efac]',
-  invalid: 'bg-red/13 text-[#fda4af]',
-  error: 'bg-amber/13 text-[#fcd34d]',
+  valid: 'bg-lime/10 text-lime',
+  invalid: 'bg-destructive/15 text-destructive',
+  error: 'bg-destructive/15 text-destructive',
   no_email: 'bg-white/8 text-fg-46',
-  pending: 'bg-cyan/13 text-[#67e8f9]',
+  pending: 'bg-white/10 text-white/70',
 }
 
 const name = (r: ValidationRowView) => [r.first_name, r.last_name].filter(Boolean).join(' ') || '—'

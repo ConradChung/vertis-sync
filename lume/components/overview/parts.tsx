@@ -1,31 +1,32 @@
 'use client'
 
-import { useEffect, useId, useState, type HTMLAttributes, type ReactNode } from 'react'
+import { useEffect, useState, type HTMLAttributes, type ReactNode } from 'react'
 import Link from 'next/link'
-import { CircleAlert, TriangleAlert } from 'lucide-react'
+import { Line, LineChart, YAxis } from 'recharts'
 import { useReducedMotion } from 'motion/react'
 import { NumberTicker } from '@/components/ui/number-ticker'
+import { ChartContainer, type ChartConfig } from '@/components/ui/chart'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { HealthLevel } from '@/lib/overview/types'
 import { cn } from '@/lib/utils'
 
 /** Shared bits for the Overview cards. */
 
-export type Tone = 'violet' | 'green' | 'amber' | 'cyan' | 'red'
+/** Sparkline colour: violet (brand / neutral trend) or lime (positive / live). */
+export type Tone = 'violet' | 'lime'
 
 export const TONE_VAR: Record<Tone, string> = {
   violet: 'var(--violet)',
-  green: 'var(--green)',
-  amber: 'var(--amber)',
-  cyan: 'var(--cyan)',
-  red: 'var(--red)',
+  lime: 'var(--lime)',
 }
 
-const HEALTH_VAR: Record<HealthLevel, string> = {
-  green: 'var(--green)',
-  amber: 'var(--amber)',
-  red: 'var(--red)',
-  idle: 'var(--fg-24)',
+/** Status dots: lime healthy · violet needs you · destructive error · white/35 idle. */
+const HEALTH: Record<HealthLevel, { color: string; word: string }> = {
+  green: { color: 'var(--lime)', word: 'healthy' },
+  amber: { color: 'var(--violet)', word: 'needs attention' },
+  red: { color: 'var(--destructive)', word: 'error' },
+  idle: { color: 'rgba(255,255,255,0.35)', word: 'no data' },
 }
 
 const fmt = new Intl.NumberFormat('en-US')
@@ -34,7 +35,7 @@ const fmt = new Intl.NumberFormat('en-US')
 export function Num({ value, className }: { value: number; className?: string }) {
   const reduce = useReducedMotion()
   if (reduce) return <span className={cn('tabular-nums', className)}>{fmt.format(value)}</span>
-  return <NumberTicker value={value} className={cn('tracking-normal text-fg', className)} />
+  return <NumberTicker value={value} className={cn('tracking-tight text-foreground', className)} />
 }
 
 /** Re-renders every `intervalMs` with the current time. */
@@ -47,75 +48,60 @@ export function useNow(intervalMs: number): number {
   return now
 }
 
-/** Inline-SVG sparkline (the prototype's `Spark`): line + soft fill. */
+/** Lime when the series ends at or above where it started (and moved), else violet. */
+export function trendTone(data: number[]): Tone {
+  if (data.length < 2) return 'violet'
+  const first = data[0]
+  const last = data[data.length - 1]
+  return last > first ? 'lime' : 'violet'
+}
+
+/** Single-series recharts sparkline inside shadcn's ChartContainer. */
 export function Spark({
   data,
-  tone = 'violet',
+  tone,
   className,
   label,
 }: {
   data: number[]
+  /** Defaults to the sign of the trend. */
   tone?: Tone
   className?: string
   label?: string
 }) {
-  const gid = useId().replace(/:/g, '')
-  if (data.length < 2) return <div className={cn('h-[34px]', className)} aria-hidden />
-  const W = 100
-  const H = 34
-  const max = Math.max(...data)
-  const min = Math.min(...data)
-  const span = max - min || 1
-  const pts = data.map((v, i) => [(i / (data.length - 1)) * W, H - 3 - ((v - min) / span) * (H - 6)] as const)
-  const line = pts.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(' ')
-  const area = `0,${H} ${line} ${W},${H}`
-  const color = TONE_VAR[tone]
+  if (data.length < 2) return <div className={cn('h-9', className)} aria-hidden />
+  const config: ChartConfig = { v: { label: label ?? 'value', color: TONE_VAR[tone ?? trendTone(data)] } }
+  const rows = data.map((v, i) => ({ i, v }))
   return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="none"
-      className={cn('h-[34px] w-full overflow-visible', className)}
-      role={label ? 'img' : undefined}
-      aria-label={label}
-      aria-hidden={label ? undefined : true}
-    >
-      <defs>
-        <linearGradient id={`sg${gid}`} x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity={0.28} />
-          <stop offset="100%" stopColor={color} stopOpacity={0} />
-        </linearGradient>
-      </defs>
-      <polygon points={area} fill={`url(#sg${gid})`} />
-      <polyline points={line} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
-    </svg>
+    <div className={cn('h-9 w-full', className)} role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
+      <ChartContainer config={config} className="aspect-auto h-full w-full" initialDimension={{ width: 240, height: 36 }}>
+        <LineChart data={rows} margin={{ top: 3, right: 2, bottom: 3, left: 2 }} accessibilityLayer={false}>
+          <YAxis hide domain={['dataMin', 'dataMax']} />
+          <Line dataKey="v" type="linear" stroke="var(--color-v)" strokeWidth={1.75} dot={false} isAnimationActive={false} />
+        </LineChart>
+      </ChartContainer>
+    </div>
   )
 }
 
-/**
- * Health dot with its reason in a tooltip. Red and amber also get an icon so
- * colour is never the only signal (the dot's label carries the words).
- */
+/** 6 px status dot with its reason in a tooltip; the label carries the words. */
 export function HealthDot({ level, reason }: { level: HealthLevel; reason: string }) {
-  const color = HEALTH_VAR[level]
+  const h = HEALTH[level]
   return (
-    <span className="inline-flex shrink-0 items-center gap-1">
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <span
-              role="img"
-              aria-label={`${level === 'idle' ? 'no data' : level}: ${reason}`}
-              tabIndex={0}
-              className="inline-block size-[7px] shrink-0 cursor-help rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              style={{ background: color, boxShadow: level === 'idle' ? 'none' : `0 0 8px ${color}` }}
-            />
-          }
-        />
-        <TooltipContent>{reason}</TooltipContent>
-      </Tooltip>
-      {level === 'red' && <CircleAlert className="size-3 text-red" aria-hidden />}
-      {level === 'amber' && <TriangleAlert className="size-3 text-amber" aria-hidden />}
-    </span>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            role="img"
+            aria-label={`${h.word}: ${reason}`}
+            tabIndex={0}
+            className="inline-block size-1.5 shrink-0 cursor-help rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            style={{ background: h.color }}
+          />
+        }
+      />
+      <TooltipContent>{reason}</TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -130,9 +116,9 @@ export function SrOnly({ children, ...props }: { children: ReactNode } & HTMLAtt
 
 export function SectionTitle({ title, children }: { title: string; children?: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-3 px-[18px] pt-[18px] pb-2">
-      <h2 className="text-[15px] font-semibold text-fg">{title}</h2>
-      {children && <div className="flex items-center gap-2 text-[11px] text-fg-46">{children}</div>}
+    <div className="flex items-center justify-between gap-3 px-5 pt-5 pb-3">
+      <h2 className="text-sm font-medium text-foreground">{title}</h2>
+      {children && <div className="flex items-center gap-2 text-xs text-muted-foreground">{children}</div>}
     </div>
   )
 }
@@ -140,8 +126,8 @@ export function SectionTitle({ title, children }: { title: string; children?: Re
 /** Muted single line for a tile/card whose source is not connected. */
 export function NotConnected({ children = 'Instantly not connected — set INSTANTLY_API_KEY', className }: { children?: ReactNode; className?: string }) {
   return (
-    <p className={cn('flex items-center gap-2 text-[11px] leading-snug text-fg-46', className)}>
-      <span className="inline-block size-[6px] shrink-0 rounded-full bg-fg-24" aria-hidden />
+    <p className={cn('flex items-center gap-2 text-xs leading-snug text-muted-foreground', className)}>
+      <span className="inline-block size-1.5 shrink-0 rounded-full bg-white/35" aria-hidden />
       {children}
     </p>
   )
@@ -150,15 +136,15 @@ export function NotConnected({ children = 'Instantly not connected — set INSTA
 /** Empty state: one line + one action. */
 export function EmptyLine({ text, action }: { text: string; action?: { label: string; href: string; external?: boolean } }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 px-[18px] py-6 text-[13px] text-fg-46">
+    <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-6 text-sm text-muted-foreground">
       <span>{text}</span>
       {action &&
         (action.external ? (
-          <a href={action.href} target="_blank" rel="noreferrer" className="text-[12px] text-violet-soft hover:text-fg">
+          <a href={action.href} target="_blank" rel="noreferrer" className="text-xs text-violet-soft hover:underline">
             {action.label} ↗
           </a>
         ) : (
-          <Link href={action.href} className="text-[12px] text-violet-soft hover:text-fg">
+          <Link href={action.href} className="text-xs text-violet-soft hover:underline">
             {action.label} →
           </Link>
         ))}
@@ -166,6 +152,7 @@ export function EmptyLine({ text, action }: { text: string; action?: { label: st
   )
 }
 
+/** Loading placeholder (shadcn Skeleton). `anim-shimmer` stays as a stable hook for tests. */
 export function ShimmerBar({ className }: { className?: string }) {
-  return <div className={cn('anim-shimmer h-4', className)} aria-hidden />
+  return <Skeleton className={cn('anim-shimmer h-4', className)} aria-hidden />
 }

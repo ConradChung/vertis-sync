@@ -3,17 +3,23 @@
 import { useEffect, useRef, useState } from 'react'
 import { useReducedMotion } from 'motion/react'
 import { AnimatedList } from '@/components/ui/animated-list'
-import { BorderBeam } from '@/components/ui/border-beam'
+import Link from 'next/link'
+import { ArrowUpRight, Inbox } from 'lucide-react'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { GlassCard } from '@/components/ui/glass-card'
-import { EmptyLine, SectionTitle, ShimmerBar, SrOnly, useNow } from '@/components/overview/parts'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { SectionTitle, ShimmerBar, SrOnly, useNow } from '@/components/overview/parts'
 import { timeAgo } from '@/lib/overview/compute'
 import type { EventRow, Json } from '@/lib/db/types'
 import { cn } from '@/lib/utils'
 
-const KIND: Record<string, { label: string; color: string; chip: string }> = {
-  reply: { label: 'Reply', color: '#22c55e', chip: 'bg-green/15 text-[#86efac]' },
-  interested: { label: 'Interested', color: '#06b6d4', chip: 'bg-cyan/15 text-[#67e8f9]' },
-  bounce: { label: 'Bounce', color: '#f43f5e', chip: 'bg-red/15 text-[#fda4af]' },
+/** Replies and interested leads are signal (lime); bounces are destructive. */
+const KIND: Record<string, { label: string; chip: string }> = {
+  reply: { label: 'Reply', chip: 'bg-lime/10 text-lime' },
+  interested: { label: 'Interested', chip: 'bg-lime/10 text-lime' },
+  bounce: { label: 'Bounce', chip: 'bg-destructive/15 text-destructive' },
 }
 
 const str = (v: Json | undefined): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null)
@@ -48,27 +54,31 @@ function FeedItem({ ev, campaignName, now }: { ev: EventRow; campaignName: strin
   const href = uniboxHref(ev)
   const text = snippet(ev.payload)
   return (
-    <article className="flex w-full gap-3 border-b border-white/8 py-[15px] last:border-b-0">
-      <div className="grid size-[34px] flex-none place-items-center rounded-[11px] text-[11px] font-bold text-white" style={{ background: kind.color }} aria-hidden>
-        {initials(ev.lead_email)}
-      </div>
+    <article className="flex w-full gap-3 border-b border-border py-4 last:border-b-0">
+      <Avatar className="size-8 rounded-lg after:rounded-lg" aria-hidden>
+        <AvatarFallback className="rounded-lg bg-white/10 font-mono text-[11px] font-medium text-foreground">{initials(ev.lead_email)}</AvatarFallback>
+      </Avatar>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-[13px] font-semibold text-fg">{ev.lead_email ?? 'Unknown lead'}</span>
-            <span className={cn('shrink-0 rounded-[5px] px-[7px] py-[3px] text-[10px]', kind.chip)}>{kind.label}</span>
+            <span className="truncate font-mono text-sm text-foreground">{ev.lead_email ?? 'Unknown lead'}</span>
+            <Badge className={cn('rounded-md', kind.chip)}>{kind.label}</Badge>
           </div>
-          <time dateTime={ev.created_at} className="shrink-0 font-mono text-[10px] whitespace-nowrap text-fg-24" suppressHydrationWarning>
+          <time dateTime={ev.created_at} className="shrink-0 font-mono text-xs whitespace-nowrap text-white/25 tabular-nums" suppressHydrationWarning>
             {timeAgo(ev.created_at, now)}
           </time>
         </div>
-        <div className="mt-[2px] text-[11px] text-fg-46">{ev.title}</div>
-        {text && <p className="mt-2 mb-[7px] line-clamp-2 text-[13px] leading-[1.4] text-fg-70">{text}</p>}
+        <div className="mt-0.5 text-xs text-muted-foreground">{ev.title}</div>
+        {text && <p className="mt-2 line-clamp-2 text-sm leading-snug text-white/70">{text}</p>}
         <div className="mt-2 flex items-center gap-2">
-          {campaignName && <span className="max-w-[60%] truncate rounded-[5px] bg-accent px-[7px] py-[3px] text-[10px] text-violet-soft">{campaignName}</span>}
+          {campaignName && (
+            <Badge variant="outline" className="max-w-[60%] rounded-md font-normal text-muted-foreground">
+              <span className="truncate">{campaignName}</span>
+            </Badge>
+          )}
           {href && (
-            <a href={href} target="_blank" rel="noreferrer" className="ml-auto text-[11px] text-fg-46 hover:text-fg">
-              Open ↗
+            <a href={href} target="_blank" rel="noreferrer" className="ml-auto inline-flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground">
+              Open <ArrowUpRight size={14} strokeWidth={1.75} aria-hidden />
             </a>
           )}
         </div>
@@ -116,28 +126,45 @@ export function ReplyFeed({ events, campaignNames }: { events: EventRow[]; campa
 
   return (
     <GlassCard className="gap-0 py-0" aria-label="Live reply feed">
-      {!reduce && <BorderBeam size={90} duration={9} colorFrom="#8b5cf6" colorTo="#22c55e" />}
       <SrOnly role="status" aria-live="polite">
         {announcement}
       </SrOnly>
       <SectionTitle title="Live reply feed">
         <span className="flex items-center gap-1.5">
-          <span className="inline-block size-[6px] rounded-full bg-green shadow-[0_0_8px_var(--green)]" aria-hidden />
+          <span className="relative inline-flex size-1.5" aria-hidden>
+            <span className="absolute inline-flex size-full animate-ping rounded-full bg-lime opacity-60 motion-reduce:hidden" />
+            <span className="relative inline-flex size-1.5 rounded-full bg-lime" />
+          </span>
           Replies · interested · bounces
         </span>
       </SectionTitle>
       {events.length === 0 ? (
-        <EmptyLine text="No replies yet — they stream in as Instantly webhooks fire." action={{ label: 'Campaigns', href: '/campaigns' }} />
+        <Empty className="py-10">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Inbox size={16} strokeWidth={1.75} />
+            </EmptyMedia>
+            <EmptyTitle className="text-sm font-medium">No replies yet</EmptyTitle>
+            <EmptyDescription>They stream in as Instantly webhooks fire.</EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Link href="/campaigns" className="text-xs text-violet-soft hover:underline">
+              Campaigns →
+            </Link>
+          </EmptyContent>
+        </Empty>
       ) : (
-        <div className="px-[18px] pb-[10px]">
-          {reduce ? (
-            <div className="flex flex-col">{[...items].reverse()}</div>
-          ) : (
-            <AnimatedList delay={90} className="gap-0">
-              {items}
-            </AnimatedList>
-          )}
-        </div>
+        <ScrollArea className="[&_[data-slot=scroll-area-viewport]]:max-h-[560px]">
+          <div className="px-5 pb-2">
+            {reduce ? (
+              <div className="flex flex-col">{[...items].reverse()}</div>
+            ) : (
+              <AnimatedList delay={90} className="gap-0">
+                {items}
+              </AnimatedList>
+            )}
+          </div>
+        </ScrollArea>
       )}
     </GlassCard>
   )
@@ -147,10 +174,10 @@ export function FeedSkeleton() {
   return (
     <GlassCard className="gap-0 py-0" aria-hidden>
       <SectionTitle title="Live reply feed" />
-      <div className="space-y-5 px-[18px] pt-2 pb-6">
+      <div className="space-y-5 px-5 pt-2 pb-6">
         {[0, 1, 2, 3].map((i) => (
           <div key={i} className="flex gap-3">
-            <ShimmerBar className="size-[34px] rounded-[11px]" />
+            <ShimmerBar className="size-8 rounded-lg" />
             <div className="flex-1 space-y-2">
               <ShimmerBar className="h-3 w-1/3" />
               <ShimmerBar className="h-3 w-4/5" />

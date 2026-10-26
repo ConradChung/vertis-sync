@@ -6,12 +6,12 @@
 
 /* ------------------------------------------------------------------ */
 /* Tokens → Tailwind                                                   */
-/* Lume is dark-only. Raw values live on :root; this block exposes them */
-/* as utilities: bg-panel, text-violet, text-fg-46, font-mono,          */
-/* rounded-panel, border-line, and the shadcn semantic set.             */
+/* Lume is dark-only: pure black canvas, four brand colours (black,     */
+/* white, violet, lime) plus one destructive red. Neutrals are white at */
+/* alpha — no grey ramp, no gradients, no glass, no shadows.            */
 /* ------------------------------------------------------------------ */
 @theme inline {
-  /* shadcn semantic palette (mapped onto Lume values in :root) */
+  /* shadcn semantic palette */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -44,31 +44,39 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  /* Lume palette (DESIGN.md) */
+  /* Brand */
+  --color-black: var(--black);
+  --color-white: var(--white);
+  --color-violet: var(--violet);
+  --color-brand: var(--violet);
+  --color-lime: var(--lime);
+
+  /* Legacy Lume names, remapped onto the four-colour palette so pages that
+     still use them stay on-brand until they are restyled:
+       green → lime (positive/live) · amber → violet (needs you)
+       cyan → white/70 (neutral)    · red → destructive */
   --color-bg: var(--bg);
   --color-panel: var(--panel);
   --color-surface: var(--surface);
   --color-line: var(--line);
-  --color-violet: var(--violet);
-  --color-brand: var(--violet); /* solid brand violet; `accent` is the hover tint */
   --color-violet-soft: var(--violet-soft);
   --color-green: var(--green);
   --color-amber: var(--amber);
   --color-red: var(--red);
   --color-cyan: var(--cyan);
 
-  /* Text: white at 100 / 70 / 46 / 24 % */
+  /* Text: white at 100 / 70 / 55 / 25 % */
   --color-fg: var(--fg);
   --color-fg-70: var(--fg-70);
   --color-fg-46: var(--fg-46);
   --color-fg-24: var(--fg-24);
 
   /* Type */
-  --font-sans: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SF Mono", monospace;
+  --font-sans: var(--font-geist-sans), "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", monospace;
   --font-heading: var(--font-sans);
 
-  /* Radius: 10 px controls, 16–20 px panels (shadcn scale derives from --radius) */
+  /* Radius: one scale from --radius (0.5rem) */
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -77,8 +85,8 @@
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
   --radius-control: var(--radius);
-  --radius-panel: var(--radius-panel);
-  --radius-panel-lg: var(--radius-panel-lg);
+  --radius-panel: var(--radius);
+  --radius-panel-lg: var(--radius);
 
   /* Motion */
   --ease-glass: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -94,68 +102,66 @@
 :root {
   color-scheme: dark;
 
-  /* Lume */
-  --bg: #070711;
-  --panel: rgba(20, 19, 35, 0.76);
-  --surface: rgba(15, 15, 25, 0.94);
-  --line: rgba(255, 255, 255, 0.1);
-  --violet: #8b5cf6;
-  --violet-soft: #c4b5fd;
-  --green: #22c55e;
-  --amber: #f59e0b;
-  --red: #f43f5e;
-  --cyan: #06b6d4;
+  /* Brand */
+  --black: #000000;
+  --white: #ffffff;
+  --violet: #7d39eb;
+  --lime: #c6ff33;
+
+  /* Neutrals: white at alpha over black */
   --fg: #ffffff;
   --fg-70: rgba(255, 255, 255, 0.7);
-  --fg-46: rgba(255, 255, 255, 0.46);
-  --fg-24: rgba(255, 255, 255, 0.24);
+  --fg-46: rgba(255, 255, 255, 0.55); /* muted */
+  --fg-24: rgba(255, 255, 255, 0.25); /* faint / dividers */
+  --fg-35: rgba(255, 255, 255, 0.35); /* disabled / manual / idle */
+  --line: rgba(255, 255, 255, 0.1);
 
-  --radius: 10px;
-  --radius-panel: 16px;
-  --radius-panel-lg: 20px;
-  --topbar-h: 76px;
+  /* Legacy names → palette */
+  --bg: var(--black);
+  --panel: var(--black);
+  /* rgba(255,255,255,.04) on black, as an opaque colour so sticky headers hide rows. */
+  --surface: #0a0a0a;
+  /* Violet text tint for small links on black (same hue, legible at 11 px). */
+  --violet-soft: color-mix(in oklab, var(--violet) 62%, var(--white));
+  --green: var(--lime);
+  --amber: var(--violet);
+  --cyan: rgba(255, 255, 255, 0.7);
+  --red: var(--destructive);
 
-  /* Liquid Glass */
-  --lg-fill: rgba(24, 22, 44, 0.38);
-  --lg-blur: 18px;
-  --lg-saturate: 1.8;
-  --lg-rim-hi: rgba(255, 255, 255, 0.42);
-  --lg-rim-mid: rgba(255, 255, 255, 0.16);
-  --lg-rim-lo: rgba(255, 255, 255, 0.07);
-  --lg-glow-color: rgba(255, 255, 255, 0.13);
+  --radius: 0.5rem;
+  --topbar-h: 56px;
 
-  /* shadcn semantic → Lume */
-  --background: var(--bg);
-  --foreground: var(--fg);
-  --card: var(--panel);
-  --card-foreground: var(--fg);
-  --popover: rgba(20, 19, 35, 0.97);
-  --popover-foreground: var(--fg);
-  --primary: var(--violet);
-  --primary-foreground: #ffffff;
-  --secondary: rgba(255, 255, 255, 0.06);
-  --secondary-foreground: rgba(255, 255, 255, 0.75);
-  --muted: rgba(255, 255, 255, 0.06);
-  --muted-foreground: var(--fg-46);
-  /* accent = the hover/selected tint (prototype's rgba(139,92,246,.16)); brand violet is `primary` / `violet` */
-  --accent: rgba(139, 92, 246, 0.16);
-  --accent-foreground: #ddd0ff;
-  --destructive: var(--red);
-  --border: var(--line);
-  --input: rgba(255, 255, 255, 0.12);
-  --ring: rgba(139, 92, 246, 0.6);
+  /* shadcn semantic */
+  --background: var(--black);
+  --foreground: var(--white);
+  --card: var(--black);
+  --card-foreground: var(--white);
+  --popover: var(--black);
+  --popover-foreground: var(--white);
+  --primary: var(--white);
+  --primary-foreground: var(--black);
+  --secondary: rgba(255, 255, 255, 0.05);
+  --secondary-foreground: var(--white);
+  --muted: rgba(255, 255, 255, 0.04);
+  --muted-foreground: rgba(255, 255, 255, 0.55);
+  --accent: rgba(255, 255, 255, 0.04);
+  --accent-foreground: var(--white);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.15);
+  --ring: var(--violet);
   --chart-1: var(--violet);
-  --chart-2: var(--green);
-  --chart-3: var(--amber);
-  --chart-4: var(--cyan);
-  --chart-5: var(--red);
-  --sidebar: var(--panel);
-  --sidebar-foreground: var(--fg);
+  --chart-2: var(--lime);
+  --chart-3: var(--white);
+  --chart-4: rgba(255, 255, 255, 0.4);
+  --chart-5: var(--destructive);
+  --sidebar: var(--black);
+  --sidebar-foreground: var(--white);
   --sidebar-primary: var(--violet);
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: var(--accent);
-  --sidebar-accent-foreground: var(--accent-foreground);
-  --sidebar-border: var(--line);
+  --sidebar-primary-foreground: var(--white);
+  --sidebar-accent: rgba(255, 255, 255, 0.04);
+  --sidebar-accent-foreground: var(--white);
+  --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
 }
 
@@ -172,12 +178,13 @@
   }
   body {
     @apply bg-background text-foreground;
+    background-color: #000;
     min-height: 100dvh;
     font-size: 14px;
     text-rendering: optimizeLegibility;
   }
   ::selection {
-    background: rgba(139, 92, 246, 0.35);
+    background: color-mix(in oklab, var(--violet) 45%, transparent);
   }
 }
 
@@ -185,155 +192,44 @@
 /* Recipes                                                             */
 /* ------------------------------------------------------------------ */
 @layer components {
-  /* ---------------------------------------------------------------- */
-  /* Liquid Glass — the navigation / control layer material.           */
-  /* Layers (back → front), all on one element, no pseudo-elements:     */
-  /*   backdrop  lensing (SVG displacement, Chromium) + blur + saturate */
-  /*   fill      base tint (--lg-fill) + adaptive tint (--lg-tint)      */
-  /*   specular  top-lit sheen + gradient rim (border-box) + inset edge */
-  /*   glow      internal radial glow that blooms on hover / press      */
-  /*   shadow    soft drop shadow that deepens with elevation           */
-  /* Variants: regular (default) · .lg-clear (rich media only, dims    */
-  /* what is behind it) · .lg-tint (primary actions only).             */
-  /* Content (cards, tables) uses .surface-card instead — never glass.  */
-  /* `.glass` is kept as an alias for floating panels (login, sheets).  */
-  /* ---------------------------------------------------------------- */
+  /* Flat panels. `.glass` / `.liquid-glass` / `.surface-card` are kept as
+     names so older call sites render as plain flat cards. */
   .liquid-glass,
   .glass,
-  .topbar {
-    --lg-tint: transparent;
-    background:
-      radial-gradient(circle at var(--lg-x, 50%) var(--lg-y, 0%), var(--lg-glow-color) 0%, transparent var(--lg-glow-r)) padding-box,
-      linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.025) 38%, transparent 62%, rgba(255, 255, 255, 0.035)) padding-box,
-      linear-gradient(var(--lg-tint), var(--lg-tint)) padding-box,
-      linear-gradient(var(--lg-fill), var(--lg-fill)) padding-box,
-      linear-gradient(155deg, var(--lg-rim-hi), var(--lg-rim-lo) 32%, var(--lg-rim-lo) 68%, var(--lg-rim-mid)) border-box;
-    border: 1px solid transparent;
-    -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate));
-    backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate));
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.2),
-      inset 0 -1px 0 rgba(255, 255, 255, 0.04),
-      0 12px 32px -12px rgba(0, 0, 0, var(--lg-shadow-a)),
-      0 2px 8px -2px rgba(0, 0, 0, calc(var(--lg-shadow-a) * 0.6));
-    transition:
-      transform 0.45s var(--ease-glass),
-      box-shadow 0.35s var(--ease-glass),
-      --lg-glow-r 0.5s var(--ease-glass),
-      --lg-shadow-a 0.35s var(--ease-glass);
-  }
-
-  /* Larger surfaces simulate thicker glass: deeper shadow, richer blur. */
-  .topbar,
-  .lg-thick {
-    --lg-blur: 26px;
-    --lg-shadow-a: 0.5;
-  }
-
-  /* Clear: permanently more transparent, no frosting. Only over rich media,
-     with bold/bright content on top. The backdrop brightness() is the
-     localized dimming layer the variant requires; pair with .lg-scrim on
-     the media for wider footprints. */
-  .lg-clear {
-    --lg-fill: rgba(8, 8, 18, 0.1);
-    --lg-blur: 5px;
-    --lg-saturate: 1.35;
-    -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(0.68);
-    backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(0.68);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
-  }
-  .lg-scrim {
-    background-image: linear-gradient(180deg, rgba(4, 4, 12, 0.18), rgba(4, 4, 12, 0.5));
-  }
-
-  /* Tint: primary actions only. Adaptive-ish: violet mixed into the glass
-     so the backdrop still reads through. White text ≥ 7:1 on the mix. */
-  .lg-tint {
-    --lg-tint: color-mix(in oklab, var(--violet) 62%, transparent);
-    --lg-rim-hi: rgba(221, 208, 255, 0.6);
-    --lg-glow-color: rgba(221, 208, 255, 0.3);
-    color: #fff;
-  }
-
-  /* Controls (buttons, segmented controls): blur only — lensing a 32 px
-     element is invisible and costs a filter pass. */
-  .lg-control {
-    --lg-blur: 12px;
-    --lg-shadow-a: 0.28;
-    position: relative;
-  }
-
-  /* Interaction: the material flexes and glows from within. */
-  .lg-interactive:hover {
-    --lg-glow-r: 130%;
-    --lg-shadow-a: 0.55;
-  }
-  .lg-interactive:hover:not(:disabled):not([data-disabled]) {
-    transform: scale(1.025);
-  }
-  .lg-interactive:active:not(:disabled):not([data-disabled]) {
-    --lg-glow-r: 180%;
-    transform: scale(0.97);
-    transition-duration: 0.12s;
-  }
-
-  /* Content surface — calm, quiet, no backdrop sampling. Cards & tables. */
   .surface-card {
-    background: linear-gradient(180deg, rgba(23, 21, 40, 0.78), rgba(15, 14, 27, 0.82));
-    border: 1px solid rgba(255, 255, 255, 0.075);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+    background: var(--card);
+    border: 1px solid var(--border);
   }
 
-  /* Reading surface — 94 % opaque for table contrast. */
+  /* Inset / secondary surface (tables). */
   .surface {
-    background: var(--surface);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-  }
-
-  /* Fixed top bar: floats as a rounded Liquid Glass plane (see the
-     unlayered geometry block below) over a scroll-edge dissolve. */
-  .topbar {
-    --lg-fill: rgba(10, 9, 22, 0.5);
-  }
-
-  /* Mesh-gradient backdrop (slow ~60 s drift). Sits behind everything. */
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: -1;
-    pointer-events: none;
-    background-color: var(--bg);
-    background-image:
-      radial-gradient(ellipse at 72% -5%, rgba(123, 78, 220, 0.42), transparent 35%),
-      radial-gradient(ellipse at 8% 74%, rgba(30, 92, 170, 0.34), transparent 42%),
-      linear-gradient(120deg, #080817, #17102a 48%, #060711);
-    background-size:
-      180% 180%,
-      180% 180%,
-      100% 100%;
-    animation: mesh-drift 60s ease-in-out infinite alternate;
+    background: var(--card);
+    border: 1px solid var(--border);
   }
 
   /* Page scaffold */
   .shell {
-    max-width: 1440px;
+    max-width: 80rem; /* max-w-7xl */
     margin: 0 auto;
-    padding: calc(var(--topbar-h) + 34px) 32px 60px;
+    padding: calc(var(--topbar-h) + 2rem) 1.5rem 2rem;
   }
   .brand {
-    font-size: 22px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
     font-weight: 600;
-    letter-spacing: -1px;
+    letter-spacing: -0.01em;
     line-height: 1;
     color: var(--fg);
     text-decoration: none;
   }
   .eyebrow {
     font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 1.5px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: var(--fg-46);
+    color: var(--muted-foreground);
   }
   .page-head {
     display: flex;
@@ -343,229 +239,22 @@
     margin-bottom: 24px;
   }
 
-  /* Orb (from the reference revision pass) */
-  .orb-button {
-    display: grid;
-    place-items: center;
-    width: 44px;
-    height: 44px;
-    padding: 0;
-    border: 0;
-    background: none;
-  }
-  .orb-placeholder {
-    width: 42px;
-    height: 42px;
-    border-radius: 50%;
-    background: radial-gradient(circle at 32% 26%, #c4b5fd, #8b5cf6 42%, #31206b 76%);
-    opacity: 0.6;
-  }
-  .orb-canvas {
-    position: relative;
-    display: grid;
-    place-items: center;
-    filter: drop-shadow(0 0 15px rgba(139, 92, 246, 0.48));
-    animation: orb-breathe 4s ease-in-out infinite;
-  }
-  .orb-canvas canvas {
-    width: 100% !important;
-    height: 100% !important;
-  }
-  .orb-canvas.needs-approval {
-    filter: drop-shadow(0 0 15px rgba(245, 158, 11, 0.55));
-    animation: orb-bounce 2.4s ease-in-out infinite;
-  }
-  .orb-canvas.needs-approval::before {
-    content: "";
-    position: absolute;
-    inset: -6px;
-    border: 1px solid rgba(245, 158, 11, 0.75);
-    border-radius: 50%;
-  }
-  .orbit-ring {
-    position: absolute;
-    inset: -11px;
-    border: 1px solid rgba(139, 92, 246, 0.7);
-    border-radius: 50%;
-    transform: rotate(-18deg) skewX(-22deg);
-    animation: orbit-spin 2.8s linear infinite;
-  }
-
-  /* Feed / sheet motion hooks. Put these on items instead of raw keyframes so
-     reduced-motion can switch them all off in one place. */
+  /* Feed / sheet motion hooks. */
   .anim-feed {
     animation: feed-in 0.45s var(--ease-glass) both;
   }
   .anim-rise {
     animation: rise 0.25s var(--ease-glass) both;
   }
-  .anim-shimmer {
-    background: linear-gradient(90deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
-    background-size: 200% 100%;
-    animation: bar-shimmer 1.3s linear infinite;
-    border-radius: 5px;
-  }
 }
 
-/* Animatable Liquid Glass parameters (glow bloom + shadow depth). */
-@property --lg-glow-r {
-  syntax: "<percentage>";
-  inherits: false;
-  initial-value: 0%;
-}
-@property --lg-shadow-a {
-  syntax: "<number>";
-  inherits: false;
-  initial-value: 0.38;
-}
-
-/* Lensing. LiquidGlassDefs sets data-lg-lens on <html> only where SVG
-   filters work inside backdrop-filter (Chromium). Elsewhere the material
-   falls back to blur + saturate, which is the recipe above. */
-:root[data-lg-lens] :is(.liquid-glass, .glass, .topbar):not(.lg-control, .lg-clear) {
-  -webkit-backdrop-filter: url(#lume-lens) blur(calc(var(--lg-blur) * 0.7)) saturate(var(--lg-saturate));
-  backdrop-filter: url(#lume-lens) blur(calc(var(--lg-blur) * 0.7)) saturate(var(--lg-saturate));
-}
-
-/* Never glass on glass: anything glass nested in glass becomes a fill —
-   a thin overlay that reads as part of the parent material. */
-:is(.liquid-glass, .glass, .topbar) :is(.liquid-glass, .glass) {
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  --lg-fill: rgba(255, 255, 255, 0.06);
-  --lg-shadow-a: 0;
-}
-
-/* Floating top bar geometry. Unlayered so it can inset the bar that
-   TopBar.tsx positions with utilities, without touching its markup. */
-.topbar {
-  top: 10px;
-  left: 12px;
-  right: 12px;
-  height: calc(var(--topbar-h) - 14px);
-  border-radius: 20px;
-}
-
-/* Scroll edge effect: content dissolves into the backdrop as it passes
-   under the floating bar, lifting the glass above it. */
-.shell::before {
-  content: "";
-  position: fixed;
-  inset: 0 0 auto;
-  height: calc(var(--topbar-h) + 26px);
-  z-index: 10;
-  pointer-events: none;
-  background: linear-gradient(180deg, rgba(7, 7, 17, 0.82), rgba(7, 7, 17, 0.45) 55%, transparent);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent);
-  mask-image: linear-gradient(180deg, #000 55%, transparent);
-}
-/* Where scroll-driven animations exist, the edge (and the bar's shadow)
-   only appear once content is actually underneath. */
-@supports (animation-timeline: scroll()) {
-  .shell::before {
-    animation: lg-edge-in linear both;
-    animation-timeline: scroll(root);
-    animation-range: 0 90px;
-  }
-  .topbar {
-    animation: lg-lift linear both;
-    animation-timeline: scroll(root);
-    animation-range: 0 120px;
-  }
-}
-
-/* No backdrop-filter at all: frosted solids. */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .liquid-glass,
-  .glass {
-    --lg-fill: rgba(20, 19, 35, 0.94);
-  }
-  .topbar {
-    --lg-fill: rgba(8, 7, 17, 0.96);
-  }
-  .lg-clear {
-    --lg-fill: rgba(8, 8, 18, 0.72);
-  }
-}
-
-/* Reduce transparency: solid, opaque material. Shape, rim and shadow stay. */
-@media (prefers-reduced-transparency: reduce) {
-  .liquid-glass,
-  .glass,
-  .topbar,
-  .lg-clear,
-  .shell::before {
-    -webkit-backdrop-filter: none !important;
-    backdrop-filter: none !important;
-  }
-  .liquid-glass,
-  .glass,
-  .lg-clear {
-    --lg-fill: #16142a;
-  }
-  .topbar {
-    --lg-fill: #0d0c1c;
-  }
-  .lg-tint {
-    --lg-tint: #5b3cc4;
-  }
-  .surface-card {
-    background: #12111f;
-  }
-  .shell::before {
-    background: linear-gradient(180deg, #070711 60%, transparent);
-  }
-  .backdrop {
-    background-image: linear-gradient(120deg, #080817, #120d22 48%, #060711);
-  }
-}
-
-/* Increased contrast: predominantly solid, with a contrasting border. */
-@media (prefers-contrast: more) {
-  .liquid-glass,
-  .glass,
-  .topbar,
-  .lg-clear {
-    --lg-fill: #0b0a16;
-    --lg-rim-hi: rgba(255, 255, 255, 0.85);
-    --lg-rim-mid: rgba(255, 255, 255, 0.85);
-    --lg-rim-lo: rgba(255, 255, 255, 0.85);
-    -webkit-backdrop-filter: none !important;
-    backdrop-filter: none !important;
-    text-shadow: none;
-  }
-  .lg-tint {
-    --lg-tint: #4c2fb0;
-  }
-  .surface-card,
-  .surface {
-    background: #0b0a16;
-    border-color: rgba(255, 255, 255, 0.6);
-  }
-}
-
-/* Reduced motion. Lume's own animations are switched off outright; the
-   catch-all below collapses anything else (tw-animate, third-party, future
-   components) to a single near-instant frame. JS motion is handled by
-   <MotionConfig reducedMotion="user"> in app/layout.tsx. */
+/* Reduced motion: switch Lume animations off; collapse anything else. JS
+   motion is handled by <MotionConfig reducedMotion="user"> in app/layout.tsx. */
 @media (prefers-reduced-motion: reduce) {
-  .backdrop,
-  .orb-canvas,
-  .orb-canvas.needs-approval,
-  .orbit-ring,
   .anim-feed,
   .anim-rise,
-  .anim-shimmer,
-  .shell::before,
-  .topbar {
+  .anim-shimmer {
     animation: none !important;
-  }
-  .lg-interactive,
-  .lg-interactive:hover,
-  .lg-interactive:active {
-    transform: none !important;
   }
   *,
   *::before,
@@ -577,25 +266,12 @@
 }
 
 /* Responsive shell */
-@media (max-width: 1000px) {
-  .shell {
-    padding: calc(var(--topbar-h) + 24px) 18px 48px;
-  }
-}
 @media (max-width: 640px) {
   :root {
-    --topbar-h: 108px;
+    --topbar-h: 96px;
   }
-  .topbar {
-    flex-wrap: wrap;
-    height: auto;
-    min-height: 64px;
-    padding: 12px 14px;
-  }
-  .topbar .nav {
-    order: 3;
-    flex-basis: 100%;
-    overflow: auto;
+  .shell {
+    padding: calc(var(--topbar-h) + 1.5rem) 1rem 2rem;
   }
   .page-head {
     flex-direction: column;
@@ -605,43 +281,6 @@
 }
 
 /* Keyframes */
-@keyframes mesh-drift {
-  from {
-    background-position:
-      0% 0%,
-      100% 100%,
-      0 0;
-  }
-  to {
-    background-position:
-      100% 10%,
-      0% 80%,
-      0 0;
-  }
-}
-@keyframes orb-breathe {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.06);
-  }
-}
-@keyframes orb-bounce {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-4px);
-  }
-}
-@keyframes orbit-spin {
-  to {
-    transform: rotate(342deg) skewX(-22deg);
-  }
-}
 @keyframes feed-in {
   from {
     opacity: 0;
@@ -665,21 +304,5 @@
 @keyframes bar-shimmer {
   to {
     background-position: -200% 0;
-  }
-}
-@keyframes lg-edge-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-@keyframes lg-lift {
-  from {
-    --lg-shadow-a: 0.3;
-  }
-  to {
-    --lg-shadow-a: 0.7;
   }
 }

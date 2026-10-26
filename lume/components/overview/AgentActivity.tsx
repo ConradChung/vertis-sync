@@ -14,16 +14,16 @@ export function AgentActivity({ events }: { events: EventRow[] }) {
       {events.length === 0 ? (
         <EmptyLine text="No agent or Lume actions yet." action={{ label: 'Approvals', href: '/validate' }} />
       ) : (
-        <ul className="px-[18px] pb-3">
+        <ul className="px-5 pb-3">
           {events.slice(0, 8).map((ev) => (
-            <li key={ev.id} className="flex items-baseline gap-3 border-b border-white/6 py-[7px] font-mono text-[11px] last:border-b-0">
-              <time dateTime={ev.created_at} className="w-[52px] shrink-0 text-fg-24" suppressHydrationWarning>
+            <li key={ev.id} className="flex items-baseline gap-3 border-b border-border py-2 font-mono text-xs last:border-b-0">
+              <time dateTime={ev.created_at} className="w-[52px] shrink-0 text-white/25 tabular-nums" suppressHydrationWarning>
                 {timeAgo(ev.created_at, now)}
               </time>
-              <span className="min-w-0 flex-1 truncate text-fg-70" title={ev.title}>
+              <span className="min-w-0 flex-1 truncate text-white/70" title={ev.title}>
                 {ev.title}
               </span>
-              <span className="shrink-0 text-[10px] text-violet-soft">{ev.type}</span>
+              <span className="shrink-0 text-[11px] text-violet-soft">{ev.type}</span>
             </li>
           ))}
         </ul>

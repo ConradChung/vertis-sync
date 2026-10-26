@@ -1,6 +1,7 @@
 'use client'
 
 import { Clock } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { GlassCard } from '@/components/ui/glass-card'
 import { EmptyLine, SectionTitle, useNow } from '@/components/overview/parts'
 import { useMemo } from 'react'
@@ -41,19 +42,20 @@ export function NextRuns({ scheduled }: { scheduled: ScheduledJobWithNext[] }) {
       ) : (
         <ul>
           {jobs.map((j) => (
-            <li key={j.name} className="flex items-center gap-3 border-b border-white/8 px-[18px] py-[15px] last:border-b-0">
-              <div className="grid size-[30px] flex-none place-items-center rounded-[9px] bg-accent text-violet-soft" aria-hidden>
-                <Clock className="size-[15px]" />
-              </div>
-              <div className="min-w-0">
-                <div className="truncate text-[13px] font-medium text-fg">{j.name}</div>
-                <div className="truncate font-mono text-[10px] text-fg-46">
-                  {j.cron} · {RUNNER[j.runner] ?? j.runner}
-                  {j.next_run && ` · ${utcTime(j.next_run)}`}
-                  {j.last_status && j.last_status !== 'succeeded' && <span className="text-amber"> · last {j.last_status}</span>}
+            <li key={j.name} className="flex items-center gap-3 border-t border-border px-5 py-3">
+              <Clock size={16} strokeWidth={1.75} className="shrink-0 text-muted-foreground" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-foreground">{j.name}</div>
+                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                  <Badge variant="outline" className="rounded-md font-mono font-normal text-foreground">
+                    {j.cron}
+                  </Badge>
+                  <span className="truncate">{RUNNER[j.runner] ?? j.runner}</span>
+                  {j.next_run && <span className="font-mono tabular-nums">· {utcTime(j.next_run)}</span>}
+                  {j.last_status && j.last_status !== 'succeeded' && <span className="text-destructive">· last {j.last_status}</span>}
                 </div>
               </div>
-              <time dateTime={j.next_run ?? undefined} className="ml-auto shrink-0 font-mono text-[11px] text-violet-soft tabular-nums" suppressHydrationWarning>
+              <time dateTime={j.next_run ?? undefined} className="ml-auto shrink-0 font-mono text-sm text-foreground tabular-nums" suppressHydrationWarning>
                 {countdown(j.next_run, now)}
               </time>
             </li>
