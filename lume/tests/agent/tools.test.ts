@@ -48,6 +48,7 @@ describe('buildTools', () => {
       duplicate_campaign: { source_campaign_id: 'c1', name: 'copy' },
       delete_rule: { rule_id: JOB },
       run_apify_actor: { actor_id: 'compass/crawler-google-places', input: { q: 'roofers' }, inputs_confirmed_by_owner: true },
+      update_campaign_sequence: { campaign_id: 'c1', steps: [{ delay: 0, variants: [{ subject: 'Hi', body: 'Hello' }] }] },
     }
     const { fetch, createAction, tool } = setup()
     for (const [name, tier] of Object.entries(TOOL_TIERS)) {
@@ -190,6 +191,20 @@ describe('Apify and campaign-launch tools', () => {
     await t.run(t.inputSchema.parse({ actor_id: 'a/b', input: { q: 1 }, max_charge_usd: 5, inputs_confirmed_by_owner: true }))
     expect(prepare).toHaveBeenCalledWith({ kind: 'run_actor', payload: { actor_id: 'a/b', input: { q: 1 }, max_charge_usd: 5 } })
     expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('get_campaign_sequence reads the editor route; update_campaign_sequence files update_sequence with defaults filled', async () => {
+    const { tool, prepare, fetch } = setup()
+    fetch.mockResolvedValueOnce(json({ configured: true, steps: [] }))
+    await tool('get_campaign_sequence').run({ campaign_id: 'c1' })
+    expect(fetch.mock.calls[0][0]).toMatch(/\/api\/campaigns\/c1\/sequence\/edit$/)
+    const t = tool('update_campaign_sequence')
+    expect(t.tier).toBe('high')
+    await t.run(t.inputSchema.parse({ campaign_id: 'c1', steps: [{ delay: 0, variants: [{ subject: 'Hi', body: 'Hello', disabled: false }] }] }))
+    expect(prepare).toHaveBeenCalledWith({
+      kind: 'update_sequence',
+      payload: { campaign_id: 'c1', steps: [{ delay: 0, delay_unit: 'days', variants: [{ subject: 'Hi', body: 'Hello' }] }] },
+    })
   })
 
   it('import_actor_run stages a finished run through /api/import/apify, and waits on a running one', async () => {

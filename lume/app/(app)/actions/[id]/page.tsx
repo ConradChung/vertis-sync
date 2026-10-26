@@ -6,6 +6,7 @@ import { getAction } from '@/lib/actions/store'
 import { requireOwner } from '@/lib/auth/guards'
 import { uuidParam } from '@/lib/http/json'
 import type { Json } from '@/lib/db/types'
+import { diffSequences, type EditStep } from '@/lib/campaigns/sequence'
 
 export const metadata: Metadata = { title: 'Confirm action' }
 export const dynamic = 'force-dynamic'
@@ -43,6 +44,19 @@ function runActorDetails(payload: Record<string, Json>, result: Record<string, J
   return out
 }
 
+/** A sequence edit: which campaign, how many steps, and the outcome once written. */
+function sequenceDetails(payload: Record<string, Json>, result: Record<string, Json> | null): [string, string][] {
+  const out: [string, string][] = [['campaign', `${payload.campaign_name ?? payload.campaign_id ?? '—'}`]]
+  const before = Array.isArray(payload.before) ? payload.before.length : 0
+  const after = Array.isArray(payload.after) ? payload.after.length : 0
+  out.push(['steps', `${before} → ${after}`])
+  out.push(['safety', 'Lume re-reads the live sequence before writing; if it changed in Instantly since this edit, nothing is written.'])
+  if (result && typeof result.steps === 'number') out.push(['written', `${result.steps} steps saved to Instantly`])
+  return out
+}
+
+const asSteps = (v: Json | undefined): EditStep[] => (Array.isArray(v) ? (v as unknown as EditStep[]) : [])
+
 /** Payload fields worth showing; the lead list and reply body are summarised. */
 function details(payload: Record<string, Json>): [string, string][] {
   const out: [string, string][] = []
@@ -72,7 +86,13 @@ export default async function ActionPage({ params }: { params: Promise<{ id: str
     id: row.id,
     kind: row.kind,
     summary: typeof row.payload?.summary === 'string' ? row.payload.summary : row.kind,
-    details: row.kind === 'run_actor' ? runActorDetails(row.payload ?? {}, (row.result as Record<string, Json> | null) ?? null) : details(row.payload),
+    details:
+      row.kind === 'run_actor'
+        ? runActorDetails(row.payload ?? {}, (row.result as Record<string, Json> | null) ?? null)
+        : row.kind === 'update_sequence'
+          ? sequenceDetails(row.payload ?? {}, (row.result as Record<string, Json> | null) ?? null)
+          : details(row.payload),
+    ...(row.kind === 'update_sequence' ? { sequenceDiff: diffSequences(asSteps(row.payload?.before), asSteps(row.payload?.after)) } : {}),
     requestedBy: row.requested_by,
     status: row.status,
     decidedVia: row.decided_via,

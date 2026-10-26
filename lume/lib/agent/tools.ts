@@ -247,6 +247,19 @@ const SPECS: Built[] = [
   ),
   tiered(
     {
+      name: 'get_campaign_sequence',
+      description:
+        "An Instantly campaign's full email sequence as plain text: every step (with its delay) and every variant's subject and body, " +
+        'plus any sequence edit already awaiting approval. Read it before drafting changes with update_campaign_sequence.',
+      inputSchema: z.object({ campaign_id: campaignId }),
+      run: async ({ campaign_id }, { call }) => ({
+        sequence: await call(`/api/campaigns/${encodeURIComponent(campaign_id)}/sequence/edit`),
+      }),
+    },
+    'read'
+  ),
+  tiered(
+    {
       name: 'list_rules',
       description: 'Rotation rules (lead bank to campaign on a cron), active or not, with next and last run.',
       inputSchema: z.object({}),
@@ -582,6 +595,46 @@ const SPECS: Built[] = [
         input: input as Json,
         ...(max_charge_usd !== undefined ? { max_charge_usd } : {}),
         ...(expected_items !== undefined ? { expected_items } : {}),
+      }),
+    },
+    'high'
+  ),
+  tiered(
+    {
+      name: 'update_campaign_sequence',
+      description:
+        "Replace an Instantly campaign's email sequence with an edited version. Pass the COMPLETE sequence (every step, " +
+        'in order, every variant) as plain text, starting from get_campaign_sequence; steps you leave out are removed. ' +
+        'Line breaks in body are kept. Variables like {{firstName}} pass through. The owner sees a before/after diff.',
+      inputSchema: z.object({
+        campaign_id: campaignId,
+        steps: z
+          .array(
+            z.object({
+              delay: z.number().min(0).max(527_040).describe('wait before this step; 0 for the first email'),
+              delay_unit: z.enum(['minutes', 'hours', 'days']).optional().describe('default days'),
+              variants: z
+                .array(
+                  z.object({
+                    subject: z.string().max(500).describe('empty on follow-ups = same thread'),
+                    body: z.string().min(1).max(20_000),
+                    disabled: z.boolean().optional(),
+                  })
+                )
+                .min(1)
+                .max(26),
+            })
+          )
+          .min(1)
+          .max(20),
+      }),
+      payload: ({ campaign_id, steps }) => ({
+        campaign_id,
+        steps: steps.map((st) => ({
+          delay: st.delay,
+          delay_unit: st.delay_unit ?? 'days',
+          variants: st.variants.map((v) => ({ subject: v.subject, body: v.body, ...(v.disabled ? { disabled: true } : {}) })),
+        })),
       }),
     },
     'high'

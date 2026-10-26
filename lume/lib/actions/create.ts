@@ -5,6 +5,7 @@ import { CAMPAIGN_ACTION_KEY, isCampaignActionKind, parseCampaignPayload } from 
 import { findAwaitingActionBy } from '@/lib/campaigns/service'
 import type { Json, PendingActionKind, PendingActionRow } from '@/lib/db/types'
 import { CRM_CLOSE_KIND, parseCrmClosePayload } from '@/lib/crm/actions'
+import { updateSequencePayloadError } from '@/lib/campaigns/sequenceAction'
 
 /**
  * Create a high-risk `pending_actions` row and ask for confirmation in
@@ -38,6 +39,9 @@ import { CRM_CLOSE_KIND, parseCrmClosePayload } from '@/lib/crm/actions'
  * `run_actor` (an Apify actor run): the snapshot from `buildActionRequest`
  * (validated input + capped options); one awaiting per `input_hash`, backed
  * by `pending_actions_one_awaiting_run_actor_idx`.
+ *
+ * `update_sequence` (edit a live campaign's emails): one awaiting edit per
+ * campaign, backed by `pending_actions_one_awaiting_sequence_idx`.
  *
  * Telegram unconfigured: the row is still created; the prompt is skipped
  * (the adapter logs it) and `telegram_message_id` stays null.
@@ -110,6 +114,10 @@ export async function createAction(
     const err = runActorPayloadError(payload)
     if (err) throw new InvalidActionPayloadError(err)
     campaignKey = { field: 'input_hash', value: String(payload.input_hash) }
+  } else if (kind === 'update_sequence') {
+    const err = updateSequencePayloadError(payload)
+    if (err) throw new InvalidActionPayloadError(err)
+    campaignKey = { field: 'campaign_id', value: String(payload.campaign_id) }
   }
   const rawJobId = payload.job_id
   if (rawJobId === undefined && JOB_KINDS.has(kind)) {

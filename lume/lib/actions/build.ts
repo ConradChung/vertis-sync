@@ -11,6 +11,7 @@ import { UUID_RE } from '@/lib/http/json'
 import { buildActivateRule, buildAssignLeads, rotateActionBody } from '@/lib/rules/actions'
 import { ACTOR_ID_RE, checkRunActor, runActorPayload } from '@/lib/apify/service'
 import { ACTOR_RUN_CAP_USD } from '@/lib/apify/pricing'
+import { buildUpdateSequence } from '@/lib/campaigns/sequenceAction'
 
 /**
  * Turn a requested action `{ kind, payload }` into the snapshot the owner
@@ -29,6 +30,8 @@ import { ACTOR_RUN_CAP_USD } from '@/lib/apify/pricing'
  *  run_actor          { actor_id, input, max_charge_usd?, expected_items? } →
  *                     lib/apify/service.ts: input validated against the
  *                     actor's schema, run options capped at $20, summary
+ *  update_sequence    { campaign_id, steps, base_hash? } → lib/campaigns/sequenceAction.ts:
+ *                     fresh Instantly read, stale check, diff, frozen PATCH body
  *  send_reply / pause_campaign / resume_campaign / create_campaign:
  *                     lib/actions/payloads.ts, with the display extras
  *                     written here (`withServerExtras`): the campaign name
@@ -66,13 +69,15 @@ const RunActorBody = z.object({
   }),
 })
 
+const UpdateSequenceBody = z.object({ kind: z.literal('update_sequence'), payload: z.record(z.string(), z.unknown()) })
+
 /** Shape check for `POST /api/actions`; `buildActionRequest` validates each payload fully. */
-export const ActionRequestBody = z.union([JobBody, rotateActionBody, OtherBody, RunActorBody, CampaignBody])
+export const ActionRequestBody = z.union([JobBody, rotateActionBody, OtherBody, RunActorBody, UpdateSequenceBody, CampaignBody])
 export type ActionRequest = z.infer<typeof ActionRequestBody>
 
 export type ActionBuild =
   | { ok: true; kind: PendingActionKind; payload: Record<string, Json> & { summary: string }; ruleId?: string }
-  | { ok: false; status: number; error: string }
+  | { ok: false; status: number; error: string; problems?: string[] }
 
 // Gate steps that need their own confirmation flow never ride on decide_gate.
 const NOT_VIA_DECIDE_GATE: ReadonlySet<string> = new Set(['push_go', 'camp_launch', 'lume_ok', 'lume_no'])
@@ -125,6 +130,10 @@ export async function buildActionRequest(input: unknown): Promise<ActionBuild> {
       const check = await checkRunActor({ ...r, input })
       if (!check.ok) return fail(check.status, check.error)
       return { ok: true, kind: req.kind, payload: runActorPayload({ ...r, input }, check.brief, check.plan) }
+    }
+    case 'update_sequence': {
+      const b = await buildUpdateSequence(req.payload, campaignName)
+      return b.ok ? { ok: true, kind: req.kind, payload: b.payload } : b
     }
     case 'push_to_instantly':
     case 'launch_campaign':

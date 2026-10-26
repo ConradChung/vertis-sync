@@ -11,6 +11,7 @@ import { AnalyticsChart } from '@/components/campaigns/AnalyticsChart'
 import { CampaignTable } from '@/components/campaigns/CampaignTable'
 import { FlowView } from '@/components/campaigns/FlowView'
 import { InboxPane } from '@/components/campaigns/InboxPane'
+import { SequenceEditor } from '@/components/campaigns/SequenceEditor'
 import { CrmWorkspace } from '@/components/crm/CrmWorkspace'
 import {
   requestCampaignAction,
@@ -22,7 +23,7 @@ import {
 import type { CampaignActionKind } from '@/lib/actions/payloads'
 import type { CampaignTableRow } from '@/lib/campaigns/types'
 
-type Tab = 'analytics' | 'flow' | 'inbox' | 'crm'
+type Tab = 'analytics' | 'flow' | 'sequence' | 'inbox' | 'crm'
 
 export function CampaignsScreen() {
   const table = useCampaignTable()
@@ -127,6 +128,7 @@ function CampaignDetail({ row }: { row: CampaignTableRow }) {
           <TabsList>
             <TabsTrigger value="analytics">Analytics</TabsTrigger>
             <TabsTrigger value="flow">Flow</TabsTrigger>
+            <TabsTrigger value="sequence">Sequence</TabsTrigger>
             <TabsTrigger value="inbox">Inbox</TabsTrigger>
             <TabsTrigger value="crm">CRM</TabsTrigger>
           </TabsList>
@@ -135,6 +137,9 @@ function CampaignDetail({ row }: { row: CampaignTableRow }) {
           </TabsContent>
           <TabsContent value="flow" className="pt-3">
             <FlowView data={flow.data} failed={!!flow.error} campaignName={row.name} onOpenInbox={openInbox} />
+          </TabsContent>
+          <TabsContent value="sequence" className="pt-3">
+            {tab === 'sequence' && <SequenceEditor campaignId={id} />}
           </TabsContent>
           <TabsContent value="inbox" className="pt-3">
             <InboxPane data={inbox.data} failed={!!inbox.error} campaignId={id} campaignName={row.name} />

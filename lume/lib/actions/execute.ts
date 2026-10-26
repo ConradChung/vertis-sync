@@ -12,6 +12,8 @@ import { actionLink } from '@/lib/adapters/telegram.messages'
 import { getPushJob, logEvent } from '@/lib/db/service'
 import { getDeal, setStage } from '@/lib/crm/service'
 import { startRun } from '@/lib/adapters/apify'
+import { getSequenceFresh, patchSequence } from '@/lib/adapters/instantlySequences'
+import type { InstantlyStep } from '@/lib/campaigns/sequence'
 import { checkRunActor, tightenOptions } from '@/lib/apify/service'
 import type { RunOptions } from '@/lib/apify/pricing'
 import type { Json, PendingActionRow } from '@/lib/db/types'
@@ -244,6 +246,28 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
       console_url: run.consoleUrl,
       options: options as unknown as Json,
     }
+  },
+
+  /**
+   * Replace a campaign's email sequence with the confirmed edit. Re-reads the
+   * live sequence first: if it is not the one the edit was made against
+   * (`before_hash`), nothing is written and the owner re-opens the editor.
+   */
+  async update_sequence(p) {
+    const campaignId = need(p, 'campaign_id')
+    const beforeHash = need(p, 'before_hash')
+    if (!Array.isArray(p.steps) || !p.steps.length) throw new ActionFailure('payload.steps is missing')
+    const current = await getSequenceFresh(campaignId)
+    if (current.hash !== beforeHash) {
+      throw new ActionFailure('Sequence changed in Instantly since this edit was filed. Re-open the editor and make the edit again.', {
+        campaign_id: campaignId,
+        stale: true,
+        current_hash: current.hash,
+      })
+    }
+    await patchSequence(campaignId, p.steps as unknown as InstantlyStep[])
+    const after = await getSequenceFresh(campaignId).catch(() => null)
+    return { campaign_id: campaignId, steps: p.steps.length, after_hash: after?.hash ?? null }
   },
 
   async create_campaign(p) {

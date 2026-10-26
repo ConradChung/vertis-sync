@@ -176,6 +176,7 @@ export type PendingActionKind =
   | 'delete_rule'
   | 'crm_close_deal'
   | 'run_actor'
+  | 'update_sequence'
 
 export type PendingActionStatus =
   | 'awaiting'

@@ -17,10 +17,11 @@ export const TOOL_TIERS = {
   list_orders: 'read', get_validation_queue: 'read', list_campaigns: 'read', campaign_stats: 'read',
   list_rules: 'read', list_scheduled_jobs: 'read', inbox_health: 'read',
   search_apify_store: 'read', get_actor_input_schema: 'read', get_actor_run: 'read', rank_campaigns: 'read',
+  get_campaign_sequence: 'read',
   create_order: 'low', draft_reply: 'low', create_rotation_rule: 'low', notify: 'low', import_actor_run: 'low',
   decide_validation: 'high', assign_leads: 'high', activate_rule: 'high', send_reply: 'high',
   pause_campaign: 'high', resume_campaign: 'high', activate_campaign: 'high', duplicate_campaign: 'high', delete_rule: 'high',
-  run_apify_actor: 'high',
+  run_apify_actor: 'high', update_campaign_sequence: 'high',
 } as const satisfies Record<string, 'read' | 'low' | 'high'>
 
 export type ToolName = keyof typeof TOOL_TIERS
@@ -29,4 +30,5 @@ export const HIGH_RISK_KIND: Record<string, PendingKind> = {
   decide_validation: 'decide_gate', assign_leads: 'assign_leads', activate_rule: 'activate_rule', send_reply: 'send_reply',
   pause_campaign: 'pause_campaign', resume_campaign: 'resume_campaign', activate_campaign: 'launch_campaign',
   duplicate_campaign: 'create_campaign', delete_rule: 'delete_rule', run_apify_actor: 'run_actor',
+  update_campaign_sequence: 'update_sequence',
 }

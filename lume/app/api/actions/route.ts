@@ -9,7 +9,7 @@ import { parseJsonBody } from '@/lib/http/json'
  * Request a high-risk action (a `pending_actions` row + Telegram prompt).
  * Kinds: `push_to_instantly`, `launch_campaign` (Validate), `assign_leads`,
  * `activate_rule`, `delete_rule` (Rotate), `send_reply`, `pause_campaign`,
- * `resume_campaign`, `create_campaign` (Campaigns) and `decide_gate`.
+ * `resume_campaign`, `create_campaign`, `update_sequence` (Campaigns) and `decide_gate`.
  * Nothing runs here: the row waits for Confirm in Lume or Approve in
  * Telegram, and `lib/actions/execute.ts` runs it after that.
  *
@@ -33,7 +33,9 @@ export async function POST(req: Request) {
 
   try {
     const built = await buildActionRequest(body.data)
-    if (!built.ok) return NextResponse.json({ error: built.error }, { status: built.status })
+    if (!built.ok) {
+      return NextResponse.json({ error: built.error, ...(built.problems ? { problems: built.problems } : {}) }, { status: built.status })
+    }
     const action = await createAction(built.kind, built.payload, requestedBy, { ruleId: built.ruleId ?? null })
     return NextResponse.json(
       { ok: true, action: { id: action.id, kind: action.kind, summary: action.payload?.summary ?? built.payload.summary } },

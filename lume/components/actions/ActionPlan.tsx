@@ -8,12 +8,16 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { GlassCard } from '@/components/ui/glass-card'
 import { cn } from '@/lib/utils'
+import { SequenceDiff } from '@/components/campaigns/SequenceDiff'
+import type { StepDiff } from '@/lib/campaigns/sequence'
 
 export interface ActionView {
   id: string
   kind: string
   summary: string
   details: [string, string][]
+  /** update_sequence: the before/after per step and variant. */
+  sequenceDiff?: StepDiff[]
   requestedBy: string
   status: string
   decidedVia: string | null
@@ -109,6 +113,8 @@ export function ActionPlan({ action }: { action: ActionView }) {
           ))}
         </dl>
       )}
+
+      {action.sequenceDiff && <SequenceDiff diff={action.sequenceDiff} />}
 
       <div className="text-[12px] text-fg-46">
         Requested by {action.requestedBy} · {when(action.createdAt)}
