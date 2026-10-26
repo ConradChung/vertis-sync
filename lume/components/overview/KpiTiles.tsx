@@ -77,7 +77,7 @@ function Tile({
         </div>
       )}
       {delta && (
-        <div className={cn('relative z-10 text-xs', deltaTone === 'positive' && 'text-positive', deltaTone === 'attention' && 'text-violet-soft', deltaTone === 'muted' && 'text-muted-foreground')}>
+        <div className={cn('relative z-10 text-xs', deltaTone === 'positive' && 'text-positive', deltaTone === 'attention' && 'font-medium text-foreground', deltaTone === 'muted' && 'text-muted-foreground')}>
           {delta}
         </div>
       )}
@@ -170,7 +170,6 @@ export function KpiTiles({
         delta={data.pending_gates > 0 ? 'Needs attention' : 'All clear'}
         deltaTone={data.pending_gates > 0 ? 'attention' : 'muted'}
         spark={data.gates_opened_7d}
-        sparkTone="violet"
         sparkLabel="Approvals opened per day, last 7 days"
       />
 

@@ -6,8 +6,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { EmptyLine, HealthDot, SectionTitle, ShimmerBar, Spark, type Tone } from '@/components/overview/parts'
 import type { CampaignStripItem, HealthLevel } from '@/lib/overview/types'
 
-/** Healthy campaigns read lime; everything else stays violet (brand / needs a look). */
-const SPARK_TONE: Record<HealthLevel, Tone> = { green: 'lime', amber: 'violet', red: 'violet', idle: 'violet' }
+/** Campaign sends are a primary series in every state; health is carried by the dot. */
+const SPARK_TONE: Record<HealthLevel, Tone> = { green: 'lime', amber: 'lime', red: 'lime', idle: 'lime' }
 
 const rate = (r: number | null) => (r === null ? '—' : `${r < 10 ? r.toFixed(1) : Math.round(r)}%`)
 

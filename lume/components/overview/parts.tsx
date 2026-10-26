@@ -52,12 +52,14 @@ export function useNow(intervalMs: number): number {
   return now
 }
 
-/** Lime when the series ends at or above where it started (and moved), else violet. */
+/**
+ * Default sparkline tone: always the theme primary (lime in dark, forest
+ * green in light). Violet is reserved for agent/automation series, which
+ * must ask for it explicitly.
+ */
 export function trendTone(data: number[]): Tone {
-  if (data.length < 2) return 'violet'
-  const first = data[0]
-  const last = data[data.length - 1]
-  return last > first ? 'lime' : 'violet'
+  void data
+  return 'lime'
 }
 
 /**
