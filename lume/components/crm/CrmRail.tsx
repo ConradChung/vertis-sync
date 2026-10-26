@@ -18,7 +18,7 @@ function Tile({ label, value, delta, tone, className, children }: {
 }) {
   return (
     <GlassCard size="sm" className={cn('gap-1 px-3.5', className)}>
-      <div className="eyebrow truncate">{label}</div>
+      <div className="eyebrow leading-tight">{label}</div>
       <div className="font-mono text-2xl leading-none font-semibold tracking-tight text-foreground tabular-nums" data-testid="crm-tile-value">
         {value}
       </div>

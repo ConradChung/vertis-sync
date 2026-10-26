@@ -28,6 +28,8 @@ export const OPEN_PALETTE_EVENT = 'lume:open-palette'
 
 type View = 'board' | 'table'
 
+const PRESSED = 'aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary'
+
 /**
  * The CRM console: breadcrumb + [Board|Table] + ⌘K (+ a campaign switcher on
  * the top-level page), a resizable left rail of stat tiles, the working area,
@@ -129,10 +131,10 @@ export function CrmWorkspace({
             if (next === 'board' || next === 'table') setView(next)
           }}
         >
-          <ToggleGroupItem value="board" aria-label="Board view">
+          <ToggleGroupItem value="board" aria-label="Board view" className={PRESSED}>
             <Columns3 /> Board
           </ToggleGroupItem>
-          <ToggleGroupItem value="table" aria-label="Table view">
+          <ToggleGroupItem value="table" aria-label="Table view" className={PRESSED}>
             <Rows3 /> Table
           </ToggleGroupItem>
         </ToggleGroup>
