@@ -46,7 +46,8 @@ import { internalOrigin } from '@/lib/http/origin'
 export const maxDuration = 300
 export const runtime = 'nodejs'
 
-const MODEL = 'claude-opus-5-5'
+/** Sonnet 5.5 at low effort: fast enough for chat, strong at tool use. Override with LUME_AGENT_MODEL. */
+const MODEL = process.env.LUME_AGENT_MODEL?.trim() || 'claude-sonnet-5-5'
 
 const Body = z.object({
   prompt: z.string().trim().min(1).max(4000),
@@ -231,7 +232,9 @@ async function executeRun({
       model: MODEL,
       max_tokens: 16000,
       thinking: { type: 'adaptive' },
-      output_config: { effort: 'medium' },
+      output_config: { effort: 'low' },
+      // Caches the stable system prompt + tool list across the run's turns and across runs.
+      cache_control: { type: 'ephemeral' },
       system: SYSTEM_PROMPT,
       tools,
       messages: [{ role: 'user', content: prompt }],
