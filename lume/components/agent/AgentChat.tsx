@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { ArrowUp, ChevronRight, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, SquarePen, Wrench } from 'lucide-react'
+import { ArrowUp, BookMarked, ChevronRight, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, SquarePen, Wrench } from 'lucide-react'
 import { AgentHistory, useConversationList } from '@/components/agent/AgentHistory'
+import { ManageSkills, SkillCard, SkillMenu, useSkillList } from '@/components/agent/AgentSkills'
 import { Markdown } from '@/components/agent/Markdown'
 import { Waveform, type WaveMode } from '@/components/agent/Waveform'
 import { PlanCard } from '@/components/orb/PlanCard'
@@ -13,7 +14,12 @@ import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAgentChat, type ChatMessage } from '@/hooks/useAgentChat'
+import type { Skill, SkillMode } from '@/lib/agent/skillModel'
 import { cn } from '@/lib/utils'
+
+/** What "Save this chat as a skill" sends: the agent drafts it and waits for the owner's OK. */
+export const SAVE_SKILL_PROMPT =
+  'Save the pipeline from this conversation as a skill. Draft the name, description, steps and variables, show them to me, and wait for my OK before calling save_skill.'
 
 export const SUGGESTIONS = [
   "What's waiting on me?",
@@ -53,6 +59,10 @@ export function AgentChat() {
   const [sheetOpen, setSheetOpen] = useState(false)
   const bump = useCallback(() => setRefreshKey((k) => k + 1), [])
   const list = useConversationList(refreshKey)
+  const skills = useSkillList(refreshKey)
+  const [picked, setPicked] = useState<Skill | null>(null)
+  const [attach, setAttach] = useState<SkillMode | null>(null)
+  const [manageOpen, setManageOpen] = useState(false)
   const chat = useAgentChat({
     conversationId: urlId,
     onConversation: (id) => {
@@ -103,14 +113,38 @@ export function AgentChat() {
     [chat.conversationId, router, pathname]
   )
 
+  const clearSkill = useCallback(() => {
+    setPicked(null)
+    setAttach(null)
+  }, [])
+
   const submit = useCallback(
     (text: string) => {
       if (!text.trim() || busy || chat.loading) return
       setDraft('')
+      // A skill attached as reference rides along with this one message.
+      if (picked && attach === 'reference') {
+        void send(text, { id: picked.id, name: picked.name, mode: 'reference' })
+        clearSkill()
+        return
+      }
       void send(text)
     },
-    [busy, chat.loading, send]
+    [busy, chat.loading, send, picked, attach, clearSkill]
   )
+
+  const runSkill = useCallback(() => {
+    if (!picked || busy || chat.loading) return
+    const extra = draft.trim()
+    setDraft('')
+    void send(`Run the skill "${picked.name}".${extra ? `\n\n${extra}` : ''}`, { id: picked.id, name: picked.name, mode: 'run' })
+    clearSkill()
+  }, [picked, busy, chat.loading, draft, send, clearSkill])
+
+  // Drop a picked skill that was deleted in Manage.
+  useEffect(() => {
+    if (picked && skills.items && !skills.items.some((s) => s.id === picked.id)) clearSkill()
+  }, [picked, skills.items, clearSkill])
 
   // Hand the composer back once a run finishes (it is disabled while one is live).
   const hadRun = messages.length > 0
@@ -235,6 +269,32 @@ export function AgentChat() {
                 {status}
               </p>
             )}
+            {picked && (
+              <SkillCard
+                skill={picked}
+                mode={attach}
+                busy={busy || chat.loading}
+                onRun={runSkill}
+                onReference={() => {
+                  setAttach((m) => (m === 'reference' ? null : 'reference'))
+                  inputRef.current?.focus()
+                }}
+                onClear={clearSkill}
+              />
+            )}
+            <div className="mb-2 flex items-center gap-2">
+              <SkillMenu
+                list={skills}
+                disabled={busy}
+                canSave={messages.length > 0 && !busy && !chat.loading}
+                onPick={(s) => {
+                  setPicked(s)
+                  setAttach(null)
+                }}
+                onSave={() => submit(SAVE_SKILL_PROMPT)}
+                onManage={() => setManageOpen(true)}
+              />
+            </div>
             <form
               className={cn(
                 'glass flex items-end gap-2 rounded-2xl p-2 pl-4 transition-colors focus-within:border-primary/60',
@@ -262,7 +322,13 @@ export function AgentChat() {
                 rows={1}
                 maxLength={4000}
                 disabled={busy}
-                placeholder={busy ? 'Lume is working…' : 'Ask Lume anything — press / to focus'}
+                placeholder={
+                  busy
+                    ? 'Lume is working…'
+                    : picked && attach === 'reference'
+                      ? `Ask with “${picked.name}” as reference…`
+                      : 'Ask Lume anything — press / to focus'
+                }
                 aria-describedby="agent-composer-hint"
                 className="max-h-[220px] min-h-10 flex-1 resize-none bg-transparent py-2 focus-visible:outline-none! text-[15px] leading-6 text-fg outline-none placeholder:text-fg-24 disabled:opacity-60"
               />
@@ -286,6 +352,7 @@ export function AgentChat() {
                 </button>
               )}
             </p>
+            <ManageSkills open={manageOpen} onOpenChange={setManageOpen} list={skills} />
             {speech.error && (
               <p className="mt-1 text-center text-[12px] text-red" role="alert">
                 Microphone: {speech.error}
@@ -350,7 +417,15 @@ function Message({ m }: { m: ChatMessage }) {
   if (m.role === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-2xl bg-white/8 px-4 py-2.5 text-[15px] leading-6 whitespace-pre-wrap text-fg">{m.text}</div>
+        <div className="flex max-w-[85%] flex-col items-end gap-1.5">
+          {m.skill && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white/4 px-2.5 py-0.5 text-[11.5px] text-fg-70">
+              <BookMarked className="size-3 text-positive" />
+              {m.skill.mode === 'run' ? 'Running skill' : 'Skill as reference'}: {m.skill.name}
+            </span>
+          )}
+          <div className="rounded-2xl bg-white/8 px-4 py-2.5 text-[15px] leading-6 whitespace-pre-wrap text-fg">{m.text}</div>
+        </div>
       </div>
     )
   }

@@ -5,6 +5,7 @@ import type { PendingApproval } from '@/components/orb/PlanCard'
 import type { ToolLogEntry } from '@/components/orb/ToolLog'
 import { parseSseFrames, type AgentEvent } from '@/lib/agent/chat'
 import type { StoredMessage } from '@/lib/agent/history'
+import type { SkillMode } from '@/lib/agent/skillModel'
 
 export interface ChatMessage {
   id: string
@@ -16,6 +17,15 @@ export interface ChatMessage {
   /** 503 agent_not_configured: rendered as a notice, not an error. */
   notConfigured?: boolean
   streaming?: boolean
+  /** A saved skill sent with this message (shown on the bubble; not stored). */
+  skill?: { name: string; mode: SkillMode }
+}
+
+/** A saved skill to send with the next message: run it, or attach it as reference. */
+export interface SkillRef {
+  id: string
+  name: string
+  mode: SkillMode
 }
 
 export interface AgentChat {
@@ -31,7 +41,7 @@ export interface AgentChat {
   acting: boolean
   /** Assistant text is arriving for the live run. */
   streaming: boolean
-  send: (text: string) => Promise<void>
+  send: (text: string, skill?: SkillRef) => Promise<void>
   reset: () => void
 }
 
@@ -155,12 +165,12 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
   }, [])
 
   const send = useCallback(
-    async (raw: string) => {
+    async (raw: string, skill?: SkillRef) => {
       const text = raw.trim()
       if (!text || busyRef.current) return
       busyRef.current = true
       setBusy(true)
-      const userMsg: ChatMessage = { id: nextId(), role: 'user', text, tools: [], approvals: [] }
+      const userMsg: ChatMessage = { id: nextId(), role: 'user', text, tools: [], approvals: [], ...(skill ? { skill: { name: skill.name, mode: skill.mode } } : {}) }
       const aid = nextId()
       setMessages((ms) => [...ms, userMsg, { id: aid, role: 'assistant', text: '', tools: [], approvals: [], streaming: true }])
       try {
@@ -168,12 +178,18 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: text, ...(currentRef.current ? { conversation_id: currentRef.current } : {}) }),
+          body: JSON.stringify({
+            prompt: text,
+            ...(currentRef.current ? { conversation_id: currentRef.current } : {}),
+            ...(skill ? { skill_id: skill.id, skill_mode: skill.mode } : {}),
+          }),
         })
         if (!res.ok || !res.body) {
           const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string }
           if (res.status === 503 || body.error === 'agent_not_configured') {
             patch(aid, (m) => ({ ...m, notConfigured: true, error: body.message ?? 'The agent is not configured yet.' }))
+          } else if (body.error === 'skill_not_found') {
+            patch(aid, (m) => ({ ...m, error: 'That skill was deleted. Pick another one.' }))
           } else if (res.status === 404) {
             patch(aid, (m) => ({ ...m, error: 'This conversation was deleted. Start a new chat.' }))
           } else {
