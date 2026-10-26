@@ -3,7 +3,6 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { AgentOrb } from '@/components/orb/AgentOrb'
 
 export const TABS = [
   { href: '/overview', label: 'Overview' },
@@ -11,6 +10,7 @@ export const TABS = [
   { href: '/validate', label: 'Validate' },
   { href: '/rotate', label: 'Rotate' },
   { href: '/campaigns', label: 'Campaigns' },
+  { href: '/agent', label: 'Agent' },
 ] as const
 
 export function TopBar() {
@@ -41,7 +41,6 @@ export function TopBar() {
         })}
       </nav>
 
-      <AgentOrb />
     </header>
   )
 }

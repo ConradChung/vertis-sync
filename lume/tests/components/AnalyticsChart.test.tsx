@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { AnalyticsChart } from '@/components/campaigns/AnalyticsChart'
 import { allZero, lastActiveDate } from '@/lib/campaigns/chart'
+import type { DailyPoint } from '@/lib/adapters/instantly.map'
 import type { CampaignAnalyticsResponse } from '@/lib/campaigns/types'
 
 // jsdom has no layout: give ResponsiveContainer a real size.
@@ -21,7 +22,7 @@ afterEach(cleanup)
 
 const day = (offset: number) => new Date(Date.now() - offset * 86_400_000).toISOString().slice(0, 10)
 
-function payload(daily: CampaignAnalyticsResponse['daily']): CampaignAnalyticsResponse {
+function payload(daily: DailyPoint[]): CampaignAnalyticsResponse {
   return {
     configured: true,
     campaign_id: 'c1',
@@ -29,7 +30,7 @@ function payload(daily: CampaignAnalyticsResponse['daily']): CampaignAnalyticsRe
     overview: { sent: 906, replies: 4, reply_rate: 0.4, opportunities: 2, bounced: 0 },
     daily,
     steps: [],
-  } as CampaignAnalyticsResponse
+  } as unknown as CampaignAnalyticsResponse
 }
 
 function curves(container: HTMLElement) {
