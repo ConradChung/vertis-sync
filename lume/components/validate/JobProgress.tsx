@@ -1,13 +1,13 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+import { AnimatedNumber } from '@/components/ui/animated-number'
 import { GlassCard } from '@/components/ui/glass-card'
 import { SectionTitle, ShimmerBar } from '@/components/overview/parts'
 import { useJobProgress } from '@/hooks/useJob'
 import { formatEta } from '@/lib/validate/client'
 import type { JobProgress as Job } from '@/lib/db/types'
 import { cn } from '@/lib/utils'
-
-const fmt = new Intl.NumberFormat('en-US')
 
 const COUNT_TONES: { key: keyof Job['counts']; label: string; tone: string }[] = [
   { key: 'valid', label: 'valid', tone: 'text-green' },
@@ -19,23 +19,35 @@ const COUNT_TONES: { key: keyof Job['counts']; label: string; tone: string }[] =
 
 function Bar({ value, total, label, tone = 'bg-primary' }: { value: number; total: number; label: string; tone?: string }) {
   const pct = total > 0 ? Math.min(100, Math.round((value / total) * 100)) : 0
+  // Grow in from 0 on mount (CSS transition; instant under reduced motion).
+  const [shown, setShown] = useState(false)
+  useEffect(() => {
+    const r = requestAnimationFrame(() => setShown(true))
+    return () => cancelAnimationFrame(r)
+  }, [])
   return (
     <div>
       <div className="mb-1.5 flex items-baseline justify-between text-[11px]">
         <span className="text-fg-70">{label}</span>
         <span className="font-mono text-fg tabular-nums">
-          {fmt.format(value)} / {fmt.format(total)} <span className="text-fg-46">· {pct}%</span>
+          <AnimatedNumber value={value} /> / <AnimatedNumber value={total} />{' '}
+          <span className="text-fg-46">
+            · <AnimatedNumber value={pct} suffix="%" />
+          </span>
         </span>
       </div>
       <div
-        className="h-[5px] overflow-hidden rounded-[3px] bg-white/10"
+        className="h-[5px] overflow-hidden rounded-full bg-muted"
         role="progressbar"
         aria-label={label}
         aria-valuemin={0}
         aria-valuemax={total}
         aria-valuenow={value}
       >
-        <i className={cn('block h-full rounded-[3px] transition-[width] duration-300', tone)} style={{ width: `${pct}%` }} />
+        <i
+          className={cn('block h-full rounded-full transition-[width] duration-700 ease-out motion-reduce:transition-none', tone)}
+          style={{ width: `${shown ? pct : 0}%` }}
+        />
       </div>
     </div>
   )
@@ -59,8 +71,8 @@ export function JobProgressView({ job }: { job: Job }) {
       )}
       <ul className="grid grid-cols-5 gap-2" aria-label="Row verdicts">
         {COUNT_TONES.map((c) => (
-          <li key={c.key} className="rounded-[9px] border border-white/8 bg-black/15 px-2.5 py-2">
-            <div className={cn('font-mono text-[15px] tabular-nums', c.tone)}>{fmt.format(job.counts[c.key])}</div>
+          <li key={c.key} className="rounded-lg border border-line bg-muted px-2.5 py-2">
+            <AnimatedNumber value={job.counts[c.key]} className={cn('block font-mono text-[15px]', c.tone)} />
             <div className="text-[10px] text-fg-46">{c.label}</div>
           </li>
         ))}
@@ -70,7 +82,7 @@ export function JobProgressView({ job }: { job: Job }) {
         <dd className="text-right font-mono text-fg-70">{job.status ?? '—'}</dd>
         <dt className="text-fg-46">Job counter</dt>
         <dd className="text-right font-mono text-fg-70 tabular-nums">
-          {fmt.format(job.processed_rows)} / {fmt.format(job.total_rows)} processed
+          <AnimatedNumber value={job.processed_rows} /> / <AnimatedNumber value={job.total_rows} /> processed
         </dd>
         {eta && (
           <>
@@ -82,7 +94,7 @@ export function JobProgressView({ job }: { job: Job }) {
           <>
             <dt className="text-fg-46">Email finder</dt>
             <dd className="text-right font-mono text-fg-70">
-              {fmt.format(job.emails_found ?? 0)} found of {fmt.format(job.rows_missing_email)} missing
+              <AnimatedNumber value={job.emails_found ?? 0} /> found of <AnimatedNumber value={job.rows_missing_email} /> missing
             </dd>
           </>
         )}

@@ -1,5 +1,6 @@
 'use client'
 
+import { AnimatedNumber } from '@/components/ui/animated-number'
 import type { GateRow } from '@/lib/db/types'
 import { groupByKind, type ButtonSpec } from '@/lib/validate/actions'
 import { gateKey } from '@/lib/validate/deepLink'
@@ -24,8 +25,8 @@ export function GateList({ gates, focusedKey, busyKeys, countOpenKey, onAction, 
         <section key={group.kind} aria-labelledby={`grp-${group.kind}`} data-group={group.kind}>
           <h2 id={`grp-${group.kind}`} className="mb-2 flex items-center gap-2 text-[11px] font-semibold tracking-[1.5px] text-fg-46 uppercase">
             {group.label}
-            <span className="rounded-[5px] bg-accent px-1.5 py-px font-mono text-[10px] tracking-normal text-violet-soft tabular-nums">
-              {group.gates.length}
+            <span className="rounded-sm bg-accent px-1.5 py-px font-mono text-[10px] tracking-normal text-violet-soft tabular-nums">
+              <AnimatedNumber value={group.gates.length} />
             </span>
           </h2>
           <div className="flex flex-col gap-3">

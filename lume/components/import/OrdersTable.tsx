@@ -1,5 +1,6 @@
 'use client'
 
+import { AnimatedNumber } from '@/components/ui/animated-number'
 import type { KeyboardEvent } from 'react'
 import { ShimmerBar, useNow } from '@/components/overview/parts'
 import { StatusBadge } from '@/components/import/StatusBadge'
@@ -15,7 +16,6 @@ export interface OrdersTableProps {
   onRetry?: () => void
 }
 
-const fmt = new Intl.NumberFormat('en-US')
 const COLS = ['Source', 'Summary', 'Rows', 'Status', 'Cost', 'Created by', 'When'] as const
 // Cost and Created by step aside on phones; the rail shows them.
 const NARROW_HIDDEN: ReadonlySet<string> = new Set(['Cost', 'Created by'])
@@ -29,7 +29,7 @@ export function OrdersTable({ orders, error, selected, onSelect, onRetry }: Orde
     <section className="surface min-w-0 overflow-hidden rounded-panel" aria-label="Orders">
       <div className="flex items-center justify-between gap-3 px-[18px] py-3">
         <h2 className="text-[13px] font-semibold text-fg">Orders</h2>
-        {orders && <span className="font-mono text-[11px] text-fg-46">{fmt.format(orders.length)}</span>}
+        {orders && <AnimatedNumber value={orders.length} className="font-mono text-[11px] text-fg-46" />}
       </div>
       {error != null && (
         <p className="flex items-center gap-3 border-t border-line px-[18px] py-2.5 text-[12px] text-amber" role="status">
@@ -99,7 +99,7 @@ export function OrdersTable({ orders, error, selected, onSelect, onRetry }: Orde
                     <td className="max-w-[130px] truncate px-3 py-2.5 text-fg sm:max-w-[260px]" title={o.summary ?? undefined}>
                       {summaryLabel(o)}
                     </td>
-                    <td className="px-3 py-2.5 text-right font-mono tabular-nums">{o.row_count == null ? '—' : fmt.format(o.row_count)}</td>
+                    <td className="px-3 py-2.5 text-right font-mono tabular-nums">{o.row_count == null ? '—' : <AnimatedNumber value={o.row_count} />}</td>
                     <td className="px-3 py-2.5">
                       <StatusBadge status={o.status} />
                     </td>

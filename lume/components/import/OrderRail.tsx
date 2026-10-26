@@ -1,5 +1,6 @@
 'use client'
 
+import { AnimatedNumber } from '@/components/ui/animated-number'
 import { useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { ExternalLink, Loader2, X } from 'lucide-react'
@@ -110,7 +111,7 @@ function Facts({ items }: { items: [string, ReactNode][] }) {
   )
 }
 
-const num = (n: number | null | undefined) => (n == null ? '—' : fmt.format(n))
+const num = (n: number | null | undefined) => (n == null ? '—' : <AnimatedNumber value={n} />)
 const mono = (v: ReactNode) => <span className="font-mono tabular-nums">{v}</span>
 
 function GateLink({ detail }: { detail: OrderDetail }) {
@@ -209,7 +210,7 @@ function SampleTable({ sample, caption }: { sample: CsvSample | null; caption: s
   return (
     <figure className="flex min-w-0 flex-col gap-1.5">
       <figcaption className="text-[11px] text-fg-46">{caption}</figcaption>
-      <div className="max-w-full overflow-x-auto rounded-[10px] border border-line">
+      <div className="max-w-full overflow-x-auto rounded-lg border border-line">
         <table className="border-collapse text-[11px]">
           <thead className="bg-white/[.03] text-left text-fg-46">
             <tr>
@@ -247,7 +248,7 @@ function Enrichment({ cfg }: { cfg: EnrichmentConfig }) {
           ['ICP filter', cfg.icp_filter ? 'On' : 'Off'],
         ]}
       />
-      {cfg.icp_description && <p className="rounded-[10px] border border-line px-2.5 py-2 text-[11px] text-fg-70">{cfg.icp_description}</p>}
+      {cfg.icp_description && <p className="rounded-lg border border-line px-2.5 py-2 text-[11px] text-fg-70">{cfg.icp_description}</p>}
     </section>
   )
 }
@@ -282,7 +283,7 @@ export function CountPicker({ orderId, onDecided }: { orderId: string; onDecided
   }
 
   return (
-    <section aria-label="Leadsfriday count" className="flex flex-col gap-2.5 rounded-[12px] border border-amber/30 bg-amber/[.06] p-3">
+    <section aria-label="Leadsfriday count" className="flex flex-col gap-2.5 rounded-xl border border-amber/30 bg-amber/[.06] p-3">
       <p className="text-[12px] text-fg">
         Waiting on a count. Credits are deducted when the order is placed.
       </p>
@@ -298,7 +299,7 @@ export function CountPicker({ orderId, onDecided }: { orderId: string; onDecided
               setCustom('')
               setChoice(n)
             }}
-            className="rounded-[8px] border border-line px-2.5 py-1 font-mono text-[12px] tabular-nums text-fg-70 transition-colors hover:text-fg aria-checked:border-violet aria-checked:bg-violet/15 aria-checked:text-fg"
+            className="rounded-lg border border-line px-2.5 py-1 font-mono text-[12px] tabular-nums text-fg-70 transition-colors hover:text-fg aria-checked:border-violet aria-checked:bg-violet/15 aria-checked:text-fg"
           >
             {fmt.format(n)}
           </button>

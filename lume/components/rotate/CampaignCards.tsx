@@ -1,5 +1,6 @@
 'use client'
 
+import { AnimatedNumber } from '@/components/ui/animated-number'
 import { useState } from 'react'
 import { useDroppable } from '@dnd-kit/core'
 import { Loader2, RefreshCw } from 'lucide-react'
@@ -9,7 +10,6 @@ import type { CampaignView } from '@/hooks/useCampaigns'
 import { errorText, syncCampaigns } from '@/lib/rules/client'
 import { cn } from '@/lib/utils'
 
-const fmt = new Intl.NumberFormat('en-US')
 
 export interface CampaignCardsProps {
   campaigns: CampaignView[] | undefined
@@ -117,15 +117,15 @@ function CampaignCard({
       <dl className="grid grid-cols-3 gap-2 text-[11px]">
         <div>
           <dt className="text-fg-46">Capacity/day</dt>
-          <dd className="font-mono text-fg">{c.capacity_per_day != null ? fmt.format(c.capacity_per_day) : '—'}</dd>
+          <dd className="font-mono text-fg">{c.capacity_per_day != null ? <AnimatedNumber value={c.capacity_per_day} /> : '—'}</dd>
         </div>
         <div>
           <dt className="text-fg-46">Accounts</dt>
-          <dd className="font-mono text-fg">{accounts != null ? fmt.format(accounts) : '—'}</dd>
+          <dd className="font-mono text-fg">{accounts != null ? <AnimatedNumber value={accounts} /> : '—'}</dd>
         </div>
         <div>
           <dt className="text-fg-46">Queued</dt>
-          <dd className="font-mono text-fg">{fmt.format(c.queued)}</dd>
+          <dd className="font-mono text-fg"><AnimatedNumber value={c.queued} /></dd>
         </div>
       </dl>
       <div className="flex items-center justify-between gap-2">

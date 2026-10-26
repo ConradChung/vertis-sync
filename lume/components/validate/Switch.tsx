@@ -23,7 +23,7 @@ export function Switch({
       aria-checked={checked}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className="group flex w-full items-center gap-3 rounded-[9px] px-2 py-1.5 text-left outline-none hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+      className="group flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left outline-none hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
     >
       <span
         aria-hidden

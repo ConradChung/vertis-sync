@@ -3,6 +3,7 @@
 import { useId, useState, type Ref } from 'react'
 import Link from 'next/link'
 import { Loader2 } from 'lucide-react'
+import { AnimatedNumber } from '@/components/ui/animated-number'
 import { Button } from '@/components/ui/button'
 import { GlassCard } from '@/components/ui/glass-card'
 import { Input } from '@/components/ui/input'
@@ -95,8 +96,8 @@ export function GateCard({ gate, focused, busy, countOpen, onAction, onCountOpen
       {chips.length > 0 && (
         <ul className="flex flex-wrap gap-1.5" aria-label="Counts">
           {chips.map((c) => (
-            <li key={c.label} className="rounded-[5px] bg-white/6 px-[7px] py-[3px] text-[10px] text-fg-70">
-              <span className="font-mono text-fg tabular-nums">{fmt.format(c.value)}</span> {c.label}
+            <li key={c.label} className="rounded-sm bg-muted px-[7px] py-[3px] text-[10px] text-fg-70">
+              <AnimatedNumber value={c.value} className="font-mono text-fg" /> {c.label}
             </li>
           ))}
         </ul>

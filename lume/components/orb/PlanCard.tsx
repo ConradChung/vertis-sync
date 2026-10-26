@@ -32,7 +32,7 @@ export function PlanCard({ approvals }: { approvals: PendingApproval[] }) {
             </span>
             <Link
               href={a.deep_link}
-              className="shrink-0 rounded-control bg-amber/90 px-3 py-1.5 text-[12px] font-medium text-black hover:bg-amber"
+              className="shrink-0 rounded-control bg-primary px-3 py-1.5 text-[12px] font-medium text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring"
             >
               Review
             </Link>

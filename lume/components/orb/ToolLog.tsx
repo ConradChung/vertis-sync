@@ -15,7 +15,7 @@ export interface ToolLogEntry {
 export function ToolLog({ entries }: { entries: ToolLogEntry[] }) {
   if (!entries.length) return null
   return (
-    <section aria-label="Tool activity" className="rounded-panel border border-line bg-black/20 p-3">
+    <section aria-label="Tool activity" className="rounded-panel border border-line bg-muted p-3">
       <h3 className="mb-1.5 text-[11px] uppercase tracking-wide text-fg-46">Activity</h3>
       <ol className="flex flex-col gap-1 font-mono text-[11px] leading-5">
         {entries.map((e) => (

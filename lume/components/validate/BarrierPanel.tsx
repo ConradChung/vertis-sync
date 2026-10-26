@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useSWRConfig } from 'swr'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { SimpleSelect } from '@/components/ui/simple-select'
 import { GlassCard } from '@/components/ui/glass-card'
 import { NotConnected, SectionTitle, ShimmerBar } from '@/components/overview/parts'
 import { Switch } from '@/components/validate/Switch'
@@ -31,7 +32,7 @@ function CampaignPick({ gate, focusTick }: { gate: GateRow; focusTick: number })
   const { data, error, mutate: reload } = useInstantlyCampaigns(true)
   const [selected, setSelected] = useState('')
   const [saving, setSaving] = useState(false)
-  const selectRef = useRef<HTMLSelectElement>(null)
+  const selectRef = useRef<HTMLButtonElement>(null)
   const configured = data?.configured === true
   const campaigns = data && data.configured ? data.campaigns : []
 
@@ -71,21 +72,18 @@ function CampaignPick({ gate, focusTick }: { gate: GateRow; focusTick: number })
             <label htmlFor={`camp-${gate.target_id}`} className="sr-only">
               Campaign
             </label>
-            <select
+            <SimpleSelect
               id={`camp-${gate.target_id}`}
-              ref={selectRef}
+              triggerRef={selectRef}
               value={selected}
               disabled={!configured || saving}
-              onChange={(e) => setSelected(e.target.value)}
-              className="h-9 w-full rounded-[9px] border border-line bg-black/20 px-2.5 text-[12px] text-fg outline-none focus-visible:border-violet disabled:opacity-50"
-            >
-              <option value="">{configured ? `Select a campaign… (${campaigns.length})` : 'Instantly not connected'}</option>
-              {campaigns.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({c.statusLabel})
-                </option>
-              ))}
-            </select>
+              onValueChange={setSelected}
+              className="h-9 text-[12px]"
+              options={[
+                { value: '', label: configured ? `Select a campaign… (${campaigns.length})` : 'Instantly not connected' },
+                ...campaigns.map((c) => ({ value: c.id, label: `${c.name} (${c.statusLabel})` })),
+              ]}
+            />
             <div className="flex items-center gap-2">
               <Button size="sm" disabled={!configured || !selected || saving} onClick={() => void save()}>
                 {saving ? 'Saving…' : 'Use this campaign'}

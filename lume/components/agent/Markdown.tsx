@@ -103,7 +103,7 @@ export function Markdown({ text }: { text: string }) {
         switch (b.kind) {
           case 'code':
             return (
-              <pre key={i} className="overflow-x-auto rounded-control border border-line bg-black/30 p-3 font-mono text-[12.5px] leading-5 text-fg">
+              <pre key={i} className="overflow-x-auto rounded-control border border-line bg-muted p-3 font-mono text-[12.5px] leading-5 text-fg">
                 <code>{b.text}</code>
               </pre>
             )

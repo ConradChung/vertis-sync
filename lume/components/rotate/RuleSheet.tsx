@@ -3,6 +3,9 @@
 import { useId, useState, type FormEvent } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { DatePicker } from '@/components/ui/date-picker'
+import { Input } from '@/components/ui/input'
+import { SimpleSelect } from '@/components/ui/simple-select'
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import type { CampaignView } from '@/hooks/useCampaigns'
 import { createRule, errorText, updateRule, type RuleInput } from '@/lib/rules/client'
@@ -71,8 +74,7 @@ function RuleForm({ rule, campaigns, onSaved, onOpenChange }: RuleSheetProps) {
   const preview = cronOk ? nextRun(v.cron) : null
   const valid = v.name.trim() !== '' && v.campaign_id !== '' && cronOk && v.daily_cap >= 1 && v.daily_cap <= 1000
   const targets = campaigns.filter((c) => c.external_id)
-  const field =
-    'h-8 w-full rounded-[10px] border border-line bg-white/[.03] px-2.5 text-[13px] text-fg placeholder:text-fg-24 focus-visible:outline-2 focus-visible:outline-violet'
+  const field = 'h-8 text-[13px]'
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -100,44 +102,45 @@ function RuleForm({ rule, campaigns, onSaved, onOpenChange }: RuleSheetProps) {
       <div className="flex flex-col gap-4 px-5">
         <label className="flex flex-col gap-1 text-[12px] text-fg-70" htmlFor={`${id}-name`}>
           Name
-          <input id={`${id}-name`} className={field} value={v.name} maxLength={80} onChange={(e) => setV({ ...v, name: e.target.value })} />
+          <Input id={`${id}-name`} className={field} value={v.name} maxLength={80} onChange={(e) => setV({ ...v, name: e.target.value })} />
         </label>
         <label className="flex flex-col gap-1 text-[12px] text-fg-70" htmlFor={`${id}-camp`}>
           Campaign
-          <select id={`${id}-camp`} className={field} value={v.campaign_id} onChange={(e) => setV({ ...v, campaign_id: e.target.value })}>
-            {targets.length === 0 && <option value="">Sync campaigns first</option>}
-            {targets.map((c) => (
-              <option key={c.id} value={c.external_id!}>
-                {c.name}
-                {c.rotator ? ' (rotator)' : ''}
-              </option>
-            ))}
-          </select>
+          <SimpleSelect
+            id={`${id}-camp`}
+            value={v.campaign_id}
+            onValueChange={(campaign_id) => setV({ ...v, campaign_id })}
+            options={
+              targets.length === 0
+                ? [{ value: '', label: 'Sync campaigns first' }]
+                : targets.map((c) => ({ value: c.external_id!, label: `${c.name}${c.rotator ? ' (rotator)' : ''}` }))
+            }
+          />
         </label>
         <fieldset className="flex flex-col gap-2">
           <legend className="mb-1 text-[12px] text-fg-70">Which leads</legend>
-          <select
+          <SimpleSelect
             aria-label="Source"
-            className={field}
             value={v.filter.source ?? ''}
-            onChange={(e) => setFilter('source', e.target.value)}
-          >
-            <option value="">Unassigned validated leads</option>
-            <option value="lead_bank">Leads queued for another campaign</option>
-          </select>
+            onValueChange={(val) => setFilter('source', val)}
+            options={[
+              { value: '', label: 'Unassigned validated leads' },
+              { value: 'lead_bank', label: 'Leads queued for another campaign' },
+            ]}
+          />
           <div className="grid grid-cols-2 gap-2">
-            <input aria-label="ICP status" placeholder="ICP status" className={field} value={v.filter.icp_status ?? ''} onChange={(e) => setFilter('icp_status', e.target.value)} />
-            <input aria-label="City contains" placeholder="City contains" className={field} value={v.filter.city ?? ''} onChange={(e) => setFilter('city', e.target.value)} />
+            <Input aria-label="ICP status" placeholder="ICP status" className={field} value={v.filter.icp_status ?? ''} onChange={(e) => setFilter('icp_status', e.target.value)} />
+            <Input aria-label="City contains" placeholder="City contains" className={field} value={v.filter.city ?? ''} onChange={(e) => setFilter('city', e.target.value)} />
           </div>
           <label className="flex items-center gap-2 text-[12px] text-fg-46" htmlFor={`${id}-since`}>
             Since
-            <input id={`${id}-since`} type="date" className={field} value={v.filter.since ?? ''} onChange={(e) => setFilter('since', e.target.value)} />
+            <DatePicker id={`${id}-since`} className="flex-1" placeholder="Any date" value={v.filter.since ?? ''} onChange={(val) => setFilter('since', val)} />
           </label>
         </fieldset>
         <div className="grid grid-cols-2 gap-3">
           <label className="flex flex-col gap-1 text-[12px] text-fg-70" htmlFor={`${id}-cap`}>
             Leads per run
-            <input
+            <Input
               id={`${id}-cap`}
               type="number"
               min={1}
@@ -149,15 +152,20 @@ function RuleForm({ rule, campaigns, onSaved, onOpenChange }: RuleSheetProps) {
           </label>
           <label className="flex flex-col gap-1 text-[12px] text-fg-70" htmlFor={`${id}-order`}>
             Order
-            <select id={`${id}-order`} className={field} value={v.order_by} onChange={(e) => setV({ ...v, order_by: e.target.value as RuleInput['order_by'] })}>
-              <option value="newest">Newest first</option>
-              <option value="oldest">Oldest first</option>
-            </select>
+            <SimpleSelect
+              id={`${id}-order`}
+              value={v.order_by}
+              onValueChange={(val) => setV({ ...v, order_by: val as RuleInput['order_by'] })}
+              options={[
+                { value: 'newest', label: 'Newest first' },
+                { value: 'oldest', label: 'Oldest first' },
+              ]}
+            />
           </label>
         </div>
         <label className="flex flex-col gap-1 text-[12px] text-fg-70" htmlFor={`${id}-cron`}>
           Schedule (cron, {OWNER_TZ})
-          <input
+          <Input
             id={`${id}-cron`}
             className={`${field} font-mono`}
             value={v.cron}

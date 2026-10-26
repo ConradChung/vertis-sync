@@ -1,6 +1,6 @@
 'use client'
 
-import { useId, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from 'react'
+import { useRef, useState, type DragEvent, type FormEvent, type ReactNode } from 'react'
 import Link from 'next/link'
 import { Database, FileUp, Link2, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -83,7 +83,7 @@ function ApifyCard({ onCreated }: SourceCardsProps) {
   const [mode, setMode] = useState<'dataset' | 'actor'>('dataset')
   const [value, setValue] = useState('')
   const [status, setStatus] = useState<Status>({ state: 'idle' })
-  const inputId = useId()
+  const inputId = 'import-apify-id'
   const busy = status.state === 'busy'
   const id = value.trim()
 
@@ -110,7 +110,7 @@ function ApifyCard({ onCreated }: SourceCardsProps) {
   return (
     <CardShell icon={<Database className="size-4" />} title="Apify" sub="Pull a dataset, or an actor's last succeeded run." label="Apify intake">
       <form onSubmit={submit} className="flex flex-col gap-2">
-        <div role="radiogroup" aria-label="Apify source" className="flex gap-1 self-start rounded-[10px] border border-line p-0.5 text-[12px]">
+        <div role="radiogroup" aria-label="Apify source" className="flex gap-1 self-start rounded-lg border border-line p-0.5 text-[12px]">
           {(['dataset', 'actor'] as const).map((m) => (
             <button
               key={m}
@@ -119,7 +119,7 @@ function ApifyCard({ onCreated }: SourceCardsProps) {
               aria-checked={mode === m}
               onClick={() => setMode(m)}
               className={cn(
-                'rounded-[8px] px-2.5 py-1 transition-colors',
+                'rounded-md px-2.5 py-1 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 mode === m ? 'bg-accent text-fg' : 'text-fg-46 hover:text-fg'
               )}
             >
@@ -157,7 +157,7 @@ function ApifyCard({ onCreated }: SourceCardsProps) {
 function ApolloCard({ onCreated }: SourceCardsProps) {
   const [url, setUrl] = useState('')
   const [status, setStatus] = useState<Status>({ state: 'idle' })
-  const inputId = useId()
+  const inputId = 'import-apollo-url'
   const busy = status.state === 'busy'
   const valid = parseApolloUrl(url) !== null
   const showHint = url.trim() !== '' && !valid
@@ -263,7 +263,7 @@ function CsvCard({ onCreated }: SourceCardsProps) {
         data-over={over || undefined}
         aria-busy={busy || undefined}
         className={cn(
-          'flex flex-col items-center justify-center gap-1.5 rounded-[12px] border border-dashed border-line px-3 py-5 text-center text-[12px] text-fg-46 transition-colors',
+          'flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-line px-3 py-5 text-center text-[12px] text-fg-46 transition-colors',
           over && 'border-primary bg-accent text-fg',
           busy && 'cursor-not-allowed'
         )}

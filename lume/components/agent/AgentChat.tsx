@@ -161,7 +161,7 @@ export function AgentChat() {
             type="submit"
             disabled={busy || !draft.trim()}
             aria-label="Send message"
-            className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-35 dark:shadow-(--primary-glow)"
+            className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-[opacity,background-color] outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-35 dark:shadow-(--primary-glow)"
           >
             <ArrowUp className="size-4" />
           </button>
@@ -212,7 +212,7 @@ function Message({ m }: { m: ChatMessage }) {
   if (m.role === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-[20px] bg-white/8 px-4 py-2.5 text-[15px] leading-6 whitespace-pre-wrap text-fg">{m.text}</div>
+        <div className="max-w-[85%] rounded-2xl bg-white/8 px-4 py-2.5 text-[15px] leading-6 whitespace-pre-wrap text-fg">{m.text}</div>
       </div>
     )
   }

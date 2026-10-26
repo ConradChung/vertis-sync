@@ -1,6 +1,7 @@
 'use client'
 
-import { useMemo } from 'react'
+import { AnimatedNumber } from '@/components/ui/animated-number'
+import { useMemo, type ReactNode } from 'react'
 import { useReducedMotion } from 'motion/react'
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts'
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
@@ -17,7 +18,6 @@ const config = {
   opportunities: { label: 'Interested', color: 'var(--fg)' },
 } satisfies ChartConfig
 
-const fmt = new Intl.NumberFormat('en-US')
 const KEYS = ['sent', 'replies', 'opportunities'] as const
 
 export function AnalyticsChart({
@@ -57,12 +57,12 @@ export function AnalyticsChart({
   if (!data.configured) return <NotConnected className="py-6 text-[13px]" />
 
   const o = data.overview
-  const stats: [string, string][] = [
-    ['Sent', fmt.format(o.sent)],
-    ['Replies', fmt.format(o.replies)],
-    ['Reply rate', o.reply_rate === null ? '—' : `${o.reply_rate.toFixed(1)}%`],
-    ['Interested', fmt.format(o.opportunities)],
-    ['Bounced', fmt.format(o.bounced)],
+  const stats: [string, ReactNode][] = [
+    ['Sent', <AnimatedNumber key="s" value={o.sent} />],
+    ['Replies', <AnimatedNumber key="r" value={o.replies} />],
+    ['Reply rate', o.reply_rate === null ? '—' : <AnimatedNumber key="rr" value={o.reply_rate} decimals={1} suffix="%" />],
+    ['Interested', <AnimatedNumber key="i" value={o.opportunities} />],
+    ['Bounced', <AnimatedNumber key="b" value={o.bounced} />],
   ]
   const maxStep = Math.max(1, ...data.steps.map((s) => s.sent))
   const empty = allZero(points, [...KEYS])
@@ -72,7 +72,7 @@ export function AnalyticsChart({
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {stats.map(([label, value]) => (
-          <div key={label} className="rounded-lg border border-white/8 bg-white/3 px-3 py-2.5">
+          <div key={label} className="rounded-lg border border-line bg-muted px-3 py-2.5">
             <p className="text-[11px] text-fg-46">{label}</p>
             <p className="mt-0.5 font-mono text-[18px] font-semibold text-fg tabular-nums">{value}</p>
           </div>
@@ -91,7 +91,7 @@ export function AnalyticsChart({
                 type="button"
                 aria-pressed={days === d}
                 onClick={() => onDays(d)}
-                className={cn('rounded px-2 py-0.5', days === d ? 'bg-white/10 text-fg' : 'text-fg-46 hover:text-fg')}
+                className={cn('rounded-md px-2 py-0.5 transition-colors', days === d ? 'bg-white/10 text-fg' : 'text-fg-46 hover:text-fg')}
               >
                 {d}d
               </button>
@@ -142,7 +142,7 @@ export function AnalyticsChart({
                   <div className="h-full rounded-full bg-primary" style={{ width: `${(s.sent / maxStep) * 100}%` }} />
                 </div>
                 <span className="font-mono text-fg-46 tabular-nums">
-                  {fmt.format(s.sent)} sent · {fmt.format(s.replies)} replies
+                  <AnimatedNumber value={s.sent} /> sent · <AnimatedNumber value={s.replies} /> replies
                 </span>
               </li>
             ))}

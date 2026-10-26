@@ -41,7 +41,7 @@ export function SequencePreview({ campaign }: { campaign: CampaignView | null })
       ) : (
         <ol className="flex flex-col gap-3">
           {data.steps.map((s) => (
-            <li key={s.step} className="rounded-[12px] border border-line bg-white/[.02] p-3">
+            <li key={s.step} className="rounded-xl border border-line bg-white/[.02] p-3">
               <div className="mb-1 flex items-center justify-between text-[11px] text-fg-46">
                 <span>Step {s.step}</span>
                 <span>{s.step === 1 ? 'Day 0' : `+${s.delayDays} day${s.delayDays === 1 ? '' : 's'}`}{s.variants > 1 ? ` · ${s.variants} variants` : ''}</span>

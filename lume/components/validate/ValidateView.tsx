@@ -1,5 +1,6 @@
 'use client'
 
+import { AnimatedNumber } from '@/components/ui/animated-number'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -318,7 +319,9 @@ function GateFacts({ gate }: { gate: GateRow }) {
             {chips.map((c) => (
               <div key={c.label} className="contents">
                 <dt className="text-fg-46">{c.label}</dt>
-                <dd className="text-right font-mono text-fg tabular-nums">{c.value.toLocaleString('en-US')}</dd>
+                <dd className="text-right font-mono text-fg">
+                  <AnimatedNumber value={c.value} />
+                </dd>
               </div>
             ))}
           </dl>

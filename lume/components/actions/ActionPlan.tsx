@@ -1,5 +1,7 @@
 'use client'
 
+import { AnimatedNumber } from '@/components/ui/animated-number'
+import { OWNER_TZ } from '@/lib/time/owner'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -31,7 +33,19 @@ const TONE: Record<string, string> = {
   failed: 'bg-red/12 text-red border-red/25',
 }
 
-const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : '—')
+// Fixed locale + zone: the card is server-rendered, so a runtime-locale
+// toLocaleString() would differ between server and browser (hydration).
+const whenFmt = new Intl.DateTimeFormat('en-US', { timeZone: OWNER_TZ, dateStyle: 'medium', timeStyle: 'short' })
+const when = (iso: string | null) => (iso ? `${whenFmt.format(new Date(iso))} PT` : '—')
+
+/** A detail value that is just a number ("1,240", "12.5") counts up. */
+function DetailValue({ v }: { v: string }) {
+  const m = /^-?\d{1,3}(,\d{3})*(\.\d+)?$|^-?\d+(\.\d+)?$/.exec(v.trim())
+  if (!m) return <>{v}</>
+  const n = Number(v.replaceAll(',', ''))
+  const decimals = v.includes('.') ? v.split('.')[1].length : 0
+  return <AnimatedNumber value={n} decimals={decimals} className="font-mono" />
+}
 
 /**
  * The plan card behind `/actions/<id>`. Confirm / Cancel are explicit clicks
@@ -88,7 +102,9 @@ export function ActionPlan({ action }: { action: ActionView }) {
           {action.details.map(([k, v]) => (
             <div key={k} className="contents">
               <dt className="text-fg-46">{k.replaceAll('_', ' ')}</dt>
-              <dd className="min-w-0 break-words whitespace-pre-wrap text-fg">{v}</dd>
+              <dd className="min-w-0 break-words whitespace-pre-wrap text-fg">
+                <DetailValue v={String(v)} />
+              </dd>
             </div>
           ))}
         </dl>

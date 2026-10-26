@@ -1,5 +1,6 @@
 'use client'
 
+import { AnimatedNumber } from '@/components/ui/animated-number'
 import { useState } from 'react'
 import { useSWRConfig } from 'swr'
 import { toast } from 'sonner'
@@ -48,7 +49,7 @@ export function CompanyReview({ jobId }: { jobId: string }) {
   return (
     <GlassCard className="gap-0 py-0" aria-label="Company names" aria-busy={isValidating || undefined}>
       <SectionTitle title="Company names">
-        <div role="group" aria-label="Names mode" className="flex gap-1 rounded-[8px] bg-white/5 p-0.5">
+        <div role="group" aria-label="Names mode" className="flex gap-1 rounded-lg bg-white/5 p-0.5">
           {[
             { v: false, label: 'Standard' },
             { v: true, label: 'Stricter' },
@@ -60,7 +61,7 @@ export function CompanyReview({ jobId }: { jobId: string }) {
               disabled={saving || !job}
               onClick={() => void setStrict(o.v)}
               className={cn(
-                'rounded-[6px] px-2 py-1 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50',
+                'rounded-md px-2 py-1 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50',
                 strict === o.v ? 'bg-accent text-fg' : 'text-fg-46 hover:text-fg'
               )}
             >
@@ -93,8 +94,8 @@ export function CompanyReview({ jobId }: { jobId: string }) {
               </p>
             )}
             <p className="text-[13px] text-fg">
-              <span className="font-mono tabular-nums">{fmt.format(preview.eligible)}</span> ready ·{' '}
-              <span className="font-mono text-fg-70 tabular-nums">{fmt.format(preview.filtered)}</span>{' '}
+              <AnimatedNumber value={preview.eligible} className="font-mono" /> ready ·{' '}
+              <AnimatedNumber value={preview.filtered} className="font-mono text-fg-70" />{' '}
               <span className="text-fg-70">filtered</span>
             </p>
             {notes.length > 0 && <p className="text-[11px] text-fg-46">{notes.join(' · ')}</p>}

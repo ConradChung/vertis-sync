@@ -117,7 +117,7 @@ export function RowTable({ jobId, editRequest = 0 }: { jobId: string; editReques
                     <td className="max-w-[160px] truncate px-3 py-2.5">{r.company_name ?? '—'}</td>
                     <td className="max-w-[200px] truncate px-3 py-2.5 font-mono text-[11px]">{r.email ?? '—'}</td>
                     <td className="px-3 py-2.5">
-                      <span className={cn('rounded-[5px] px-[7px] py-[3px] text-[10px]', STATUS_PILL[r.status] ?? 'bg-white/8 text-fg-46')}>
+                      <span className={cn('rounded-sm px-[7px] py-[3px] text-[10px]', STATUS_PILL[r.status] ?? 'bg-white/8 text-fg-46')}>
                         {r.status.replace('_', ' ')}
                       </span>
                     </td>

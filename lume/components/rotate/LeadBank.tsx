@@ -1,9 +1,14 @@
 'use client'
 
+import { AnimatedNumber } from '@/components/ui/animated-number'
 import { useId } from 'react'
 import { useDraggable } from '@dnd-kit/core'
 import { GripVertical } from 'lucide-react'
 import { ShimmerBar } from '@/components/overview/parts'
+import { Checkbox } from '@/components/ui/checkbox'
+import { DatePicker } from '@/components/ui/date-picker'
+import { Input } from '@/components/ui/input'
+import { SimpleSelect } from '@/components/ui/simple-select'
 import type { LeadBankFilter } from '@/lib/db/leadBankQuery'
 import type { LeadBankRow } from '@/lib/db/types'
 import { dragLabel, MAX_DRAG_LEADS, refKey, toRuleFilter, type DragLeads, type LeadRef } from '@/lib/rules/client'
@@ -53,7 +58,7 @@ export function LeadBank(p: LeadBankProps) {
       <div className="flex flex-wrap items-center justify-between gap-3 px-[18px] py-3">
         <div className="flex items-baseline gap-2">
           <h2 className="text-[13px] font-semibold text-fg">Lead bank</h2>
-          <span className="font-mono text-[11px] text-fg-46">{fmt.format(p.total)}</span>
+          <AnimatedNumber value={p.total} className="font-mono text-[11px] text-fg-46" />
         </div>
         <div className="flex items-center gap-2">
           {p.selected.size > 0 && (
@@ -91,13 +96,7 @@ export function LeadBank(p: LeadBankProps) {
             <thead className="sticky top-0 z-[1] bg-surface text-left text-[11px] text-fg-46">
               <tr>
                 <th className="w-8 px-2 py-2">
-                  <input
-                    type="checkbox"
-                    aria-label="Select this page"
-                    checked={allOnPage}
-                    onChange={(e) => p.onTogglePage(refs, e.target.checked)}
-                    className="accent-[var(--violet)]"
-                  />
+                  <Checkbox aria-label="Select this page" checked={allOnPage} onCheckedChange={(checked) => p.onTogglePage(refs, checked)} />
                 </th>
                 <th className="w-6" aria-label="Drag" />
                 <th className="px-2 py-2 font-medium">Lead</th>
@@ -142,7 +141,7 @@ function Bundle({ drag, disabled }: { drag: DragLeads; disabled: boolean }) {
       {...listeners}
       aria-label={`Drag ${dragLabel(drag)} onto a campaign`}
       className={cn(
-        'inline-flex h-7 cursor-grab touch-none items-center gap-1.5 rounded-[10px] border border-primary/40 bg-accent px-2.5 text-[12px] text-fg active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40',
+        'inline-flex h-7 cursor-grab touch-none items-center gap-1.5 rounded-lg border border-primary/40 bg-accent outline-none hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring px-2.5 text-[12px] text-fg active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40',
         isDragging && 'opacity-50'
       )}
     >
@@ -174,13 +173,7 @@ function LeadRow({
   return (
     <tr className={cn('border-t border-line/60', isSel && 'bg-accent', isDragging && 'opacity-50')}>
       <td className="px-2 py-1.5">
-        <input
-          type="checkbox"
-          checked={isSel}
-          onChange={() => onToggle(ref)}
-          aria-label={`Select ${row.email ?? row.id}`}
-          className="accent-[var(--violet)]"
-        />
+        <Checkbox checked={isSel} onCheckedChange={() => onToggle(ref)} aria-label={`Select ${row.email ?? row.id}`} />
       </td>
       <td className="px-0 py-1.5">
         <button
@@ -210,26 +203,28 @@ function LeadRow({
 
 function Filters({ filter, onChange }: { filter: LeadBankFilter; onChange: (f: LeadBankFilter) => void }) {
   const id = useId()
-  const field = 'h-7 rounded-[8px] border border-line bg-white/[.03] px-2 text-[12px] text-fg placeholder:text-fg-24 focus-visible:outline-2 focus-visible:outline-violet'
+  const field = 'h-7 text-[12px]'
   return (
     <div className="flex flex-wrap items-center gap-2 border-t border-line px-[18px] py-2.5" role="group" aria-label="Lead bank filters">
       <label className="sr-only" htmlFor={`${id}-src`}>
         Source
       </label>
-      <select
+      <SimpleSelect
         id={`${id}-src`}
-        className={field}
+        size="sm"
+        className="w-auto text-[12px]"
         value={filter.origin ?? ''}
-        onChange={(e) => onChange({ ...filter, origin: e.target.value || undefined })}
-      >
-        <option value="">All sources</option>
-        <option value="validation_rows">Unassigned (validated)</option>
-        <option value="lead_bank">Queued in lead_bank</option>
-      </select>
+        onValueChange={(val) => onChange({ ...filter, origin: val || undefined })}
+        options={[
+          { value: '', label: 'All sources' },
+          { value: 'validation_rows', label: 'Unassigned (validated)' },
+          { value: 'lead_bank', label: 'Queued in lead_bank' },
+        ]}
+      />
       <label className="sr-only" htmlFor={`${id}-icp`}>
         ICP status
       </label>
-      <input
+      <Input
         id={`${id}-icp`}
         className={cn(field, 'w-24')}
         placeholder="ICP"
@@ -239,7 +234,7 @@ function Filters({ filter, onChange }: { filter: LeadBankFilter; onChange: (f: L
       <label className="sr-only" htmlFor={`${id}-city`}>
         City contains
       </label>
-      <input
+      <Input
         id={`${id}-city`}
         className={cn(field, 'w-32')}
         placeholder="City"
@@ -249,12 +244,13 @@ function Filters({ filter, onChange }: { filter: LeadBankFilter; onChange: (f: L
       <label className="sr-only" htmlFor={`${id}-since`}>
         Since
       </label>
-      <input
+      <DatePicker
         id={`${id}-since`}
-        type="date"
-        className={field}
+        size="sm"
+        placeholder="Since"
+        className="w-40"
         value={filter.since ?? ''}
-        onChange={(e) => onChange({ ...filter, since: e.target.value || undefined })}
+        onChange={(val) => onChange({ ...filter, since: val || undefined })}
       />
     </div>
   )

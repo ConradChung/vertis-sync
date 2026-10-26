@@ -1,14 +1,14 @@
 'use client'
 
+import { AnimatedNumber } from '@/components/ui/animated-number'
 import { GlassCard } from '@/components/ui/glass-card'
 import { NotConnected, SectionTitle, ShimmerBar } from '@/components/overview/parts'
 import { campaignStatusText, isProblemStatus } from '@/lib/adapters/instantly.map'
 import type { CampaignTableRow, InstantlyState } from '@/lib/campaigns/types'
 import { cn } from '@/lib/utils'
 
-const fmt = new Intl.NumberFormat('en-US')
-const n = (v: number | null) => (v === null ? '—' : fmt.format(v))
-const rate = (r: number | null) => (r === null ? '—' : `${r < 10 ? r.toFixed(1) : Math.round(r)}%`)
+const n = (v: number | null) => (v === null ? '—' : <AnimatedNumber value={v} />)
+const rate = (r: number | null) => (r === null ? '—' : <AnimatedNumber value={r < 10 ? r : Math.round(r)} decimals={r < 10 ? 1 : 0} suffix="%" />)
 
 const FAMILY: Record<CampaignTableRow['family'], string> = {
   kaspen: 'bg-violet/15 text-violet-soft',

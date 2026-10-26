@@ -7,11 +7,11 @@
 //
 // Materials: a transmission material refracts what is behind it, and the
 // 42 px top-bar canvas has nothing behind it and no lights, so it rendered
-// solid black. The compact orb is an opaque MeshPhysicalMaterial (violet,
+// solid black. The compact orb is an opaque MeshPhysicalMaterial (lime,
 // emissive, clearcoat) under ambient + directional lights. The large orb
 // (Task 14 sheet) keeps MeshTransmissionMaterial with the same lights, a local
 // <Environment> built from <Lightformer>s (no HDR fetch) and a solid
-// deep-violet `background` to refract.
+// near-black `background` to refract.
 
 import { Canvas, useFrame } from '@react-three/fiber'
 import { Environment, Lightformer, MeshTransmissionMaterial } from '@react-three/drei'
@@ -28,10 +28,12 @@ export type OrbProps = {
   compact?: boolean
 }
 
-const AMBER = '#f59e0b'
-const VIOLET = '#8b5cf6'
-const EMISSIVE_VIOLET = '#4c1d95'
-const EMISSIVE_AMBER = '#78350f'
+// Black / white / lime only: lime while working, neutral white when it needs you.
+const NEUTRAL = '#e8e8e8'
+const LIME = '#c6ff33'
+const EMISSIVE_LIME = '#2f4a00'
+const EMISSIVE_NEUTRAL = '#3a3a3a'
+const LIME_TINT = '#e6ffb0'
 
 export default function Orb({ state = 'idle', compact = false }: OrbProps) {
   const size = compact ? 42 : 122
@@ -52,12 +54,12 @@ export default function Orb({ state = 'idle', compact = false }: OrbProps) {
       >
         <ambientLight intensity={0.55} />
         <directionalLight position={[2.5, 3, 4]} intensity={2.2} />
-        <directionalLight position={[-3, -1.5, 2]} intensity={0.6} color="#c4b5fd" />
+        <directionalLight position={[-3, -1.5, 2]} intensity={0.6} color={LIME_TINT} />
         {!compact && (
           <Environment resolution={64}>
             <Lightformer form="circle" intensity={3} position={[2, 2.5, 3]} scale={2} />
-            <Lightformer form="rect" intensity={1.5} color="#c4b5fd" position={[-3, 0, 1]} scale={[1, 4, 1]} />
-            <Lightformer form="ring" intensity={1} color={VIOLET} position={[0, -3, -2]} scale={3} />
+            <Lightformer form="rect" intensity={1.5} color={LIME_TINT} position={[-3, 0, 1]} scale={[1, 4, 1]} />
+            <Lightformer form="ring" intensity={1} color={LIME} position={[0, -3, -2]} scale={3} />
           </Environment>
         )}
         <OrbMesh state={state} animate={!reduceMotion} compact={compact} />
@@ -69,7 +71,7 @@ export default function Orb({ state = 'idle', compact = false }: OrbProps) {
 
 function OrbMesh({ state, animate, compact }: { state: OrbState; animate: boolean; compact: boolean }) {
   const ref = useRef<Mesh>(null)
-  const background = useMemo(() => new Color('#1b1236'), [])
+  const background = useMemo(() => new Color('#0b0f06'), [])
   const amber = state === 'needs-approval'
 
   useFrame(({ clock }) => {
@@ -92,8 +94,8 @@ function OrbMesh({ state, animate, compact }: { state: OrbState; animate: boolea
       <sphereGeometry args={[1, 64, 64]} />
       {compact ? (
         <meshPhysicalMaterial
-          color={amber ? AMBER : VIOLET}
-          emissive={amber ? EMISSIVE_AMBER : EMISSIVE_VIOLET}
+          color={amber ? NEUTRAL : LIME}
+          emissive={amber ? EMISSIVE_NEUTRAL : EMISSIVE_LIME}
           emissiveIntensity={0.5}
           roughness={0.15}
           metalness={0}
@@ -111,7 +113,7 @@ function OrbMesh({ state, animate, compact }: { state: OrbState; animate: boolea
           ior={1.35}
           chromaticAberration={0.12}
           anisotropy={0.25}
-          color={amber ? AMBER : VIOLET}
+          color={amber ? NEUTRAL : LIME}
         />
       )}
     </mesh>
