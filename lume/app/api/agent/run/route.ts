@@ -14,6 +14,7 @@ import { createSkill, findSkillByName, getSkill, listSkills, markSkillRun } from
 import { toRunnableTools, type ToolHooks } from '@/lib/agent/runnable'
 import { failStaleRuns, insertAgentRun, updateAgentRun, type AgentRunPatch } from '@/lib/agent/runs'
 import { buildTools } from '@/lib/agent/tools'
+import { WEB_TOOLS, logServerToolUses } from '@/lib/agent/webTools'
 import { STALE_RUN_MS, type ToolCallEntry } from '@/lib/agent/orbState'
 import { logEvent } from '@/lib/db/service'
 import type { Json } from '@/lib/db/types'
@@ -259,7 +260,8 @@ async function executeRun({
       // Caches the stable system prompt + tool list across the run's turns and across runs.
       cache_control: { type: 'ephemeral' },
       system: SYSTEM_PROMPT,
-      tools,
+      // Anthropic-hosted, read-only web research (no approval needed: nothing leaves Lume but a query/URL).
+      tools: [...tools, ...WEB_TOOLS],
       messages: [{ role: 'user', content: prompt }],
       max_iterations: 20,
       stream: true,
@@ -282,6 +284,12 @@ async function executeRun({
         .map((b) => b.text)
         .join('')
       if (text) outcome = text
+      await logServerToolUses(message.content, hooks)
+      // The runner does not auto-resume a paused server-tool turn; push it back so the answer isn't truncated.
+      if (message.stop_reason === 'pause_turn') {
+        runner.pushMessages({ role: 'assistant', content: message.content })
+        continue
+      }
       if (message.stop_reason === 'refusal') {
         status = 'failed'
         outcome = outcome || 'The model declined this request.'
