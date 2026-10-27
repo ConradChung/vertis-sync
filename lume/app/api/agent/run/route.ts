@@ -216,8 +216,14 @@ const autoApprove: NonNullable<ToolDeps['autoApprove']> = async (id) => {
   try {
     claimed = await claimDecision(id, true, 'agent')
   } catch (err) {
-    // Nothing claimed, nothing ran: the row still awaits the owner.
-    return { status: 'failed', result: null, error: errText(err) }
+    // Nothing claimed, nothing ran: the row still awaits the owner, so the run
+    // treats it as an ordinary approval (see onEnd's `still_awaiting`).
+    console.error('[api/agent/run] auto-approve claim failed:', errText(err))
+    return {
+      status: 'failed',
+      result: { still_awaiting: true },
+      error: `${errText(err)} — not approved and nothing ran; it still awaits the owner at /actions/${id}`,
+    }
   }
   if (!claimed) return handledElsewhere(id)
   try {
@@ -308,7 +314,12 @@ async function executeRun({
       const entry = toolCalls.find((c) => c.id === id)
       if (entry) Object.assign(entry, { status: ok ? 'ok' : 'error', ms, ...(error ? { error } : {}) })
       send({ type: 'tool_end', id, name, tier, ok, ms, ...(error ? { error } : {}) })
-      if (ok && result?.status === 'auto_approved' && typeof result.action_id === 'string' && result.action_id) {
+      // Skip mode's claim hit a DB error: nothing ran and the row still awaits the owner's tap.
+      const stillAwaiting =
+        result?.status === 'auto_approved' &&
+        result.outcome === 'failed' &&
+        (result.result as Record<string, unknown> | null)?.still_awaiting === true
+      if (ok && !stillAwaiting && result?.status === 'auto_approved' && typeof result.action_id === 'string' && result.action_id) {
         // Skip mode already ran it: show the card, but the run does not wait.
         if (entry) entry.action_id = result.action_id
         const state: StoredApproval['state'] =
@@ -318,7 +329,7 @@ async function executeRun({
         await save({ tool_calls: snapshot() })
         return
       }
-      if (ok && result?.status === 'awaiting_approval' && typeof result.action_id === 'string' && result.action_id) {
+      if (ok && (result?.status === 'awaiting_approval' || stillAwaiting) && typeof result?.action_id === 'string' && result.action_id) {
         approvalActionId = result.action_id
         if (entry) entry.action_id = result.action_id
         send({ type: 'approval', action_id: result.action_id, deep_link: result.deep_link, summary: result.summary ?? null, tool: name, state: 'awaiting' })

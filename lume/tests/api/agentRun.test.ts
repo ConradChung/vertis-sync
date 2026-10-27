@@ -405,15 +405,24 @@ describe('POST /api/agent/run in skip-permissions mode', () => {
     expect(ev).toContainEqual(expect.objectContaining({ type: 'approval', state: 'handled_elsewhere' }))
   })
 
-  it('a claim DB error is auto_failed and nothing runs', async () => {
+  it('a claim DB error leaves the action awaiting: nothing runs and the run ends needs_approval', async () => {
     h.claimDecision.mockRejectedValue(new Error('db down'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
     const results: unknown[] = []
     fakeRunner(pause, results)
     const ev = await events(await post('pause c1', { skip_permissions: true }))
     expect(h.executeAction).not.toHaveBeenCalled()
-    expect(results[0]).toMatchObject({ outcome: 'failed', error: 'db down' })
-    expect(ev).toContainEqual(expect.objectContaining({ type: 'approval', state: 'auto_failed' }))
-    expect(ev.at(-1)).toMatchObject({ type: 'done', status: 'done' })
+    expect(results[0]).toMatchObject({
+      outcome: 'failed',
+      result: { still_awaiting: true },
+      error: 'db down — not approved and nothing ran; it still awaits the owner at /actions/act-1',
+    })
+    expect(ev).toContainEqual(expect.objectContaining({ type: 'approval', action_id: 'act-1', state: 'awaiting' }))
+    expect(ev).not.toContainEqual(expect.objectContaining({ type: 'approval', state: 'auto_failed' }))
+    expect(ev.at(-1)).toMatchObject({ type: 'done', status: 'needs_approval', approval_action_id: 'act-1' })
+    const msg = h.insertMessage.mock.calls.at(-1)![0]
+    expect(msg.tools).toEqual([expect.objectContaining({ status: 'awaiting' })])
+    expect(msg.approvals).toEqual([expect.objectContaining({ action_id: 'act-1', state: 'awaiting' })])
   })
 
   it('executeAction throwing after the claim is auto_failed and flagged uncertain; the run carries on', async () => {
