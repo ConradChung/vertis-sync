@@ -30,7 +30,8 @@ export const ALERTS_MAX_LIMIT = 200
 const COLS = 'id, source, severity, title, body, link, campaign_id, scope, created_at, acked_at, acked_by_operator, dedupe_key'
 
 export async function listAlerts({ unackedOnly, limit }: { unackedOnly: boolean; limit: number }): Promise<AlertRow[]> {
-  const n = Math.min(Math.max(Math.floor(limit) || ALERTS_DEFAULT_LIMIT, 1), ALERTS_MAX_LIMIT)
+  // Clamp to [1, 200]; only a non-number falls back to the default (0 means 1, not 50).
+  const n = Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 1), ALERTS_MAX_LIMIT) : ALERTS_DEFAULT_LIMIT
   let q = createServiceClient().from('lume_alerts').select(COLS)
   if (unackedOnly) q = q.is('acked_at', null)
   const res = await q.order('created_at', { ascending: false }).limit(n)

@@ -49,6 +49,11 @@ describe('listAlerts', () => {
     expect(op('limit')[0].args).toEqual([ALERTS_MAX_LIMIT])
   })
 
+  it('limit 0 is clamped to 1, not replaced by the default', async () => {
+    await listAlerts({ unackedOnly: true, limit: 0 })
+    expect(op('limit')[0].args).toEqual([1])
+  })
+
   it('a DB error throws', async () => {
     result = { data: null, error: { message: 'nope' } }
     await expect(listAlerts({ unackedOnly: true, limit: 5 })).rejects.toThrow('listAlerts')

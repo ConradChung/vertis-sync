@@ -56,6 +56,11 @@ describe('GET /api/alerts', () => {
     expect(h.listAlerts).toHaveBeenLastCalledWith({ unackedOnly: false, limit: 50 })
   })
 
+  it('limit=0 is passed through as 0 (the store clamps it to 1), not swapped for the default', async () => {
+    await GET(new Request('http://localhost/api/alerts?limit=0'))
+    expect(h.listAlerts).toHaveBeenLastCalledWith({ unackedOnly: false, limit: 0 })
+  })
+
   it('a DB error is a 500 without detail', async () => {
     h.listAlerts.mockRejectedValue(new DbError('listAlerts', new Error('secret detail')))
     const res = await GET(new Request('http://localhost/api/alerts'))
