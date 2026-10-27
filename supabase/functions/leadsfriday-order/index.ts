@@ -293,7 +293,8 @@ async function phasePoll(order: ApolloOrder, payload: Payload, startedAt: number
 // Delivered: fetch the CSV now (the URL expires), store it where dropped files
 // go, create the same telegram_ingests row handleDocument creates, and send
 // the owner the same prompt. From here the existing pipeline owns it.
-async function ingest(order: ApolloOrder, st: LeadsfridayStatus): Promise<void> {
+// Exported for the send-body tests only.
+export async function ingest(order: ApolloOrder, st: LeadsfridayStatus): Promise<void> {
   const dl = await fetch(st.download_url!, { redirect: 'follow' })
   if (!dl.ok) throw new Error(`Leadsfriday download failed (${dl.status})`)
   const bytes = new Uint8Array(await dl.arrayBuffer())

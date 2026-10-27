@@ -173,7 +173,8 @@ function countDataRows(bytes: Uint8Array): number {
 
 interface TelegramIngest { id: string }
 
-async function handleFileShared(fileId: string, channelId: string): Promise<void> {
+// Exported for the send-body tests only.
+export async function handleFileShared(fileId: string, channelId: string): Promise<void> {
   const info = await slackApiGet('files.info', { file: fileId })
   const file = info.file as {
     name?: string

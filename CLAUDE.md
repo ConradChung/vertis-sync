@@ -51,5 +51,5 @@ driven from Telegram, with two Next.js front ends.
 
 - Root: `npx tsc --noEmit`, `npm run lint`.
 - Lume: `cd lume && npm run lint && npx tsc --noEmit && npx vitest run && npm run build`.
-- Edge: `cd supabase/functions && deno test _shared/`; `deno check telegram-inbox/index.ts`.
+- Edge: `cd supabase/functions && deno test _shared/ email-validator/`; send-body tests (env read at import): `deno test --allow-env slack-inbox/ telegram-inbox/ leadsfriday-order/`; `deno check telegram-inbox/index.ts`.
 - DB: `supabase test db` (pgTAP in `supabase/tests/`).

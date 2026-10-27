@@ -291,7 +291,8 @@ function senderLabel(from?: { first_name?: string; username?: string }): string 
   return from.username ? `@${from.username}` : (from.first_name ?? 'Unknown')
 }
 
-async function handleDocument(message: NonNullable<TelegramUpdate['message']>): Promise<void> {
+// Exported for the send-body tests only.
+export async function handleDocument(message: NonNullable<TelegramUpdate['message']>): Promise<void> {
   const doc = message.document!
   const senderChatId = String(message.chat.id)
   const name = doc.file_name ?? 'upload.csv'
