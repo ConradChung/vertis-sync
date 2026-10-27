@@ -303,15 +303,15 @@ export async function deleteRule(id: string): Promise<boolean> {
  * Actions decided since `since` (newest decision first, at most `limit`):
  * the /operator page's "Recent outcomes" and the Overview vertical strip.
  */
-export async function listDecidedSince(since: Date, limit = 200): Promise<PendingActionRow[]> {
+export async function listDecidedSince(
+  since: Date,
+  limit = 200,
+  opts: { via?: NonNullable<PendingActionRow['decided_via']> } = {}
+): Promise<PendingActionRow[]> {
   const sb = createServiceClient()
-  const res = await sb
-    .from('pending_actions')
-    .select('*')
-    .neq('status', 'awaiting')
-    .gte('decided_at', since.toISOString())
-    .order('decided_at', { ascending: false })
-    .limit(limit)
+  let q = sb.from('pending_actions').select('*').neq('status', 'awaiting').gte('decided_at', since.toISOString())
+  if (opts.via) q = q.eq('decided_via', opts.via)
+  const res = await q.order('decided_at', { ascending: false }).limit(limit)
   if (res.error) throw new DbError('listDecidedSince', res.error)
   return (res.data ?? []) as PendingActionRow[]
 }

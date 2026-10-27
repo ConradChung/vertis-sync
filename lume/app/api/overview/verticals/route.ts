@@ -10,7 +10,8 @@ import { listOperators, listVerticals } from '@/lib/operators/store'
 /**
  * The Overview "Verticals" strip: one card per live vertical (last bot
  * check-in, needs-confirmation count, unacked alerts, last action its bot
- * decided). Five cheap reads in parallel; routing in `verticalCards`.
+ * decided). Five small reads in parallel (verticals, keys, open gates,
+ * unacked alerts, the week's bot decisions); routing in `verticalCards`.
  */
 export async function GET(req: Request) {
   const auth = await requireOwner(req)
@@ -22,7 +23,8 @@ export async function GET(req: Request) {
       listOperators(),
       getGates(),
       listAlerts({ unackedOnly: true, limit: ALERTS_MAX_LIMIT }),
-      listDecidedSince(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000), 200),
+      // Only the bots' decisions matter for "last action by its bot".
+      listDecidedSince(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000), 200, { via: 'operator' }),
     ])
     return NextResponse.json({ cards: verticalCards({ verticals, operators, gates, alerts, decided, now }), generated_at: now.toISOString() })
   } catch (err) {

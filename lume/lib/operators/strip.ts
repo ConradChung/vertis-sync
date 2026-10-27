@@ -5,7 +5,7 @@ import type { AlertLike } from '@/lib/operators/checkin'
 
 /**
  * Overview "Verticals" strip (Phase G6): one card per live vertical. Pure;
- * `/api/overview/verticals` feeds it four parallel reads (verticals, keys,
+ * `/api/overview/verticals` feeds it five parallel reads (verticals, keys,
  * open gates, unacked alerts, the last week's decided actions).
  */
 
