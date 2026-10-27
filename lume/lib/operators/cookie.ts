@@ -1,9 +1,12 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
 /**
- * The `lume_op` cookie: `<operator id>.<hmac>`, HMAC-SHA256 of the id keyed
- * with `LUME_INTERNAL_SECRET`, base64url. It only says which Grok Bot holds
- * this owner session (attribution); the session itself is Supabase's. Pure.
+ * The `lume_op` cookie: `<operator id>.<hmac>`, HMAC-SHA256 of the id,
+ * base64url. The key is derived, `HMAC_SHA256(LUME_INTERNAL_SECRET, 'lume_op')`,
+ * so the cookie MAC never uses the internal bearer secret directly (and a MAC
+ * from some other use of that secret can never pass as a cookie). It only says
+ * which Grok Bot holds this owner session (attribution); the session itself is
+ * Supabase's. Pure. `revocation.ts` verifies the same thing with Web Crypto.
  */
 
 export const OPERATOR_COOKIE = 'lume_op'
@@ -20,8 +23,15 @@ export const OPERATOR_COOKIE_OPTIONS = {
 
 const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
+/** Domain label for the derived cookie key; must match `revocation.ts`. */
+export const OPERATOR_COOKIE_KEY_LABEL = 'lume_op'
+
+function cookieKey(secret: string): Buffer {
+  return createHmac('sha256', secret).update(OPERATOR_COOKIE_KEY_LABEL).digest()
+}
+
 function mac(id: string, secret: string): Buffer {
-  return createHmac('sha256', secret).update(id).digest()
+  return createHmac('sha256', cookieKey(secret)).update(id).digest()
 }
 
 /** `<id>.<hmac>`; throws without a secret (callers fail closed). */

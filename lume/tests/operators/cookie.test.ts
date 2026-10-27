@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { cookieFromHeader, signOperatorCookie, verifyOperatorCookie } from '@/lib/operators/cookie'
 
@@ -27,6 +28,15 @@ describe('lume_op cookie', () => {
     }
     expect(verifyOperatorCookie(signOperatorCookie(ID, SECRET), undefined)).toBeNull()
     expect(() => signOperatorCookie(ID, '')).toThrow()
+  })
+
+  it('keys the HMAC with HMAC_SHA256(secret, "lume_op"), never the raw secret', () => {
+    const derived = createHmac('sha256', SECRET).update('lume_op').digest()
+    const expected = createHmac('sha256', derived).update(ID).digest('base64url')
+    expect(signOperatorCookie(ID, SECRET)).toBe(`${ID}.${expected}`)
+    // A cookie minted the old way (raw secret as the key) no longer verifies.
+    const legacy = `${ID}.${createHmac('sha256', SECRET).update(ID).digest('base64url')}`
+    expect(verifyOperatorCookie(legacy, SECRET)).toBeNull()
   })
 
   it('reads one cookie from a Cookie header', () => {

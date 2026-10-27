@@ -2,8 +2,12 @@
  * Edge-safe (middleware) half of the `lume_op` cookie: Web Crypto only, no
  * `node:crypto`, no `server-only`, no supabase-js. `cookie.ts` signs with
  * Node's HMAC; this verifies the same `<operator id>.<base64url HMAC-SHA256>`
- * and asks PostgREST whether that operator is still live.
+ * (keyed with `HMAC_SHA256(secret, 'lume_op')`, as there) and asks PostgREST
+ * whether that operator is still live.
  */
+
+/** Must match `OPERATOR_COOKIE_KEY_LABEL` in cookie.ts (not imported: that file pulls in node:crypto). */
+const OPERATOR_COOKIE_KEY_LABEL = 'lume_op'
 
 const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const SIG_RE = /^[A-Za-z0-9_-]{43}$/
@@ -25,7 +29,10 @@ export async function verifyOperatorCookieWeb(value: string | null | undefined, 
   const sig = value.slice(dot + 1)
   if (!ID_RE.test(id) || !SIG_RE.test(sig)) return null
   const enc = new TextEncoder()
-  const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify'])
+  // Derived key, as cookie.ts: HMAC_SHA256(secret, 'lume_op').
+  const master = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const derived = await crypto.subtle.sign('HMAC', master, enc.encode(OPERATOR_COOKIE_KEY_LABEL))
+  const key = await crypto.subtle.importKey('raw', derived, { name: 'HMAC', hash: 'SHA-256' }, false, ['verify'])
   const ok = await crypto.subtle.verify('HMAC', key, fromBase64url(sig), enc.encode(id))
   return ok ? id : null
 }

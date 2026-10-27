@@ -130,4 +130,13 @@ describe('verifyOperatorCookieWeb (Edge, Web Crypto)', () => {
     for (const bad of [null, undefined, '', OP, `${OP}.`, `x.${mac}`]) expect(await verifyOperatorCookieWeb(bad, SECRET)).toBeNull()
     expect(await verifyOperatorCookieWeb(v, undefined)).toBeNull()
   })
+
+  it('uses the same derived key as the Node signer: a raw-secret (legacy) cookie is rejected', async () => {
+    const { createHmac } = await import('node:crypto')
+    const legacy = `${OP}.${createHmac('sha256', SECRET).update(OP).digest('base64url')}`
+    expect(await verifyOperatorCookieWeb(legacy, SECRET)).toBeNull()
+    const derived = createHmac('sha256', SECRET).update('lume_op').digest()
+    const current = `${OP}.${createHmac('sha256', derived).update(OP).digest('base64url')}`
+    expect(await verifyOperatorCookieWeb(current, SECRET)).toBe(OP)
+  })
 })
