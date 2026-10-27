@@ -76,7 +76,54 @@ describe('ApprovalCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
     await screen.findByText('Already executed elsewhere')
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
-    expect(onDecided).toHaveBeenCalledWith(expect.objectContaining({ decision: 'approve', status: 'executed' }))
+    expect(onDecided).toHaveBeenCalledWith(expect.objectContaining({ decision: 'approve', status: 'executed', elsewhere: true }))
+  })
+
+  it('a double click sends one decision', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const fetchMock = vi.fn(async () => {
+      await gate
+      return Response.json({ ok: true, status: 'executed', result: {}, error: null })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<ApprovalCard approvals={[A]} />)
+    const approve = screen.getByRole('button', { name: 'Approve' })
+    fireEvent.click(approve)
+    fireEvent.click(approve)
+    fireEvent.click(screen.getByRole('button', { name: 'Deny' }))
+    release()
+    await screen.findByText('Executed')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a decision that lands after the card is gone (chat switched) is not reported', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        await gate
+        return Response.json({ ok: true, status: 'executed', result: {}, error: null })
+      })
+    )
+    const onDecided = vi.fn()
+    const { unmount } = render(<ApprovalCard approvals={[A]} onDecided={onDecided} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    unmount()
+    release()
+    await new Promise((r) => setTimeout(r, 10))
+    expect(onDecided).not.toHaveBeenCalled()
+  })
+
+  it('re-syncs when the live status prop changes', () => {
+    const { rerender } = render(<ApprovalCard approvals={[{ ...A, state: 'awaiting', status: 'awaiting' }]} />)
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeTruthy()
+    rerender(<ApprovalCard approvals={[{ ...A, state: 'awaiting', status: 'rejected' }]} />)
+    expect(screen.getByText('Denied')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
+    rerender(<ApprovalCard approvals={[{ ...A, state: 'awaiting', status: 'awaiting' }]} />)
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeTruthy()
   })
 
   it('other errors show the text and re-enable the buttons', async () => {

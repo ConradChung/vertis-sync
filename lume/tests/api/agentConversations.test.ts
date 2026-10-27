@@ -85,6 +85,19 @@ describe('/api/agent/conversations/[id]', () => {
     expect(body.messages[1].approvals[0]).toEqual({ ...approval('gone'), status: null })
   })
 
+  it('GET still returns the messages, without live statuses, when the status lookup fails', async () => {
+    h.getConversation.mockResolvedValue(conv)
+    const msgs = [{ id: 'm1', role: 'assistant', text: 'a', approvals: [{ action_id: 'a1', deep_link: '/actions/a1', summary: 's', tool: 't', state: 'awaiting' }] }]
+    h.getMessages.mockResolvedValue(msgs)
+    h.getActionStatuses.mockRejectedValue(new Error('db down'))
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await GET(req(), ctx())
+    expect(res.status).toBe(200)
+    expect((await res.json()).messages).toEqual(msgs)
+    expect(err).toHaveBeenCalled()
+    err.mockRestore()
+  })
+
   it('GET with no approvals runs no status lookup', async () => {
     h.getConversation.mockResolvedValue(conv)
     h.getMessages.mockResolvedValue([{ id: 'm1', role: 'user', text: 'hi', approvals: [] }])

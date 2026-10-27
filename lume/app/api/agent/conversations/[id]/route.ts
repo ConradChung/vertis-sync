@@ -22,11 +22,18 @@ const Rename = z.object({ title: z.string().trim().min(1).max(120) }).strict()
 const notFound = () => NextResponse.json({ error: 'not_found' }, { status: 404 })
 const badId = () => NextResponse.json({ error: 'invalid_id' }, { status: 400 })
 
-/** One `in` query for every approval's row status; null when the row is gone. */
+/** One `in` query for every approval's row status; null when the row is gone. A failed lookup leaves them unset. */
 async function withLiveStatus(messages: StoredMessage[]): Promise<StoredMessage[]> {
   const ids = messages.flatMap((m) => (m.approvals ?? []).map((a) => a.action_id))
   if (!ids.length) return messages
-  const statuses = await getActionStatuses(ids)
+  let statuses: Map<string, string>
+  try {
+    statuses = await getActionStatuses(ids)
+  } catch (err) {
+    // The cards fall back to their stored state; the chat itself still loads.
+    console.error('[api/agent/conversations/[id]] status lookup failed:', err instanceof Error ? err.message : err)
+    return messages
+  }
   return messages.map((m) =>
     m.approvals?.length ? { ...m, approvals: m.approvals.map((a) => ({ ...a, status: statuses.get(a.action_id) ?? null })) } : m
   )

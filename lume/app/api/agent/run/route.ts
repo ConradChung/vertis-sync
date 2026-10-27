@@ -320,14 +320,14 @@ async function executeRun({
         const state: StoredApproval['state'] =
           result.outcome === 'executed' ? 'auto_executed' : result.outcome === 'handled_elsewhere' ? 'handled_elsewhere' : 'auto_failed'
         autoRan.set(id, state === 'auto_failed' ? 'error' : 'ok')
-        send({ type: 'approval', action_id: result.action_id, deep_link: result.deep_link, summary: result.summary ?? null, tool: name, state })
+        send({ type: 'approval', action_id: result.action_id, deep_link: result.deep_link, summary: result.summary ?? null, tool: name, tool_id: id, state })
         await save({ tool_calls: snapshot() })
         return
       }
       if (ok && result?.status === 'awaiting_approval' && typeof result?.action_id === 'string' && result.action_id) {
         approvalActionId = result.action_id
         if (entry) entry.action_id = result.action_id
-        send({ type: 'approval', action_id: result.action_id, deep_link: result.deep_link, summary: result.summary ?? null, tool: name, state: 'awaiting' })
+        send({ type: 'approval', action_id: result.action_id, deep_link: result.deep_link, summary: result.summary ?? null, tool: name, tool_id: id, state: 'awaiting' })
         await save({ status: 'needs_approval', approval_action_id: approvalActionId, tool_calls: snapshot() })
         return
       }

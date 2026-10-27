@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { ShieldAlert, Zap } from 'lucide-react'
 import type { PendingApproval } from '@/components/orb/PlanCard'
@@ -25,6 +25,8 @@ export interface ApprovalDecision {
   /** The row's status after the decision (or the status someone else left it in). */
   status: string
   error: string | null
+  /** 409 already_handled: Telegram, the action page or another tab decided it first; `decision` was not applied. */
+  elsewhere?: boolean
 }
 
 const LABEL: Record<string, string> = {
@@ -93,16 +95,32 @@ function settledFrom(status: string): Settled {
 
 /** Awaiting the owner: Approve / Deny until decided here, elsewhere, or before a reload. */
 function Decision({ a, onDecided }: { a: ChatApproval; onDecided?: (d: ApprovalDecision) => void }) {
-  const loaded = a.status === undefined || a.status === 'awaiting' ? null : settledFrom(a.status ?? '')
-  const [settled, setSettled] = useState<Settled | null>(loaded)
+  const fromProp = (status: string | null | undefined) => (status === undefined || status === 'awaiting' ? null : settledFrom(status ?? ''))
+  const [settled, setSettled] = useState<Settled | null>(() => fromProp(a.status))
+  // Re-sync when a reload (or a parent) hands a new live status: adjust during render, not in an effect.
+  const [seenStatus, setSeenStatus] = useState(a.status)
+  if (seenStatus !== a.status) {
+    setSeenStatus(a.status)
+    setSettled(fromProp(a.status))
+  }
   const [pending, setPending] = useState<'approve' | 'reject' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // A decision that lands after this card unmounted (chat switched or reset) must not
+  // send a follow-up into whatever conversation is on screen now.
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
 
   const decide = async (decision: 'approve' | 'reject') => {
     setPending(decision)
     setError(null)
-    const report = (status: string, err: string | null) =>
-      onDecided?.({ action_id: a.action_id, tool: a.tool, summary: a.summary, decision, status, error: err })
+    const report = (status: string, err: string | null, elsewhere = false) => {
+      if (mounted.current) onDecided?.({ action_id: a.action_id, tool: a.tool, summary: a.summary, decision, status, error: err, ...(elsewhere ? { elsewhere } : {}) })
+    }
     try {
       const res = await fetch(`/api/actions/${a.action_id}/decide`, {
         method: 'POST',
@@ -114,7 +132,7 @@ function Decision({ a, onDecided }: { a: ChatApproval; onDecided?: (d: ApprovalD
       if (res.status === 409 && body.error === 'already_handled') {
         const status = body.status ?? 'handled'
         setSettled({ text: `Already ${label(status).toLowerCase()} elsewhere`, tone: 'muted' })
-        report(status, null)
+        report(status, null, true)
         return
       }
       if (!res.ok) {

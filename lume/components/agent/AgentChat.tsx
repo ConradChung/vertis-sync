@@ -455,7 +455,9 @@ export function AgentChat() {
             <p id="agent-composer-hint" className="mt-2 flex items-center justify-center gap-3 text-[11px] text-fg-24 max-sm:sr-only">
               <span>Enter to send · Shift+Enter for a new line</span>
               <span aria-hidden>·</span>
-              <span>Anything risky waits for your approval</span>
+              <span className={cn(chat.skipPermissions && 'text-red/80')}>
+                {chat.skipPermissions ? 'Skip permissions on — money and emails still ask' : 'Anything risky waits for your approval'}
+              </span>
               {messages.length > 0 && !busy && (
                 <button type="button" onClick={newChat} className="inline-flex items-center gap-1 text-fg-46 hover:text-fg">
                   <RotateCcw className="size-3" /> New chat
@@ -659,7 +661,7 @@ function Message({
 
 /** Lume told the agent how an approval came out: one muted line, not a bubble. */
 function AutoTurn({ text }: { text: string }) {
-  const denied = text.startsWith('[approval] I denied')
+  const denied = text.startsWith('[approval] I denied') || /handled elsewhere: rejected\b/.test(text)
   const Icon = denied ? ShieldX : ShieldCheck
   return (
     <p className="flex items-start gap-1.5 text-[12px] text-fg-46" aria-label="Approval outcome sent to Lume">

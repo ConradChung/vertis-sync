@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
-import { approvalFollowUp, storedToChat, useAgentChat } from '@/hooks/useAgentChat'
+import { applyAgentEvent, approvalFollowUp, storedToChat, useAgentChat, type ChatMessage } from '@/hooks/useAgentChat'
 import type { ApprovalDecision } from '@/components/agent/ApprovalCard'
 import type { StoredMessage } from '@/lib/agent/history'
 
@@ -32,9 +32,24 @@ describe('approvalFollowUp', () => {
     expect(approvalFollowUp({ ...approved, status: 'failed', error: 'boom' })).toBe(
       '[approval] I approved pause_campaign (Pause A). Outcome: failed — boom. Continue.'
     )
-    expect(approvalFollowUp({ ...approved, decision: 'reject', status: 'rejected', summary: null })).toBe(
-      "[approval] I denied pause_campaign (). Don't retry it; tell me what you'd do instead."
+    expect(approvalFollowUp({ ...approved, decision: 'reject', status: 'rejected' })).toBe(
+      "[approval] I denied pause_campaign (Pause A). Don't retry it; tell me what you'd do instead."
     )
+  })
+
+  it('a null summary leaves no empty parentheses; a multi-line one is one line', () => {
+    expect(approvalFollowUp({ ...approved, summary: null })).toBe('[approval] I approved pause_campaign. Outcome: executed. Continue.')
+    expect(approvalFollowUp({ ...approved, decision: 'reject', status: 'rejected', summary: null })).toBe(
+      "[approval] I denied pause_campaign. Don't retry it; tell me what you'd do instead."
+    )
+    expect(approvalFollowUp({ ...approved, summary: 'Pause A\n120 leads' })).toBe('[approval] I approved pause_campaign (Pause A 120 leads). Outcome: executed. Continue.')
+  })
+
+  it('already handled elsewhere: says so, never that the owner decided it', () => {
+    expect(approvalFollowUp({ ...approved, status: 'rejected', elsewhere: true })).toBe(
+      '[approval] pause_campaign (Pause A) was already handled elsewhere: rejected. Continue.'
+    )
+    expect(approvalFollowUp({ ...approved, summary: null, elsewhere: true })).toBe('[approval] pause_campaign was already handled elsewhere: executed. Continue.')
   })
 })
 
@@ -43,8 +58,8 @@ describe('useAgentChat', () => {
     const fetchMock = vi.fn(async () => sse([{ type: 'done' }]))
     vi.stubGlobal('fetch', fetchMock)
     const { result } = renderHook(() => useAgentChat())
-    await act(() => result.current.send('[approval] I approved x (). Outcome: executed. Continue.', undefined, { auto: true }))
-    expect(runBodies(fetchMock)[0]).toEqual({ prompt: '[approval] I approved x (). Outcome: executed. Continue.', auto: true })
+    await act(() => result.current.send('[approval] I approved x. Outcome: executed. Continue.', undefined, { auto: true }))
+    expect(runBodies(fetchMock)[0]).toEqual({ prompt: '[approval] I approved x. Outcome: executed. Continue.', auto: true })
     expect(result.current.messages[0]).toMatchObject({ role: 'user', auto: true })
   })
 
@@ -82,6 +97,29 @@ describe('useAgentChat', () => {
     act(() => result.current.followUp({ ...approved, decision: 'reject', status: 'rejected' }))
     await waitFor(() => expect(runBodies(fetchMock)).toHaveLength(1))
     expect(runBodies(fetchMock)[0]).toMatchObject({ auto: true, prompt: expect.stringContaining('I denied pause_campaign') })
+  })
+})
+
+describe('applyAgentEvent: skip-mode auto-runs', () => {
+  const base = { id: 'a', role: 'assistant' as const, text: '', approvals: [] }
+  const ended = (tools: { id: string; name: string }[]) =>
+    tools.reduce(
+      (m, t) => applyAgentEvent(applyAgentEvent(m, { type: 'tool_start', id: t.id, name: t.name, tier: 'high' }), { type: 'tool_end', id: t.id, name: t.name, tier: 'high', ok: true, ms: 5 }),
+      { ...base, tools: [] } as ChatMessage
+    )
+  it('an auto-executed approval marks its chip ok, an auto-failed one error (by tool id)', () => {
+    let m = ended([{ id: 't1', name: 'pause_campaign' }, { id: 't2', name: 'pause_campaign' }])
+    expect(m.tools.map((t) => t.status)).toEqual(['awaiting', 'awaiting'])
+    m = applyAgentEvent(m, { type: 'approval', action_id: 'x1', tool: 'pause_campaign', tool_id: 't1', state: 'auto_executed' })
+    m = applyAgentEvent(m, { type: 'approval', action_id: 'x2', tool: 'pause_campaign', tool_id: 't2', state: 'auto_failed' })
+    expect(m.tools.map((t) => t.status)).toEqual(['ok', 'error'])
+  })
+  it('without a tool id, the latest awaiting chip of that tool; an awaiting approval leaves the chip awaiting', () => {
+    let m = ended([{ id: 't1', name: 'pause_campaign' }, { id: 't2', name: 'resume_campaign' }])
+    m = applyAgentEvent(m, { type: 'approval', action_id: 'x1', tool: 'resume_campaign', state: 'awaiting' })
+    expect(m.tools.map((t) => t.status)).toEqual(['awaiting', 'awaiting'])
+    m = applyAgentEvent(m, { type: 'approval', action_id: 'x2', tool: 'pause_campaign', state: 'handled_elsewhere' })
+    expect(m.tools.map((t) => t.status)).toEqual(['ok', 'awaiting'])
   })
 })
 

@@ -103,6 +103,7 @@ export function applyAgentEvent(m: ChatMessage, e: AgentEvent): ChatMessage {
     case 'approval':
       return {
         ...m,
+        tools: settleAutoRun(m.tools, e),
         approvals: [
           ...m.approvals.filter((x) => x.action_id !== e.action_id),
           {
@@ -121,11 +122,28 @@ export function applyAgentEvent(m: ChatMessage, e: AgentEvent): ChatMessage {
   }
 }
 
+/**
+ * Skip mode settled a high-tier call without asking: its chip is ok / error,
+ * not "awaiting". Matched by the event's tool call id, else the latest
+ * awaiting chip of that tool (the approval follows its tool_end directly).
+ */
+function settleAutoRun(tools: ToolLogEntry[], e: AgentEvent): ToolLogEntry[] {
+  const state = e.state as ChatApproval['state']
+  if (!state || state === 'awaiting') return tools
+  const status: ToolLogEntry['status'] = state === 'auto_failed' ? 'error' : 'ok'
+  const byId = e.tool_id ? tools.findIndex((t) => t.id === e.tool_id) : -1
+  const i = byId >= 0 ? byId : tools.findLastIndex((t) => t.name === e.tool && t.status === 'awaiting')
+  return i < 0 ? tools : tools.map((t, j) => (j === i ? { ...t, status } : t))
+}
+
 /** The automatic turn that tells the agent what the owner decided in an approval card. */
 export function approvalFollowUp(d: ApprovalDecision): string {
+  const summary = d.summary?.replace(/\s+/g, ' ').trim()
+  const what = summary ? `${d.tool} (${summary})` : d.tool
+  if (d.elsewhere) return `[approval] ${what} was already handled elsewhere: ${d.status}. Continue.`
   return d.decision === 'approve'
-    ? `[approval] I approved ${d.tool} (${d.summary ?? ''}). Outcome: ${d.status}${d.error ? ` — ${d.error}` : ''}. Continue.`
-    : `[approval] I denied ${d.tool} (${d.summary ?? ''}). Don't retry it; tell me what you'd do instead.`
+    ? `[approval] I approved ${what}. Outcome: ${d.status}${d.error ? ` — ${d.error}` : ''}. Continue.`
+    : `[approval] I denied ${what}. Don't retry it; tell me what you'd do instead.`
 }
 
 /** A stored message, as the chat renders it. */

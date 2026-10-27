@@ -135,6 +135,15 @@ describe('AgentChat', () => {
     expect(screen.queryByText(/Skip permissions is on/)).toBeNull()
   })
 
+  it('skip permissions changes the composer hint', () => {
+    vi.stubGlobal('fetch', router({}))
+    render(<AgentChat />)
+    expect(screen.getByText('Anything risky waits for your approval')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Skip permissions' }))
+    expect(screen.queryByText('Anything risky waits for your approval')).toBeNull()
+    expect(screen.getByText('Skip permissions on — money and emails still ask')).toBeTruthy()
+  })
+
   it('the banner turns skip permissions off', () => {
     vi.stubGlobal('fetch', router({}))
     render(<AgentChat />)
