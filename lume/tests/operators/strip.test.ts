@@ -23,7 +23,7 @@ describe('verticalCards', () => {
   it('one card per live vertical with check-in, counts and the bot’s last action', () => {
     const cards = verticalCards({
       verticals,
-      operators: [op('op-r', 'r', '2026-10-26T09:45:00Z'), op('op-r-old', 'r', '2026-10-26T08:00:00Z', { revoked_at: 'x' }), op('op-m', null, '2026-10-26T09:59:00Z', { is_master: true })],
+      operators: [op('op-r', 'r', '2026-10-26T09:45:00Z'), op('op-r-old', 'r', '2026-10-26T08:00:00Z', { revoked_at: 'x' }), op('op-m', null, '2026-10-26T09:59:00Z', { is_master: true, revoked_at: 'gone' })],
       gates, alerts, decided, now,
     })
     expect(cards.map((c) => c.id)).toEqual(['r', 'k'])
@@ -33,6 +33,20 @@ describe('verticalCards', () => {
       last_bot_action: { id: 'a1', kind: 'pause_campaign', summary: 'Pause R', status: 'executed', decided_at: '2026-10-26T09:00:00Z' },
     })
     expect(cards[1]).toMatchObject({ bots: 0, last_check_in: null, stale: true, needs_confirmation: 1, unacked_alerts: 0, last_bot_action: null })
+  })
+
+  it('a live master bot takes unrouted items: the default vertical no longer counts them', () => {
+    const cards = verticalCards({
+      verticals, operators: [op('op-m', null, '2026-10-26T09:59:00Z', { is_master: true })], gates, alerts: [], decided: [], now,
+    })
+    expect(cards.find((c) => c.id === 'k')!.needs_confirmation).toBe(0)
+    expect(cards.find((c) => c.id === 'r')!.needs_confirmation).toBe(1)
+  })
+
+  it('an operator-key request counts for no vertical, default included', () => {
+    const keyGate = [{ kind: 'lume_action', title: 'issue_operator_key', counts: { vertical_id: 'r' } }] as unknown as GateRow[]
+    const cards = verticalCards({ verticals, operators: [], gates: keyGate, alerts: [], decided: [], now })
+    expect(cards.every((c) => c.needs_confirmation === 0)).toBe(true)
   })
 
   it('red after 30 minutes', () => {

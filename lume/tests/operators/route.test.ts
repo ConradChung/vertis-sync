@@ -122,3 +122,29 @@ describe('scopes', () => {
     expect(verticalFor(scopeForGate({ kind: 'push_review', counts: { campaign_id: 'camp-z' }, title: null }), ALL)).toBe(KASPEN)
   })
 })
+
+describe('owner-only items (issue_operator_key) and the master fallback (review fixes)', () => {
+  it('issue_operator_key routes to no vertical, never the default', () => {
+    const item = routeItemForAction({ kind: 'issue_operator_key', payload: { vertical_id: 'roof', summary: 's' } })
+    expect(verticalFor(item, ALL)).toBeNull()
+    const gate = scopeForGate({ kind: 'lume_action', title: 'issue_operator_key', counts: { vertical_id: 'roof' } })
+    expect(verticalFor(gate, ALL)).toBeNull()
+  })
+
+  it('a vertical operator never sees it, even the default vertical; the master does', () => {
+    const items = [routeItemForAction({ kind: 'issue_operator_key', payload: {} })]
+    expect(itemsForOperator({ is_master: false, vertical_id: 'kaspen' }, items, ALL)).toEqual([])
+    expect(itemsForOperator({ is_master: false, vertical_id: 'roof' }, items, ALL)).toEqual([])
+    expect(itemsForOperator({ is_master: true, vertical_id: null }, items, ALL)).toHaveLength(1)
+  })
+
+  it('with a live master operator, unrouted items go to the master (null), not the default vertical', () => {
+    const unrouted = { campaign_id: 'unknown', scope: 'validation' as const }
+    expect(verticalFor(unrouted, ALL)?.id).toBe('kaspen')
+    expect(verticalFor(unrouted, ALL, { masterLive: true })).toBeNull()
+    // Campaign and sole-scope routing are unchanged.
+    expect(verticalFor({ campaign_id: 'camp-r' }, ALL, { masterLive: true })?.id).toBe('roof')
+    expect(itemsForOperator({ is_master: false, vertical_id: 'kaspen' }, [unrouted], ALL, { masterLive: true })).toEqual([])
+    expect(itemsForOperator({ is_master: false, vertical_id: 'kaspen' }, [unrouted], ALL)).toEqual([unrouted])
+  })
+})

@@ -15,7 +15,7 @@ import {
   type CheckinSummary,
   type OutcomeItem,
 } from '@/lib/operators/checkin'
-import { routeItemForAction } from '@/lib/operators/route'
+import { hasLiveMaster, routeItemForAction } from '@/lib/operators/route'
 import { listOperators, listVerticals, touchOperator } from '@/lib/operators/store'
 import type { Operator, Vertical } from '@/lib/operators/types'
 
@@ -102,9 +102,11 @@ export async function loadCheckin(opts: { operator: Operator | null; verticalPar
     }
   }
 
-  const items = needsConfirmation(gates, verticals, scope)
-  const scopedAlerts = alertsForScope(alerts, verticals, scope)
-  const outcomes = outcomesForScope(decided, verticals, scope, routeItemForAction)
+  // A live master bot takes unrouted items instead of the default vertical.
+  const routeOpts = { masterLive: hasLiveMaster(operators) }
+  const items = needsConfirmation(gates, verticals, scope, routeOpts)
+  const scopedAlerts = alertsForScope(alerts, verticals, scope, routeOpts)
+  const outcomes = outcomesForScope(decided, verticals, scope, routeItemForAction, routeOpts)
   const operatorLabels = Object.fromEntries(operators.map((o) => [o.id, o.label]))
 
   const campaignIds = [...new Set((scope.all ? verticals : [scope.vertical]).flatMap((v) => v.campaign_ids))]

@@ -11,7 +11,7 @@ const h = vi.hoisted(() => ({
 vi.mock('@/lib/auth/guards', () => ({ requireOwner: h.requireOwner, requireOwnerSession: h.requireOwnerSession }))
 vi.mock('@/lib/operators/session', () => ({ currentOperator: h.currentOperator }))
 vi.mock('@/lib/alertsStore', () => ({ listAlerts: h.listAlerts, ackAlerts: h.ackAlerts, ALERTS_DEFAULT_LIMIT: 50, ALERTS_MAX_LIMIT: 200 }))
-vi.mock('@/lib/operators/store', () => ({ listVerticals: h.listVerticals }))
+vi.mock('@/lib/operators/store', () => ({ listVerticals: h.listVerticals, listOperators: async () => [] }))
 
 import { NextResponse } from 'next/server'
 import { GET } from '@/app/api/alerts/route'

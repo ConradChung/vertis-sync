@@ -1,6 +1,6 @@
 import type { GateRow, Json, PendingActionRow } from '@/lib/db/types'
 import type { Vertical } from '@/lib/operators/types'
-import { scopeForGate, verticalFor } from '@/lib/operators/route'
+import { scopeForGate, verticalFor, type RouteOptions } from '@/lib/operators/route'
 import { BUTTON_SPECS, KIND_LABEL, LFO_PRESETS, SPENDING_ACTIONS } from '@/lib/validate/actions'
 
 /**
@@ -236,8 +236,8 @@ function controlOf(gate: GateRow): Control {
   }
 }
 
-export function describeGate(gate: GateRow, verticals: readonly Vertical[]): CheckinItem {
-  const vertical = verticalFor(scopeForGate(gate), verticals)
+export function describeGate(gate: GateRow, verticals: readonly Vertical[], opts: RouteOptions = {}): CheckinItem {
+  const vertical = verticalFor(scopeForGate(gate), verticals, opts)
   const leads = leadsOf(gate)
   const isAction = gate.kind === 'lume_action'
   const actionKind = isAction ? (gate.title ?? '') : null
@@ -275,8 +275,13 @@ export function inScope(verticalId: string | null, scope: CheckinScope): boolean
   return scope.all || verticalId === scope.vertical.id
 }
 
-export function needsConfirmation(gates: readonly GateRow[], verticals: readonly Vertical[], scope: CheckinScope): CheckinItem[] {
-  return orderItems(gates.map((g) => describeGate(g, verticals)).filter((i) => inScope(i.vertical_id, scope)))
+export function needsConfirmation(
+  gates: readonly GateRow[],
+  verticals: readonly Vertical[],
+  scope: CheckinScope,
+  opts: RouteOptions = {}
+): CheckinItem[] {
+  return orderItems(gates.map((g) => describeGate(g, verticals, opts)).filter((i) => inScope(i.vertical_id, scope)))
 }
 
 /** Items grouped by vertical, verticals by name, the unrouted (owner-only) group last. */
@@ -307,8 +312,13 @@ export interface AlertLike {
 }
 
 /** Unacked alerts for the scope: urgent first, newest first inside each severity band. */
-export function alertsForScope<A extends AlertLike>(alerts: readonly A[], verticals: readonly Vertical[], scope: CheckinScope): A[] {
-  const mine = scope.all ? [...alerts] : alerts.filter((a) => verticalFor(a, verticals)?.id === scope.vertical.id)
+export function alertsForScope<A extends AlertLike>(
+  alerts: readonly A[],
+  verticals: readonly Vertical[],
+  scope: CheckinScope,
+  opts: RouteOptions = {}
+): A[] {
+  const mine = scope.all ? [...alerts] : alerts.filter((a) => verticalFor(a, verticals, opts)?.id === scope.vertical.id)
   return mine.sort(
     (a, b) =>
       Number(b.severity === 'urgent') - Number(a.severity === 'urgent') ||
@@ -336,7 +346,8 @@ export function outcomesForScope(
   rows: readonly PendingActionRow[],
   verticals: readonly Vertical[],
   scope: CheckinScope,
-  routeOf: (a: PendingActionRow) => { campaign_id?: string | null; scope?: Vertical['scopes'][number] | null }
+  routeOf: (a: PendingActionRow) => { campaign_id?: string | null; scope?: Vertical['scopes'][number] | null; owner_only?: boolean },
+  opts: RouteOptions = {}
 ): OutcomeItem[] {
   return rows
     .map((a) => ({
@@ -349,7 +360,7 @@ export function outcomesForScope(
       decided_at: a.decided_at,
       executed_at: a.executed_at,
       error: a.error,
-      vertical_id: verticalFor(routeOf(a), verticals)?.id ?? null,
+      vertical_id: verticalFor(routeOf(a), verticals, opts)?.id ?? null,
     }))
     .filter((o) => inScope(o.vertical_id, scope))
 }

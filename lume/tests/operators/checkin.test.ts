@@ -175,3 +175,19 @@ describe('outcomes, summary, ranges', () => {
     expect(instantlyCampaignIds(['gmail:recruiter', '04ca2257-5ea6-434e-bf62-f55add156914'])).toEqual(['04ca2257-5ea6-434e-bf62-f55add156914'])
   })
 })
+
+describe('owner-only and master fallback on /operator (review fixes)', () => {
+  const keyGate = gate('lume_action', { target_table: 'pending_actions', target_id: 'k1', title: 'issue_operator_key', counts: { vertical_id: 'v-r' } })
+  it('a vertical operator never sees an operator-key request, the default vertical included', () => {
+    for (const v of verticals) expect(needsConfirmation([keyGate], verticals, { all: false, vertical: v })).toEqual([])
+    const all = needsConfirmation([keyGate], verticals, { all: true })
+    expect(all.map((i) => [i.key, i.vertical_id])).toEqual([['lume_action:k1', null]])
+  })
+  it('with a live master, unrouted items leave the default vertical page', () => {
+    // campaign scope is shared by Kaspen and Roofers, and no campaign: unrouted.
+    const stall = gate('lume_action', { target_table: 'pending_actions', target_id: 's1', title: 'activate_rule', counts: {} })
+    expect(needsConfirmation([stall], verticals, { all: false, vertical: KASPEN })).toHaveLength(1)
+    expect(needsConfirmation([stall], verticals, { all: false, vertical: KASPEN }, { masterLive: true })).toEqual([])
+    expect(needsConfirmation([stall], verticals, { all: true }, { masterLive: true })[0].vertical_id).toBeNull()
+  })
+})

@@ -1,6 +1,6 @@
 import type { GateRow, PendingActionRow } from '@/lib/db/types'
 import type { Operator, Vertical } from '@/lib/operators/types'
-import { scopeForGate, verticalFor } from '@/lib/operators/route'
+import { hasLiveMaster, scopeForGate, verticalFor } from '@/lib/operators/route'
 import type { AlertLike } from '@/lib/operators/checkin'
 
 /**
@@ -33,14 +33,16 @@ export function verticalCards(args: {
   now: Date
 }): VerticalCard[] {
   const live = args.verticals.filter((v) => !v.archived_at)
+  // A live master bot takes the unrouted items; owner-only items (key requests) count for no vertical.
+  const opts = { masterLive: hasLiveMaster(args.operators) }
   const gateCount = new Map<string, number>()
   for (const g of args.gates) {
-    const v = verticalFor(scopeForGate(g), live)
+    const v = verticalFor(scopeForGate(g), live, opts)
     if (v) gateCount.set(v.id, (gateCount.get(v.id) ?? 0) + 1)
   }
   const alertCount = new Map<string, number>()
   for (const a of args.alerts) {
-    const v = verticalFor(a, live)
+    const v = verticalFor(a, live, opts)
     if (v) alertCount.set(v.id, (alertCount.get(v.id) ?? 0) + 1)
   }
   const botVertical = new Map(args.operators.map((o) => [o.id, o.vertical_id]))

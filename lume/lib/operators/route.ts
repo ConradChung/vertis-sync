@@ -10,20 +10,41 @@ import type { Operator, Vertical, VerticalScope } from '@/lib/operators/types'
  *  2. else, by scope, but ONLY when exactly one live vertical holds that
  *     scope (a scope several verticals share is ambiguous and says nothing
  *     about the owner);
- *  3. else the default vertical;
+ *  3. else, when no live master operator exists, the default vertical;
  *  4. else null (the owner / master bot only).
+ * An `owner_only` item (an operator-key request) is always null: it belongs
+ * to the owner and the master bot, never a vertical, default included.
  */
 
 export interface RouteItem {
   campaign_id?: string | null
   scope?: VerticalScope | null
+  /** Never routed to a vertical (issue_operator_key). */
+  owner_only?: boolean
+}
+
+export interface RouteOptions {
+  /**
+   * A live (unrevoked) master operator exists: it takes the unrouted items,
+   * so the default vertical gets nothing by fallback.
+   */
+  masterLive?: boolean
+}
+
+/** Pending-action kinds that only the owner / master bot ever see. */
+export const OWNER_ONLY_KINDS: ReadonlySet<string> = new Set(['issue_operator_key'])
+
+/** `masterLive` from a key list: any live master key. */
+export function hasLiveMaster(operators: readonly Pick<Operator, 'is_master' | 'revoked_at'>[]): boolean {
+  return operators.some((o) => o.is_master && !o.revoked_at)
 }
 
 type RoutableVertical = Pick<Vertical, 'id' | 'name' | 'campaign_ids' | 'scopes' | 'is_default' | 'archived_at'>
 
 const byName = <V extends RoutableVertical>(a: V, b: V) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.id < b.id ? -1 : 1)
 
-export function verticalFor<V extends RoutableVertical>(item: RouteItem, verticals: readonly V[]): V | null {
+export function verticalFor<V extends RoutableVertical>(item: RouteItem, verticals: readonly V[], opts: RouteOptions = {}): V | null {
+  if (item.owner_only) return null
   const live = verticals.filter((v) => !v.archived_at).sort(byName)
   const campaignId = item.campaign_id?.trim()
   if (campaignId) {
@@ -35,6 +56,7 @@ export function verticalFor<V extends RoutableVertical>(item: RouteItem, vertica
     const scoped = live.filter((v) => v.scopes.includes(scope))
     if (scoped.length === 1) return scoped[0]
   }
+  if (opts.masterLive) return null
   return live.find((v) => v.is_default) ?? null
 }
 
@@ -45,11 +67,12 @@ export function verticalFor<V extends RoutableVertical>(item: RouteItem, vertica
 export function itemsForOperator<T extends RouteItem>(
   op: Pick<Operator, 'is_master' | 'vertical_id'>,
   items: readonly T[],
-  verticals: readonly RoutableVertical[]
+  verticals: readonly RoutableVertical[],
+  opts: RouteOptions = {}
 ): T[] {
   if (op.is_master) return [...items]
   if (!op.vertical_id) return []
-  return items.filter((item) => verticalFor(item, verticals)?.id === op.vertical_id)
+  return items.filter((item) => verticalFor(item, verticals, opts)?.id === op.vertical_id)
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +117,7 @@ const str = (v: Json | undefined): string | null => (typeof v === 'string' && v.
 export function routeItemForAction(a: { kind: string; payload: Record<string, Json> | null }): RouteItem {
   const p = a.payload ?? {}
   const campaign_id = str(p.campaign_id) ?? str(p.source_campaign_id)
+  if (OWNER_ONLY_KINDS.has(a.kind)) return { campaign_id: null, scope: null, owner_only: true }
   if (a.kind === 'decide_gate') {
     const action = str(p.callback_data)?.split(':')[0] ?? ''
     return { campaign_id, scope: scopeForGateAction(action) }

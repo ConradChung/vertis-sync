@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server'
 import { requireOwner } from '@/lib/auth/guards'
 import { ALERTS_DEFAULT_LIMIT, ALERTS_MAX_LIMIT, listAlerts } from '@/lib/alertsStore'
 import { uuidParam } from '@/lib/http/json'
-import { verticalFor } from '@/lib/operators/route'
-import { listVerticals } from '@/lib/operators/store'
+import { hasLiveMaster, verticalFor } from '@/lib/operators/route'
+import { listOperators, listVerticals } from '@/lib/operators/store'
 import { dbErrorResponse } from '@/lib/http/errors'
 
 /**
@@ -28,9 +28,14 @@ export async function GET(req: Request) {
   if (rawVertical && !verticalId) return NextResponse.json({ error: 'bad_vertical' }, { status: 400 })
   try {
     if (!verticalId) return NextResponse.json({ alerts: await listAlerts({ unackedOnly, limit }) })
-    const [alerts, verticals] = await Promise.all([listAlerts({ unackedOnly, limit: ALERTS_MAX_LIMIT }), listVerticals()])
+    const [alerts, verticals, operators] = await Promise.all([
+      listAlerts({ unackedOnly, limit: ALERTS_MAX_LIMIT }),
+      listVerticals(),
+      listOperators(),
+    ])
     const n = Math.min(Math.max(Math.floor(limit), 1), ALERTS_MAX_LIMIT)
-    const mine = alerts.filter((a) => verticalFor(a, verticals)?.id === verticalId).slice(0, n)
+    const opts = { masterLive: hasLiveMaster(operators) }
+    const mine = alerts.filter((a) => verticalFor(a, verticals, opts)?.id === verticalId).slice(0, n)
     return NextResponse.json({ alerts: mine })
   } catch (err) {
     return dbErrorResponse(err, 'api/alerts')
