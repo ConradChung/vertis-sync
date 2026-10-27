@@ -44,7 +44,7 @@ import {
   type Pool,
 } from '../_shared/jobsearch/pool.ts'
 import { getAccessToken, readRange } from '../_shared/jobsearch/sheets.ts'
-import { alert, type AlertInput, lumeLink, titleFrom } from '../_shared/alert.ts'
+import { alert, type AlertInput, gateKey, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 
@@ -425,9 +425,9 @@ async function parkWaitingFill(batch: JobBatch, resolved: number, poolLeft: numb
     `Leadsfriday needs ${LEADSFRIDAY_MIN_CONTACTS} (${need} companies).\n` +
     `Eligible pool left: ${poolLeft}. New scrapes top this batch up automatically (checked hourly).\n\n` +
     `Order anyway places a ${LEADSFRIDAY_MIN_CONTACTS}-contact order for the ${resolved} resolved now.`,
-    // Money decision. Keyed on the resolved count so a retry adds nothing but
-    // a later re-park (after a refill) gets its own row.
-    { severity: 'urgent', link: lumeLink(`/validate?gate=jobs_fill:${batch.id}`), dedupe_key: `${batch.id}:jobs_fill:${resolved}` },
+    // Money decision. One row per batch; a later re-park (after a refill)
+    // re-opens (un-acks) it with the new counts.
+    { severity: 'urgent', link: lumeLink(`/validate?gate=jobs_fill:${batch.id}`), dedupe_key: gateKey(batch.id, 'jobs_fill') },
     {
       inline_keyboard: [[
         { text: `💳 Order anyway (${LEADSFRIDAY_MIN_CONTACTS} min)`, callback_data: `jobs_order_now:${batch.id}` },
@@ -796,7 +796,7 @@ async function phaseRank(batch: JobBatch): Promise<void> {
     `${contacts.length} people across ${groups.size} ${groups.size === 1 ? 'company' : 'companies'} · ${withEmail} with email\n` +
     `kept top ${KEEP_TOP} per company → ${keptCount} rows` +
     unresolvedLine
-  await notify(text, { severity: 'urgent', link: lumeLink(`/validate?gate=jobs_write:${batch.id}`), dedupe_key: `${batch.id}:jobs_write` }, {
+  await notify(text, { severity: 'urgent', link: lumeLink(`/validate?gate=jobs_write:${batch.id}`), dedupe_key: gateKey(batch.id, 'jobs_write') }, {
     inline_keyboard: [[
       { text: '✍️ Write to gtm tab', callback_data: `jobs_write:${batch.id}` },
       { text: '🗑 Discard', callback_data: `jobs_discard:${batch.id}` },

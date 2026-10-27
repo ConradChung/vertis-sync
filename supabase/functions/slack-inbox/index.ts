@@ -6,7 +6,7 @@
 // (via sender_platform='slack') once the owner decides.
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
-import { alert, lumeLink, titleFrom } from '../_shared/alert.ts'
+import { alert, gateKey, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -273,7 +273,7 @@ async function handleFileShared(fileId: string, channelId: string): Promise<void
   const sent = await alert({
     source: 'slack-inbox', severity: 'urgent', title: titleFrom(ownerText), body: ownerText,
     link: lumeLink(`/validate?gate=ingest_approval:${ingest.id}`), scope: 'validation',
-    dedupe_key: `${ingest.id}:ingest_approval`,
+    dedupe_key: gateKey(ingest.id, 'ingest_approval'),
     telegram: () => tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: ownerText, reply_markup: keyboard }),
   })
   const ownerMessageId = (sent?.result as { message_id?: number } | undefined)?.message_id

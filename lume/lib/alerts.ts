@@ -81,6 +81,15 @@ export function titleFrom(text: string): string {
     .slice(0, 200)
 }
 
+/**
+ * The feed's dedupe_key for a gate prompt: `<target id>:<gate kind>`, the same
+ * format the edge functions' _shared/alert.ts uses, so one gate is one row. No per-instance
+ * suffix: a gate that re-opens is un-acked by lume_alert_upsert (mode reopen).
+ */
+export function gateKey(targetId: string, kind: string): string {
+  return `${targetId}:${kind}`
+}
+
 /** A Lume page for the feed row: absolute when `LUME_URL` is set, else relative. */
 export function alertLink(path: string): string {
   const base = configuredBaseUrl()

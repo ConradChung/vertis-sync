@@ -22,7 +22,7 @@
 // exact code that later pushes them.
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
-import { alert, type AlertInput, lumeLink, titleFrom } from '../_shared/alert.ts'
+import { alert, type AlertInput, gateKey, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -643,7 +643,7 @@ async function processJob(jobId: string): Promise<void> {
     ].join('\n'),
     pushed > 0
       // The Launch button asks a decision; without it this is a report.
-      ? { severity: 'urgent', link: lumeLink('/campaigns'), scope: 'campaign', campaign_id: campaignId, dedupe_key: `${jobId}:camp_launch` }
+      ? { severity: 'urgent', link: lumeLink('/campaigns'), scope: 'campaign', campaign_id: campaignId, dedupe_key: gateKey(jobId, 'camp_launch') }
       : { severity: 'info', link: lumeLink('/campaigns'), scope: 'campaign', campaign_id: campaignId },
     pushed > 0
       ? { inline_keyboard: [[{ text: '🚀 Launch campaign', callback_data: `camp_launch:${jobId}` }]] }

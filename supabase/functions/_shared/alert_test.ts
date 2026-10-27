@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertRejects } from 'jsr:@std/assert@1'
-import { alert, type AlertDeps, lumeLink, parseChannels, titleFrom } from './alert.ts'
+import { alert, type AlertDeps, gateKey, lumeLink, parseChannels, titleFrom } from './alert.ts'
 
 interface Captured { url: string; init: RequestInit }
 
@@ -155,3 +155,8 @@ Deno.test('with waitUntil available the feed insert is handed off, not awaited',
   assertEquals(handed.length, 1)
   await handed[0]
 })
+
+Deno.test('gateKey: <target id>:<gate kind>, the format Lume gate-opened uses too', () => {
+  assertEquals(gateKey('7db3d841-252c-4572-95ec-bc110727df8d', 'stall'), '7db3d841-252c-4572-95ec-bc110727df8d:stall')
+})
+

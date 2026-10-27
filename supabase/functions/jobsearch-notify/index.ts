@@ -10,7 +10,7 @@
 import { normalizeCompanyName, normalizeDomain, optionalHeaderIndex } from '../_shared/jobsearch/pure.ts'
 import { classifyPool, companiesNeeded, LEADSFRIDAY_MIN_CONTACTS, type Pool } from '../_shared/jobsearch/pool.ts'
 import { getAccessToken, readRange, sheetTabLink } from '../_shared/jobsearch/sheets.ts'
-import { alert, lumeLink, titleFrom } from '../_shared/alert.ts'
+import { alert, gateKey, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -228,7 +228,7 @@ async function notify(batchId: string): Promise<{ message_id: number | null; edi
   const open = batch.status === 'awaiting_review'
   const gate = {
     source: 'jobsearch-notify', severity: open ? 'urgent' : 'info', title: titleFrom(text), body: text,
-    link: lumeLink(`/validate?gate=jobs_review:${batch.id}`), scope: 'orders', dedupe_key: `${batch.id}:jobs_review`,
+    link: lumeLink(`/validate?gate=jobs_review:${batch.id}`), scope: 'orders', dedupe_key: gateKey(batch.id, 'jobs_review'),
     mode: open ? 'reopen' : 'update',
   } as const
 

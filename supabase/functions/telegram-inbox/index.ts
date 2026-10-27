@@ -4,7 +4,7 @@
 // normal validation pipeline (validation_jobs/validation_rows + email-validator).
 
 import { LUME_MIN_COUNT, LUME_MAX_COUNT, parseLumeAction, secretsMatch } from '../_shared/lume/action.ts'
-import { alert, lumeLink, titleFrom } from '../_shared/alert.ts'
+import { alert, gateKey, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 
@@ -392,7 +392,7 @@ async function handleDocument(message: NonNullable<TelegramUpdate['message']>): 
   const sent = await alert({
     source: 'telegram-inbox', severity: 'urgent', title: titleFrom(ownerText), body: ownerText,
     link: lumeLink(`/validate?gate=ingest_approval:${ingest.id}`), scope: 'validation',
-    dedupe_key: `${ingest.id}:ingest_approval`,
+    dedupe_key: gateKey(ingest.id, 'ingest_approval'),
     telegram: () => tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: ownerText, reply_markup: keyboard }),
   })
   const ownerMessageId = (sent?.result as { message_id?: number } | undefined)?.message_id
@@ -707,7 +707,7 @@ async function showBarrierScreen(job: InstantlyJob, edit?: { chatId: number; mes
     await alert({
       source: 'telegram-inbox', severity: 'urgent', title: titleFrom(screen.text), body: screen.text,
       link: lumeLink(`/validate?gate=push_review:${job.id}`), scope: 'validation',
-      campaign_id: job.instantly_campaign_id ?? null, dedupe_key: `${job.id}:push_review`,
+      campaign_id: job.instantly_campaign_id ?? null, dedupe_key: gateKey(job.id, 'push_review'),
       telegram: () => tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: screen.text, reply_markup: screen.reply_markup }),
     })
   }
@@ -1123,7 +1123,7 @@ async function sendFinderPrompt(
   await alert({
     source: 'telegram-inbox', severity: 'urgent', title: titleFrom(finderText), body: finderText,
     link: lumeLink(`/validate?gate=finder_decision:${jobId}`), scope: 'validation',
-    dedupe_key: `${jobId}:finder_decision`,
+    dedupe_key: gateKey(jobId, 'finder_decision'),
     telegram: () => tg('sendMessage', {
       chat_id: TELEGRAM_CHAT_ID,
       text: finderText,
@@ -1517,7 +1517,7 @@ async function handleApolloOrPasteText(message: NonNullable<TelegramUpdate['mess
     const sent = await alert({
       source: 'telegram-inbox', severity: 'urgent', title: titleFrom(countText), body: countText,
       link: lumeLink(`/validate?gate=lfo_count:${order.id}`), scope: 'orders',
-      dedupe_key: `${order.id}:lfo_count`,
+      dedupe_key: gateKey(order.id, 'lfo_count'),
       telegram: () => tg('sendMessage', {
         chat_id: TELEGRAM_CHAT_ID,
         text: countText,

@@ -31,13 +31,13 @@ beforeEach(() => {
 })
 
 describe('POST /api/hooks/gate-opened alerts (G4)', () => {
-  it('pings Telegram exactly as before and writes one urgent row keyed like the pipeline prompt', async () => {
+  it('pings Telegram exactly as before; touches the gate row keyed like the pipeline prompt (never overwrites it)', async () => {
     const res = await hook({ kind: 'finder_decision', target_table: 'validation_jobs', target_id: ID })
     expect(await res.json()).toEqual({ ok: true, pinged: true })
     expect(h.sendGatePing).toHaveBeenCalledWith('finder_decision', ID, 'leads.csv')
     expect(feed.rows).toEqual([{
       source: 'lume.gates', severity: 'urgent', title: '🔗 leads.csv — open in Lume', body: '🔗 leads.csv — open in Lume',
-      link: `/validate?gate=finder_decision:${ID}`, campaign_id: null, scope: 'validation', dedupe_key: `${ID}:finder_decision`, mode: 'reopen',
+      link: `/validate?gate=finder_decision:${ID}`, campaign_id: null, scope: 'validation', dedupe_key: `${ID}:finder_decision`, mode: 'touch',
     }])
     expect(h.logEvent).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ pinged: true, telegram_message_id: 9 }) }))
   })
@@ -49,4 +49,12 @@ describe('POST /api/hooks/gate-opened alerts (G4)', () => {
     expect(h.sendGatePing).not.toHaveBeenCalled()
     expect(feed.rows[0]).toMatchObject({ scope: 'orders', dedupe_key: `${ID}:lfo_count` })
   })
+})
+
+describe('gate-opened shares the pipelines\' keys (G4 fix)', () => {
+  it.each(['stall', 'jobs_stall', 'jobs_fill', 'jobs_review', 'jobs_write', 'push_review', 'campaign_choice', 'lume_action'])(
+    '%s: <target id>:<kind>, no instance suffix', async (kind) => {
+      await hook({ kind, target_table: 'validation_jobs', target_id: ID })
+      expect(feed.rows.at(-1)).toMatchObject({ dedupe_key: `${ID}:${kind}`, mode: 'touch' })
+    })
 })

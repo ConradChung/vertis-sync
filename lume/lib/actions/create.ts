@@ -2,7 +2,7 @@ import 'server-only'
 import { findAwaitingAction, findAwaitingRuleAction, insertPendingAction, isDbError, setActionMessageId } from '@/lib/db/service'
 import { sendActionPrompt } from '@/lib/adapters/telegram'
 import { buildActionPrompt } from '@/lib/adapters/telegram.messages'
-import { alert, alertLink, telegramSkipped, titleFrom } from '@/lib/alerts'
+import { alert, alertLink, gateKey, telegramSkipped, titleFrom } from '@/lib/alerts'
 import { routeItemForAction } from '@/lib/operators/route'
 import { CAMPAIGN_ACTION_KEY, isCampaignActionKind, parseCampaignPayload } from '@/lib/actions/payloads'
 import { findAwaitingActionBy } from '@/lib/campaigns/service'
@@ -177,7 +177,7 @@ export async function createAction(
   const sent = (await alert({
     source: 'lume.actions', severity: 'urgent', title: titleFrom(promptText), body: promptText,
     link: alertLink(`/actions/${row.id}`), campaign_id: route.campaign_id, scope: route.scope,
-    dedupe_key: `${row.id}:lume_action`,
+    dedupe_key: gateKey(row.id, 'lume_action'),
     telegram: () => sendActionPrompt(row),
   })) ?? telegramSkipped
   if (sent.ok && sent.messageId !== null) {

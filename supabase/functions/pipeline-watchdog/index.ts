@@ -9,7 +9,7 @@
 // function secret instead of being copied into the database vault. pg_cron's
 // only job is to POST to this function every 5 minutes.
 
-import { alert, lumeLink, titleFrom } from '../_shared/alert.ts'
+import { alert, gateKey, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -110,11 +110,10 @@ async function checkForStalls(): Promise<{ scanned: number; notified: string[] }
 
     // Claim the notification slot before sending. Two overlapping ticks then
     // cannot produce two prompts for the same job.
-    const notifiedAt = new Date().toISOString()
     const claimed = (await supabaseRequest(
       'PATCH',
       `validation_jobs?id=eq.${job.id}&watchdog_status=eq.idle`,
-      { watchdog_status: 'awaiting', watchdog_notified_at: notifiedAt },
+      { watchdog_status: 'awaiting', watchdog_notified_at: new Date().toISOString() },
       { returning: true },
     )) as Job[]
     if (!claimed || claimed.length === 0) continue
@@ -130,12 +129,12 @@ async function checkForStalls(): Promise<{ scanned: number; notified: string[] }
     const stallText =
       `⚠️ Job ${job.filename} looks stalled at ${done}/${job.total_rows}\n` +
       `No rows written in ${Math.floor(idleMinutes)} minutes.\n\nResume?`
-    // A stall gate: the feed row links to the Lume card that decides it; one
-    // row per notification slot (the claim time), so a re-stall gets its own.
+    // A stall gate: the feed row links to the Lume card that decides it. One
+    // row per job; a re-stall re-opens (un-acks) it.
     await alert({
       source: 'pipeline-watchdog', severity: 'urgent', title: titleFrom(stallText), body: stallText,
       link: lumeLink(`/validate?gate=stall:${job.id}`), scope: 'validation',
-      dedupe_key: `${job.id}:stall:${notifiedAt}`,
+      dedupe_key: gateKey(job.id, 'stall'),
       telegram: async () => {
         if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
           await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -204,11 +203,10 @@ async function checkJobBatchStalls(): Promise<{ scanned: number; notified: strin
     // Claim the slot before sending so two overlapping ticks cannot produce
     // two prompts. (The claim itself bumps updated_at through the trigger;
     // the next tick is gated by watchdog_status, not by the heartbeat.)
-    const notifiedAt = new Date().toISOString()
     const claimed = (await supabaseRequest(
       'PATCH',
       `job_batches?id=eq.${batch.id}&watchdog_status=eq.idle`,
-      { watchdog_status: 'awaiting', watchdog_notified_at: notifiedAt },
+      { watchdog_status: 'awaiting', watchdog_notified_at: new Date().toISOString() },
       { returning: true },
     )) as JobBatch[]
     if (!claimed || claimed.length === 0) continue
@@ -219,7 +217,7 @@ async function checkJobBatchStalls(): Promise<{ scanned: number; notified: strin
     await alert({
       source: 'pipeline-watchdog', severity: 'urgent', title: titleFrom(stallText), body: stallText,
       link: lumeLink(`/validate?gate=jobs_stall:${batch.id}`), scope: 'orders',
-      dedupe_key: `${batch.id}:jobs_stall:${notifiedAt}`,
+      dedupe_key: gateKey(batch.id, 'jobs_stall'),
       telegram: async () => {
         if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
           await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {

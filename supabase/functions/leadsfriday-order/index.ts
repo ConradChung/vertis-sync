@@ -12,7 +12,7 @@
 // Helpers copied from telegram-inbox; polling pattern from jobsearch-puller.
 
 import { parseCsv } from '../_shared/jobsearch/pure.ts'
-import { alert, type AlertInput, lumeLink, titleFrom } from '../_shared/alert.ts'
+import { alert, type AlertInput, gateKey, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 
@@ -349,7 +349,7 @@ async function ingest(order: ApolloOrder, st: LeadsfridayStatus): Promise<void> 
 
   const sent = await notify(ownerText, {
     severity: 'urgent', link: lumeLink(`/validate?gate=ingest_approval:${ing.id}`), scope: 'validation',
-    dedupe_key: `${ing.id}:ingest_approval`,
+    dedupe_key: gateKey(ing.id, 'ingest_approval'),
   }, keyboard)
   const mid = (sent?.result as { message_id?: number } | undefined)?.message_id
   if (mid) await supabaseRequest('PATCH', `telegram_ingests?id=eq.${ing.id}`, { telegram_message_id: mid })

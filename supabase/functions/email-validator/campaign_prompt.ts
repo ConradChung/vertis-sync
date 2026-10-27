@@ -9,7 +9,7 @@
 // With Telegram on this is exactly the pre-G4 sequence: send, then one PATCH
 // carrying both the message id and the status.
 
-import { alert, type AlertDeps, lumeLink, titleFrom } from '../_shared/alert.ts'
+import { alert, type AlertDeps, gateKey, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 export interface CampaignPromptDeps {
   botToken: string
@@ -32,7 +32,7 @@ export async function promptForCampaign(
   await alert({
     source: 'email-validator', severity: 'urgent', title: titleFrom(text), body: text,
     link: lumeLink(`/validate?gate=campaign_choice:${jobId}`, deps.alertDeps?.env), scope: 'validation',
-    dedupe_key: `${jobId}:campaign_choice`,
+    dedupe_key: gateKey(jobId, 'campaign_choice'),
     telegram: async () => {
       if (!deps.botToken || !deps.chatId) return
       try {
