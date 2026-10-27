@@ -19,7 +19,8 @@ import type { TelegramResult } from '@/lib/adapters/telegram'
  * The feed is written regardless.
  *
  * The feed insert starts before the send and is awaited after it, so the send
- * goes out on its old timing; a feed failure is logged, never thrown.
+ * goes out on its old timing; it is capped at 5 s, and a feed failure or
+ * timeout is logged, never thrown.
  */
 
 export type AlertChannel = 'telegram' | 'feed'
@@ -89,7 +90,12 @@ export function alertLink(path: string): string {
 /** What callers treat as the Telegram result when Telegram is switched off. */
 export const telegramSkipped: TelegramResult = { ok: false, skipped: true }
 
+/** Same cap as the edge helper: a hung feed write never holds the caller longer. */
+export const FEED_TIMEOUT_MS = 5_000
+
 async function insertFeed<T>(input: AlertInput<T>): Promise<void> {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
     const args = {
       p_source: input.source,
@@ -102,10 +108,23 @@ async function insertFeed<T>(input: AlertInput<T>): Promise<void> {
       p_dedupe_key: input.dedupe_key ?? null,
       p_mode: input.mode ?? 'reopen',
     }
-    const res = await createServiceClient().rpc('lume_alert_upsert', args)
-    if (res.error) console.error(`[alerts] lume_alerts insert failed for ${input.source}:`, res.error.message)
+    const call = createServiceClient().rpc('lume_alert_upsert', args).abortSignal(controller.signal)
+    const timeout = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => {
+        controller.abort()
+        resolve('timeout')
+      }, FEED_TIMEOUT_MS)
+    })
+    const res = await Promise.race([call, timeout])
+    if (res === 'timeout') {
+      console.error(`[alerts] lume_alerts insert failed for ${input.source}:`, `timed out after ${FEED_TIMEOUT_MS} ms`)
+    } else if (res.error) {
+      console.error(`[alerts] lume_alerts insert failed for ${input.source}:`, res.error.message)
+    }
   } catch (err) {
     console.error(`[alerts] lume_alerts insert failed for ${input.source}:`, err instanceof Error ? err.message : err)
+  } finally {
+    if (timer) clearTimeout(timer)
   }
 }
 

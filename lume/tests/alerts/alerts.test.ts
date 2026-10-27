@@ -133,3 +133,23 @@ describe('alert', () => {
   })
 })
 
+describe('alert feed timeout', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('a feed write that hangs is abandoned after 5 s (aborted and logged); telegram is unaffected', async () => {
+    vi.useFakeTimers()
+    let signal: AbortSignal | undefined
+    db.rpc.mockImplementationOnce(() => {
+      const never = new Promise<{ error: null }>(() => {})
+      return { abortSignal: (s: AbortSignal) => { signal = s; return never }, then: never.then.bind(never) }
+    })
+    let settled = false
+    const p = alert({ source: 's', title: 'T', telegram: async () => 'sent' }).then((v) => { settled = true; return v })
+    await vi.advanceTimersByTimeAsync(4_999)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await p).toBe('sent')
+    expect(signal?.aborted).toBe(true)
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('lume_alerts'), expect.stringContaining('timed out'))
+  })
+})
