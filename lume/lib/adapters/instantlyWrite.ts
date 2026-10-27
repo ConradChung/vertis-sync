@@ -1,5 +1,6 @@
 import 'server-only'
 import { INSTANTLY_BASE_URL, InstantlyError } from '@/lib/adapters/instantly'
+import { instantlyCall } from '@/lib/adapters/instantlyLeads'
 
 /**
  * Instantly API v2, write side. Only `lib/actions/execute.ts` may import this:
@@ -83,4 +84,23 @@ export async function createCampaignFrom(sourceId: string, name: string): Promis
   const created = (await request('POST', '/campaigns', body)) as { id?: string }
   if (!created.id) throw new InstantlyError(0, 'Instantly returned no campaign id')
   return { id: created.id, name }
+}
+
+export const DELETE_CHUNK = 100
+
+/**
+ * Delete leads from a campaign by id (`DELETE /leads` with `campaign_id` +
+ * `ids`), 100 ids per call; deleting frees the uploaded-contacts quota after
+ * 5–10 minutes. Returns how many Instantly reports deleted. Only the
+ * `remove_leads` executor calls this, after snapshotting each lead.
+ */
+export async function deleteLeads(campaignId: string, ids: string[]): Promise<number> {
+  const unique = [...new Set(ids)]
+  let count = 0
+  for (let i = 0; i < unique.length; i += DELETE_CHUNK) {
+    const chunk = unique.slice(i, i + DELETE_CHUNK)
+    const res = (await instantlyCall('DELETE', '/leads', { campaign_id: campaignId, ids: chunk, limit: chunk.length })) as { count?: unknown }
+    count += typeof res?.count === 'number' ? res.count : 0
+  }
+  return count
 }
