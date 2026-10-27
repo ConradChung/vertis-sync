@@ -1,7 +1,7 @@
 -- supabase/tests/lume_operators_test.sql
 -- Grok Bot operator layer (Phase G1): verticals, operator keys, attribution.
 begin;
-select plan(26);
+select plan(29);
 
 -- structure
 select has_table('public', 'lume_verticals', 'lume_verticals exists');
@@ -20,6 +20,13 @@ select ok((select relrowsecurity from pg_class where relname='lume_verticals'), 
 select ok((select relrowsecurity from pg_class where relname='lume_operators'), 'lume_operators has RLS on');
 select ok(not has_table_privilege('authenticated', 'public.lume_operators', 'select'), 'authenticated cannot read lume_operators');
 select ok(not has_table_privilege('anon', 'public.lume_verticals', 'select'), 'anon cannot read lume_verticals');
+
+-- seed (20261027020633): the owner's five verticals, Kaspen / Zenport the default, idempotent
+select is((select count(*)::int from lume_verticals where name in
+  ('Job search / GTM roles','PM reactions','HNWI / wealth management','Kaspen / Zenport','Roofers')), 5, 'the five seeded verticals exist');
+select is((select name from lume_verticals where is_default), 'Kaspen / Zenport', 'Kaspen / Zenport is the default vertical');
+select lives_ok($$insert into lume_verticals (name, scopes, is_default) values ('Kaspen / Zenport', '{campaign}', true)
+  on conflict (name) do nothing$$, 're-running the seed is a no-op');
 
 -- behaviour: verticals
 -- (clear any seeded default inside this rolled-back transaction)
