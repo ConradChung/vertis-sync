@@ -267,8 +267,8 @@ export function AgentChat() {
       </Sheet>
 
       <div className="relative min-w-0 flex-1">
-        {/* Toolbar floats beside the centred chat on wide screens; below lg it is its own row so it never covers messages. */}
-        <div className={cn('z-10 flex items-center gap-1', split && desktop ? 'mb-2' : 'mb-2 lg:absolute lg:top-0 lg:left-0 lg:mb-0')}>
+        {/* Toolbar is its own row above the chat panel so it never covers messages. */}
+        <div className={cn('z-10 mb-2 flex items-center gap-1', !(split && desktop) && 'mx-auto max-w-[1200px]')}>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -307,7 +307,7 @@ export function AgentChat() {
             split && desktop
               ? 'split-chat-in h-full'
               : // Phones: visual viewport (shrinks with the keyboard) minus header, bottom bar, padding and the toolbar row.
-                'mx-auto h-[calc(var(--vvh,100dvh)-var(--topbar-h)-var(--bottombar-h)-4.75rem)] max-w-[820px] sm:h-[calc(100dvh-var(--topbar-h)-6.75rem)] lg:h-[calc(100dvh-var(--topbar-h)-110px)]'
+                'mx-auto h-[calc(var(--vvh,100dvh)-var(--topbar-h)-var(--bottombar-h)-4.75rem)] max-w-[1200px] sm:h-[calc(100dvh-var(--topbar-h)-6.75rem)]'
           )}
         >
           <div
