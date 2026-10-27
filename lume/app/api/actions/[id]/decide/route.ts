@@ -121,7 +121,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     if (dispatched === 'dispatched') return formRedirect(req, form.returnTo, { ok: 'approved_running' })
     try {
       const outcome = await executeAction(id)
-      if (!outcome.ran) return formRedirect(req, form.returnTo, { ok: 'approved' })
+      // Not claimable here: the dispatched run (or the sweeper) has it. Say where it really stands.
+      if (!outcome.ran) {
+        if (outcome.status === 'executed') return formRedirect(req, form.returnTo, { ok: 'approved_ran' })
+        if (outcome.status === 'failed') return formRedirect(req, form.returnTo, { error: 'approved_failed' })
+        if (outcome.status === 'executing') return formRedirect(req, form.returnTo, { ok: 'approved_running' })
+        return formRedirect(req, form.returnTo, { error: 'approved_unknown' })
+      }
       return outcome.status === 'executed'
         ? formRedirect(req, form.returnTo, { ok: 'approved_ran' })
         : formRedirect(req, form.returnTo, { error: 'approved_failed' })

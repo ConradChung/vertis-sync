@@ -526,6 +526,23 @@ describe('POST /api/actions/[id]/decide', () => {
       expect(ins.pauseCampaign).toHaveBeenCalledOnce()
     })
 
+    it('dispatch refused (non-2xx) and the inline run finds it not claimable: the real state, never plain "Approved"', async () => {
+      store.claimDecision.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }, { status: 'approved' }))
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('{}', { status: 500 }))
+      store.claimExecution.mockResolvedValue(null)
+      for (const [status, expected] of [
+        ['failed', 'flash_error=approved_failed'],
+        ['executed', 'flash=approved_ran'],
+        ['executing', 'flash=approved_running'],
+        ['approved', 'flash_error=approved_unknown'],
+      ] as const) {
+        store.getAction.mockResolvedValue(row('pause_campaign', {}, { status }))
+        const res = await decidePOST(form('decision=approve'), params(ID))
+        expect(res.headers.get('location'), status).toContain(expected)
+      }
+      fetchSpy.mockRestore()
+    })
+
     it('claim lost → 303 with flash_error', async () => {
       store.claimDecision.mockResolvedValue(null)
       store.getAction.mockResolvedValue(row('pause_campaign', {}, { status: 'approved' }))

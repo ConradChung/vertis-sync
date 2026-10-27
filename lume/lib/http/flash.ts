@@ -31,6 +31,7 @@ export const FLASH_ERROR = {
   pipeline_not_configured: 'The pipeline entrypoint is not configured; tell Conrad.',
   approved_failed: 'Approved, but it failed. See Recent outcomes.',
   approved_retry: 'Approved, but it could not finish; it will be retried.',
+  approved_unknown: 'Approved, but its run could not be confirmed. Check Recent outcomes before doing anything else.',
   key_on_action_page: 'Decide this on its action page: its sign-in link is shown once there.',
   master_only: 'Only the master bot or the owner can issue keys or manage verticals.',
   several_matches: 'Several campaigns match; pick one from the list.',
