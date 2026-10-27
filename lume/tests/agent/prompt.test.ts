@@ -79,3 +79,19 @@ describe('Grok Bot operator playbook (G9)', () => {
     expect(SYSTEM_PROMPT).toMatch(/Never ask for a master key/)
   })
 })
+
+describe('lead cycling and the contact cap (Phase 2)', () => {
+  it('explains when to check the cap, list, remove and set up cycling', () => {
+    const section = at('Contact cap and lead cycling')
+    for (const t of ['contact_usage', 'list_campaign_leads', 'remove_leads', 'create_cycle_out_rule', 'activate_rule']) {
+      expect(at(t), t).toBeGreaterThanOrEqual(0)
+    }
+    expect(SYSTEM_PROMPT.indexOf('remove_leads', section)).toBeGreaterThan(section)
+    expect(SYSTEM_PROMPT).toMatch(/Replied and interested leads are never removed/)
+    expect(SYSTEM_PROMPT).toMatch(/5-10 minutes/)
+    expect(SYSTEM_PROMPT).toMatch(/never guess/i)
+  })
+  it('lists removing leads among the high-risk tools', () => {
+    expect(SYSTEM_PROMPT).toMatch(/High-risk tools \([^)]*removing leads/)
+  })
+})
