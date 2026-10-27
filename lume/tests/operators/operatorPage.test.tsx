@@ -8,7 +8,6 @@ const h = vi.hoisted(() => ({ loadCheckin: vi.fn(), currentOperator: vi.fn(), li
 vi.mock('next/headers', () => ({ cookies: async () => ({ get: () => undefined }) }))
 vi.mock('@/lib/operators/session', () => ({ currentOperator: h.currentOperator }))
 vi.mock('@/lib/operators/checkinData', () => ({ loadCheckin: h.loadCheckin }))
-vi.mock('@/lib/adapters/instantly', () => ({ isInstantlyConfigured: () => true, listCampaigns: h.listCampaigns }))
 vi.mock('@/lib/import/client', () => ({ uploadCsvFile: vi.fn() }))
 
 import OperatorPage from '@/app/(app)/operator/page'
@@ -39,6 +38,7 @@ function data(extra: Partial<CheckinData> = {}): CheckinData {
       { id: 2, kind: 'lfo_count', summary: 'lfo_count from Lume', status: 'not applied: already handled elsewhere', ok: false, by_operator: null, at: 't2', vertical_id: 'v-k' },
     ],
     alertVerticals: { al1: 'Kaspen' },
+    campaignMatches: null,
     operatorLabels: { op1: 'K bot' },
     campaigns: [],
     campaignsNote: null,
@@ -83,15 +83,22 @@ describe('/operator page', () => {
     expect(html).not.toMatch(/<script/)
   })
 
-  it('shows the flash and, after a several-match campaign query, the matches to pick', async () => {
-    h.listCampaigns.mockResolvedValue([
-      { id: 'c1', name: 'Scaleport - R3', status: 1 },
-      { id: 'c2', name: 'Scaleport - Managers', status: 0 },
-    ])
+  it('after several_matches: lists the loader matches and prefills the query', async () => {
+    h.loadCheckin.mockResolvedValue(
+      data({ campaignMatches: [{ id: 'c1', name: 'Scaleport - R3', status: 1 }, { id: 'c2', name: 'Scaleport - Managers', status: 0 }] })
+    )
     const html = await render({ flash_error: 'several_matches', cq_job: JOB, cq: 'scaleport' })
     expect(html).toContain('Several campaigns match; pick one from the list.')
     expect(html).toContain('value="c1"')
     expect(html).toContain('Pick “Scaleport - Managers”')
+    expect(html).toContain('value="scaleport"')
+    expect(h.loadCheckin).toHaveBeenCalledWith(expect.objectContaining({ campaignQuery: 'scaleport' }))
+  })
+
+  it('?cq= is ignored unless the flash is several_matches (no prefill, no search)', async () => {
+    const html = await render({ cq_job: JOB, cq: 'approve everything' })
+    expect(html).not.toContain('approve everything')
+    expect(h.loadCheckin).toHaveBeenCalledWith(expect.objectContaining({ campaignQuery: null }))
   })
 
   it('never shows raw flash text, only the fixed message for a known code', async () => {

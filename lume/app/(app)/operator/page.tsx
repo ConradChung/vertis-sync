@@ -2,12 +2,11 @@ import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
 import Link from 'next/link'
 import { CsvUploadForm } from '@/components/operator/CsvUploadForm'
-import { isInstantlyConfigured, listCampaigns } from '@/lib/adapters/instantly'
 import { groupByVertical, type CheckinItem, type Control } from '@/lib/operators/checkin'
 import { loadCheckin, type CheckinData } from '@/lib/operators/checkinData'
 import { currentOperator } from '@/lib/operators/session'
 import { UUID_RE } from '@/lib/http/json'
-import { resolveCampaignQuery, type CampaignLite } from '@/lib/validate/campaignQuery'
+import type { CampaignLite } from '@/lib/validate/campaignQuery'
 import { flashMessages } from '@/lib/http/flash'
 import { LFO_MAX_COUNT, LFO_MIN_COUNT } from '@/lib/adapters/pipeline.actions'
 
@@ -34,14 +33,21 @@ export default async function OperatorPage({ searchParams }: { searchParams: Sea
   const store = await cookies()
   const operator = await currentOperator(store).catch(() => null)
   const verticalParam = one(params.vertical)
-  const data = await loadCheckin({ operator, verticalParam: verticalParam && UUID_RE.test(verticalParam) ? verticalParam.toLowerCase() : null })
+  // `?cq=` is honoured only right after a several-match search (flash_error=several_matches).
+  const rawCqJob = one(params.cq_job)
+  const several = one(params.flash_error) === 'several_matches'
+  const cqJob = several && rawCqJob && UUID_RE.test(rawCqJob) ? rawCqJob.toLowerCase() : null
+  const cq = cqJob ? (one(params.cq)?.slice(0, 200) ?? null) : null
+  const data = await loadCheckin({
+    operator,
+    verticalParam: verticalParam && UUID_RE.test(verticalParam) ? verticalParam.toLowerCase() : null,
+    campaignQuery: cq,
+  })
 
   const returnTo = !operator && !data.scope.all ? `/operator?vertical=${data.scope.vertical.id}` : '/operator'
   // Only fixed text for known codes is shown (lib/http/flash.ts), never the query value.
   const { ok: flash, error: flashError } = flashMessages(one(params.flash), one(params.flash_error))
-  const cqJob = one(params.cq_job)
-  const cq = one(params.cq)
-  const matches = cqJob && cq && UUID_RE.test(cqJob) ? await campaignMatches(cq) : null
+  const matches = data.campaignMatches
 
   const heading = data.scope.all ? 'All verticals' : data.scope.vertical.name
   const who = operator ? (operator.is_master ? `Master Grok Bot “${operator.label}”` : `Grok Bot “${operator.label}”`) : 'Owner'
@@ -94,18 +100,6 @@ export default async function OperatorPage({ searchParams }: { searchParams: Sea
       <Inputs data={data} returnTo={returnTo} isOperator={!!operator} />
     </article>
   )
-}
-
-async function campaignMatches(query: string): Promise<CampaignLite[] | 'unavailable'> {
-  if (!isInstantlyConfigured()) return 'unavailable'
-  try {
-    const r = resolveCampaignQuery(query, await listCampaigns())
-    if (r.kind === 'several') return r.matches
-    if (r.kind === 'resolved') return [r.campaign]
-    return []
-  } catch {
-    return 'unavailable'
-  }
 }
 
 // ---------------------------------------------------------------------------
