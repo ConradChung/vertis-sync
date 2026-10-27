@@ -235,3 +235,46 @@ Each tool follows the existing pattern: read/low tools call a new Lume `/api/*` 
 **Phase 5 — reporting + cleanup:** `reply_rates` (read; group by country/title/campaign joined to lead-bank attributes), `edit_rule` (high, skippable), `cancel_order` (high, skippable; only before spend).
 
 Open API questions for phases 2–5 are listed in the design doc; resolve them before detailing those tasks.
+
+---
+
+## Phase G — Grok Bot operator layer (build after Phase 1 deploys, before Phase 2)
+
+Goal: moving from Telegram to Grok Bot is flipping settings, not a project. See the design doc
+section "Grok Bot operator layer". Default behaviour after this phase is unchanged (Telegram stays on).
+
+### G1: Verticals + operator keys (migration + store)
+- Tables: `lume_verticals (id uuid pk, name text unique, campaign_ids text[] default '{}', scopes text[] default '{}' check subset of {campaign,orders,replies,validation}, is_default bool default false, created_at, archived_at)`; `lume_operators (id uuid pk, vertical_id fk, label text, key_hash text unique (sha256 hex), created_at, revoked_at, last_seen_at)`. RLS on, service role only (match existing lume_* tables). At most one `is_default` vertical (partial unique index) — it receives items no vertical claims.
+- `pending_actions.decided_via` check adds `'operator'`; add `pending_actions.decided_by_operator uuid null references lume_operators`. `agent_conversations.vertical_id uuid null`.
+- pgTAP: constraints, default uniqueness, decided_via operator.
+- `lume/lib/operators/store.ts`: create vertical, list, update, archive; `createOperatorKey(verticalId, label)` → returns the raw key once (32 random bytes base64url) and stores sha256; `findOperatorByKey(raw)` (constant-time compare on hash); `revoke`; `touch(operatorId)`.
+
+### G2: Operator sign-in + attribution
+- `GET /auth/operator?k=<key>`: on a valid, unrevoked key → same Supabase owner session as `/auth/key` (full owner rights, owner's decision) PLUS an httpOnly, secure, sameSite=lax cookie `lume_op=<operator id>.<hmac>` signed with `LUME_INTERNAL_SECRET`; redirect to `/operator`. Invalid → `/login?error=exchange_failed`. `Referrer-Policy: no-referrer`.
+- `lib/operators/session.ts`: `currentOperator(req)` verifies the cookie HMAC, loads the operator (null if revoked → also clear cookie).
+- Attribution: `/api/actions/[id]/decide` → `claimDecision(id, approve, op ? 'operator' : 'lume')` + `decided_by_operator`; agent run route creates conversations with the operator's `vertical_id` and passes the operator/vertical into the prompt context ("You are being operated by the <name> Grok Bot; its campaigns: …"). Owner sign-in clears `lume_op`.
+- Header shows a small "Operator: <vertical>" chip when signed in as an operator.
+
+### G3: Routing items to verticals
+- `lib/operators/route.ts` pure `verticalFor(item, verticals)`: pending action / gate / alert → vertical whose `campaign_ids` contains its campaign id; else by scope (orders/validation items → vertical with that scope); else the default vertical; else null (owner only). Unit-tested.
+- "Needs confirmation" = awaiting `pending_actions` + open pipeline gates (`lume_gates` view) routed to the vertical, money/validation kinds first.
+
+### G4: Alert feed + channel switch
+- Table `lume_alerts (id, source text, severity info|warn|urgent, title, body, link, campaign_id, scope, created_at, acked_at, acked_by_operator)`; Realtime enabled like `events`.
+- Edge shared helper `supabase/functions/_shared/alert.ts`: `alert({source, severity, title, body, link?, campaign_id?, scope?, telegram?: () => Promise<void>})` — always inserts into `lume_alerts`; runs the function's existing Telegram send only when env `ALERT_CHANNELS` includes `telegram` (default `telegram,feed`). Gate prompts with buttons keep their Telegram path behind the same switch; the feed row links to the Lume page that decides the gate.
+- Swap each function's direct Telegram send for `alert(...)` keeping the exact Telegram text/buttons inside the `telegram` callback: hnwi-pipeline-orchestrator, contact-email-finder, jobsearch-notify, email-validator, jobsearch-puller, operating-city-enricher, instantly-push, pipeline-watchdog, jobsearch-sheet-writer, leadsfriday-order, slack-inbox, telegram-inbox (outbound notices only). Lume side: lib/adapters/telegram.ts `sendMessage` callers (actions/execute.ts, rules/tick.ts, import/ingest.ts, agent run route) go through `lib/alerts.ts` with the same switch (`ALERT_CHANNELS` env on Vercel).
+- Deploy every edited function; deno tests for the helper (channel parsing, telegram skipped when off, feed insert always). Verify by hash after deploy, as in earlier phases.
+
+### G5: `/operator` check-in page
+- Server-rendered, plain semantic HTML (headings, lists, tables, real `<button>`/`<form>`), minimal JS, so a browsing agent reads it reliably; no animations. Sections in order: **Needs confirmation** (routed approvals + gates; Approve/Deny inline via decide route / gate decide route; money items show exact cost: Leadsfriday count × $0.003), **Alerts** (unacked, with Acknowledge + "Acknowledge all"), **Recent outcomes** (last 24h actions/events for the vertical), **Campaigns** (sent / replies / bounces today + 7d for its campaigns), **Inputs** (Apollo link → existing apollo-link import; CSV upload → existing import; "Message Lume's agent" → opens /agent in a vertical-tagged conversation). A machine-readable `<pre id="operator-summary">` JSON block at the top with counts (needs_confirmation, unacked_alerts, last_checked_at) for quick routine checks.
+- Visiting the page calls `touch(operator)`. Owner can open `/operator?vertical=<id>` too.
+
+### G6: Settings + hub
+- `/settings/verticals` (owner only — not operators? owner decided full rights, so operators may view; creating/revoking keys requires owner session WITHOUT lume_op cookie): create/edit/archive verticals, generate a key (shown once with copy button + the full sign-in URL), revoke.
+- Hub: Overview gets a "Verticals" strip — per vertical: last check-in (relative, red if > 30 min), needs-confirmation count, unacked alerts, last action by its bot.
+
+### G7: Grok setup guide
+- `docs/lume/GROK-SETUP.md`: per-bot instructions template (role, vertical, sign-in link placeholder, confirmation rules template with example spend thresholds, never-do list), routine prompt ("every 15 minutes open <link>/operator; read #operator-summary; handle Needs confirmation per rules; acknowledge alerts after reporting urgent ones to me"), first-run test checklist, cutover steps (set `ALERT_CHANNELS=feed` on Vercel + Supabase secrets, watch for 3 days, then Telegram retirement).
+
+### G8: Verify + deploy
+Full vitest, tsc, next build, deno tests; apply migrations; deploy functions + Vercel; manual: create a test vertical, mint key, sign in via link in a private window → lands on /operator, decide a test pending action → `decided_via=operator`; `ALERT_CHANNELS` default keeps Telegram identical.
