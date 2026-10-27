@@ -52,7 +52,7 @@ vi.mock('@/lib/adapters/instantlyWrite', () => ins)
 const tg = vi.hoisted(() => ({ sendMessage: vi.fn(), editMessage: vi.fn(), sendDecisionNote: vi.fn(), sendActionPrompt: vi.fn() }))
 vi.mock('@/lib/adapters/telegram', () => tg)
 
-const ops = vi.hoisted(() => ({ getOperator: vi.fn() }))
+const ops = vi.hoisted(() => ({ getOperator: vi.fn(), getVertical: vi.fn(), createOperatorKey: vi.fn() }))
 vi.mock('@/lib/operators/store', () => ops)
 
 vi.mock('@/lib/supabase/service', async () => (await import('../stubs/feed')).serviceModule)
@@ -112,8 +112,8 @@ const lastFinish = () => store.finishAction.mock.calls.at(-1)!
 describe('executeAction dispatch table', () => {
   it('has a handler for every kind the DB allows', () => {
     expect(EXECUTABLE_KINDS.sort()).toEqual([
-      'activate_rule', 'assign_leads', 'create_campaign', 'crm_close_deal', 'decide_gate', 'delete_rule', 'launch_campaign',
-      'pause_campaign', 'push_to_instantly', 'resume_campaign', 'run_actor', 'send_reply',
+      'activate_rule', 'assign_leads', 'create_campaign', 'crm_close_deal', 'decide_gate', 'delete_rule', 'issue_operator_key',
+      'launch_campaign', 'pause_campaign', 'push_to_instantly', 'resume_campaign', 'run_actor', 'send_reply',
       'update_sequence',
     ])
   })
@@ -750,5 +750,72 @@ describe('alert feed (G4): every notice lands in lume_alerts; ALERT_CHANNELS gat
     expect(tg.sendActionPrompt).not.toHaveBeenCalled()
     expect(svc.setActionMessageId).not.toHaveBeenCalled()
     expect(feed.rows).toHaveLength(1)
+  })
+})
+
+describe('issue_operator_key (G9)', () => {
+  const VID = '3941b73f-c74e-4cc5-9766-f0140e6ad9c9'
+  const keyRow = (extra = {}) => row('issue_operator_key', { vertical_id: VID, label: 'Roofers bot' }, extra)
+  beforeEach(() => {
+    ops.getVertical.mockReset()
+    ops.createOperatorKey.mockReset()
+    ops.getVertical.mockResolvedValue({ id: VID, name: 'Roofers', archived_at: null })
+    ops.createOperatorKey.mockResolvedValue({ operator: { id: 'op-new', label: 'Roofers bot' }, rawKey: 'RAWKEY0123456789' })
+  })
+
+  it('reveals the sign-in link once; the stored result, event and outcome keep only a masked copy', async () => {
+    store.claimExecution.mockResolvedValue(keyRow())
+    const out = await executeAction(ID, { revealOnce: true, origin: 'https://lume.test' })
+    expect(out).toMatchObject({ ran: true, status: 'executed', reveal: { sign_in_url: 'https://lume.test/auth/operator?k=RAWKEY0123456789' } })
+    expect(ops.createOperatorKey).toHaveBeenCalledWith({ verticalId: VID, label: 'Roofers bot' })
+    const [, , stored] = lastFinish()
+    expect(stored).toEqual({
+      operator_id: 'op-new', vertical_id: VID, vertical_name: 'Roofers', label: 'Roofers bot',
+      sign_in_url_masked: 'https://lume.test/auth/operator?k=RAWK****',
+    })
+    expect(JSON.stringify(store.finishAction.mock.calls)).not.toContain('RAWKEY0123456789')
+    expect(JSON.stringify(svc.logEvent.mock.calls)).not.toContain('RAWKEY0123456789')
+    expect(JSON.stringify(tg.sendMessage.mock.calls)).not.toContain('RAWKEY0123456789')
+    expect(JSON.stringify(feed.rows)).not.toContain('RAWKEY0123456789')
+  })
+
+  it('refuses to mint without revealOnce (Telegram lume_ok, the sweeper): the link could never be shown', async () => {
+    store.claimExecution.mockResolvedValue(keyRow())
+    const out = await executeAction(ID)
+    expect(out).toMatchObject({ ran: true, status: 'failed' })
+    expect(ops.createOperatorKey).not.toHaveBeenCalled()
+  })
+
+  it('an archived vertical fails', async () => {
+    store.claimExecution.mockResolvedValue(keyRow())
+    ops.getVertical.mockResolvedValue({ id: VID, name: 'Roofers', archived_at: '2026-10-01' })
+    expect(await executeAction(ID, { revealOnce: true })).toMatchObject({ status: 'failed' })
+    expect(ops.createOperatorKey).not.toHaveBeenCalled()
+  })
+
+  it('decide route: approve returns the link in that one no-store response', async () => {
+    store.claimDecision.mockResolvedValue(keyRow({ status: 'approved' }))
+    store.claimExecution.mockResolvedValue(keyRow())
+    const res = await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve' }), params(ID))
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    const body = await res.json()
+    expect(body.sign_in_url).toBe('http://localhost/auth/operator?k=RAWKEY0123456789')
+    expect(JSON.stringify(body.result)).not.toContain('RAWKEY0123456789')
+  })
+
+  it('decide route: a form post is refused before any claim (a redirect cannot carry the link)', async () => {
+    store.getAction.mockResolvedValue(keyRow({ status: 'awaiting' }))
+    const res = await decidePOST(
+      new Request(`http://localhost/api/actions/${ID}/decide`, {
+        method: 'POST',
+        body: 'decision=approve',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'http://localhost' },
+      }),
+      params(ID)
+    )
+    expect(res.status).toBe(303)
+    expect(decodeURIComponent(res.headers.get('location')!)).toContain(`/actions/${ID}`)
+    expect(store.claimDecision).not.toHaveBeenCalled()
   })
 })

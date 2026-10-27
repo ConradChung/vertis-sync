@@ -2,6 +2,7 @@
 
 import { AnimatedNumber } from '@/components/ui/animated-number'
 import { OWNER_TZ } from '@/lib/time/owner'
+import { OneTimeLink } from '@/components/operator/OneTimeLink'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -59,6 +60,8 @@ function DetailValue({ v }: { v: string }) {
 export function ActionPlan({ action }: { action: ActionView }) {
   const router = useRouter()
   const [busy, setBusy] = useState<null | 'approve' | 'reject'>(null)
+  // issue_operator_key: the sign-in link from the decide response, shown once.
+  const [signIn, setSignIn] = useState<string | null>(null)
   const awaiting = action.status === 'awaiting'
 
   async function decide(decision: 'approve' | 'reject') {
@@ -69,7 +72,8 @@ export function ActionPlan({ action }: { action: ActionView }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ decision }),
       })
-      const body = (await res.json().catch(() => ({}))) as { status?: string; error?: string | null }
+      const body = (await res.json().catch(() => ({}))) as { status?: string; error?: string | null; sign_in_url?: string }
+      if (typeof body.sign_in_url === 'string') setSignIn(body.sign_in_url)
       if (res.status === 409) toast.info('Already handled — someone decided this first')
       else if (!res.ok && res.status !== 202) toast.error(body.error ?? `Failed (${res.status})`)
       else if (decision === 'reject') toast.success('Cancelled')
@@ -139,6 +143,7 @@ export function ActionPlan({ action }: { action: ActionView }) {
       ) : (
         <p className="text-[13px] text-fg-46">Already handled — nothing to confirm.</p>
       )}
+      {signIn && <OneTimeLink url={signIn} />}
     </GlassCard>
   )
 }

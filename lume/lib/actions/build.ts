@@ -12,6 +12,7 @@ import { buildActivateRule, buildAssignLeads, rotateActionBody } from '@/lib/rul
 import { ACTOR_ID_RE, checkRunActor, runActorPayload } from '@/lib/apify/service'
 import { ACTOR_RUN_CAP_USD } from '@/lib/apify/pricing'
 import { buildUpdateSequence } from '@/lib/campaigns/sequenceAction'
+import { getVertical } from '@/lib/operators/store'
 
 /**
  * Turn a requested action `{ kind, payload }` into the snapshot the owner
@@ -27,6 +28,8 @@ import { buildUpdateSequence } from '@/lib/campaigns/sequenceAction'
  *  activate_rule      { rule_id, rule_name, campaign_id, cron, tz, first_run, summary }
  *  delete_rule        { rule_id, summary }
  *  decide_gate        { callback_data, target_id, job_id?, summary }
+ *  issue_operator_key { vertical_id, label? } → { vertical_id, vertical_name, label, summary }
+ *                     (a live vertical; never a master key)
  *  run_actor          { actor_id, input, max_charge_usd?, expected_items? } →
  *                     lib/apify/service.ts: input validated against the
  *                     actor's schema, run options capped at $20, summary
@@ -51,6 +54,10 @@ const OtherBody = z.discriminatedUnion('kind', [
     payload: z.object({ callback_data: z.string().min(1).max(128), job_id: z.string().regex(UUID_RE).optional() }),
   }),
   z.object({ kind: z.literal('delete_rule'), payload: z.object({ rule_id: z.string().regex(UUID_RE) }) }),
+  z.object({
+    kind: z.literal('issue_operator_key'),
+    payload: z.object({ vertical_id: z.string().regex(UUID_RE), label: z.string().trim().min(1).max(80).optional() }),
+  }),
 ])
 
 // Campaign kinds: the payload is checked by parseCampaignPayload.
@@ -122,6 +129,21 @@ export async function buildActionRequest(input: unknown): Promise<ActionBuild> {
         kind: req.kind,
         payload: { rule_id: ruleId, summary: `Delete rotation rule “${rule.name}” (${rule.cron})` },
         ruleId,
+      }
+    }
+    case 'issue_operator_key': {
+      const v = await getVertical(req.payload.vertical_id.toLowerCase())
+      if (!v || v.archived_at) return fail(404, 'vertical_not_found')
+      const label = req.payload.label ?? `${v.name} bot`
+      return {
+        ok: true,
+        kind: req.kind,
+        payload: {
+          vertical_id: v.id,
+          vertical_name: v.name,
+          label,
+          summary: `Issue a Grok Bot operator key “${label}” for the ${v.name} vertical (full owner rights; sign-in link shown once to whoever approves)`,
+        },
       }
     }
     case 'run_actor': {

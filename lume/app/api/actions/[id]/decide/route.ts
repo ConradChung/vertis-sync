@@ -9,7 +9,7 @@ import { routeItemForAction } from '@/lib/operators/route'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { formRedirect, readJsonOrForm } from '@/lib/http/form'
 import { uuidParam } from '@/lib/http/json'
-import { internalOrigin } from '@/lib/http/origin'
+import { internalOrigin, requestOrigin } from '@/lib/http/origin'
 import { currentOperator } from '@/lib/operators/session'
 
 /**
@@ -29,6 +29,11 @@ import { currentOperator } from '@/lib/operators/session'
  * approved form decision is dispatched to `/api/actions/<id>/execute` (its own
  * function, like the sweeper) instead of being awaited here, so the page comes
  * back at once; without LUME_ACTION_SECRET it runs inline.
+ *
+ * `issue_operator_key`: the executor runs here with `revealOnce`, and the raw
+ * sign-in link comes back in this one JSON response (`sign_in_url`, no-store)
+ * and nowhere else. A form post for it is refused (a redirect cannot carry it
+ * safely); it is decided on its /actions page.
  */
 
 // executeAction may wait on pipeline.decide() (170 s); outlive it.
@@ -49,6 +54,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const form = body.form
 
   const op = await currentOperator(req)
+
+  if (form) {
+    try {
+      const row = await getAction(id)
+      if (row?.kind === 'issue_operator_key') {
+        return formRedirect(req, form.returnTo, { error: `Decide this on /actions/${id}: its sign-in link is shown once there` })
+      }
+    } catch {
+      return formRedirect(req, form.returnTo, { error: 'db_error' })
+    }
+  }
 
   let claimed
   try {
@@ -106,12 +122,18 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
 
   try {
-    const outcome = await executeAction(id)
+    const outcome = await executeAction(id, { revealOnce: true, origin: requestOrigin(req) })
     if (!outcome.ran) return NextResponse.json({ ok: true, status: outcome.status ?? 'approved' }, { status: 202 })
     const timedOut = outcome.status === 'executed' && outcome.result.timeout === true
     return NextResponse.json(
-      { ok: outcome.status === 'executed', status: outcome.status, result: outcome.result, error: outcome.error },
-      { status: timedOut ? 202 : 200 }
+      {
+        ok: outcome.status === 'executed',
+        status: outcome.status,
+        result: outcome.result,
+        error: outcome.error,
+        ...(outcome.reveal ? { sign_in_url: outcome.reveal.sign_in_url } : {}),
+      },
+      { status: timedOut ? 202 : 200, headers: { 'Cache-Control': 'no-store' } }
     )
   } catch (err) {
     // Approved but the executor could not finish; the sweeper retries rows

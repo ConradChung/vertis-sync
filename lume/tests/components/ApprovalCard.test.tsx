@@ -26,6 +26,16 @@ describe('ApprovalCard', () => {
     expect(screen.getByRole('link', { name: 'Details' }).getAttribute('href')).toBe('/actions/act1')
   })
 
+  it('issue_operator_key: the sign-in link from the decide response is shown once, never reported onward', async () => {
+    stubDecide(Response.json({ ok: true, status: 'executed', result: { sign_in_url_masked: 'x?k=RAWK****' }, error: null, sign_in_url: 'https://lume.test/auth/operator?k=RAWKEY' }))
+    const onDecided = vi.fn()
+    render(<ApprovalCard approvals={[{ ...A, tool: 'issue_operator_key' }]} onDecided={onDecided} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    const input = (await screen.findByLabelText('Sign-in link')) as HTMLInputElement
+    expect(input.value).toBe('https://lume.test/auth/operator?k=RAWKEY')
+    expect(JSON.stringify(onDecided.mock.calls)).not.toContain('RAWKEY')
+  })
+
   it('approve posts the decision, settles with the outcome and reports it', async () => {
     let release!: () => void
     const gate = new Promise<void>((r) => (release = r))

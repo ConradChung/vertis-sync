@@ -117,6 +117,12 @@ export async function createAction(
     const err = runActorPayloadError(payload)
     if (err) throw new InvalidActionPayloadError(err)
     campaignKey = { field: 'input_hash', value: String(payload.input_hash) }
+  } else if (kind === 'issue_operator_key') {
+    // One awaiting key request per vertical (pending_actions_one_awaiting_operator_key_idx).
+    if (typeof payload.vertical_id !== 'string' || !LOWER_UUID.test(payload.vertical_id)) {
+      throw new InvalidActionPayloadError('payload.vertical_id must be a lowercase uuid')
+    }
+    campaignKey = { field: 'vertical_id', value: payload.vertical_id }
   } else if (kind === 'update_sequence') {
     const err = updateSequencePayloadError(payload)
     if (err) throw new InvalidActionPayloadError(err)

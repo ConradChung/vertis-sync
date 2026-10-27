@@ -50,6 +50,7 @@ describe('buildTools', () => {
       delete_rule: { rule_id: JOB },
       run_apify_actor: { actor_id: 'compass/crawler-google-places', input: { q: 'roofers' }, inputs_confirmed_by_owner: true },
       update_campaign_sequence: { campaign_id: 'c1', steps: [{ delay: 0, variants: [{ subject: 'Hi', body: 'Hello' }] }] },
+      issue_operator_key: { vertical_id: JOB.toUpperCase(), label: 'Dentists bot' },
     }
     const { fetch, createAction, tool } = setup()
     for (const [name, tier] of Object.entries(TOOL_TIERS)) {
@@ -384,5 +385,49 @@ describe('skill tools', () => {
   it('skill tools fail cleanly without a store', async () => {
     const { tool } = setup()
     await expect(tool('list_skills').run({})).rejects.toThrow(/not available/)
+  })
+})
+
+describe('vertical tools (G9)', () => {
+  const VID = '3941b73f-c74e-4cc5-9766-f0140e6ad9c9'
+  it('list_verticals reads /api/verticals (archived on request)', async () => {
+    const { fetch, tool } = setup(new Response('{"verticals":[]}'))
+    await tool('list_verticals').run({ include_archived: true })
+    expect(fetch.mock.calls[0][0]).toBe('https://lume.test/api/verticals?archived=1')
+    expect(fetch.mock.calls[0][1]).toMatchObject({ method: 'GET', headers: { Authorization: 'Bearer s3cret' } })
+  })
+
+  it('create_vertical posts name, scopes and campaigns, with no key', async () => {
+    const { fetch, createAction, tool } = setup()
+    const t = tool('create_vertical')
+    await t.run(t.inputSchema.parse({ name: 'Dentists', scopes: ['campaign'], campaign_ids: ['c-1'] }))
+    expect(fetch.mock.calls[0][0]).toBe('https://lume.test/api/verticals')
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ name: 'Dentists', scopes: ['campaign'], campaign_ids: ['c-1'] })
+    expect(createAction).not.toHaveBeenCalled()
+  })
+
+  it('update_vertical patches, or archives alone', async () => {
+    const { fetch, tool } = setup()
+    fetch.mockImplementation(async () => new Response('{"ok":true}'))
+    const t = tool('update_vertical')
+    await t.run(t.inputSchema.parse({ vertical_id: VID.toUpperCase(), name: 'Dental', campaign_ids: [] }))
+    expect(fetch.mock.calls[0][0]).toBe(`https://lume.test/api/verticals/${VID}`)
+    expect(fetch.mock.calls[0][1]).toMatchObject({ method: 'PATCH' })
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ name: 'Dental', campaign_ids: [] })
+    await t.run(t.inputSchema.parse({ vertical_id: VID, archive: true }))
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ archived: true })
+    expect(() => t.inputSchema.parse({ vertical_id: VID, archive: true, name: 'x' })).toThrow()
+    expect(() => t.inputSchema.parse({ vertical_id: VID })).toThrow()
+  })
+
+  it('issue_operator_key is high, skippable, and only files a request for one vertical', async () => {
+    const { createAction, tool } = setup()
+    const t = tool('issue_operator_key')
+    expect(t.tier).toBe('high')
+    expect(t.description).toMatch(/auto_approved/)
+    expect(() => t.inputSchema.parse({ master: true })).toThrow()
+    await t.run(t.inputSchema.parse({ vertical_id: VID }))
+    expect(createAction.mock.calls[0][0]).toBe('issue_operator_key')
+    expect(createAction.mock.calls[0][1]).toMatchObject({ vertical_id: VID })
   })
 })

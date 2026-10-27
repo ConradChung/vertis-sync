@@ -4,6 +4,7 @@ import type { PostgrestError } from '@supabase/supabase-js'
 import { DbError } from '@/lib/db/service'
 import type { Json, PendingActionRow } from '@/lib/db/types'
 import { applyFilter, type RuleFilter, type RuleFilterQuery } from '@/lib/rules/filter'
+import { maskOperatorKeys } from '@/lib/operators/mask'
 
 /**
  * The `pending_actions` state machine, as conditional PATCHes. Each transition
@@ -89,7 +90,8 @@ export async function finishAction(
   const sb = createServiceClient()
   const res = await sb
     .from('pending_actions')
-    .update({ status, result, error, executed_at: new Date().toISOString() })
+    // An operator sign-in link is never stored in plaintext (lib/operators/mask.ts).
+    .update({ status, result: maskOperatorKeys(result), error: error === null ? null : maskOperatorKeys(error), executed_at: new Date().toISOString() })
     .eq('id', id)
     .eq('status', 'executing')
   if (res.error) throw new DbError('finishAction', res.error)

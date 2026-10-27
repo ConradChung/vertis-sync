@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { DbError } from '@/lib/db/service'
 import type { Json } from '@/lib/db/types'
 import type { ConversationSummary, StoredApproval, StoredMessage, StoredToolEntry } from '@/lib/agent/history'
+import { maskOperatorKeys } from '@/lib/operators/mask'
 
 /** `agent_conversations` / `agent_messages` (service role, after the owner guard). */
 
@@ -20,7 +21,10 @@ export interface ConversationOrigin {
 
 export async function createConversation(title: string, origin?: ConversationOrigin): Promise<ConversationSummary> {
   const sb = createServiceClient()
-  const row: Record<string, string | null> = origin ? { title, vertical_id: origin.vertical_id, operator_id: origin.operator_id } : { title }
+  const safeTitle = maskOperatorKeys(title)
+  const row: Record<string, string | null> = origin
+    ? { title: safeTitle, vertical_id: origin.vertical_id, operator_id: origin.operator_id }
+    : { title: safeTitle }
   const res = await sb.from('agent_conversations').insert(row).select(COLS).single()
   if (res.error || !res.data) throw new DbError('createConversation', res.error ?? new Error('no data'))
   return res.data as ConversationSummary
@@ -68,13 +72,14 @@ export interface NewMessage {
 /** Insert a message and bump the conversation's `updated_at` (sidebar order). */
 export async function insertMessage(m: NewMessage): Promise<void> {
   const sb = createServiceClient()
+  // A sign-in link the agent was handed once (issue_operator_key) is stored masked only.
   const res = await sb.from('agent_messages').insert({
     conversation_id: m.conversation_id,
     role: m.role,
-    text: m.text,
-    tools: (m.tools ?? []) as unknown as Json,
-    approvals: (m.approvals ?? []) as unknown as Json,
-    error: m.error ?? null,
+    text: maskOperatorKeys(m.text),
+    tools: maskOperatorKeys(m.tools ?? []) as unknown as Json,
+    approvals: maskOperatorKeys(m.approvals ?? []) as unknown as Json,
+    error: m.error ? maskOperatorKeys(m.error) : null,
     run_id: m.run_id ?? null,
     auto: m.auto ?? false,
   })

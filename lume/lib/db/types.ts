@@ -177,6 +177,7 @@ export type PendingActionKind =
   | 'crm_close_deal'
   | 'run_actor'
   | 'update_sequence'
+  | 'issue_operator_key'
 
 export type PendingActionStatus =
   | 'awaiting'

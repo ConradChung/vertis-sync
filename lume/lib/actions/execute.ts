@@ -10,6 +10,10 @@ import {
 import { sendMessage } from '@/lib/adapters/telegram'
 import { alert, alertLink, titleFrom } from '@/lib/alerts'
 import { routeItemForAction } from '@/lib/operators/route'
+import { createOperatorKey, getVertical } from '@/lib/operators/store'
+import { signInUrl } from '@/lib/operators/guard'
+import { maskKeyText } from '@/lib/operators/mask'
+import { configuredBaseUrl } from '@/lib/http/origin'
 import { actionLink } from '@/lib/adapters/telegram.messages'
 import { getPushJob, logEvent } from '@/lib/db/service'
 import { getDeal, setStage } from '@/lib/crm/service'
@@ -51,7 +55,31 @@ import {
 
 export type ExecuteOutcome =
   | { ran: false; reason: 'not_found' | 'not_claimable'; status?: PendingActionRow['status'] }
-  | { ran: true; status: 'executed' | 'failed'; result: Record<string, Json>; error: string | null }
+  | {
+      ran: true
+      status: 'executed' | 'failed'
+      result: Record<string, Json>
+      error: string | null
+      /**
+       * Shown once to whoever approved, never stored (issue_operator_key's
+       * raw sign-in link). Only with `revealOnce`.
+       */
+      reveal?: { sign_in_url: string }
+    }
+
+export interface ExecuteOptions {
+  /**
+   * The caller shows the result to the person (or bot) who just approved it
+   * (Lume's decide route, skip mode). Kinds that mint a secret refuse to run
+   * without it: from Telegram or the sweeper the link could never be shown.
+   */
+  revealOnce?: boolean
+  /** Origin for links shown once (the request's); else LUME_URL. */
+  origin?: string
+}
+
+/** Key in a handler's result that executeAction strips before anything is stored. */
+const REVEAL = '__reveal_once'
 
 class ActionFailure extends Error {
   readonly result: Record<string, Json>
@@ -80,7 +108,7 @@ async function runDecide(callbackData: string): Promise<Record<string, Json>> {
   throw new ActionFailure(`pipeline: ${r.error}`, { callback_data: callbackData, http_status: r.status })
 }
 
-type Handler = (p: Record<string, Json>, action: PendingActionRow) => Promise<Record<string, Json>>
+type Handler = (p: Record<string, Json>, action: PendingActionRow, opts: ExecuteOptions) => Promise<Record<string, Json>>
 
 const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
   async push_to_instantly(p) {
@@ -272,6 +300,31 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
     return { campaign_id: campaignId, steps: p.steps.length, after_hash: after?.hash ?? null }
   },
 
+  /**
+   * Mint a Grok Bot key for a live vertical. The raw sign-in link goes back
+   * once, out of band (`reveal`); the stored result keeps it masked.
+   */
+  async issue_operator_key(p, _action, opts) {
+    if (!opts.revealOnce) {
+      throw new ActionFailure('An operator key can only be issued from Lume (the sign-in link is shown once to whoever approves). Approve it on its /actions page.')
+    }
+    const verticalId = need(p, 'vertical_id')
+    const v = await getVertical(verticalId)
+    if (!v || v.archived_at) throw new ActionFailure('vertical not found or archived', { vertical_id: verticalId })
+    const label = str(p.label) ?? `${v.name} bot`
+    const { operator, rawKey } = await createOperatorKey({ verticalId: v.id, label })
+    const origin = opts.origin || configuredBaseUrl()
+    const url = signInUrl(origin, rawKey)
+    return {
+      operator_id: operator.id,
+      vertical_id: v.id,
+      vertical_name: v.name,
+      label: operator.label,
+      sign_in_url_masked: maskKeyText(url),
+      [REVEAL]: { sign_in_url: url },
+    }
+  },
+
   async create_campaign(p) {
     const created = await createCampaignFrom(need(p, 'source_campaign_id'), need(p, 'name'))
     return { source_campaign_id: need(p, 'source_campaign_id'), campaign_id: created.id, name: created.name }
@@ -315,7 +368,7 @@ async function report(a: PendingActionRow, status: 'executed' | 'failed', result
   }
 }
 
-export async function executeAction(id: string): Promise<ExecuteOutcome> {
+export async function executeAction(id: string, opts: ExecuteOptions = {}): Promise<ExecuteOutcome> {
   const action = await claimExecution(id)
   if (!action) {
     const row = await getAction(id)
@@ -325,10 +378,13 @@ export async function executeAction(id: string): Promise<ExecuteOutcome> {
   let status: 'executed' | 'failed'
   let result: Record<string, Json>
   let error: string | null = null
+  let reveal: { sign_in_url: string } | undefined
   try {
     const handler = HANDLERS[action.kind]
     if (!handler) throw new ActionFailure(`unknown kind ${action.kind}`)
-    result = await handler(action.payload ?? {}, action)
+    const { [REVEAL]: once, ...rest } = await handler(action.payload ?? {}, action, opts)
+    result = rest
+    if (once && typeof once === 'object' && !Array.isArray(once) && typeof once.sign_in_url === 'string') reveal = { sign_in_url: once.sign_in_url }
     status = 'executed'
   } catch (err) {
     status = 'failed'
@@ -338,7 +394,7 @@ export async function executeAction(id: string): Promise<ExecuteOutcome> {
 
   await finishAction(id, status, result, error)
   await report(action, status, result, error)
-  return { ran: true, status, result, error }
+  return { ran: true, status, result, error, ...(reveal ? { reveal } : {}) }
 }
 
 export const SWEEP_AFTER_MS = 2 * 60_000

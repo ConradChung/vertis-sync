@@ -269,8 +269,15 @@ const autoApprove: NonNullable<ToolDeps['autoApprove']> = async (id) => {
     } catch (err) {
       console.error('[api/agent/run] telegram edit failed:', errText(err))
     }
-    const o = await executeAction(id)
-    return o.ran ? { status: o.status, result: o.result, error: o.error } : handledElsewhere(id, o.status)
+    // Skip mode shows the outcome to whoever runs this chat: a minted sign-in
+    // link rides back in the tool result once (agent_messages / agent_runs
+    // store only a masked copy; lib/operators/mask.ts).
+    const o = await executeAction(id, { revealOnce: true })
+    if (!o.ran) return handledElsewhere(id, o.status)
+    const result = o.reveal
+      ? { ...o.result, sign_in_url: o.reveal.sign_in_url, sign_in_url_note: 'Shown once. Lume keeps only a masked copy; give this link to the new Grok Bot now.' }
+      : o.result
+    return { status: o.status, result, error: o.error }
   } catch (err) {
     // Claimed, and the executor may have reached Instantly before it threw.
     console.error('[api/agent/run] auto-approved execution failed:', errText(err))

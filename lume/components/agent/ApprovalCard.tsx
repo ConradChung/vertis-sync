@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import type { StoredApproval } from '@/lib/agent/history'
 import { cn } from '@/lib/utils'
+import { OneTimeLink } from '@/components/operator/OneTimeLink'
 
 /** An approval as the chat holds it: the run's state, plus the row's live status after a reload. */
 export interface ChatApproval extends PendingApproval {
@@ -105,6 +106,8 @@ function Decision({ a, onDecided }: { a: ChatApproval; onDecided?: (d: ApprovalD
   }
   const [pending, setPending] = useState<'approve' | 'reject' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // issue_operator_key: the sign-in link from the decide response, shown once.
+  const [signIn, setSignIn] = useState<string | null>(null)
   // A decision that lands after this card unmounted (chat switched or reset) must not
   // send a follow-up into whatever conversation is on screen now.
   const mounted = useRef(true)
@@ -128,7 +131,8 @@ function Decision({ a, onDecided }: { a: ChatApproval; onDecided?: (d: ApprovalD
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ decision }),
       })
-      const body = (await res.json().catch(() => ({}))) as { status?: string; error?: string | null }
+      const body = (await res.json().catch(() => ({}))) as { status?: string; error?: string | null; sign_in_url?: string }
+      if (typeof body.sign_in_url === 'string' && mounted.current) setSignIn(body.sign_in_url)
       if (res.status === 409 && body.error === 'already_handled') {
         const status = body.status ?? 'handled'
         setSettled({ text: `Already ${label(status).toLowerCase()} elsewhere`, tone: 'muted' })
@@ -194,6 +198,11 @@ function Decision({ a, onDecided }: { a: ChatApproval; onDecided?: (d: ApprovalD
         <p className="mt-2 pl-6 text-[12px] text-red" role="alert">
           {error}
         </p>
+      )}
+      {signIn && (
+        <div className="pl-6">
+          <OneTimeLink url={signIn} />
+        </div>
       )}
     </section>
   )

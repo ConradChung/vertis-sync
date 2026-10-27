@@ -426,7 +426,7 @@ describe('POST /api/agent/run in skip-permissions mode', () => {
     const ev = await events(await post('pause c1', { skip_permissions: true }))
     expect(h.createAction).toHaveBeenCalledWith('pause_campaign', expect.anything(), 'agent', { agentRunId: 'run-1' })
     expect(h.claimDecision).toHaveBeenCalledWith('act-1', true, 'agent')
-    expect(h.executeAction).toHaveBeenCalledWith('act-1')
+    expect(h.executeAction).toHaveBeenCalledWith('act-1', { revealOnce: true })
     expect(h.editMessage).toHaveBeenCalledWith(42, expect.stringContaining('Auto-approved'))
     expect(ev).toContainEqual(expect.objectContaining({ type: 'approval', action_id: 'act-1', tool: 'pause_campaign', state: 'auto_executed' }))
     expect(ev.at(-1)).toMatchObject({ type: 'done', status: 'done' })
@@ -516,7 +516,7 @@ describe('POST /api/agent/run in skip-permissions mode', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     fakeRunner(pause)
     const ev = await events(await post('pause c1', { skip_permissions: true }))
-    expect(h.executeAction).toHaveBeenCalledWith('act-1')
+    expect(h.executeAction).toHaveBeenCalledWith('act-1', { revealOnce: true })
     expect(ev).toContainEqual(expect.objectContaining({ type: 'approval', state: 'auto_executed' }))
   })
 

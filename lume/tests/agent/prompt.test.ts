@@ -63,3 +63,19 @@ describe('approvals in the chat', () => {
     expect(SYSTEM_PROMPT).toMatch(/without asking again/)
   })
 })
+
+describe('Grok Bot operator playbook (G9)', () => {
+  it('stands up a new vertical: research, diagram, build, create_vertical, then offer issue_operator_key', async () => {
+    const { SYSTEM_PROMPT } = await import('@/lib/agent/prompt')
+    const i = (s: string) => SYSTEM_PROMPT.indexOf(s)
+    const order = ['Standing up a new vertical', 'Research the market', 'search_apify_store for lead sources', 'Propose the pipeline as a flow diagram', 'Build it step by step', 'create_vertical with its name', 'Offer issue_operator_key']
+    for (const s of order) expect(i(s), s).toBeGreaterThan(-1)
+    for (let k = 1; k < order.length; k++) expect(i(order[k])).toBeGreaterThan(i(order[k - 1]))
+  })
+  it('keeps the money/validation approvals and the once-only link rule', async () => {
+    const { SYSTEM_PROMPT } = await import('@/lib/agent/prompt')
+    expect(SYSTEM_PROMPT).toMatch(/money and validation approval rules above are unchanged/)
+    expect(SYSTEM_PROMPT).toMatch(/never repeat or store it afterwards/)
+    expect(SYSTEM_PROMPT).toMatch(/Never ask for a master key/)
+  })
+})

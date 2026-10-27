@@ -71,6 +71,8 @@ const KIND_SCOPE: Record<PendingActionKind, VerticalScope | null> = {
   // An Apify scrape is a paid data order.
   run_actor: 'orders',
   decide_gate: null,
+  // Owner / master-bot business: never a vertical's item.
+  issue_operator_key: null,
 }
 
 export function scopeForPendingKind(kind: string): VerticalScope | null {

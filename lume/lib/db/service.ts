@@ -1,4 +1,5 @@
 import 'server-only'
+import { maskOperatorKeys } from '@/lib/operators/mask'
 import type { PostgrestError } from '@supabase/supabase-js'
 import { createServiceClient } from '@/lib/supabase/service'
 import { applyLeadBankFilter, pageRange, type LeadBankFilter, type LeadBankQuery } from '@/lib/db/leadBankQuery'
@@ -224,8 +225,9 @@ export async function logEvent(input: EventInsert): Promise<EventRow | null> {
     source_id: input.source_id ?? null,
     campaign_id: input.campaign_id ?? null,
     lead_email: input.lead_email ?? null,
-    title: input.title,
-    payload: input.payload ?? {},
+    title: maskOperatorKeys(input.title),
+    // An operator sign-in link is never stored in plaintext (lib/operators/mask.ts).
+    payload: maskOperatorKeys(input.payload ?? {}),
     webhook_id: input.webhook_id ?? null,
   }
   if (row.webhook_id) {

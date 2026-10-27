@@ -92,7 +92,7 @@ export interface AgentTool {
   run: (input: any) => Promise<ToolResult>
 }
 
-type RouteCall = (path: string, init?: { method?: 'GET' | 'POST' | 'DELETE'; body?: unknown }) => Promise<unknown>
+type RouteCall = (path: string, init?: { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown }) => Promise<unknown>
 
 interface RunSpec<S extends z.ZodType> {
   name: ToolName
@@ -856,6 +856,60 @@ const SPECS: Built[] = [
       description: 'Delete a rotation rule.',
       inputSchema: z.object({ rule_id: uuid }),
       payload: ({ rule_id }) => ({ rule_id: rule_id.toLowerCase() }),
+    },
+    'high'
+  ),
+  // verticals (Grok Bot operator layer) ----------------------------------------
+  tiered(
+    {
+      name: 'list_verticals',
+      description:
+        'List the verticals (lines of business, one Grok Bot each): id, name, scopes, campaign_ids, is_default; archived ones with include_archived.',
+      inputSchema: z.object({ include_archived: z.boolean().optional() }),
+      run: async ({ include_archived }, { call }) => (await call(`/api/verticals${include_archived ? '?archived=1' : ''}`)) as ToolResult,
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'create_vertical',
+      description:
+        'Create a vertical (a line of business a Grok Bot will run): name, scopes (which unrouted items it owns: campaign, orders, replies, validation) and the campaign ids it owns (Instantly ids, or gmail:/muse: ids). Created with no operator key; offer issue_operator_key next.',
+      inputSchema: z.object({
+        name: z.string().trim().min(1).max(80),
+        scopes: z.array(z.enum(['campaign', 'orders', 'replies', 'validation'])).max(4).optional(),
+        campaign_ids: z.array(campaignId).max(50).optional(),
+      }),
+      run: async (input, { call }) => (await call('/api/verticals', { method: 'POST', body: input })) as ToolResult,
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'update_vertical',
+      description:
+        'Change a vertical: rename it, replace its scopes or campaign_ids (the full new list), or archive it (archive: true, alone). Archiving does not revoke its bot keys; the owner revokes keys in Settings.',
+      inputSchema: z
+        .object({
+          vertical_id: uuid,
+          name: z.string().trim().min(1).max(80).optional(),
+          scopes: z.array(z.enum(['campaign', 'orders', 'replies', 'validation'])).max(4).optional(),
+          campaign_ids: z.array(campaignId).max(50).optional(),
+          archive: z.literal(true).optional(),
+        })
+        .refine((v) => (v.archive ? v.name === undefined && v.scopes === undefined && v.campaign_ids === undefined : v.name !== undefined || v.scopes !== undefined || v.campaign_ids !== undefined), 'archive alone, or at least one change'),
+      run: async ({ vertical_id, archive, ...patch }, { call }) =>
+        (await call(`/api/verticals/${vertical_id.toLowerCase()}`, { method: 'PATCH', body: archive ? { archived: true } : patch })) as ToolResult,
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'issue_operator_key',
+      description:
+        "Issue a Grok Bot operator key for one vertical (never a master key: only the owner mints those in Settings). The key is a sign-in link with the owner's full rights. Once approved, the sign-in link appears ONCE (on the approval card, or in this tool's result in skip mode); Lume stores only a masked copy, so pass it on immediately and never repeat it later.",
+      inputSchema: z.object({ vertical_id: uuid, label: z.string().trim().min(1).max(80).optional() }),
+      payload: ({ vertical_id, label }) => ({ vertical_id: vertical_id.toLowerCase(), ...(label ? { label } : {}) }),
     },
     'high'
   ),
