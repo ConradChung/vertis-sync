@@ -204,6 +204,23 @@ describe('skip-permissions mode', () => {
     expect(autoApprove).not.toHaveBeenCalled()
   })
 
+  it('fails closed when the builder remaps the kind', async () => {
+    const autoApprove = vi.fn().mockResolvedValue(done)
+    const { tool, prepare, createAction } = setup(undefined, { skipPermissions: true, autoApprove })
+    prepare.mockImplementationOnce(async ({ payload }) => ({ ok: true as const, kind: 'delete_rule', payload: { ...payload, summary: 's' } }))
+    await expect(tool('pause_campaign').run({ campaign_id: JOB })).resolves.toMatchObject({ status: 'awaiting_approval' })
+    expect(createAction.mock.calls[0][0]).toBe('delete_rule')
+    expect(autoApprove).not.toHaveBeenCalled()
+  })
+
+  it('only skippable tools say they may auto-approve', () => {
+    const { tool } = setup()
+    expect(tool('pause_campaign').description).toContain('auto_approved')
+    for (const name of ['send_reply', 'run_apify_actor', 'activate_campaign', 'resume_campaign', 'decide_validation']) {
+      expect(tool(name).description).not.toContain('auto_approved')
+    }
+  })
+
   it('never auto-approves a duplicate', async () => {
     const autoApprove = vi.fn().mockResolvedValue(done)
     const { tool, createAction } = setup(undefined, { skipPermissions: true, autoApprove })

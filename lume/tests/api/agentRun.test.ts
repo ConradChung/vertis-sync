@@ -25,6 +25,7 @@ const h = vi.hoisted(() => ({
   claimDecision: vi.fn(),
   executeAction: vi.fn(),
   editMessage: vi.fn(),
+  getAction: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/guards', () => ({ requireOwner: h.requireOwner }))
@@ -46,7 +47,7 @@ vi.mock('@/lib/actions/create', () => ({ createAction: h.createAction }))
 vi.mock('@/lib/agent/memory', () => ({ loadKnowledge: h.loadKnowledge }))
 vi.mock('@/lib/db/service', () => ({ logEvent: h.logEvent, isDbError: () => false }))
 vi.mock('@/lib/adapters/telegram', () => ({ sendMessage: h.sendMessage, editMessage: h.editMessage }))
-vi.mock('@/lib/actions/store', () => ({ claimDecision: h.claimDecision }))
+vi.mock('@/lib/actions/store', () => ({ claimDecision: h.claimDecision, getAction: h.getAction }))
 vi.mock('@/lib/actions/execute', () => ({ executeAction: h.executeAction }))
 vi.mock('@anthropic-ai/sdk', () => {
   class APIError extends Error {
@@ -64,7 +65,7 @@ import { POST } from '@/app/api/agent/run/route'
 type FakeTool = { name: string; run: (input: unknown, ctx: unknown) => Promise<unknown> }
 
 /** One streamed turn: optionally runs tools (as the runner would), then yields a fake message stream. */
-function fakeRunner(turns: { text: string; call?: { name: string; input: unknown } }[]) {
+function fakeRunner(turns: { text: string; call?: { name: string; input: unknown } }[], results: unknown[] = []) {
   h.toolRunner.mockImplementation((params: { tools: FakeTool[] }) => ({
     async *[Symbol.asyncIterator]() {
       for (const turn of turns) {
@@ -82,7 +83,8 @@ function fakeRunner(turns: { text: string; call?: { name: string; input: unknown
         }
         if (turn.call) {
           const tool = params.tools.find((t) => t.name === turn.call!.name)!
-          await tool.run(turn.call.input, { toolUse: { id: `tu-${turn.call.name}` } })
+          // What the model sees: the tool result as JSON text.
+          results.push(JSON.parse(String(await tool.run(turn.call.input, { toolUse: { id: `tu-${turn.call.name}` } }))))
         }
       }
     },
@@ -380,12 +382,65 @@ describe('POST /api/agent/run in skip-permissions mode', () => {
     expect(h.insertMessage.mock.calls.at(-1)![0].tools).toEqual([expect.objectContaining({ status: 'error' })])
   })
 
-  it('a lost claim reports not_claimable and runs nothing', async () => {
+  it('a lost claim is handled_elsewhere (with the row status), stored ok, and runs nothing', async () => {
     h.claimDecision.mockResolvedValue(null)
-    fakeRunner(pause)
+    h.getAction.mockResolvedValue({ id: 'act-1', status: 'rejected' })
+    const results: unknown[] = []
+    fakeRunner(pause, results)
     const ev = await events(await post('pause c1', { skip_permissions: true }))
     expect(h.executeAction).not.toHaveBeenCalled()
+    expect(h.getAction).toHaveBeenCalledWith('act-1')
+    expect(results[0]).toMatchObject({ status: 'auto_approved', outcome: 'handled_elsewhere', result: { status: 'rejected' } })
+    expect(ev).toContainEqual(expect.objectContaining({ type: 'approval', state: 'handled_elsewhere' }))
+    expect(h.insertMessage.mock.calls.at(-1)![0].tools).toEqual([expect.objectContaining({ status: 'ok' })])
+    expect(h.insertMessage.mock.calls.at(-1)![0].approvals).toEqual([expect.objectContaining({ state: 'handled_elsewhere' })])
+  })
+
+  it('executeAction ran:false after the claim is handled_elsewhere too', async () => {
+    h.executeAction.mockResolvedValue({ ran: false, reason: 'not_claimable', status: 'executing' })
+    const results: unknown[] = []
+    fakeRunner(pause, results)
+    const ev = await events(await post('pause c1', { skip_permissions: true }))
+    expect(results[0]).toMatchObject({ outcome: 'handled_elsewhere', result: { status: 'executing' } })
+    expect(ev).toContainEqual(expect.objectContaining({ type: 'approval', state: 'handled_elsewhere' }))
+  })
+
+  it('a claim DB error is auto_failed and nothing runs', async () => {
+    h.claimDecision.mockRejectedValue(new Error('db down'))
+    const results: unknown[] = []
+    fakeRunner(pause, results)
+    const ev = await events(await post('pause c1', { skip_permissions: true }))
+    expect(h.executeAction).not.toHaveBeenCalled()
+    expect(results[0]).toMatchObject({ outcome: 'failed', error: 'db down' })
     expect(ev).toContainEqual(expect.objectContaining({ type: 'approval', state: 'auto_failed' }))
+    expect(ev.at(-1)).toMatchObject({ type: 'done', status: 'done' })
+  })
+
+  it('executeAction throwing after the claim is auto_failed and flagged uncertain; the run carries on', async () => {
+    h.executeAction.mockRejectedValue(new Error('socket hang up'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const results: unknown[] = []
+    fakeRunner(pause, results)
+    const ev = await events(await post('pause c1', { skip_permissions: true }))
+    expect(results[0]).toMatchObject({
+      status: 'auto_approved',
+      outcome: 'failed',
+      result: { uncertain: true },
+      error: 'socket hang up — may have partly run; check /actions/act-1 before retrying',
+    })
+    expect(ev).toContainEqual(expect.objectContaining({ type: 'approval', action_id: 'act-1', state: 'auto_failed' }))
+    expect(ev).toContainEqual({ type: 'text', delta: 'Paused.' })
+    expect(ev.at(-1)).toMatchObject({ type: 'done', status: 'done' })
+    expect(h.createAction).toHaveBeenCalledTimes(1)
+  })
+
+  it('a failing Telegram edit does not stop the execution', async () => {
+    h.editMessage.mockRejectedValue(new Error('tg down'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    fakeRunner(pause)
+    const ev = await events(await post('pause c1', { skip_permissions: true }))
+    expect(h.executeAction).toHaveBeenCalledWith('act-1')
+    expect(ev).toContainEqual(expect.objectContaining({ type: 'approval', state: 'auto_executed' }))
   })
 
   it('without skip_permissions nothing is auto-approved', async () => {

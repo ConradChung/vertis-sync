@@ -5,7 +5,7 @@ import { requireOwner } from '@/lib/auth/guards'
 import { buildActionRequest } from '@/lib/actions/build'
 import { createAction } from '@/lib/actions/create'
 import { executeAction } from '@/lib/actions/execute'
-import { claimDecision } from '@/lib/actions/store'
+import { claimDecision, getAction } from '@/lib/actions/store'
 import { editMessage, sendMessage } from '@/lib/adapters/telegram'
 import { buildPrompt } from '@/lib/agent/chat'
 import { createConversation, getConversation, getMessages, insertMessage } from '@/lib/agent/conversations'
@@ -190,22 +190,54 @@ export async function POST(req: Request) {
   })
 }
 
+const errText = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
+/** Someone else claimed or ran it first: report where it stands. */
+async function handledElsewhere(id: string, status?: string): Promise<Awaited<ReturnType<NonNullable<ToolDeps['autoApprove']>>>> {
+  let current = status ?? null
+  if (!current) {
+    try {
+      current = (await getAction(id))?.status ?? 'not_found'
+    } catch (err) {
+      console.error('[api/agent/run] getAction failed:', errText(err))
+    }
+  }
+  return { status: 'handled_elsewhere', result: { status: current }, error: null }
+}
+
 /**
  * Skip mode's approval: the same claim a Lume click runs (decided_via
  * 'agent'), then the executor, server-side. The tool never reaches this
- * without the owner's per-chat opt-in and a skippable kind.
+ * without the owner's per-chat opt-in and a skippable kind. Never throws: a
+ * throw would fail the tool call and invite the model to file it again.
  */
 const autoApprove: NonNullable<ToolDeps['autoApprove']> = async (id) => {
-  const claimed = await claimDecision(id, true, 'agent')
-  if (!claimed) return { status: 'not_claimable', result: null, error: null }
-  // Best effort: strip the Telegram prompt's buttons so nobody taps a handled action.
+  let claimed
   try {
-    if (claimed.telegram_message_id) await editMessage(claimed.telegram_message_id, `⚡ Auto-approved (skip mode) — ${claimed.kind}`)
+    claimed = await claimDecision(id, true, 'agent')
   } catch (err) {
-    console.error('[api/agent/run] telegram edit failed:', err instanceof Error ? err.message : err)
+    // Nothing claimed, nothing ran: the row still awaits the owner.
+    return { status: 'failed', result: null, error: errText(err) }
   }
-  const o = await executeAction(id)
-  return o.ran ? { status: o.status, result: o.result, error: o.error } : { status: 'not_claimable', result: null, error: null }
+  if (!claimed) return handledElsewhere(id)
+  try {
+    // Best effort: strip the Telegram prompt's buttons so nobody taps a handled action.
+    try {
+      if (claimed.telegram_message_id) await editMessage(claimed.telegram_message_id, `⚡ Auto-approved (skip mode) — ${claimed.kind}`)
+    } catch (err) {
+      console.error('[api/agent/run] telegram edit failed:', errText(err))
+    }
+    const o = await executeAction(id)
+    return o.ran ? { status: o.status, result: o.result, error: o.error } : handledElsewhere(id, o.status)
+  } catch (err) {
+    // Claimed, and the executor may have reached Instantly before it threw.
+    console.error('[api/agent/run] auto-approved execution failed:', errText(err))
+    return {
+      status: 'failed',
+      result: { uncertain: true },
+      error: `${errText(err)} — may have partly run; check /actions/${id} before retrying`,
+    }
+  }
 }
 
 /** What the run said and did, stored as the assistant message. */
@@ -252,7 +284,7 @@ async function executeRun({
   }
   const toolCalls: ToolCallEntry[] = []
   let approvalActionId: string | null = null
-  // Tool calls skip mode approved and ran: stored as ok / error, not awaiting.
+  // Tool calls skip mode settled (ran, failed, or found handled): stored as ok / error, not awaiting.
   const autoRan = new Map<string, 'ok' | 'error'>()
   const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 
@@ -279,9 +311,10 @@ async function executeRun({
       if (ok && result?.status === 'auto_approved' && typeof result.action_id === 'string' && result.action_id) {
         // Skip mode already ran it: show the card, but the run does not wait.
         if (entry) entry.action_id = result.action_id
-        const executed = result.outcome === 'executed'
-        autoRan.set(id, executed ? 'ok' : 'error')
-        send({ type: 'approval', action_id: result.action_id, deep_link: result.deep_link, summary: result.summary ?? null, tool: name, state: executed ? 'auto_executed' : 'auto_failed' })
+        const state: StoredApproval['state'] =
+          result.outcome === 'executed' ? 'auto_executed' : result.outcome === 'handled_elsewhere' ? 'handled_elsewhere' : 'auto_failed'
+        autoRan.set(id, state === 'auto_failed' ? 'error' : 'ok')
+        send({ type: 'approval', action_id: result.action_id, deep_link: result.deep_link, summary: result.summary ?? null, tool: name, state })
         await save({ tool_calls: snapshot() })
         return
       }

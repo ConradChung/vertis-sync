@@ -2,12 +2,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /** claimDecision records who decided: the owner in Lume, or the agent in skip mode. */
 const updates: Record<string, unknown>[] = []
+const filters: [string, unknown][] = []
 
 function client() {
   return {
     from: () => {
       const b: Record<string, unknown> = {}
-      for (const m of ['select', 'eq']) b[m] = () => b
+      b.select = () => b
+      b.eq = (col: string, v: unknown) => {
+        filters.push([col, v])
+        return b
+      }
       b.update = (patch: Record<string, unknown>) => {
         updates.push(patch)
         return b
@@ -23,6 +28,7 @@ import { claimDecision } from '@/lib/actions/store'
 
 beforeEach(() => {
   updates.length = 0
+  filters.length = 0
 })
 
 describe('claimDecision', () => {
@@ -34,5 +40,7 @@ describe('claimDecision', () => {
     const row = await claimDecision('a1', true, 'agent')
     expect(updates[0]).toMatchObject({ decided_via: 'agent', status: 'approved' })
     expect(row).toEqual({ id: 'a1' })
+    // Only an untouched row is claimable: a Telegram tap or Lume click that won first leaves nothing.
+    expect(filters).toEqual(expect.arrayContaining([['id', 'a1'], ['claim_status', 'awaiting'], ['status', 'awaiting']]))
   })
 })

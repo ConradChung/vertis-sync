@@ -25,8 +25,11 @@ export interface StoredApproval {
   deep_link: string
   summary: string | null
   tool: string
-  /** awaiting the owner's tap, or approved by skip-permissions mode and run (or failed). */
-  state?: 'awaiting' | 'auto_executed' | 'auto_failed'
+  /**
+   * awaiting the owner's tap; approved by skip-permissions mode and run (or
+   * failed); or claimed / run by someone else first (handled_elsewhere).
+   */
+  state?: 'awaiting' | 'auto_executed' | 'auto_failed' | 'handled_elsewhere'
 }
 
 export interface StoredMessage {

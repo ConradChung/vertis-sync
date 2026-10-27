@@ -37,9 +37,22 @@ export const HIGH_RISK_KIND: Record<string, PendingKind> = {
 }
 
 /**
- * Kinds that still need a tap in skip-permissions mode: they spend money
- * (Apify runs; gate decisions that buy Leadsfriday / finder / validator work)
- * or email leads (a reply; launching or resuming a campaign starts sends).
+ * Skip-permissions mode is an allowlist: only these kinds are approved and run
+ * without a tap. The owner chose that assign_leads and update_sequence run in
+ * skip mode even though assigning into a live campaign leads to sends.
+ * Launching, resuming, replies and anything that spends money always ask, and
+ * any kind added later asks until it is listed here.
+ */
+export const SKIPPABLE_KINDS: ReadonlySet<PendingKind> = new Set<PendingKind>([
+  'pause_campaign', 'create_campaign', 'delete_rule', 'activate_rule', 'assign_leads', 'update_sequence',
+])
+
+/**
+ * The agent's kinds that still need a tap in skip mode (documentation; the
+ * allowlist above decides): they spend money (Apify runs; gate decisions that
+ * buy Leadsfriday / finder / validator work) or email leads (a reply;
+ * launching or resuming a campaign starts sends).
  */
 export const ALWAYS_ASK_KINDS: ReadonlySet<PendingKind> = new Set<PendingKind>(['run_actor', 'send_reply', 'decide_gate', 'launch_campaign', 'resume_campaign'])
-export const skippable = (kind: PendingKind): boolean => !ALWAYS_ASK_KINDS.has(kind)
+
+export const skippable = (kind: PendingKind): boolean => SKIPPABLE_KINDS.has(kind)

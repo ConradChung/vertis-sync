@@ -118,7 +118,10 @@ export function ActionPlan({ action }: { action: ActionView }) {
 
       <div className="text-[12px] text-fg-46">
         Requested by {action.requestedBy} · {when(action.createdAt)}
-        {action.decidedAt && ` · decided in ${action.decidedVia ?? '—'} ${when(action.decidedAt)}`}
+        {action.decidedAt &&
+          (action.decidedVia === 'agent'
+            ? ` · auto-approved (skip mode) ${when(action.decidedAt)}`
+            : ` · decided in ${action.decidedVia ?? '—'} ${when(action.decidedAt)}`)}
         {action.executedAt && ` · finished ${when(action.executedAt)}`}
       </div>
 

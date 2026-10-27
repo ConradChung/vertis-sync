@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { TOOL_TIERS, HIGH_RISK_KIND, ALWAYS_ASK_KINDS, skippable } from '@/lib/agent/permissions'
+import { TOOL_TIERS, HIGH_RISK_KIND, ALWAYS_ASK_KINDS, SKIPPABLE_KINDS, skippable } from '@/lib/agent/permissions'
+import type { PendingActionKind } from '@/lib/db/types'
 import { buildTools } from '@/lib/agent/tools'
 
 const prepare = vi.fn(async (r: { kind: string; payload: Record<string, unknown> }) => ({ ok: true as const, kind: r.kind, payload: { ...r.payload, summary: 's' } }))
@@ -36,7 +37,24 @@ describe('skip-permissions mode', () => {
     for (const k of ['assign_leads', 'activate_rule', 'pause_campaign', 'create_campaign', 'delete_rule', 'update_sequence'] as const)
       expect(skippable(k)).toBe(true)
   })
-  it('every high-risk kind has an answer', () => {
-    for (const kind of Object.values(HIGH_RISK_KIND)) expect(typeof skippable(kind)).toBe('boolean')
+  it('every high-risk kind is in exactly one of the two sets', () => {
+    for (const kind of Object.values(HIGH_RISK_KIND)) {
+      expect(Number(SKIPPABLE_KINDS.has(kind)) + Number(ALWAYS_ASK_KINDS.has(kind)), kind).toBe(1)
+    }
+  })
+  it('kinds no agent tool files are in neither set, so they ask (allowlist fails closed)', () => {
+    // Keyed by the union, so a new kind fails tsc here until it is classified.
+    const ALL: Record<PendingActionKind, true> = {
+      push_to_instantly: true, launch_campaign: true, assign_leads: true, activate_rule: true, send_reply: true,
+      pause_campaign: true, resume_campaign: true, create_campaign: true, decide_gate: true, delete_rule: true,
+      crm_close_deal: true, run_actor: true, update_sequence: true,
+    }
+    const agentKinds = new Set(Object.values(HIGH_RISK_KIND))
+    const others = (Object.keys(ALL) as PendingActionKind[]).filter((k) => !agentKinds.has(k))
+    expect(others).toEqual(expect.arrayContaining(['push_to_instantly', 'crm_close_deal']))
+    for (const k of others) {
+      expect(SKIPPABLE_KINDS.has(k) || ALWAYS_ASK_KINDS.has(k), k).toBe(false)
+      expect(skippable(k)).toBe(false)
+    }
   })
 })

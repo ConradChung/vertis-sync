@@ -22,7 +22,8 @@ import { describeStep, newSkillSchema, placeholdersIn, skillStepSchema, skillVar
  *    path from a high-risk tool to a route or a write adapter. In
  *    skip-permissions mode a skippable kind (lib/agent/permissions.ts) is then
  *    handed to `deps.autoApprove` (claim as 'agent' + execute, server-side)
- *    and returns `auto_approved` with the outcome; a duplicate never is.
+ *    and returns `auto_approved` with the outcome; a duplicate never is, nor a
+ *    kind the builder remapped.
  *
  * Pure (deps injected) so the tiering is unit-tested without a network.
  * `toRunnableTools` in `lib/agent/runnable.ts` adapts these for the SDK runner.
@@ -64,7 +65,8 @@ export interface ToolDeps {
   skipPermissions?: boolean
   /** Claims (decided_via 'agent') and executes a pending action. Server-side only. */
   autoApprove?: (actionId: string) => Promise<{
-    status: 'executed' | 'failed' | 'not_claimable'
+    /** handled_elsewhere: someone else claimed or ran it first; result carries the row status. */
+    status: 'executed' | 'failed' | 'handled_elsewhere'
     result: Record<string, Json> | null
     error: string | null
   }>
@@ -124,7 +126,9 @@ export function tiered<S extends z.ZodType>(spec: RunSpec<S> | HighSpec<S>, tier
     return (deps) => ({
       name: spec.name,
       tier,
-      description: `${spec.description} Needs the owner's approval: this only creates a pending action and returns awaiting_approval; it does not run. If the owner has skip permissions on for this chat it may instead return auto_approved with the outcome (it ran).`,
+      description:
+        `${spec.description} Needs the owner's approval: this only creates a pending action and returns awaiting_approval; it does not run.` +
+        (skippable(kind) ? ' If the owner has skip permissions on for this chat it may instead return auto_approved with the outcome (it ran).' : ''),
       inputSchema: spec.inputSchema,
       run: async (input) => requestApproval(deps, kind, spec.payload(input)),
     })
@@ -149,7 +153,8 @@ async function requestApproval(
   try {
     const meta = built.ruleId ? { agentRunId: deps.agentRunId, ruleId: built.ruleId } : { agentRunId: deps.agentRunId }
     const action = await deps.createAction(built.kind, built.payload, 'agent', meta)
-    if (deps.skipPermissions && deps.autoApprove && skippable(built.kind)) {
+    // Fail closed: a builder that remaps the kind never inherits the tool's skip.
+    if (deps.skipPermissions && deps.autoApprove && built.kind === kind && skippable(kind)) {
       const done = await deps.autoApprove(action.id)
       return {
         status: 'auto_approved',
