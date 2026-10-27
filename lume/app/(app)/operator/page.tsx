@@ -8,6 +8,8 @@ import { loadCheckin, type CheckinData } from '@/lib/operators/checkinData'
 import { currentOperator } from '@/lib/operators/session'
 import { UUID_RE } from '@/lib/http/json'
 import { resolveCampaignQuery, type CampaignLite } from '@/lib/validate/campaignQuery'
+import { flashMessages } from '@/lib/http/flash'
+import { LFO_MAX_COUNT, LFO_MIN_COUNT } from '@/lib/adapters/pipeline.actions'
 
 export const metadata: Metadata = { title: 'Operator check-in' }
 export const dynamic = 'force-dynamic'
@@ -35,8 +37,8 @@ export default async function OperatorPage({ searchParams }: { searchParams: Sea
   const data = await loadCheckin({ operator, verticalParam: verticalParam && UUID_RE.test(verticalParam) ? verticalParam.toLowerCase() : null })
 
   const returnTo = !operator && !data.scope.all ? `/operator?vertical=${data.scope.vertical.id}` : '/operator'
-  const flash = one(params.flash)
-  const flashError = one(params.flash_error)
+  // Only fixed text for known codes is shown (lib/http/flash.ts), never the query value.
+  const { ok: flash, error: flashError } = flashMessages(one(params.flash), one(params.flash_error))
   const cqJob = one(params.cq_job)
   const cq = one(params.cq)
   const matches = cqJob && cq && UUID_RE.test(cqJob) ? await campaignMatches(cq) : null
@@ -238,8 +240,10 @@ function Controls({
           <form method="post" action="/api/gates/decide" className="block">
             <input type="hidden" name="callback_data" value={`lfo_count:${c.target_id}`} />
             <Hidden returnTo={returnTo} />
-            <label htmlFor={`count-${c.target_id}`}>Custom count (min 500, $0.003 each)</label>{' '}
-            <input id={`count-${c.target_id}`} name="count" type="number" min={500} step={1} required />{' '}
+            <label htmlFor={`count-${c.target_id}`}>
+              Custom count ({LFO_MIN_COUNT.toLocaleString('en-US')}–{LFO_MAX_COUNT.toLocaleString('en-US')}, $0.003 each)
+            </label>{' '}
+            <input id={`count-${c.target_id}`} name="count" type="number" min={LFO_MIN_COUNT} max={LFO_MAX_COUNT} step={1} required />{' '}
             <button type="submit" data-tone="approve">
               Order custom count
             </button>
@@ -317,7 +321,6 @@ function Controls({
 // ---------------------------------------------------------------------------
 
 function Alerts({ data, returnTo }: { data: CheckinData; returnTo: string }) {
-  const name = (id: string | null) => data.verticals.find((v) => v.id === id)?.name
   return (
     <section aria-labelledby="alerts">
       <h2 id="alerts">
@@ -359,7 +362,7 @@ function Alerts({ data, returnTo }: { data: CheckinData; returnTo: string }) {
                   </td>
                   <td>
                     {a.source}
-                    {data.scope.all && a.campaign_id && name(a.campaign_id) ? ` · ${name(a.campaign_id)}` : ''}
+                    {data.scope.all ? ` · ${data.alertVerticals[a.id] ?? 'owner / master'}` : ''}
                   </td>
                   <td>
                     <form method="post" action="/api/alerts/ack">
@@ -379,14 +382,17 @@ function Alerts({ data, returnTo }: { data: CheckinData; returnTo: string }) {
 }
 
 function Outcomes({ data }: { data: CheckinData }) {
+  const by = (via: string | null, opId: string | null) =>
+    via === 'operator' && opId ? `Grok Bot “${data.operatorLabels[opId] ?? opId}”` : (via ?? '—')
   return (
     <section aria-labelledby="outcomes">
       <h2 id="outcomes">Recent outcomes (last 24 h)</h2>
-      <p className="muted">Pending actions decided in the last 24 hours and what the executor did. Gate decisions taken by a pipeline appear as alerts.</p>
+      <h3 id="outcomes-actions">Confirmed actions</h3>
+      <p className="muted">Pending actions decided in the last 24 hours and what the executor did. Failures are marked FAILED.</p>
       {data.outcomes.length === 0 ? (
-        <p id="outcomes-empty">No decisions in the last 24 hours.</p>
+        <p id="outcomes-empty">No decided actions in the last 24 hours.</p>
       ) : (
-        <table>
+        <table aria-labelledby="outcomes-actions">
           <thead>
             <tr>
               <th scope="col">Decided (UTC)</th>
@@ -398,18 +404,42 @@ function Outcomes({ data }: { data: CheckinData }) {
           </thead>
           <tbody>
             {data.outcomes.map((o) => (
-              <tr key={o.id}>
+              <tr key={o.id} data-ok={o.status === 'failed' ? 'false' : 'true'}>
                 <td>{o.decided_at ?? '—'}</td>
                 <td>
                   <Link href={`/actions/${o.id}`}>{o.kind}</Link>: <span style={{ whiteSpace: 'pre-wrap' }}>{o.summary}</span>
                 </td>
-                <td>{o.status}</td>
-                <td>
-                  {o.decided_via === 'operator' && o.decided_by_operator
-                    ? `Grok Bot “${data.operatorLabels[o.decided_by_operator] ?? o.decided_by_operator}”`
-                    : (o.decided_via ?? '—')}
-                </td>
+                <td className={o.status === 'failed' ? 'urgent' : undefined}>{o.status === 'failed' ? 'FAILED' : o.status}</td>
+                <td>{by(o.decided_via, o.decided_by_operator)}</td>
                 <td>{o.error ?? ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <h3 id="outcomes-gates">Gate decisions and campaign picks</h3>
+      <p className="muted">Pipeline gate decisions sent from Lume (by Conrad or a Grok Bot) and campaign picks. A decision that did not apply is marked FAILED.</p>
+      {data.decisionEvents.length === 0 ? (
+        <p id="outcomes-gates-empty">No gate decisions in the last 24 hours.</p>
+      ) : (
+        <table aria-labelledby="outcomes-gates">
+          <thead>
+            <tr>
+              <th scope="col">When (UTC)</th>
+              <th scope="col">Decision</th>
+              <th scope="col">Result</th>
+              <th scope="col">By</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.decisionEvents.map((e) => (
+              <tr key={e.id} data-ok={e.ok ? 'true' : 'false'}>
+                <td>{e.at}</td>
+                <td>
+                  {e.kind}: {e.summary}
+                </td>
+                <td className={e.ok ? undefined : 'urgent'}>{e.ok ? e.status : `FAILED (${e.status})`}</td>
+                <td>{e.by_operator ? `Grok Bot “${data.operatorLabels[e.by_operator] ?? e.by_operator}”` : 'Lume'}</td>
               </tr>
             ))}
           </tbody>

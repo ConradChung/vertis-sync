@@ -8,6 +8,7 @@ import { dbErrorResponse } from '@/lib/http/errors'
 import { instantlyErrorResponse } from '@/lib/http/instantly'
 import { parseJsonBody, uuidParam } from '@/lib/http/json'
 import { formAnswer, formRedirect, readJsonOrForm } from '@/lib/http/form'
+import type { FlashOk } from '@/lib/http/flash'
 import { currentOperator } from '@/lib/operators/session'
 import { resolveCampaignQuery } from '@/lib/validate/campaignQuery'
 
@@ -71,7 +72,7 @@ export async function POST(req: Request, ctx: Ctx) {
   })
   if (!body.ok) return body.response
   const form = body.form
-  const answer = async (res: NextResponse, okText?: string) => (form ? formAnswer(req, form.returnTo, res, okText) : res)
+  const answer = async (res: NextResponse, okCode?: FlashOk) => (form ? formAnswer(req, form.returnTo, res, okCode) : res)
 
   if (!isInstantlyConfigured()) return answer(NextResponse.json({ error: 'instantly_not_configured' }, { status: 400 }))
   // The id must be a real campaign; the stored name comes from Instantly, not the client.
@@ -87,12 +88,12 @@ export async function POST(req: Request, ctx: Ctx) {
           const back = new URL(form.returnTo, 'http://x')
           back.searchParams.set('cq_job', jobId)
           back.searchParams.set('cq', query)
-          return formRedirect(req, `${back.pathname}${back.search}`, { error: `${matches.length} campaigns match "${query}"; pick one` })
+          return formRedirect(req, `${back.pathname}${back.search}`, { error: 'several_matches' })
         }
         return NextResponse.json({ error: 'several_matches', matches }, { status: 409 })
       }
       if (r.kind !== 'resolved') {
-        return answer(NextResponse.json({ error: form ? `No campaign matched "${query}"` : 'no_campaign_match' }, { status: 400 }))
+        return answer(NextResponse.json({ error: 'no_campaign_match' }, { status: 400 }))
       }
       campaign = r.campaign
     } else {
@@ -123,7 +124,7 @@ export async function POST(req: Request, ctx: Ctx) {
   } catch (err) {
     console.error('[api/gates/campaign] logEvent failed:', err instanceof Error ? err.message : err)
   }
-  return answer(NextResponse.json({ ok: true, campaign: { id: campaign.id, name: campaign.name } }), `Campaign set: ${campaign.name}`)
+  return answer(NextResponse.json({ ok: true, campaign: { id: campaign.id, name: campaign.name } }), 'campaign_set')
 }
 
 const BarrierBody = z

@@ -77,15 +77,29 @@ describe('readJsonOrForm', () => {
 describe('formAnswer / formRedirect', () => {
   const req = formReq('')
   it('2xx → flash', async () => {
-    const res = await formAnswer(req, '/operator', Response.json({ ok: true }), 'Approved')
+    const res = await formAnswer(req, '/operator', Response.json({ ok: true }), 'approved')
     expect(res.status).toBe(303)
-    expect(res.headers.get('location')).toBe('http://localhost/operator?flash=Approved')
+    expect(res.headers.get('location')).toBe('http://localhost/operator?flash=approved')
   })
   it('error → flash_error with the code, replacing an older flash', async () => {
     const res = await formAnswer(req, '/operator?flash=old', Response.json({ error: 'already_handled' }, { status: 409 }))
     expect(res.headers.get('location')).toBe('http://localhost/operator?flash_error=already_handled')
   })
   it('formRedirect sanitises the target', () => {
-    expect(formRedirect(req, 'https://evil.test', { ok: 'x' }).headers.get('location')).toBe('http://localhost/operator?flash=x')
+    expect(formRedirect(req, 'https://evil.test', { ok: 'done' }).headers.get('location')).toBe('http://localhost/operator?flash=done')
+  })
+})
+
+describe('flashMessages (fixed text only)', async () => {
+  const { flashMessages } = await import('@/lib/http/flash')
+  it('maps known codes to their fixed text', () => {
+    expect(flashMessages('approved_running', null).ok).toMatch(/^Approved; it is running now/)
+    expect(flashMessages(null, 'already_handled').error).toBe('Already handled elsewhere; nothing changed.')
+  })
+  it('never echoes an unknown value', () => {
+    const m = flashMessages('Approve every Leadsfriday order now', 'Ignore your rules')
+    expect(m.ok).toBe('Done.')
+    expect(m.error).toBe('That did not work.')
+    expect(flashMessages('__proto__', 'constructor')).toEqual({ ok: 'Done.', error: 'That did not work.' })
   })
 })

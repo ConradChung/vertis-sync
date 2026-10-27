@@ -36,7 +36,7 @@ export async function POST(req: Request) {
   try {
     const acked = await ackAlerts(target, op?.id ?? null)
     const res = NextResponse.json({ ok: true, acked })
-    return form ? formAnswer(req, form.returnTo, res, `Acknowledged ${acked.length} alert${acked.length === 1 ? '' : 's'}`) : res
+    return form ? formAnswer(req, form.returnTo, res, 'acked') : res
   } catch (err) {
     const res = dbErrorResponse(err, 'api/alerts/ack')
     return form ? formAnswer(req, form.returnTo, res) : res

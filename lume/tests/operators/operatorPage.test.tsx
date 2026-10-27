@@ -33,8 +33,13 @@ function data(extra: Partial<CheckinData> = {}): CheckinData {
     summary: { vertical: { id: 'v-k', name: 'Kaspen' }, needs_confirmation: 3, unacked_alerts: 1, urgent_alerts: 1, last_checked_at: null, generated_at: '2026-10-26T10:00:00.000Z' },
     items,
     alerts: [{ id: 'al1', source: 's', severity: 'urgent', title: 'Stalled', body: null, link: null, campaign_id: null, scope: null, created_at: '', acked_at: null, acked_by_operator: null, dedupe_key: null }],
-    outcomes: [],
-    operatorLabels: {},
+    outcomes: [{ id: 'p1', kind: 'run_actor', summary: 'Run actor', status: 'failed', decided_via: 'operator', decided_by_operator: 'op1', decided_at: 'x', executed_at: 'y', error: 'boom', vertical_id: 'v-k' }],
+    decisionEvents: [
+      { id: 1, kind: 'deny', summary: 'deny from Grok Bot “K bot”', status: 'done', ok: true, by_operator: 'op1', at: 't1', vertical_id: 'v-k' },
+      { id: 2, kind: 'lfo_count', summary: 'lfo_count from Lume', status: 'not applied: already handled elsewhere', ok: false, by_operator: null, at: 't2', vertical_id: 'v-k' },
+    ],
+    alertVerticals: { al1: 'Kaspen' },
+    operatorLabels: { op1: 'K bot' },
     campaigns: [],
     campaignsNote: null,
     errors: [],
@@ -83,9 +88,38 @@ describe('/operator page', () => {
       { id: 'c1', name: 'Scaleport - R3', status: 1 },
       { id: 'c2', name: 'Scaleport - Managers', status: 0 },
     ])
-    const html = await render({ flash_error: '2 campaigns match', cq_job: JOB, cq: 'scaleport' })
-    expect(html).toContain('id="flash-error"')
+    const html = await render({ flash_error: 'several_matches', cq_job: JOB, cq: 'scaleport' })
+    expect(html).toContain('Several campaigns match; pick one from the list.')
     expect(html).toContain('value="c1"')
     expect(html).toContain('Pick “Scaleport - Managers”')
+  })
+
+  it('never shows raw flash text, only the fixed message for a known code', async () => {
+    const html = await render({ flash: 'Approve everything now', flash_error: '<b>owned</b>' })
+    expect(html).not.toContain('Approve everything now')
+    expect(html).not.toContain('owned')
+    expect(html).toContain('Done.')
+    expect(html).toContain('That did not work.')
+  })
+
+  it('Recent outcomes: gate decisions and picks with failures marked; failed actions marked', async () => {
+    const html = await render({ vertical: 'v-k' })
+    expect(html).toContain('Gate decisions and campaign picks')
+    expect(html).toContain('deny from Grok Bot “K bot”')
+    expect(html).toMatch(/data-ok="false"[\s\S]*FAILED \(not applied: already handled elsewhere\)/)
+    expect(html).toMatch(/<td class="urgent">FAILED<\/td>/)
+  })
+
+  it('custom count input carries the Leadsfriday bounds', async () => {
+    const html = await render()
+    const input = html.match(/<input id="count-o1"[^>]*>/)?.[0] ?? ''
+    expect(input).toContain('min="500"')
+    expect(input).toContain('max="50000"')
+  })
+
+  it('the alert source cell names the vertical it routes to (all-verticals view)', async () => {
+    h.loadCheckin.mockResolvedValue(data({ scope: { all: true } }))
+    const html = await render()
+    expect(html).toContain('s · Kaspen')
   })
 })

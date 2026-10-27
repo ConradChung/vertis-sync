@@ -36,7 +36,7 @@ export async function POST(req: Request) {
   if (!body.ok) return body.response
   const form = body.form
   const answer = async (res: NextResponse) =>
-    form ? formAnswer(req, form.returnTo, res, 'Filed; it now needs confirmation (Approve below)') : res
+    form ? formAnswer(req, form.returnTo, res, 'filed') : res
   const requestedBy = auth.via === 'internal' ? 'agent' : 'user'
 
   try {

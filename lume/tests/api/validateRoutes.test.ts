@@ -150,7 +150,7 @@ describe('POST /api/gates/decide as a plain form (/operator)', () => {
     decide.mockResolvedValue({ ok: true, claimed: true, action: 'deny', target_id: JOB })
     const res = await decidePOST(form(`callback_data=deny%3A${JOB}&return_to=%2Foperator`))
     expect(res.status).toBe(303)
-    expect(res.headers.get('location')).toBe('http://localhost/operator?flash=Decided%3A+deny')
+    expect(res.headers.get('location')).toBe('http://localhost/operator?flash=decided')
     expect(decide).toHaveBeenCalledWith(`deny:${JOB}`)
   })
 
@@ -249,7 +249,7 @@ describe('/api/gates/campaign/[jobId]', () => {
       svc.pickCampaign.mockResolvedValue(true)
       const res = await campaignPOST(form('campaign_query=kaspen&return_to=%2Foperator'), params('jobId', JOB))
       expect(res.status).toBe(303)
-      expect(res.headers.get('location')).toBe('http://localhost/operator?flash=Campaign+set%3A+Kaspen+PM')
+      expect(res.headers.get('location')).toBe('http://localhost/operator?flash=campaign_set')
     })
 
     it('form: several → back to /operator with cq_job + cq to list them', async () => {
@@ -258,7 +258,7 @@ describe('/api/gates/campaign/[jobId]', () => {
       expect(loc.pathname).toBe('/operator')
       expect(loc.searchParams.get('cq_job')).toBe(JOB)
       expect(loc.searchParams.get('cq')).toBe('scaleport')
-      expect(loc.searchParams.get('flash_error')).toContain('2 campaigns match')
+      expect(loc.searchParams.get('flash_error')).toBe('several_matches')
       expect(svc.pickCampaign).not.toHaveBeenCalled()
     })
 
@@ -376,7 +376,7 @@ describe('POST /api/actions', () => {
       })
     )
     expect(res.status).toBe(303)
-    expect(res.headers.get('location')).toContain('/operator?flash=Filed')
+    expect(res.headers.get('location')).toContain('/operator?flash=filed')
     expect(svc.insertPendingAction.mock.calls[0][0]).toMatchObject({ kind: 'push_to_instantly', payload: { job_id: JOB } })
   })
 

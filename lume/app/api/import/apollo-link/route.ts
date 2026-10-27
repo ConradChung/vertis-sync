@@ -25,7 +25,7 @@ export async function POST(req: Request) {
   if (!body.ok) return body.response
   const form = body.form
   const answer = async (res: NextResponse) =>
-    form ? formAnswer(req, form.returnTo, res, 'Apollo link received; choose the count under Needs confirmation') : res
+    form ? formAnswer(req, form.returnTo, res, 'apollo_received') : res
   const url = parseApolloUrl(body.data.url)
   if (!url) return answer(NextResponse.json({ error: 'invalid_apollo_url' }, { status: 400 }))
 

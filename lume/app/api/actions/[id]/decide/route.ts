@@ -59,7 +59,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     try {
       const row = await getAction(id)
       if (row?.kind === 'issue_operator_key') {
-        return formRedirect(req, form.returnTo, { error: `Decide this on /actions/${id}: its sign-in link is shown once there` })
+        return formRedirect(req, form.returnTo, { error: 'key_on_action_page' })
       }
     } catch {
       return formRedirect(req, form.returnTo, { error: 'db_error' })
@@ -71,7 +71,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     claimed = await claimDecision(id, approve, op ? 'operator' : 'lume', op?.id)
     if (!claimed) {
       const row = await getAction(id)
-      if (form) return formRedirect(req, form.returnTo, { error: row ? `already_handled (${row.status})` : 'not_found' })
+      if (form) return formRedirect(req, form.returnTo, { error: row ? 'already_handled' : 'not_found' })
       if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 })
       return NextResponse.json({ error: 'already_handled', status: row.status }, { status: 409 })
     }
@@ -103,21 +103,21 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
 
   if (!approve) {
-    if (form) return formRedirect(req, form.returnTo, { ok: `Denied: ${claimed.kind}` })
+    if (form) return formRedirect(req, form.returnTo, { ok: 'denied' })
     return NextResponse.json({ ok: true, status: 'rejected' })
   }
 
   if (form) {
     const dispatched = await dispatchExecuteNow(id, internalOrigin(req))
-    if (dispatched === 'dispatched') return formRedirect(req, form.returnTo, { ok: `Approved: ${claimed.kind} (running)` })
+    if (dispatched === 'dispatched') return formRedirect(req, form.returnTo, { ok: 'approved_running' })
     try {
       const outcome = await executeAction(id)
-      if (!outcome.ran) return formRedirect(req, form.returnTo, { ok: `Approved: ${claimed.kind}` })
+      if (!outcome.ran) return formRedirect(req, form.returnTo, { ok: 'approved' })
       return outcome.status === 'executed'
-        ? formRedirect(req, form.returnTo, { ok: `Approved and ran: ${claimed.kind}` })
-        : formRedirect(req, form.returnTo, { error: `Approved, but it failed: ${outcome.error ?? 'error'}` })
+        ? formRedirect(req, form.returnTo, { ok: 'approved_ran' })
+        : formRedirect(req, form.returnTo, { error: 'approved_failed' })
     } catch {
-      return formRedirect(req, form.returnTo, { error: 'Approved, but the executor could not finish; it will be retried' })
+      return formRedirect(req, form.returnTo, { error: 'approved_retry' })
     }
   }
 

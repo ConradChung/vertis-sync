@@ -348,7 +348,7 @@ describe('POST /api/import/apollo-link as a plain form (/operator)', () => {
     ingest.createApolloOrder.mockResolvedValue({ order: { id: ID, status: 'awaiting_count' }, telegram: 'skipped' })
     const res = await form(`url=${encodeURIComponent(url)}&return_to=%2Foperator`)
     expect(res.status).toBe(303)
-    expect(res.headers.get('location')).toContain('/operator?flash=Apollo+link+received')
+    expect(res.headers.get('location')).toContain('/operator?flash=apollo_received')
     expect(ingest.createApolloOrder).toHaveBeenCalled()
   })
   it('a bad link → flash_error', async () => {

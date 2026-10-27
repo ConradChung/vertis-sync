@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { readBodyCapped } from '@/lib/http/readBody'
 import { requestOrigin } from '@/lib/http/origin'
+import type { FlashError, FlashOk } from '@/lib/http/flash'
 
 /**
  * Plain HTML form posts for the routes the `/operator` check-in page uses
@@ -9,8 +10,9 @@ import { requestOrigin } from '@/lib/http/origin'
  * `application/x-www-form-urlencoded` post is mapped to the same shape by the
  * route's `fromForm` and validated by the same zod schema. A form post must
  * be same-origin (Origin, else Sec-Fetch-Site), and is answered with a 303
- * back to a same-site `return_to` path (default `/operator`) carrying a short
- * `flash` / `flash_error` instead of JSON (`formAnswer`).
+ * back to a same-site `return_to` path (default `/operator`) carrying a
+ * `flash` / `flash_error` CODE (lib/http/flash.ts) instead of JSON
+ * (`formAnswer`); the page maps codes to fixed text.
  */
 
 export const FORM_CONTENT_TYPE = 'application/x-www-form-urlencoded'
@@ -93,22 +95,22 @@ export async function readJsonOrForm<T>(
 }
 
 /** 303 to `returnTo` with `flash` (ok) or `flash_error`, replacing any earlier flash. */
-export function formRedirect(req: Request, returnTo: string, flash: { ok?: string; error?: string }): Response {
+export function formRedirect(req: Request, returnTo: string, flash: { ok?: FlashOk; error?: FlashError | string }): Response {
   const url = new URL(safeReturnTo(returnTo), requestOrigin(req))
   url.searchParams.delete('flash')
   url.searchParams.delete('flash_error')
-  if (flash.error) url.searchParams.set('flash_error', flash.error.slice(0, 200))
-  else if (flash.ok) url.searchParams.set('flash', flash.ok.slice(0, 200))
+  if (flash.error) url.searchParams.set('flash_error', flash.error.slice(0, 64))
+  else if (flash.ok) url.searchParams.set('flash', flash.ok)
   return NextResponse.redirect(url, 303)
 }
 
 /**
- * Turn a route's JSON answer into the form redirect: a 2xx → `flash=okText`;
- * anything else → `flash_error=<the body's error code>` (or `HTTP <status>`).
+ * Turn a route's JSON answer into the form redirect: a 2xx → `flash=<okCode>`;
+ * anything else → `flash_error=<the body's error code>` (or `http_<status>`).
  */
-export async function formAnswer(req: Request, returnTo: string, res: Response, okText = 'Done'): Promise<Response> {
-  if (res.status >= 200 && res.status < 300) return formRedirect(req, returnTo, { ok: okText })
-  let code = `HTTP ${res.status}`
+export async function formAnswer(req: Request, returnTo: string, res: Response, okCode: FlashOk = 'done'): Promise<Response> {
+  if (res.status >= 200 && res.status < 300) return formRedirect(req, returnTo, { ok: okCode })
+  let code = `http_${res.status}`
   try {
     const j = (await res.clone().json()) as { error?: unknown }
     if (typeof j?.error === 'string' && j.error) code = j.error

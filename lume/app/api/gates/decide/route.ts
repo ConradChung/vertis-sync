@@ -5,6 +5,7 @@ import { decide } from '@/lib/adapters/pipeline'
 import { parseCallbackData } from '@/lib/adapters/pipeline.actions'
 import { logEvent } from '@/lib/db/service'
 import { formAnswer, readJsonOrForm } from '@/lib/http/form'
+import type { FlashOk } from '@/lib/http/flash'
 import { currentOperator } from '@/lib/operators/session'
 import { decideHttp } from '@/lib/validate/decideResult'
 
@@ -50,7 +51,7 @@ export async function POST(req: Request) {
   })
   if (!body.ok) return body.response
   const callbackData = body.data.callback_data
-  const answer = (res: NextResponse, okText?: string) => (body.form ? formAnswer(req, body.form.returnTo, res, okText) : res)
+  const answer = (res: NextResponse, okCode?: FlashOk) => (body.form ? formAnswer(req, body.form.returnTo, res, okCode) : res)
 
   const parsed = parseCallbackData(callbackData)
   if (!parsed) return answer(NextResponse.json({ error: 'bad_callback_data' }, { status: 400 }))
@@ -81,6 +82,6 @@ export async function POST(req: Request) {
   }
 
   const res = NextResponse.json(http.body, { status: http.status })
-  if (body.form && http.status === 202) return formAnswer(req, body.form.returnTo, res, `Sent ${parsed.action}; still working, re-check shortly`)
-  return answer(res, `Decided: ${parsed.action}`)
+  if (body.form && http.status === 202) return formAnswer(req, body.form.returnTo, res, 'still_working')
+  return answer(res, 'decided')
 }

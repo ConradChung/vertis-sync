@@ -149,7 +149,7 @@ describe('POST /api/alerts/ack as a plain form (/operator)', () => {
     h.ackAlerts.mockResolvedValue([A, A])
     const res = await form(`ids=${A}&ids=${A}&return_to=%2Foperator`)
     expect(res.status).toBe(303)
-    expect(res.headers.get('location')).toBe('http://localhost/operator?flash=Acknowledged+2+alerts')
+    expect(res.headers.get('location')).toBe('http://localhost/operator?flash=acked')
     expect(h.ackAlerts).toHaveBeenCalledWith({ ids: [A, A] }, null)
   })
   it('a junk id → flash_error, nothing acked', async () => {
