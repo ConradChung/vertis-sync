@@ -104,3 +104,31 @@ describe('storedToChat', () => {
     expect(storedToChat({ id: 'm2', role: 'user', text: 'hi', tools: [], approvals: [], auto: false } as unknown as StoredMessage)).not.toHaveProperty('auto')
   })
 })
+
+describe('skip permissions', () => {
+  it('rides on every send while on, including auto follow-ups, and a new chat clears it', async () => {
+    const fetchMock = vi.fn(async () => sse([{ type: 'run', id: 'r', conversation_id: 'c1' }, { type: 'done' }]))
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useAgentChat())
+    expect(result.current.skipPermissions).toBe(false)
+    act(() => result.current.setSkipPermissions(true))
+    await act(() => result.current.send('pause A'))
+    await act(async () => result.current.followUp(approved))
+    await waitFor(() => expect(runBodies(fetchMock)).toHaveLength(2))
+    await waitFor(() => expect(result.current.busy).toBe(false))
+    expect(runBodies(fetchMock)[0]).toEqual({ prompt: 'pause A', skip_permissions: true })
+    expect(runBodies(fetchMock)[1]).toMatchObject({ auto: true, skip_permissions: true })
+    act(() => result.current.reset())
+    expect(result.current.skipPermissions).toBe(false)
+    await act(() => result.current.send('again'))
+    expect(runBodies(fetchMock)[2]).toEqual({ prompt: 'again' })
+  })
+
+  it('switching conversations turns it off', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ messages: [] })))
+    const { result, rerender } = renderHook(({ id }: { id: string | null }) => useAgentChat({ conversationId: id }), { initialProps: { id: null as string | null } })
+    act(() => result.current.setSkipPermissions(true))
+    rerender({ id: '0f3c2b1a-9d8e-4f7a-8b6c-5d4e3f2a1b0c' })
+    expect(result.current.skipPermissions).toBe(false)
+  })
+})

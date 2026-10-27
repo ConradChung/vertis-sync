@@ -55,6 +55,12 @@ export interface AgentChat {
   /** Assistant text is arriving for the live run. */
   streaming: boolean
   send: (text: string, skill?: SkillRef, opts?: SendOptions) => Promise<void>
+  /**
+   * Skip-permissions mode for this conversation: skippable high-risk tools run
+   * without asking. In memory only; a new chat or another conversation turns it off.
+   */
+  skipPermissions: boolean
+  setSkipPermissions: (on: boolean) => void
   /** Tell the agent how an in-chat approval came out: sent now, or after the live run settles. */
   followUp: (d: ApprovalDecision) => void
   reset: () => void
@@ -156,6 +162,12 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
   // Approval follow-ups waiting for the live run to settle, one per action.
   const queueRef = useRef(new Map<string, string>())
   const [queued, setQueued] = useState(0)
+  const [skipPermissions, setSkip] = useState(false)
+  const skipRef = useRef(false)
+  const setSkipPermissions = useCallback((on: boolean) => {
+    skipRef.current = on
+    setSkip(on)
+  }, [])
   const optsRef = useRef(opts)
   useEffect(() => {
     optsRef.current = opts
@@ -165,8 +177,9 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
     if (conversationId === currentRef.current) return
     currentRef.current = conversationId
     setCurrent(conversationId)
-    // A follow-up belongs to the conversation it was decided in.
+    // A follow-up belongs to the conversation it was decided in; skip mode never carries over.
     queueRef.current.clear()
+    setSkipPermissions(false)
     setNotFound(false)
     setMessages([])
     if (!conversationId) {
@@ -190,7 +203,7 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
         if (!ctl.signal.aborted) setLoading(false)
       })
     return () => ctl.abort()
-  }, [conversationId])
+  }, [conversationId, setSkipPermissions])
 
   const patch = useCallback((id: string, fn: (m: ChatMessage) => ChatMessage) => {
     setMessages((ms) => ms.map((m) => (m.id === id ? fn(m) : m)))
@@ -223,6 +236,7 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
             ...(currentRef.current ? { conversation_id: currentRef.current } : {}),
             ...(skill ? { skill_id: skill.id, skill_mode: skill.mode } : {}),
             ...(sendOpts.auto ? { auto: true } : {}),
+            ...(skipRef.current ? { skip_permissions: true } : {}),
           }),
         })
         if (!res.ok || !res.body) {
@@ -291,11 +305,12 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
   const reset = useCallback(() => {
     if (busyRef.current) return
     queueRef.current.clear()
+    setSkipPermissions(false)
     currentRef.current = null
     setCurrent(null)
     setNotFound(false)
     setMessages([])
-  }, [])
+  }, [setSkipPermissions])
 
   const live = busy ? messages.at(-1) : undefined
   return {
@@ -309,6 +324,8 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
     liveStatus: live?.status ?? null,
     streaming: !!live?.text,
     send,
+    skipPermissions,
+    setSkipPermissions,
     followUp,
     reset,
   }

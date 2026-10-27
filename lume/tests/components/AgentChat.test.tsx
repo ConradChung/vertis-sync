@@ -116,6 +116,33 @@ describe('AgentChat', () => {
     expect(screen.getByText('Executed')).toBeTruthy()
   })
 
+  it('skip permissions: the toggle shows a banner and sends the flag; a new chat turns it off', async () => {
+    const fetchMock = router({ run: () => sseResponse([{ type: 'run', id: 'r1', conversation_id: CONV }, { type: 'text', delta: 'Ok.' }, { type: 'done' }]) })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<AgentChat />)
+    const toggle = screen.getByRole('button', { name: 'Skip permissions' })
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByText(/Skip permissions is on/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: SUGGESTIONS[0] }))
+    await screen.findByText('Ok.')
+    const body = JSON.parse(fetchMock.mock.calls.find((c) => c[0] === '/api/agent/run')![1]!.body as string)
+    expect(body).toEqual({ prompt: SUGGESTIONS[0], skip_permissions: true })
+    await waitFor(() => expect((screen.getByLabelText('Message Lume') as HTMLTextAreaElement).disabled).toBe(false))
+    fireEvent.click(screen.getAllByRole('button', { name: /New chat/ })[0])
+    expect(screen.getByRole('button', { name: 'Skip permissions' }).getAttribute('aria-pressed')).toBe('false')
+    expect(screen.queryByText(/Skip permissions is on/)).toBeNull()
+  })
+
+  it('the banner turns skip permissions off', () => {
+    vi.stubGlobal('fetch', router({}))
+    render(<AgentChat />)
+    fireEvent.click(screen.getByRole('button', { name: 'Skip permissions' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Turn off' }))
+    expect(screen.getByRole('button', { name: 'Skip permissions' }).getAttribute('aria-pressed')).toBe('false')
+  })
+
   it('Shift+Enter does not send', () => {
     const fetchMock = router({})
     vi.stubGlobal('fetch', fetchMock)

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { ArrowUp, BookMarked, Brain, PanelRight, ChevronRight, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, ShieldCheck, ShieldX, SquarePen, Wrench } from 'lucide-react'
+import { ArrowUp, BookMarked, Brain, PanelRight, ChevronRight, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, ShieldCheck, ShieldOff, ShieldX, SquarePen, Wrench } from 'lucide-react'
 import { AgentHistory, useConversationList } from '@/components/agent/AgentHistory'
 import { ApprovalCard, type ApprovalDecision } from '@/components/agent/ApprovalCard'
 import { ManageSkills, SkillCard, SkillMenu, useSkillList } from '@/components/agent/AgentSkills'
@@ -289,6 +289,19 @@ export function AgentChat() {
           <Button variant="ghost" size="icon-sm" className="max-sm:size-10" onClick={() => setMemoryOpen(true)} aria-label="Memory" title="What Lume remembers">
             <Brain className="size-4" />
           </Button>
+          {/* Per conversation, in memory only: a new chat or another conversation turns it off. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn('max-sm:h-10', chat.skipPermissions && 'bg-red/10 text-red hover:bg-red/15 hover:text-red')}
+            onClick={() => chat.setSkipPermissions(!chat.skipPermissions)}
+            aria-pressed={chat.skipPermissions}
+            aria-label="Skip permissions"
+            title="Let Lume act without asking in this chat (never for spending money or emailing leads)"
+          >
+            <ShieldOff className="size-3.5" />
+            <span className="max-sm:sr-only">Skip permissions</span>
+          </Button>
           {hasPanel && !panelOpen && (
             <Button variant="outline" size="sm" className="anim-rise ml-1 max-sm:h-10" onClick={() => setPanelOpen(true)}>
               <PanelRight className="size-3.5" /> Show {diagrams.length ? 'pipeline' : 'leads'}
@@ -339,6 +352,15 @@ export function AgentChat() {
           </div>
 
           <div className="shrink-0 border-t border-line bg-[var(--glass-fill-strong)] px-3 pt-2.5 pb-3 sm:px-8 sm:pt-3 sm:pb-4">
+            {chat.skipPermissions && (
+              <div className="mb-3 flex items-center gap-2 rounded-control border border-red/40 bg-red/10 px-3 py-2 text-[13px] text-red" role="status">
+                <ShieldOff className="size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1">Skip permissions is on — I&apos;ll act without asking, except spending money or emailing leads.</span>
+                <Button variant="outline" size="xs" className="shrink-0" onClick={() => chat.setSkipPermissions(false)}>
+                  Turn off
+                </Button>
+              </div>
+            )}
             {speech.listening ? (
               <>
                 <div className="mb-2 flex items-center justify-center gap-3">
