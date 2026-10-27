@@ -222,11 +222,14 @@ async function notify(batchId: string): Promise<{ message_id: number | null; edi
   const reply_markup = batch.status === 'awaiting_review' ? gateOneKeyboard(batch) : undefined
 
   // Gate 1 in the feed: one row per batch (a re-post / merge refresh edits the
-  // Telegram prompt but does not add a second feed row).
+  // Telegram prompt but does not add a second feed row). While the gate is
+  // open the row is refreshed and un-acked; once decided, a late re-post only
+  // refreshes the content (severity drops to info), leaving the ack alone.
   const open = batch.status === 'awaiting_review'
   const gate = {
     source: 'jobsearch-notify', severity: open ? 'urgent' : 'info', title: titleFrom(text), body: text,
     link: lumeLink(`/validate?gate=jobs_review:${batch.id}`), scope: 'orders', dedupe_key: `${batch.id}:jobs_review`,
+    mode: open ? 'reopen' : 'update',
   } as const
 
   if (batch.telegram_message_id) {

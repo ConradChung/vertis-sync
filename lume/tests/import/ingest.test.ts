@@ -142,6 +142,7 @@ describe('alert feed (G4)', () => {
       source: 'lume.import', severity: 'urgent', title: '📥 New CSV from Lume',
       body: '📥 New CSV from Lume\nFile: x.csv\nRows: 1\nEmail column: Email',
       link: `/validate?gate=ingest_approval:${ID}`, campaign_id: null, scope: 'validation', dedupe_key: `${ID}:ingest_approval`,
+      mode: 'reopen',
     }])
   })
 

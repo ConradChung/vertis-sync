@@ -8,7 +8,7 @@ import type { TelegramResult } from '@/lib/adapters/telegram'
  * helper `supabase/functions/_shared/alert.ts`.
  *
  * `alert()` always writes the notification to the durable feed
- * (`lume_alerts`), which the Grok Bot reads on /operator. The caller's
+ * (`lume_alerts`, through the `lume_alert_upsert` RPC), which the Grok Bot reads on /operator. The caller's
  * existing Telegram send runs, unchanged, as the `telegram` callback only
  * while `ALERT_CHANNELS` includes `telegram`; its result is returned so
  * callers that store a Telegram message id keep working.
@@ -25,6 +25,12 @@ import type { TelegramResult } from '@/lib/adapters/telegram'
 export type AlertChannel = 'telegram' | 'feed'
 export type AlertSeverity = 'info' | 'warn' | 'urgent'
 export type AlertScope = 'campaign' | 'orders' | 'replies' | 'validation'
+/**
+ * A repeated dedupe_key (lume_alert_upsert): `reopen` (default) refreshes the
+ * row and un-acks it; `update` refreshes the content and keeps the ack;
+ * `touch` only un-acks (a thinner ping must not overwrite the pipeline's prompt).
+ */
+export type AlertMode = 'reopen' | 'update' | 'touch'
 
 export interface AlertInput<T> {
   source: string
@@ -35,6 +41,7 @@ export interface AlertInput<T> {
   campaign_id?: string | null
   scope?: AlertScope | null
   dedupe_key?: string | null
+  mode?: AlertMode
   telegram?: () => Promise<T>
 }
 
@@ -84,20 +91,18 @@ export const telegramSkipped: TelegramResult = { ok: false, skipped: true }
 
 async function insertFeed<T>(input: AlertInput<T>): Promise<void> {
   try {
-    const row = {
-      source: input.source,
-      severity: input.severity ?? 'info',
-      title: input.title || input.source,
-      body: input.body ?? null,
-      link: input.link ?? null,
-      campaign_id: input.campaign_id ?? null,
-      scope: input.scope ?? null,
-      dedupe_key: input.dedupe_key ?? null,
+    const args = {
+      p_source: input.source,
+      p_severity: input.severity ?? 'info',
+      p_title: input.title || input.source,
+      p_body: input.body ?? null,
+      p_link: input.link ?? null,
+      p_campaign_id: input.campaign_id ?? null,
+      p_scope: input.scope ?? null,
+      p_dedupe_key: input.dedupe_key ?? null,
+      p_mode: input.mode ?? 'reopen',
     }
-    const table = createServiceClient().from('lume_alerts')
-    const res = row.dedupe_key
-      ? await table.upsert(row, { onConflict: 'dedupe_key', ignoreDuplicates: true })
-      : await table.insert(row)
+    const res = await createServiceClient().rpc('lume_alert_upsert', args)
     if (res.error) console.error(`[alerts] lume_alerts insert failed for ${input.source}:`, res.error.message)
   } catch (err) {
     console.error(`[alerts] lume_alerts insert failed for ${input.source}:`, err instanceof Error ? err.message : err)

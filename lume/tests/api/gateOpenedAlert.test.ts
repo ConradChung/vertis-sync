@@ -37,7 +37,7 @@ describe('POST /api/hooks/gate-opened alerts (G4)', () => {
     expect(h.sendGatePing).toHaveBeenCalledWith('finder_decision', ID, 'leads.csv')
     expect(feed.rows).toEqual([{
       source: 'lume.gates', severity: 'urgent', title: '🔗 leads.csv — open in Lume', body: '🔗 leads.csv — open in Lume',
-      link: `/validate?gate=finder_decision:${ID}`, campaign_id: null, scope: 'validation', dedupe_key: `${ID}:finder_decision`,
+      link: `/validate?gate=finder_decision:${ID}`, campaign_id: null, scope: 'validation', dedupe_key: `${ID}:finder_decision`, mode: 'reopen',
     }])
     expect(h.logEvent).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ pinged: true, telegram_message_id: 9 }) }))
   })

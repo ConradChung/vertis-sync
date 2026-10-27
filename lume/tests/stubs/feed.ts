@@ -1,4 +1,4 @@
-// Captures lume_alerts writes made through lib/alerts.ts. Use with
+// Captures lume_alerts writes (lume_alert_upsert RPC calls) made through lib/alerts.ts. Use with
 //   vi.mock('@/lib/supabase/service', async () => (await import('../stubs/feed')).serviceModule)
 // in tests whose other DB access is mocked at '@/lib/db/service' / stores.
 export interface FeedRow {
@@ -10,20 +10,28 @@ export interface FeedRow {
   campaign_id: string | null
   scope: string | null
   dedupe_key: string | null
+  mode?: string
 }
 
 export const feed = { rows: [] as FeedRow[] }
 
-const table = {
-  insert: async (row: FeedRow) => { feed.rows.push(row); return { error: null } },
-  upsert: async (row: FeedRow) => { feed.rows.push(row); return { error: null } },
-}
-
 export const serviceModule = {
   createServiceClient: () => ({
-    from: (name: string) => {
-      if (name !== 'lume_alerts') throw new Error(`feed stub: unexpected table ${name}`)
-      return table
+    rpc: (fn: string, args: Record<string, unknown>) => {
+      if (fn !== 'lume_alert_upsert') throw new Error(`feed stub: unexpected rpc ${fn}`)
+      feed.rows.push({
+        source: args.p_source as string,
+        severity: args.p_severity as string,
+        title: args.p_title as string,
+        body: (args.p_body ?? null) as string | null,
+        link: (args.p_link ?? null) as string | null,
+        campaign_id: (args.p_campaign_id ?? null) as string | null,
+        scope: (args.p_scope ?? null) as string | null,
+        dedupe_key: (args.p_dedupe_key ?? null) as string | null,
+        mode: args.p_mode as string,
+      })
+      const result = Promise.resolve({ error: null })
+      return { abortSignal: () => result, then: result.then.bind(result) }
     },
   }),
 }

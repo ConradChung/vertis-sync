@@ -20,6 +20,14 @@
 export type AlertChannel = 'telegram' | 'feed'
 export type AlertSeverity = 'info' | 'warn' | 'urgent'
 export type AlertScope = 'campaign' | 'orders' | 'replies' | 'validation'
+/**
+ * What a repeated dedupe_key does (lume_alert_upsert): `reopen` (default)
+ * refreshes the row and makes it unacked again, so a gate that re-opens is
+ * seen; `update` refreshes the content but keeps the ack (a re-post of a gate
+ * that is no longer open); `touch` only un-acks (a thinner ping that must not
+ * overwrite the pipeline's own prompt).
+ */
+export type AlertMode = 'reopen' | 'update' | 'touch'
 
 export interface AlertInput<T> {
   source: string
@@ -30,6 +38,7 @@ export interface AlertInput<T> {
   campaign_id?: string | null
   scope?: AlertScope | null
   dedupe_key?: string | null
+  mode?: AlertMode
   telegram?: () => Promise<T>
 }
 
@@ -101,28 +110,29 @@ function insertFeed<T>(input: AlertInput<T>, deps: AlertDeps): Promise<void> {
     deps.log('[alert] lume_alerts insert skipped: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set')
     return Promise.resolve()
   }
-  const row = {
-    source: input.source,
-    severity: input.severity ?? 'info',
-    title: input.title || input.source,
-    body: input.body ?? null,
-    link: input.link ?? null,
-    campaign_id: input.campaign_id ?? null,
-    scope: input.scope ?? null,
-    dedupe_key: input.dedupe_key ?? null,
+  // One write path for every alert: the lume_alert_upsert RPC (plain insert
+  // without a dedupe_key; re-open / update / touch semantics with one).
+  const args = {
+    p_source: input.source,
+    p_severity: input.severity ?? 'info',
+    p_title: input.title || input.source,
+    p_body: input.body ?? null,
+    p_link: input.link ?? null,
+    p_campaign_id: input.campaign_id ?? null,
+    p_scope: input.scope ?? null,
+    p_dedupe_key: input.dedupe_key ?? null,
+    p_mode: input.mode ?? 'reopen',
   }
-  const dedupe = !!input.dedupe_key
   let res: Promise<Response>
   try {
-    res = deps.fetch(`${url}/rest/v1/lume_alerts${dedupe ? '?on_conflict=dedupe_key' : ''}`, {
+    res = deps.fetch(`${url}/rest/v1/rpc/lume_alert_upsert`, {
       method: 'POST',
       headers: {
         'apikey': key,
         'Authorization': `Bearer ${key}`,
         'Content-Type': 'application/json',
-        'Prefer': dedupe ? 'resolution=ignore-duplicates,return=minimal' : 'return=minimal',
       },
-      body: JSON.stringify(row),
+      body: JSON.stringify(args),
       signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
     })
   } catch (e) {

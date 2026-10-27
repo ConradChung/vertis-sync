@@ -1,23 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const db = vi.hoisted(() => {
-  const state = { error: null as { message: string } | null, throws: false, calls: [] as { op: string; row: unknown; opts?: unknown }[] }
-  const from = vi.fn((table: string) => {
+  const state = {
+    error: null as { message: string } | null,
+    throws: false,
+    calls: [] as { fn: string; args: Record<string, unknown>; signal?: AbortSignal }[],
+  }
+  const rpc = vi.fn((fn: string, args: Record<string, unknown>) => {
     if (state.throws) throw new Error('client exploded')
+    const call: { fn: string; args: Record<string, unknown>; signal?: AbortSignal } = { fn, args }
+    state.calls.push(call)
+    const result = Promise.resolve({ error: state.error })
     return {
-      insert: (row: unknown) => {
-        state.calls.push({ op: `insert:${table}`, row })
-        return Promise.resolve({ error: state.error })
-      },
-      upsert: (row: unknown, opts: unknown) => {
-        state.calls.push({ op: `upsert:${table}`, row, opts })
-        return Promise.resolve({ error: state.error })
-      },
+      abortSignal: (signal: AbortSignal) => { call.signal = signal; return result },
+      then: result.then.bind(result),
     }
   })
-  return { state, from }
+  return { state, rpc }
 })
-vi.mock('@/lib/supabase/service', () => ({ createServiceClient: () => ({ from: db.from }) }))
+vi.mock('@/lib/supabase/service', () => ({ createServiceClient: () => ({ rpc: db.rpc }) }))
 
 import { alert, alertLink, parseChannels, telegramSkipped, titleFrom } from '@/lib/alerts'
 
@@ -74,10 +75,13 @@ describe('alert', () => {
     expect(telegram).toHaveBeenCalledTimes(1)
     expect(out).toEqual({ ok: true, messageId: 9 })
     expect(db.state.calls).toEqual([
-      {
-        op: 'insert:lume_alerts',
-        row: { source: 'lume.test', severity: 'info', title: 'T', body: 'B', link: '/x', campaign_id: 'c1', scope: 'campaign', dedupe_key: null },
-      },
+      expect.objectContaining({
+        fn: 'lume_alert_upsert',
+        args: {
+          p_source: 'lume.test', p_severity: 'info', p_title: 'T', p_body: 'B', p_link: '/x', p_campaign_id: 'c1',
+          p_scope: 'campaign', p_dedupe_key: null, p_mode: 'reopen',
+        },
+      }),
     ])
   })
 
@@ -89,13 +93,11 @@ describe('alert', () => {
     expect(db.state.calls).toHaveLength(1)
   })
 
-  it('dedupe_key → upsert on dedupe_key ignoring duplicates', async () => {
+  it('dedupe_key + mode go to lume_alert_upsert (mode defaults to reopen)', async () => {
     await alert({ source: 's', title: 'Gate', severity: 'urgent', dedupe_key: 'a1:lume_action' })
-    expect(db.state.calls[0]).toMatchObject({
-      op: 'upsert:lume_alerts',
-      row: { dedupe_key: 'a1:lume_action', severity: 'urgent' },
-      opts: { onConflict: 'dedupe_key', ignoreDuplicates: true },
-    })
+    await alert({ source: 's', title: 'Ping', dedupe_key: 'a1:stall', mode: 'touch' })
+    expect(db.state.calls[0].args).toMatchObject({ p_dedupe_key: 'a1:lume_action', p_severity: 'urgent', p_mode: 'reopen' })
+    expect(db.state.calls[1].args).toMatchObject({ p_dedupe_key: 'a1:stall', p_mode: 'touch' })
   })
 
   it('a feed error (returned or thrown) is logged and swallowed; telegram still runs', async () => {
@@ -116,10 +118,11 @@ describe('alert', () => {
     const order: string[] = []
     let release!: () => void
     const gate = new Promise<void>((r) => { release = r })
-    db.from.mockImplementationOnce(() => ({
-      insert: async () => { order.push('feed:start'); await gate; order.push('feed:end'); return { error: null } },
-      upsert: async () => ({ error: null }),
-    }))
+    db.rpc.mockImplementationOnce(() => {
+      order.push('feed:start')
+      const p = gate.then(() => { order.push('feed:end'); return { error: null } })
+      return { abortSignal: () => p, then: p.then.bind(p) }
+    })
     const p = alert({ source: 's', title: 'T', telegram: async () => { order.push('telegram'); release(); return 1 } })
     expect(await p).toBe(1)
     expect(order).toEqual(['feed:start', 'telegram', 'feed:end'])
@@ -129,3 +132,4 @@ describe('alert', () => {
     expect(telegramSkipped).toEqual({ ok: false, skipped: true })
   })
 })
+

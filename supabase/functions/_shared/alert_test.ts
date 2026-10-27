@@ -71,12 +71,15 @@ Deno.test('default channels: feed insert attempted and telegram runs, result pas
   assertEquals(ran, 1)
   assertEquals(out, { message_id: 42 })
   assertEquals(calls.length, 1)
-  assertEquals(calls[0].url, 'https://x.supabase.co/rest/v1/lume_alerts')
+  assertEquals(calls[0].url, 'https://x.supabase.co/rest/v1/rpc/lume_alert_upsert')
   const headers = calls[0].init.headers as Record<string, string>
   assertEquals(headers['apikey'], 'svc')
   assertEquals(headers['Authorization'], 'Bearer svc')
   const row = JSON.parse(String(calls[0].init.body))
-  assertEquals(row, { source: 'unit', severity: 'info', title: 'T', body: 'B', link: '/validate', campaign_id: null, scope: 'validation', dedupe_key: null })
+  assertEquals(row, {
+    p_source: 'unit', p_severity: 'info', p_title: 'T', p_body: 'B', p_link: '/validate', p_campaign_id: null,
+    p_scope: 'validation', p_dedupe_key: null, p_mode: 'reopen',
+  })
 })
 
 Deno.test('ALERT_CHANNELS=feed: telegram skipped, feed still inserted, returns undefined', async () => {
@@ -95,13 +98,14 @@ Deno.test('ALERT_CHANNELS=telegram: the feed is still written (it always is)', a
   assertEquals(calls.length, 1)
 })
 
-Deno.test('dedupe_key: insert ignores duplicates on dedupe_key', async () => {
+Deno.test('dedupe_key goes to lume_alert_upsert; mode defaults to reopen and can be update / touch', async () => {
   const { d, calls } = deps(BASE_ENV)
-  await alert({ source: 'unit', title: 'Gate', severity: 'urgent', dedupe_key: 'job1:finder' }, d)
-  assertEquals(calls[0].url, 'https://x.supabase.co/rest/v1/lume_alerts?on_conflict=dedupe_key')
-  const headers = calls[0].init.headers as Record<string, string>
-  assert(headers['Prefer'].includes('resolution=ignore-duplicates'))
-  assertEquals(JSON.parse(String(calls[0].init.body)).dedupe_key, 'job1:finder')
+  await alert({ source: 'unit', title: 'Gate', severity: 'urgent', dedupe_key: 'job1:finder_decision' }, d)
+  await alert({ source: 'unit', title: 'Gate', dedupe_key: 'job1:jobs_review', mode: 'update' }, d)
+  for (const c of calls) assertEquals(c.url, 'https://x.supabase.co/rest/v1/rpc/lume_alert_upsert')
+  const bodies = calls.map((c) => JSON.parse(String(c.init.body)))
+  assertEquals([bodies[0].p_dedupe_key, bodies[0].p_mode], ['job1:finder_decision', 'reopen'])
+  assertEquals([bodies[1].p_dedupe_key, bodies[1].p_mode], ['job1:jobs_review', 'update'])
 })
 
 Deno.test('a feed failure (throw or non-2xx) is logged and swallowed; telegram still runs', async () => {
