@@ -26,11 +26,24 @@ describe('verticalFor', () => {
     expect(verticalFor({}, [{ ...KASPEN, archived_at: 'x' }])).toBeNull()
   })
 
-  it('2. an unknown campaign falls to the first live vertical by name holding the scope', () => {
-    expect(verticalFor({ campaign_id: 'camp-unknown', scope: 'campaign' }, ALL)).toBe(HNWI)
-    expect(verticalFor({ scope: 'orders' }, ALL)).toBe(JOBS)
+  it('2. a scope match only when exactly one live vertical holds that scope', () => {
+    const REPLIES = v('rep', 'Replies desk', { scopes: ['replies'] })
+    expect(verticalFor({ campaign_id: 'camp-unknown', scope: 'replies' }, [...ALL, REPLIES])).toBe(REPLIES)
+    expect(verticalFor({ scope: 'replies' }, [REPLIES, ROOF])).toBe(REPLIES)
     // input order does not matter
-    expect(verticalFor({ scope: 'orders' }, [...ALL].reverse())).toBe(JOBS)
+    expect(verticalFor({ scope: 'replies' }, [...ALL, REPLIES].reverse())).toBe(REPLIES)
+    // an archived vertical does not make a scope ambiguous
+    const archivedJobs = { ...JOBS, archived_at: '2026-10-26T00:00:00Z' }
+    expect(verticalFor({ scope: 'orders' }, [archivedJobs, { ...KASPEN, is_default: false }, ROOF])).toEqual({ ...KASPEN, is_default: false })
+  })
+
+  it('2b. a scope held by several live verticals is ambiguous → the default, never the first by name', () => {
+    // campaign: Roofers, Kaspen, Jobs, HNWI; orders: Jobs, Kaspen; validation: Jobs, HNWI, Kaspen
+    expect(verticalFor({ campaign_id: 'camp-unknown', scope: 'campaign' }, ALL)).toBe(KASPEN)
+    expect(verticalFor({ scope: 'orders' }, ALL)).toBe(KASPEN)
+    expect(verticalFor({ scope: 'validation' }, ALL)).toBe(KASPEN)
+    // ambiguous and no default → null (owner / master only)
+    expect(verticalFor({ scope: 'campaign' }, [ROOF, JOBS, HNWI])).toBeNull()
   })
 
   it('3. no campaign or scope match → the default vertical', () => {
@@ -56,8 +69,9 @@ describe('itemsForOperator', () => {
   })
   it('a vertical bot sees only items routed to its vertical', () => {
     expect(itemsForOperator({ is_master: false, vertical_id: 'roof' }, items, ALL).map((i) => i.id)).toEqual([1])
-    expect(itemsForOperator({ is_master: false, vertical_id: 'jobs' }, items, ALL).map((i) => i.id)).toEqual([2])
-    expect(itemsForOperator({ is_master: false, vertical_id: 'kaspen' }, items, ALL).map((i) => i.id)).toEqual([3])
+    // orders is held by Jobs and Kaspen: ambiguous, so it goes to the default (Kaspen)
+    expect(itemsForOperator({ is_master: false, vertical_id: 'jobs' }, items, ALL).map((i) => i.id)).toEqual([])
+    expect(itemsForOperator({ is_master: false, vertical_id: 'kaspen' }, items, ALL).map((i) => i.id)).toEqual([2, 3])
     expect(itemsForOperator({ is_master: false, vertical_id: null }, items, ALL)).toEqual([])
   })
 })
@@ -101,8 +115,9 @@ describe('scopes', () => {
     for (const k of GATE_KINDS) expect(gate(k).scope).not.toBeUndefined()
   })
 
-  it('end to end: a push_review on an unmapped campaign lands on the first validation vertical', () => {
-    expect(verticalFor(scopeForGate({ kind: 'push_review', counts: { campaign_id: 'camp-x' }, title: null }), ALL)).toBe(HNWI)
+  it('end to end: a push_review on an unmapped campaign (validation is ambiguous) lands on the default', () => {
+    expect(verticalFor(scopeForGate({ kind: 'push_review', counts: { campaign_id: 'camp-x' }, title: null }), ALL)).toBe(KASPEN)
+    expect(verticalFor(scopeForGate({ kind: 'push_review', counts: { campaign_id: 'camp-x' }, title: null }), [ROOF, HNWI])).toBe(HNWI)
     expect(verticalFor(scopeForGate({ kind: 'push_review', counts: { campaign_id: 'camp-z' }, title: null }), ALL)).toBe(KASPEN)
   })
 })

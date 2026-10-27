@@ -7,7 +7,8 @@
 --   869d73b3-5bf3-4f1c-ba8c-43ac6d0f529d  "Scaleport - Fall Mega" (live rotation campaign;
 --                                         Scaleport is the Zenport offer: same Instantly id
 --                                         was named both, and its copy is the Zenport template) → Kaspen / Zenport
--- Left unassigned for the owner: muse:auto-apply ("Muse auto-apply"),
+-- (muse:auto-apply "Muse auto-apply" → Job search / GTM roles in 20261027021253.)
+-- Left unassigned for the owner:
 -- ab55afe9-b632-4e8d-ac84-48873140c56e (old "Scaleport - Fall Mega", deleted in Instantly),
 -- 9a244d14-eede-4e51-b603-0b1cd0449dc1 ("Scaleport - Fall Mega — No Location").
 insert into lume_verticals (name, scopes, campaign_ids, is_default) values

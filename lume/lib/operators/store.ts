@@ -21,6 +21,29 @@ export class DuplicateVerticalNameError extends Error {
   }
 }
 
+/** Another vertical already holds `is_default` (partial unique index `lume_verticals_one_default_idx`). */
+export class DefaultVerticalConflictError extends Error {
+  constructor() {
+    super('Another vertical is already the default; unset it first')
+    this.name = 'DefaultVerticalConflictError'
+  }
+}
+
+type PgError = { code?: string; message?: string; details?: string } | null | undefined
+
+/**
+ * Map a unique violation to the constraint it hit: the name key → duplicate
+ * name, the single-default index → default conflict. Anything else (or any
+ * other error) returns undefined and the caller raises a DbError.
+ */
+function uniqueViolation(err: PgError, name: string): Error | undefined {
+  if (err?.code !== '23505') return undefined
+  const text = `${err.message ?? ''} ${err.details ?? ''}`
+  if (text.includes('lume_verticals_one_default_idx')) return new DefaultVerticalConflictError()
+  if (text.includes('lume_verticals_name_key')) return new DuplicateVerticalNameError(name)
+  return undefined
+}
+
 const uniq = <T>(xs: T[]) => [...new Set(xs)]
 const cleanIds = (ids: string[]) => uniq(ids.map((s) => s.trim()).filter(Boolean))
 
@@ -61,7 +84,8 @@ export async function createVertical(v: NewVertical): Promise<Vertical> {
     })
     .select(VERTICAL_COLS)
     .single()
-  if (res.error?.code === '23505') throw new DuplicateVerticalNameError(name)
+  const conflict = uniqueViolation(res.error, name)
+  if (conflict) throw conflict
   if (res.error || !res.data) throw new DbError('createVertical', res.error ?? new Error('no data'))
   return res.data as Vertical
 }
@@ -77,7 +101,8 @@ export async function updateVertical(id: string, patch: VerticalPatch): Promise<
   if (patch.is_default !== undefined) row.is_default = patch.is_default
   const sb = createServiceClient()
   const res = await sb.from('lume_verticals').update(row).eq('id', id).is('archived_at', null).select(VERTICAL_COLS)
-  if (res.error?.code === '23505' && typeof row.name === 'string') throw new DuplicateVerticalNameError(row.name)
+  const conflict = uniqueViolation(res.error, typeof row.name === 'string' ? row.name : '')
+  if (conflict) throw conflict
   if (res.error) throw new DbError('updateVertical', res.error)
   return ((res.data ?? []) as Vertical[])[0] ?? null
 }
@@ -150,12 +175,27 @@ export async function getOperator(id: string): Promise<Operator | null> {
   return (res.data as Operator | null) ?? null
 }
 
-/** Revoke a key; false when already revoked or missing. */
+/**
+ * Revoke a key and sign its bot out: marks the key revoked, then deletes every
+ * Supabase session its sign-ins recorded (`lume_revoke_operator_sessions`;
+ * refresh tokens go with them), so the bot's owner session dies too. The
+ * purge runs even when the key was already revoked, so a retry finishes a
+ * half-done revoke. False when already revoked or missing.
+ */
 export async function revokeOperator(id: string): Promise<boolean> {
   const sb = createServiceClient()
   const res = await sb.from('lume_operators').update({ revoked_at: new Date().toISOString() }).eq('id', id).is('revoked_at', null).select('id')
   if (res.error) throw new DbError('revokeOperator', res.error)
+  const purge = await sb.rpc('lume_revoke_operator_sessions', { op: id })
+  if (purge.error) throw new DbError('revokeOperatorSessions', purge.error)
   return (res.data ?? []).length > 0
+}
+
+/** Record the Supabase session an operator sign-in minted, so revocation can delete it. */
+export async function recordOperatorSession(operatorId: string, sessionId: string): Promise<void> {
+  const sb = createServiceClient()
+  const res = await sb.from('lume_operator_sessions').insert({ operator_id: operatorId, session_id: sessionId })
+  if (res.error) throw new DbError('recordOperatorSession', res.error)
 }
 
 /** Record a check-in (`last_seen_at = now()`). */

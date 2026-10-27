@@ -4,8 +4,12 @@ import type { Operator, Vertical } from '@/lib/operators/types'
 
 /** The line put ahead of an operator's agent prompt. */
 export function operatorPromptLine(op: Pick<Operator, 'is_master'>, vertical: Pick<Vertical, 'name' | 'campaign_ids'> | null): string {
-  if (op.is_master || !vertical) {
+  if (op.is_master) {
     return 'You are being operated by the master Grok Bot (operator), which oversees all verticals and can create new ones. It has the owner’s full authority.'
+  }
+  // A vertical bot whose vertical is gone (or failed to load) is never the master.
+  if (!vertical) {
+    return 'You are being operated by a Grok Bot (operator) whose vertical no longer exists. It has the owner’s full authority.'
   }
   const campaigns = vertical.campaign_ids.length ? vertical.campaign_ids.join(', ') : 'none'
   return `You are being operated by the ${vertical.name} Grok Bot (operator). Its campaigns: ${campaigns}. It has the owner’s full authority.`

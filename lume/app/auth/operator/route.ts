@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
-import { mintOwnerSession } from '@/lib/auth/ownerSession'
+import { mintOwnerSession, signOutLocal } from '@/lib/auth/ownerSession'
 import { requestOrigin } from '@/lib/http/origin'
 import { OPERATOR_COOKIE, OPERATOR_COOKIE_MAX_AGE, OPERATOR_COOKIE_OPTIONS, signOperatorCookie } from '@/lib/operators/cookie'
-import { findOperatorByKey, touchOperator } from '@/lib/operators/store'
+import { findOperatorByKey, recordOperatorSession, touchOperator } from '@/lib/operators/store'
 
 /**
  * Grok Bot sign-in: `/auth/operator?k=<operator key>`. A live (unrevoked) key
@@ -11,6 +11,11 @@ import { findOperatorByKey, touchOperator } from '@/lib/operators/store'
  * decisions and agent chats are attributed to that bot. Lands on `/operator`.
  * Any bad, revoked or unknown key (or a missing secret / owner email) →
  * `/login?error=exchange_failed`, before any token is minted.
+ *
+ * The minted session's id (JWT `session_id`) is recorded in
+ * `lume_operator_sessions` so revoking the key deletes it. If it cannot be
+ * recorded the sign-in fails closed: the fresh session is signed out again,
+ * because a session revocation cannot reach would outlive the key.
  */
 export async function GET(request: Request) {
   const origin = requestOrigin(request)
@@ -33,7 +38,16 @@ export async function GET(request: Request) {
   }
   if (!operator) return fail()
 
-  if (!(await mintOwnerSession(email, 'auth/operator'))) return fail()
+  const minted = await mintOwnerSession(email, 'auth/operator')
+  if (!minted) return fail()
+  try {
+    if (!minted.sessionId) throw new Error('minted session has no session_id claim')
+    await recordOperatorSession(operator.id, minted.sessionId)
+  } catch (err) {
+    console.error('[auth/operator] session record failed:', err instanceof Error ? err.message : err)
+    await signOutLocal('auth/operator')
+    return fail()
+  }
 
   try {
     await touchOperator(operator.id)

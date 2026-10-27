@@ -3,6 +3,9 @@ import { updateSession } from '@/lib/supabase/middleware'
 import { isOwner } from '@/lib/auth/isOwner'
 import { isPublicPath } from '@/lib/auth/publicPaths'
 import { bearerMatches, hasBearerToken } from '@/lib/auth/bearer'
+import { isOperatorRevoked, verifyOperatorCookieWeb } from '@/lib/operators/revocation'
+
+const OPERATOR_COOKIE = 'lume_op'
 
 /**
  * Single-user gate. `lib/auth/publicPaths.ts` is the single source of what
@@ -16,6 +19,10 @@ import { bearerMatches, hasBearerToken } from '@/lib/auth/bearer'
  *  - pages: no session → redirect /login; wrong account → redirect /forbidden
  *    (a redirect, not a rewrite: Next drops a custom status on rewrites, so
  *    the URL changes and the 403 intent is carried by the page itself).
+ *  - a Grok Bot whose operator key was revoked (valid `lume_op` cookie, row
+ *    revoked or gone): signed out locally (Supabase signOut, local scope;
+ *    every auth cookie and `lume_op` cleared) → /login, or 401 for the API.
+ *    `/auth/*` is exempt so a re-issued key can sign in over a stale cookie.
  */
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
@@ -41,7 +48,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
-  const { response, user } = await updateSession(request)
+  const { response, user, supabase } = await updateSession(request)
   const owner = isOwner(user?.email, process.env.LUME_ALLOWED_EMAIL)
 
   if (isAuthPage) {
@@ -60,7 +67,35 @@ export async function middleware(request: NextRequest) {
     return isApi ? jsonError('forbidden', 403, response) : redirectTo('/forbidden', request, response)
   }
 
+  if (await revokedOperatorCookie(request)) {
+    try {
+      await supabase.auth.signOut({ scope: 'local' })
+    } catch (err) {
+      console.error('[middleware] operator signOut failed:', err instanceof Error ? err.message : err)
+    }
+    const out = isApi ? jsonError('operator_revoked', 401, response) : redirectTo('/login', request, response)
+    return clearSession(request, out)
+  }
+
   return response
+}
+
+/** A verified `lume_op` cookie for an operator that is revoked or deleted. Unsigned / forged cookies never reach the DB. */
+async function revokedOperatorCookie(request: NextRequest): Promise<boolean> {
+  const value = request.cookies.get(OPERATOR_COOKIE)?.value
+  if (!value) return false
+  const id = await verifyOperatorCookieWeb(value, process.env.LUME_INTERNAL_SECRET)
+  if (!id) return false
+  return (await isOperatorRevoked(id)) === true
+}
+
+/** Sign out locally: expire `lume_op` and every Supabase auth-token cookie (chunks included). */
+function clearSession(request: NextRequest, res: NextResponse) {
+  res.cookies.set(OPERATOR_COOKIE, '', { maxAge: 0, path: '/' })
+  for (const c of request.cookies.getAll()) {
+    if (c.name.startsWith('sb-') && c.name.includes('auth-token')) res.cookies.set(c.name, '', { maxAge: 0, path: '/' })
+  }
+  return res
 }
 
 function redirectTo(pathname: string, request: NextRequest, from: NextResponse) {

@@ -7,7 +7,9 @@ import type { Operator, Vertical, VerticalScope } from '@/lib/operators/types'
  *
  * `verticalFor` picks, in order:
  *  1. the live vertical whose `campaign_ids` holds the item's campaign id;
- *  2. else the first live vertical (by name) whose `scopes` hold its scope;
+ *  2. else, by scope, but ONLY when exactly one live vertical holds that
+ *     scope (a scope several verticals share is ambiguous and says nothing
+ *     about the owner);
  *  3. else the default vertical;
  *  4. else null (the owner / master bot only).
  */
@@ -28,9 +30,10 @@ export function verticalFor<V extends RoutableVertical>(item: RouteItem, vertica
     const owner = live.find((v) => v.campaign_ids.includes(campaignId))
     if (owner) return owner
   }
-  if (item.scope) {
-    const scoped = live.find((v) => v.scopes.includes(item.scope!))
-    if (scoped) return scoped
+  const scope = item.scope
+  if (scope) {
+    const scoped = live.filter((v) => v.scopes.includes(scope))
+    if (scoped.length === 1) return scoped[0]
   }
   return live.find((v) => v.is_default) ?? null
 }

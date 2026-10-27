@@ -10,6 +10,11 @@ describe('operatorPromptLine', () => {
   it('describes the master bot', () => {
     expect(operatorPromptLine({ is_master: true }, null)).toMatch(/operated by the master Grok Bot.*oversees all verticals and can create new ones/)
   })
+  it('a vertical bot whose vertical cannot be loaded is never described as the master', () => {
+    const line = operatorPromptLine({ is_master: false }, null)
+    expect(line).not.toMatch(/master|oversees all verticals|create new ones/i)
+    expect(line).toBe('You are being operated by a Grok Bot (operator) whose vertical no longer exists. It has the owner’s full authority.')
+  })
 })
 
 describe('operatorChipLabel', () => {

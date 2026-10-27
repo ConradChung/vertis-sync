@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 type Call = { table: string; op: string; args: unknown[] }
 const calls: Call[] = []
 let result: { data: unknown; error: unknown } = { data: null, error: null }
+let rpcResult: { data: unknown; error: unknown } = { data: 0, error: null }
 
 function client() {
   return {
@@ -20,6 +21,10 @@ function client() {
       b.then = (resolve: (v: unknown) => unknown) => resolve(result)
       return b
     },
+    rpc: async (fn: string, args: unknown) => {
+      calls.push({ table: 'rpc', op: 'rpc', args: [fn, args] })
+      return rpcResult
+    },
   }
 }
 vi.mock('server-only', () => ({}))
@@ -29,12 +34,14 @@ import {
   archiveVertical,
   createOperatorKey,
   createVertical,
+  DefaultVerticalConflictError,
   DuplicateVerticalNameError,
   findOperatorByKey,
   getOperator,
   getVertical,
   hashOperatorKey,
   listVerticals,
+  recordOperatorSession,
   revokeOperator,
   touchOperator,
   updateVertical,
@@ -46,6 +53,7 @@ const sha = (s: string) => createHash('sha256').update(s).digest('hex')
 beforeEach(() => {
   calls.length = 0
   result = { data: null, error: null }
+  rpcResult = { data: 0, error: null }
 })
 
 describe('verticals', () => {
@@ -65,9 +73,27 @@ describe('verticals', () => {
     expect(op('insert')[0].args[0]).toEqual({ name: 'Roofers', scopes: ['campaign'], campaign_ids: ['c1', 'c2'], is_default: false })
   })
 
+  const nameDup = { code: '23505', message: 'duplicate key value violates unique constraint "lume_verticals_name_key"', details: 'Key (name)=(Roofers) already exists.' }
+  const defaultDup = { code: '23505', message: 'duplicate key value violates unique constraint "lume_verticals_one_default_idx"', details: 'Key (is_default)=(t) already exists.' }
+
   it('a duplicate name is a DuplicateVerticalNameError', async () => {
-    result = { data: null, error: { code: '23505', message: 'dup' } }
+    result = { data: null, error: nameDup }
     await expect(createVertical({ name: 'Roofers' })).rejects.toBeInstanceOf(DuplicateVerticalNameError)
+    await expect(updateVertical('v1', { name: 'Roofers' })).rejects.toBeInstanceOf(DuplicateVerticalNameError)
+  })
+
+  it('a second default is a DefaultVerticalConflictError, never a duplicate name', async () => {
+    result = { data: null, error: defaultDup }
+    await expect(createVertical({ name: 'Roofers', is_default: true })).rejects.toBeInstanceOf(DefaultVerticalConflictError)
+    await expect(createVertical({ name: 'Roofers', is_default: true })).rejects.toThrow(/another vertical is already the default/i)
+    // also when the patch renames and sets the default at once
+    await expect(updateVertical('v1', { name: 'Roofers', is_default: true })).rejects.toBeInstanceOf(DefaultVerticalConflictError)
+    await expect(updateVertical('v1', { is_default: true })).rejects.toBeInstanceOf(DefaultVerticalConflictError)
+  })
+
+  it('an unrecognised unique violation is a DbError', async () => {
+    result = { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "something_else"' } }
+    await expect(createVertical({ name: 'Roofers' })).rejects.toMatchObject({ name: 'DbError', op: 'createVertical' })
   })
 
   it('other errors are DbErrors', async () => {
@@ -166,5 +192,32 @@ describe('operator keys', () => {
     await touchOperator('o1')
     expect(op('update')[0].args[0]).toHaveProperty('last_seen_at')
     expect(op('eq')[0].args).toEqual(['id', 'o1'])
+  })
+
+  it('revoking signs the bot out: its recorded Supabase sessions are deleted', async () => {
+    result = { data: [{ id: 'o1' }], error: null }
+    rpcResult = { data: 2, error: null }
+    expect(await revokeOperator('o1')).toBe(true)
+    expect(op('rpc')).toEqual([{ table: 'rpc', op: 'rpc', args: ['lume_revoke_operator_sessions', { op: 'o1' }] }])
+  })
+
+  it('revoking an already-revoked key still purges its sessions (retry-safe)', async () => {
+    result = { data: [], error: null }
+    expect(await revokeOperator('o1')).toBe(false)
+    expect(op('rpc')).toHaveLength(1)
+  })
+
+  it('a failed session purge is an error, not a silent success', async () => {
+    result = { data: [{ id: 'o1' }], error: null }
+    rpcResult = { data: null, error: { code: '42501', message: 'denied' } }
+    await expect(revokeOperator('o1')).rejects.toMatchObject({ name: 'DbError', op: 'revokeOperatorSessions' })
+  })
+
+  it('records an operator sign-in session', async () => {
+    result = { data: null, error: null }
+    await recordOperatorSession('o1', 'sess-1')
+    expect(op('insert')[0]).toMatchObject({ table: 'lume_operator_sessions', args: [{ operator_id: 'o1', session_id: 'sess-1' }] })
+    result = { data: null, error: { code: '23503', message: 'fk' } }
+    await expect(recordOperatorSession('o1', 'sess-1')).rejects.toMatchObject({ name: 'DbError', op: 'recordOperatorSession' })
   })
 })

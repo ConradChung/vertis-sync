@@ -252,11 +252,12 @@ section "Grok Bot operator layer". Default behaviour after this phase is unchang
 ### G2: Operator sign-in + attribution
 - `GET /auth/operator?k=<key>`: on a valid, unrevoked key → same Supabase owner session as `/auth/key` (full owner rights, owner's decision) PLUS an httpOnly, secure, sameSite=lax cookie `lume_op=<operator id>.<hmac>` signed with `LUME_INTERNAL_SECRET`; redirect to `/operator`. Invalid → `/login?error=exchange_failed`. `Referrer-Policy: no-referrer`.
 - `lib/operators/session.ts`: `currentOperator(req)` verifies the cookie HMAC, loads the operator (null if revoked → also clear cookie).
+- Revocation signs the bot out: each `/auth/operator` sign-in records its Supabase session id (JWT `session_id`) in `lume_operator_sessions` (fails closed if it cannot); `revokeOperator` calls `lume_revoke_operator_sessions(op)` (security definer, service_role only) to delete those `auth.sessions` rows. The middleware signs out locally (→ /login, or 401 for the API) any request whose `lume_op` names a revoked or deleted operator.
 - Attribution: `/api/actions/[id]/decide` → `claimDecision(id, approve, op ? 'operator' : 'lume')` + `decided_by_operator`; agent run route creates conversations with the operator's `vertical_id` and passes the operator/vertical into the prompt context ("You are being operated by the <name> Grok Bot; its campaigns: …"). Owner sign-in clears `lume_op`.
 - Header shows a small "Operator: <vertical>" chip when signed in as an operator.
 
 ### G3: Routing items to verticals
-- `lib/operators/route.ts` pure `verticalFor(item, verticals)`: pending action / gate / alert → vertical whose `campaign_ids` contains its campaign id; else by scope (orders/validation items → vertical with that scope); else the default vertical; else null (owner only). Unit-tested.
+- `lib/operators/route.ts` pure `verticalFor(item, verticals)`: pending action / gate / alert → vertical whose `campaign_ids` contains its campaign id; else by scope, but only when exactly one live (non-archived) vertical holds that scope (a shared scope is ambiguous); else the default vertical; else null (owner only). Unit-tested.
 - "Needs confirmation" = awaiting `pending_actions` + open pipeline gates (`lume_gates` view) routed to the vertical, money/validation kinds first.
 
 ### G4: Alert feed + channel switch
