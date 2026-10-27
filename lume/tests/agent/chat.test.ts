@@ -47,6 +47,10 @@ describe('applyAgentEvent', () => {
     expect(m.tools.map((t) => t.status)).toEqual(['ok', 'awaiting'])
     expect(m.approvals).toEqual([{ action_id: 'act1', deep_link: '/actions/act1', summary: 'Pause X', tool: 'pause_campaign' }])
   })
+  it("keeps an approval's skip-mode state", () => {
+    const m = applyAgentEvent(empty, { type: 'approval', action_id: 'act1', summary: 'Paused X', tool: 'pause_campaign', state: 'auto_executed' })
+    expect(m.approvals[0]).toMatchObject({ action_id: 'act1', state: 'auto_executed' })
+  })
   it('records run errors', () => {
     expect(applyAgentEvent(empty, { type: 'error', message: 'boom' }).error).toBe('boom')
   })

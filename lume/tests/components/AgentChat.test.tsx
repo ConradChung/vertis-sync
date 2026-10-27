@@ -82,7 +82,9 @@ describe('AgentChat', () => {
     await screen.findByText('waiting')
     expect(screen.getByText('Order B').tagName).toBe('LI')
     expect(screen.getByText(/Used 1 tool/)).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'Review' }).getAttribute('href')).toBe('/actions/abc')
+    // Decided right in the chat: Approve / Deny, with the action page one link away.
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Details' }).getAttribute('href')).toBe('/actions/abc')
     const runCall = fetchMock.mock.calls.find((c) => c[0] === '/api/agent/run')!
     // A new chat sends only the message: the server owns history.
     expect(JSON.parse(runCall[1]!.body as string)).toEqual({ prompt: "What's waiting on me?" })
@@ -165,7 +167,7 @@ describe('AgentChat history', () => {
     await screen.findByText('approval')
     expect(screen.getByText('pause A')).toBeTruthy()
     expect(screen.getByText(/Used 1 tool/)).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'Review' }).getAttribute('href')).toBe('/actions/act9')
+    expect(screen.getByRole('link', { name: 'Details' }).getAttribute('href')).toBe('/actions/act9')
     const active = await screen.findAllByRole('button', { name: 'Gates today' })
     expect(active[0].getAttribute('aria-current')).toBe('page')
 

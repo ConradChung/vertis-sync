@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ArrowUp, BookMarked, Brain, PanelRight, ChevronRight, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, SquarePen, Wrench } from 'lucide-react'
 import { AgentHistory, useConversationList } from '@/components/agent/AgentHistory'
+import { ApprovalCard } from '@/components/agent/ApprovalCard'
 import { ManageSkills, SkillCard, SkillMenu, useSkillList } from '@/components/agent/AgentSkills'
 import { Markdown } from '@/components/agent/Markdown'
 import { Waveform } from '@/components/agent/Waveform'
@@ -13,7 +14,6 @@ import { AgentSidePanel, type ReviewSetRef, type SideTab } from '@/components/ag
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { chatDiagrams, REVIEW_TOOLS } from '@/lib/agent/chatDiagrams'
 import { htmlLinksToMarkdown } from '@/lib/agent/linkify'
-import { PlanCard } from '@/components/orb/PlanCard'
 import { ToolLog, type ToolLogEntry } from '@/components/orb/ToolLog'
 import { useSpeechRecognition, VoiceInput } from '@/components/orb/VoiceInput'
 import { Button } from '@/components/ui/button'
@@ -600,7 +600,7 @@ function Message({ m, activeFlow = null, onViewFlow }: { m: ChatMessage; activeF
     <div className="flex min-w-0 flex-col gap-3">
       {m.tools.length > 0 && <ToolChips tools={m.tools} live={!!m.streaming} />}
       {m.text && <Markdown text={htmlLinksToMarkdown(m.text)} flow={onViewFlow ? { onView: onViewFlow, active: activeFlow } : undefined} />}
-      <PlanCard approvals={m.approvals} />
+      <ApprovalCard approvals={m.approvals} />
       {m.notConfigured ? (
         <div className="flex items-start gap-3 rounded-panel border border-amber/40 bg-amber/8 px-4 py-3 text-[13px]" role="status">
           <KeyRound className="mt-0.5 size-4 shrink-0 text-amber" />

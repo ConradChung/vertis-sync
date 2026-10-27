@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { PendingApproval } from '@/components/orb/PlanCard'
+import type { ChatApproval } from '@/components/agent/ApprovalCard'
 import type { ToolLogEntry } from '@/components/orb/ToolLog'
 import { parseSseFrames, type AgentEvent } from '@/lib/agent/chat'
 import type { StoredMessage } from '@/lib/agent/history'
@@ -12,7 +12,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   text: string
   tools: ToolLogEntry[]
-  approvals: PendingApproval[]
+  approvals: ChatApproval[]
   error?: string
   /** 503 agent_not_configured: rendered as a notice, not an error. */
   notConfigured?: boolean
@@ -95,6 +95,7 @@ export function applyAgentEvent(m: ChatMessage, e: AgentEvent): ChatMessage {
             deep_link: String(e.deep_link ?? `/actions/${e.action_id}`),
             summary: (e.summary as string | null) ?? null,
             tool: String(e.tool ?? ''),
+            ...(e.state ? { state: e.state as ChatApproval['state'] } : {}),
           },
         ],
       }
@@ -112,7 +113,7 @@ export function storedToChat(m: StoredMessage): ChatMessage {
     role: m.role,
     text: m.text ?? '',
     tools: (m.tools ?? []) as ToolLogEntry[],
-    approvals: (m.approvals ?? []) as PendingApproval[],
+    approvals: (m.approvals ?? []) as ChatApproval[],
     ...(m.error ? { error: m.error } : {}),
   }
 }
