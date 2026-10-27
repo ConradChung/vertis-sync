@@ -102,3 +102,29 @@ Each phase reviewed and deployed before the next.
 **connector-os (finder):** undocumented. `GET /api/email/v2/quota` → `{quota:{remaining, reset_date, bonus_remaining}}`; 1 credit per found email (not-found free); packs ~$0.025–0.033/credit.
 
 **Design impact:** "Apollo count at the gate" / `edit_order` re-count cannot come from Leadsfriday — needs another source (Apollo search API is owner-rejected for enrichment; a count-only call or the existing gate count path must be checked in Phase 4 planning).
+
+## Grok Bot operator layer (owner decisions 2026-10-26)
+
+Grok Bot (xAI's always-on cloud agent; no public API/webhook found) replaces Telegram. It uses
+Lume through its own browser like the owner does.
+
+- **Keys:** one operator key per vertical (sign-in link, shown once, revocable/rotatable), with
+  **full owner rights**. Owner accepted the risk that a bot can approve spends/launches unchecked;
+  hard caps (Apify $20 etc.) still apply. Actions are attributed `decided_via='operator'` +
+  vertical id.
+- **Verticals:** name + campaigns + scope. Set focus and attribution, not access limits. Each
+  bot's agent conversations are tagged with its vertical; the agent is told which campaign the bot
+  owns.
+- **Agent:** bots chat with Lume's agent in the normal Agent tab (send, approve/deny cards, skip
+  mode).
+- **Approvals route to Grok Bot:** every money or validation approval (run_actor, decide_gate,
+  Leadsfriday count choices, finder/validator spend, launches) appears on the owning vertical's
+  `/operator` check-in page under "Needs confirmation"; the bot confirms there. Lume cannot push,
+  so latency = the bot's routine interval (target 10–15 min).
+- **`/operator`:** compact, bot-readable check-in page per vertical: needs confirmation, recent
+  events/outcomes, alerts (acknowledgeable), campaign stats, inputs (Apollo link, CSV).
+- **Hub:** one card per vertical (last check-in, open items, recent actions).
+- **Telegram:** every ping becomes an alert in the feed; inputs move to `/operator`; Telegram is
+  removed once the owner confirms the Grok path works.
+
+Build order: Phase 1 → operator layer → Phases 2–5 → Telegram retirement.
