@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { ruleFilterSchema } from '@/lib/rules/filter'
 import { isValidRuleCron } from '@/lib/rules/nextRun'
+import { cycleParamsSchema, DEFAULT_CYCLE_MAX } from '@/lib/rules/cycle'
 
 /**
  * Request bodies for `/api/rules`. `active` is accepted in the schema only so
@@ -27,12 +28,33 @@ const fields = {
   active: z.boolean().optional(),
 }
 
-export const createRuleSchema = z.strictObject({
-  ...fields,
-  filter: fields.filter.optional().default({}),
-  daily_cap: fields.daily_cap.optional().default(40),
-  order_by: fields.order_by.optional().default('newest'),
-})
+/**
+ * `kind` 'rotate' (default; lead bank → campaign) or 'cycle_out' (remove
+ * finished, never-replied leads, then refill; `params: { after_days?,
+ * refill_to? }`, `daily_cap` = most removed per run, default 1000). A rotate
+ * rule takes no params.
+ */
+export const createRuleSchema = z
+  .strictObject({
+    ...fields,
+    filter: fields.filter.optional().default({}),
+    daily_cap: fields.daily_cap.optional(),
+    order_by: fields.order_by.optional().default('newest'),
+    kind: z.enum(['rotate', 'cycle_out']).optional().default('rotate'),
+    params: z.record(z.string(), z.unknown()).optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.kind === 'cycle_out') {
+      if (!cycleParamsSchema.safeParse(v.params ?? {}).success) ctx.addIssue({ code: 'custom', path: ['params'], message: 'after_days 1-365, refill_to 1-100000' })
+    } else if (v.params && Object.keys(v.params).length) {
+      ctx.addIssue({ code: 'custom', path: ['params'], message: 'rotate rules take no params' })
+    }
+  })
+  .transform((v) => ({
+    ...v,
+    daily_cap: v.daily_cap ?? (v.kind === 'cycle_out' ? DEFAULT_CYCLE_MAX : 40),
+    params: v.kind === 'cycle_out' ? cycleParamsSchema.parse(v.params ?? {}) : {},
+  }))
 
 export const updateRuleSchema = z
   .strictObject({

@@ -17,6 +17,8 @@ import {
 import type { Json } from '@/lib/db/types'
 import { parseRuleFilter, summarizeFilter } from '@/lib/rules/filter'
 import { nextRun } from '@/lib/rules/nextRun'
+import { buildRemoveLeads } from '@/lib/actions/removeLeads'
+import { parseCycleParams } from '@/lib/rules/cycle'
 
 /**
  * The rotation tick (`POST /api/cron/rotation-tick`, called by pg_cron's
@@ -35,6 +37,11 @@ import { nextRun } from '@/lib/rules/nextRun'
  *     a 23505 surfaces as DuplicateActionError → skipped.
  * Failures write `last_result.error` and ping Telegram; the claim already
  * advanced the rule, so there is no retry until its next scheduled run.
+ *
+ * A `cycle_out` rule (lib/rules/cycle.ts) files one `remove_leads` instead:
+ * it reads the campaign's finished, never-replied leads from Instantly
+ * (read-only) and freezes the ones last emailed `after_days`+ ago, at most
+ * `daily_cap`; the removal and its refill still wait for a tap.
  *
  * Before the rules, awaiting actions older than 24 h expire. After them, the
  * sweeper re-dispatches approved actions nobody ran (`executed_at` null,
@@ -147,6 +154,7 @@ async function runRule(rule: DueRule, now: Date): Promise<RuleOutcome> {
 
   try {
     if (!next) throw new Error(`invalid cron expression "${rule.cron}"`)
+    if (rule.kind === 'cycle_out') return await runCycleOut(rule, now)
 
     // 2. A confirmation for this rule is still open.
     const open = await findAwaitingRuleAction('assign_leads', rule.id)
@@ -208,7 +216,7 @@ async function runRule(rule: DueRule, now: Date): Promise<RuleOutcome> {
     const error = msg(err)
     console.error(`[rotation-tick] rule ${rule.id} failed:`, error)
     await setRuleResult(rule.id, { at: nowIso, error }).catch(() => null)
-    const failText = `⚠️ Rotation rule "${rule.name}" failed: ${error}\nNothing was assigned.`
+    const failText = `⚠️ ${rule.kind === 'cycle_out' ? 'Cycle-out' : 'Rotation'} rule "${rule.name}" failed: ${error}\nNothing was ${rule.kind === 'cycle_out' ? 'removed' : 'assigned'}.`
     await alert({
       source: 'lume.rotation', severity: 'warn', title: titleFrom(failText), body: failText,
       link: alertLink('/rotate'), campaign_id: rule.campaign_id ?? null, scope: 'campaign',
@@ -216,4 +224,54 @@ async function runRule(rule: DueRule, now: Date): Promise<RuleOutcome> {
     }).catch(() => null)
     return { rule_id: rule.id, outcome: 'error', error }
   }
+}
+
+/** A due cycle_out rule (already claimed): file one remove_leads for its finished, never-replied leads. */
+async function runCycleOut(rule: DueRule, now: Date): Promise<RuleOutcome> {
+  const nowIso = now.toISOString()
+  const open = await findAwaitingRuleAction('remove_leads', rule.id)
+  if (open) {
+    await setRuleResult(rule.id, { at: nowIso, skipped: 'action_awaiting', action_id: open.id })
+    return { rule_id: rule.id, outcome: 'skipped', reason: 'action_awaiting', action_id: open.id }
+  }
+  const cycle = parseCycleParams(rule.params)
+  if (!cycle) throw new Error('cycle_out params no longer parse')
+  const campaign = await getCampaignByExternalId(rule.campaign_id).catch(() => null)
+  const campaignName = campaign?.name ?? rule.campaign_id
+  const built = await buildRemoveLeads(
+    {
+      campaign_id: rule.campaign_id,
+      reason: `cycle-out rule "${rule.name}": sequence finished ${cycle.after_days}+ days ago, no reply`.slice(0, 300),
+      filter: { state: 'finished_no_reply', older_than_days: cycle.after_days },
+    },
+    { campaignName: async () => campaignName, max: rule.daily_cap, now }
+  )
+  if (!built.ok) {
+    if (built.error === 'nothing_to_remove') {
+      await setRuleResult(rule.id, { at: nowIso, count: 0, skipped: 'no_candidates' })
+      return { rule_id: rule.id, outcome: 'skipped', reason: 'no_candidates' }
+    }
+    throw new Error(`could not list leads to cycle out: ${built.error}`)
+  }
+  const count = typeof built.payload.count === 'number' ? built.payload.count : 0
+  let action
+  try {
+    action = await createAction('remove_leads', { ...built.payload, rule_id: rule.id, rule_name: rule.name }, 'rule', { ruleId: rule.id })
+  } catch (err) {
+    if (err instanceof DuplicateActionError) {
+      await setRuleResult(rule.id, { at: nowIso, skipped: 'action_awaiting', action_id: err.existingId || null })
+      return { rule_id: rule.id, outcome: 'skipped', reason: 'action_awaiting', ...(err.existingId ? { action_id: err.existingId } : {}) }
+    }
+    throw err
+  }
+  await setRuleResult(rule.id, { at: nowIso, action_id: action.id, count, removal: true })
+  await logEvent({
+    type: 'lume.rule_fired',
+    source: 'lume',
+    source_id: rule.id,
+    campaign_id: rule.campaign_id,
+    title: `Cycle-out rule "${rule.name}" → ${fmt.format(count)} leads to remove, awaiting confirmation`,
+    payload: { action_id: action.id, count },
+  }).catch((err) => console.error('[rotation-tick] logEvent failed:', msg(err)))
+  return { rule_id: rule.id, outcome: 'created', action_id: action.id, count, available: count }
 }

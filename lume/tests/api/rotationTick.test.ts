@@ -32,6 +32,9 @@ vi.mock('@/lib/actions/execute', () => ({
   recoverInterruptedActions: (...a: unknown[]) => recover(...a),
 }))
 
+const buildRemove = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/actions/removeLeads', () => ({ buildRemoveLeads: (...a: unknown[]) => buildRemove(...a) }))
+
 vi.mock('@/lib/supabase/service', async () => (await import('../stubs/feed')).serviceModule)
 import { feed } from '../stubs/feed'
 
@@ -317,5 +320,53 @@ describe('rotation tick alerts (G4)', () => {
     expect(tg.editMessage).not.toHaveBeenCalled()
     expect(tg.sendMessage).not.toHaveBeenCalled()
     expect(feed.rows).toHaveLength(2)
+  })
+})
+
+describe('rotation tick: cycle_out rules', () => {
+  const cycleRule = (over: Record<string, unknown> = {}) =>
+    rule({ kind: 'cycle_out', params: { after_days: 14, refill_to: 900 }, daily_cap: 500, cron: '0 7 * * *', name: 'Cycle PM', ...over })
+
+  beforeEach(() => {
+    buildRemove.mockReset()
+    svc.getDueRules.mockResolvedValue([cycleRule()])
+  })
+
+  it('files one remove_leads for finished, never-replied leads older than after_days (never assigns)', async () => {
+    buildRemove.mockResolvedValue({ ok: true, payload: { campaign_id: CAMP, lead_ids: ['a', 'b'], count: 2, summary: 'Remove 2 leads from Kaspen Rotation' } })
+    const body = await (await tick()).json()
+    expect(buildRemove).toHaveBeenCalledWith(
+      { campaign_id: CAMP, reason: expect.stringContaining('cycle-out rule "Cycle PM"'), filter: { state: 'finished_no_reply', older_than_days: 14 } },
+      expect.objectContaining({ max: 500 })
+    )
+    expect(svc.countCandidates).not.toHaveBeenCalled()
+    expect(svc.insertPendingAction).toHaveBeenCalledTimes(1)
+    const row = svc.insertPendingAction.mock.calls[0][0]
+    expect(row).toMatchObject({ kind: 'remove_leads', requested_by: 'rule', rule_id: RULE })
+    expect(row.payload).toMatchObject({ lead_ids: ['a', 'b'], count: 2, rule_id: RULE, rule_name: 'Cycle PM' })
+    expect(svc.setRuleResult).toHaveBeenCalledWith(RULE, expect.objectContaining({ action_id: ACTION, count: 2 }))
+    expect(body.rules).toEqual([expect.objectContaining({ outcome: 'created', count: 2 })])
+  })
+
+  it('an open removal for the rule → skipped, nothing read', async () => {
+    svc.findAwaitingRuleAction.mockImplementation(async (kind: string) => (kind === 'remove_leads' ? { id: 'open-1' } : null))
+    const body = await (await tick()).json()
+    expect(buildRemove).not.toHaveBeenCalled()
+    expect(body.rules).toEqual([expect.objectContaining({ outcome: 'skipped', reason: 'action_awaiting', action_id: 'open-1' })])
+  })
+
+  it('nothing to remove → no_candidates', async () => {
+    buildRemove.mockResolvedValue({ ok: false, status: 409, error: 'nothing_to_remove' })
+    const body = await (await tick()).json()
+    expect(svc.insertPendingAction).not.toHaveBeenCalled()
+    expect(body.rules).toEqual([expect.objectContaining({ outcome: 'skipped', reason: 'no_candidates' })])
+  })
+
+  it('an Instantly failure is a rule error with a notice, nothing filed', async () => {
+    buildRemove.mockResolvedValue({ ok: false, status: 502, error: 'instantly_failed' })
+    const body = await (await tick()).json()
+    expect(svc.insertPendingAction).not.toHaveBeenCalled()
+    expect(body.rules[0]).toMatchObject({ outcome: 'error', error: expect.stringContaining('instantly_failed') })
+    expect(svc.setRuleResult).toHaveBeenCalledWith(RULE, expect.objectContaining({ error: expect.any(String) }))
   })
 })

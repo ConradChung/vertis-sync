@@ -19,7 +19,7 @@ import { ACTIVATE_VIA_ACTION, updateRuleSchema } from '@/lib/rules/schema'
  */
 type Ctx = { params: Promise<{ id: string }> }
 
-const RULE_KINDS: PendingActionKind[] = ['activate_rule', 'assign_leads', 'delete_rule']
+const RULE_KINDS: PendingActionKind[] = ['activate_rule', 'assign_leads', 'delete_rule', 'remove_leads']
 
 export async function GET(req: Request, ctx: Ctx) {
   const auth = await requireOwner(req)

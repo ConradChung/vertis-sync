@@ -113,6 +113,7 @@ export function lastResultLabel(r: Record<string, Json> | null | undefined): { t
   if (typeof r.error === 'string') return { text: `Error: ${r.error}`, tone: 'warn' }
   if (r.skipped === 'no_candidates') return { text: 'No candidates', tone: 'muted' }
   if (r.skipped === 'action_awaiting') return { text: 'Skipped — confirmation still open', tone: 'muted' }
+  if (typeof r.count === 'number' && r.removal === true) return { text: `${r.count.toLocaleString('en-US')} leads to remove, awaiting confirmation`, tone: 'ok' }
   if (typeof r.count === 'number') return { text: `${r.count.toLocaleString('en-US')} leads awaiting confirmation`, tone: 'ok' }
   return { text: '—', tone: 'muted' }
 }

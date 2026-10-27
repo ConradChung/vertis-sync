@@ -8,6 +8,7 @@ import { formatRun } from '@/components/rotate/RuleSheet'
 import { lastResultLabel } from '@/lib/rules/client'
 import { parseRuleFilter, summarizeFilter } from '@/lib/rules/filter'
 import { nextRun } from '@/lib/rules/nextRun'
+import { describeCycle, parseCycleParams } from '@/lib/rules/cycle'
 import type { RuleView } from '@/lib/rules/view'
 import { cn } from '@/lib/utils'
 
@@ -27,6 +28,7 @@ const KIND_LABEL: Record<string, string> = {
   activate_rule: 'Activation awaiting confirmation',
   assign_leads: 'Assignment awaiting confirmation',
   delete_rule: 'Deletion awaiting confirmation',
+  remove_leads: 'Removal awaiting confirmation',
 }
 
 /**
@@ -95,6 +97,7 @@ function RuleRow({ r, busyId, onEdit, onActivate, onPause, onDelete }: { r: Rule
   const activation = r.awaiting.find((a) => a.kind === 'activate_rule')
   const last = lastResultLabel(r.last_result)
   const next = r.active ? (r.next_run_at ?? nextRun(r.cron)) : null
+  const cycle = r.kind === 'cycle_out' ? parseCycleParams(r.params) : null
   return (
     <tr id={`rule-${r.id}`} className="scroll-mt-24 border-t border-line/60 align-top target:bg-accent">
       <td className="px-[18px] py-2">
@@ -102,10 +105,19 @@ function RuleRow({ r, busyId, onEdit, onActivate, onPause, onDelete }: { r: Rule
         <div className="text-[11px] text-fg-46">→ {r.campaign_name ?? r.campaign_id}</div>
       </td>
       <td className="px-2 py-2 text-fg-70">
-        {summarizeFilter(parseRuleFilter(r.filter))}
-        <div className="text-[11px] text-fg-46">
-          up to {r.daily_cap} · {r.order_by} first
-        </div>
+        {r.kind === 'cycle_out' ? (
+          <>
+            <span className="font-medium">Cycle out:</span> {cycle ? describeCycle(cycle) : 'invalid settings'}
+            <div className="text-[11px] text-fg-46">up to {r.daily_cap} removed per run · never replied, interested or bounced</div>
+          </>
+        ) : (
+          <>
+            {summarizeFilter(parseRuleFilter(r.filter))}
+            <div className="text-[11px] text-fg-46">
+              up to {r.daily_cap} · {r.order_by} first
+            </div>
+          </>
+        )}
       </td>
       <td className="px-2 py-2">
         <div className="font-mono text-fg-70">{r.cron}</div>

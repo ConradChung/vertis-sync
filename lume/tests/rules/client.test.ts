@@ -30,5 +30,6 @@ describe('lastResultLabel', () => {
     expect(lastResultLabel({ count: 0, skipped: 'no_candidates' }).text).toBe('No candidates')
     expect(lastResultLabel({ skipped: 'action_awaiting' }).text).toMatch(/still open/)
     expect(lastResultLabel({ count: 40, action_id: 'a' })).toEqual({ text: '40 leads awaiting confirmation', tone: 'ok' })
+    expect(lastResultLabel({ count: 12, action_id: 'a', removal: true })).toEqual({ text: '12 leads to remove, awaiting confirmation', tone: 'ok' })
   })
 })

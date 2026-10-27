@@ -103,7 +103,28 @@ describe('POST /api/rules', () => {
       daily_cap: 40,
       order_by: 'newest',
       cron: '0 8 * * 1-5',
+      kind: 'rotate',
+      params: {},
     })
+  })
+
+  it('creates an inactive cycle_out rule: after_days defaults to 14, cap to 1000 per run', async () => {
+    svc.insertRule.mockResolvedValue(rule({ kind: 'cycle_out' }))
+    const res = await rulesPOST(req('/api/rules', { name: 'Cycle', campaign_id: CAMP, cron: '0 7 * * *', kind: 'cycle_out', params: { refill_to: 900 } }))
+    expect(res.status).toBe(201)
+    expect(svc.insertRule).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'cycle_out', params: { after_days: 14, refill_to: 900 }, daily_cap: 1000, filter: {} })
+    )
+  })
+
+  it.each([
+    ['cycle_out with a bad after_days', { kind: 'cycle_out', params: { after_days: 0 } }],
+    ['cycle_out with an unknown param', { kind: 'cycle_out', params: { after_days: 14, x: 1 } }],
+    ['a rotate rule with params', { params: { after_days: 14 } }],
+    ['an unknown kind', { kind: 'purge' }],
+  ])('400 for %s', async (_, patch) => {
+    expect((await rulesPOST(req('/api/rules', { ...valid, ...patch }))).status).toBe(400)
+    expect(svc.insertRule).not.toHaveBeenCalled()
   })
 
   it('refuses active=true: activation is a pending action', async () => {
@@ -256,6 +277,17 @@ describe('POST /api/actions — Rotate kinds', () => {
     const dup = await actionsPOST(req('/api/actions', { kind: 'activate_rule', payload: { rule_id: RULE } }))
     expect(dup.status).toBe(409)
     expect(await dup.json()).toEqual({ error: 'duplicate', existing_id: 'act-1' })
+  })
+
+  it('activate_rule on a cycle_out rule describes the removal + refill it will ask for', async () => {
+    svc.getRule.mockResolvedValue(rule({ kind: 'cycle_out', params: { after_days: 21, refill_to: 900 }, daily_cap: 1000, cron: '0 7 * * *' }))
+    const res = await actionsPOST(req('/api/actions', { kind: 'activate_rule', payload: { rule_id: RULE } }))
+    expect(res.status).toBe(201)
+    const row = svc.insertPendingAction.mock.calls[0][0]
+    expect(row.payload).toMatchObject({ rule_kind: 'cycle_out', params: { after_days: 21, refill_to: 900 } })
+    expect(row.payload.summary).toContain('Activate cycle-out rule "Weekday" on Kaspen Rotation')
+    expect(row.payload.summary).toContain('finished 21+ days ago with no reply, then refill to 900 leads')
+    expect(row.payload.summary).toContain('never removed')
   })
 
   it('activate_rule: 409 when already active', async () => {

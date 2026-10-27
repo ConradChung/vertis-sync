@@ -331,7 +331,7 @@ const SPECS: Built[] = [
   tiered(
     {
       name: 'list_rules',
-      description: 'Rotation rules (lead bank to campaign on a cron), active or not, with next and last run.',
+      description: 'Rules, active or not, with next and last run: rotation rules (kind rotate: lead bank to campaign on a cron) and cycle-out rules (kind cycle_out: remove finished no-reply leads, then refill; params after_days, refill_to).',
       inputSchema: z.object({}),
       run: async (_i, { call }) => ({ rules: await call('/api/rules') }),
     },
@@ -790,7 +790,7 @@ const SPECS: Built[] = [
   tiered(
     {
       name: 'activate_rule',
-      description: 'Turn a rotation rule on so it runs on its cron (each run still asks before assigning).',
+      description: 'Turn a rotation or cycle-out rule on so it runs on its cron (each run still asks before assigning or removing).',
       inputSchema: z.object({ rule_id: uuid }),
       payload: ({ rule_id }) => ({ rule_id: rule_id.toLowerCase() }),
     },

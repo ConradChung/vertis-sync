@@ -13,6 +13,7 @@ import { ruleFilterSchema, summarizeFilter } from '@/lib/rules/filter'
 import { isValidRuleCron, nextRun } from '@/lib/rules/nextRun'
 import { CAMPAIGN_ID_RE } from '@/lib/rules/schema'
 import { OWNER_TZ } from '@/lib/time/owner'
+import { describeCycle, parseCycleParams } from '@/lib/rules/cycle'
 
 /**
  * Rotate's two pending-action kinds, built server-side into the snapshot the
@@ -117,6 +118,9 @@ export async function buildActivateRule(p: z.infer<typeof activateRulePayload>):
   if (!isValidRuleCron(rule.cron)) return { ok: false, status: 409, error: 'invalid_cron' }
   const campaign = await getCampaignByExternalId(rule.campaign_id).catch(() => null)
   const firstRun = nextRun(rule.cron)
+  const cycle = rule.kind === 'cycle_out' ? parseCycleParams(rule.params) : null
+  if (rule.kind === 'cycle_out' && !cycle) return { ok: false, status: 409, error: 'invalid_params' }
+  const where = campaign?.name ?? rule.campaign_id
   return {
     ok: true,
     ruleId,
@@ -127,9 +131,13 @@ export async function buildActivateRule(p: z.infer<typeof activateRulePayload>):
       cron: rule.cron,
       tz: OWNER_TZ,
       first_run: firstRun,
-      summary:
-        `Activate rule "${rule.name}" → ${campaign?.name ?? rule.campaign_id}: ${rule.cron} (${OWNER_TZ}), ` +
-        `up to ${fmt.format(rule.daily_cap)} ${rule.order_by} leads per run. Each run still asks before assigning.`,
+      ...(cycle ? { rule_kind: 'cycle_out', params: { ...cycle } } : {}),
+      summary: cycle
+        ? `Activate cycle-out rule "${rule.name}" on ${where}: ${rule.cron} (${OWNER_TZ}), ${describeCycle(cycle)}; ` +
+          `up to ${fmt.format(rule.daily_cap)} removed per run. Replied, interested and bounced leads are never removed. ` +
+          'Each run still asks before removing or assigning.'
+        : `Activate rule "${rule.name}" → ${where}: ${rule.cron} (${OWNER_TZ}), ` +
+          `up to ${fmt.format(rule.daily_cap)} ${rule.order_by} leads per run. Each run still asks before assigning.`,
     },
   }
 }
