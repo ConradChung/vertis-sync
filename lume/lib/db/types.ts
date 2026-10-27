@@ -198,7 +198,7 @@ export interface PendingActionRow {
   agent_run_id: string | null
   rule_id: string | null
   telegram_message_id: number | null
-  decided_via: 'lume' | 'telegram' | null
+  decided_via: 'lume' | 'telegram' | 'agent' | null
   decided_at: string | null
   executed_at: string | null
   result: Record<string, Json> | null

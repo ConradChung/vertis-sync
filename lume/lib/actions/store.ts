@@ -25,15 +25,22 @@ export async function getAction(id: string): Promise<PendingActionRow | null> {
   return (res.data as PendingActionRow | null) ?? null
 }
 
-/** Same claim telegram-inbox's lume_ok/lume_no runs, with decided_via='lume'. */
-export async function claimDecision(id: string, approve: boolean): Promise<PendingActionRow | null> {
+/**
+ * Same claim telegram-inbox's lume_ok/lume_no runs, with decided_via='lume'
+ * (the owner's tap) or 'agent' (skip-permissions mode approving for them).
+ */
+export async function claimDecision(
+  id: string,
+  approve: boolean,
+  via: 'lume' | 'agent' = 'lume'
+): Promise<PendingActionRow | null> {
   const sb = createServiceClient()
   const res = await sb
     .from('pending_actions')
     .update({
       claim_status: 'claimed',
       status: approve ? 'approved' : 'rejected',
-      decided_via: 'lume',
+      decided_via: via,
       decided_at: new Date().toISOString(),
     })
     .eq('id', id)
