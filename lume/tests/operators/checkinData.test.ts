@@ -66,7 +66,7 @@ describe('loadCheckin', () => {
       { id: IC, name: 'Kaspen R3', today: { sent: 10, replies: 1, bounced: 0 }, week: { sent: 70, replies: 5, bounced: 2 }, note: null },
       { id: 'gmail:x', name: 'gmail:x', today: null, week: null, note: 'Not an Instantly campaign: no send stats here' },
     ])
-    expect(h.getAnalyticsOverview).toHaveBeenCalledWith(IC, { startDate: '2026-10-20', endDate: '2026-10-26' })
+    expect(h.getAnalyticsOverview).toHaveBeenCalledWith(IC, { startDate: '2026-10-20', endDate: '2026-10-26' }, expect.any(AbortSignal))
   })
 
   it('the master bot and the owner without a param see everything', async () => {
@@ -74,11 +74,39 @@ describe('loadCheckin', () => {
     expect((await loadCheckin({ operator: null, verticalParam: null, now })).summary.vertical).toBe('all')
   })
 
+  it('stats that miss the budget: the campaigns that answered keep their numbers; Instantly calls get the signal', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const IC2 = '869d73b3-5bf3-4f1c-ba8c-43ac6d0f529d'
+    h.listVerticals.mockResolvedValue([{ ...K, campaign_ids: [IC, IC2] }, R])
+    h.getAnalyticsOverview.mockImplementation((id: string, _r: unknown, signal: AbortSignal) =>
+      id === IC
+        ? Promise.resolve({ sent: 1, replies: 0, bounced: 0 })
+        : new Promise((_res, rej) => signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' }))))
+    )
+    const p = loadCheckin({ operator: null, verticalParam: 'v-k', now })
+    await vi.advanceTimersByTimeAsync(6_100)
+    const d = await p
+    vi.useRealTimers()
+    expect(d.campaigns.find((c) => c.id === IC)!.today).toEqual({ sent: 1, replies: 0, bounced: 0 })
+    expect(d.campaigns.find((c) => c.id === IC2)!.note).toMatch(/too slow/)
+    expect(d.campaignsNote).toMatch(/longer than 6 s/)
+    expect(h.getAnalyticsOverview.mock.calls[0][2]).toBeInstanceOf(AbortSignal)
+  })
+
+  it('a campaign-name query is searched under the same budget', async () => {
+    h.listCampaigns.mockResolvedValue([{ id: 'c1', name: 'Scaleport - R3', status: 1 }, { id: 'c2', name: 'Scaleport - M', status: 1 }])
+    const d = await loadCheckin({ operator: null, verticalParam: null, campaignQuery: 'scaleport', now })
+    expect(d.campaignMatches).toEqual([{ id: 'c1', name: 'Scaleport - R3', status: 1 }, { id: 'c2', name: 'Scaleport - M', status: 1 }])
+    expect(h.listCampaigns).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) })
+  })
+
   it('an unknown ?vertical falls back to all and says so; a failing part is reported, not thrown', async () => {
     h.getGates.mockRejectedValue(new Error('db down'))
     const d = await loadCheckin({ operator: null, verticalParam: 'nope', now })
     expect(d.scope).toEqual({ all: true })
-    expect(d.errors.join(' ')).toMatch(/Unknown vertical.*gates: db down/)
+    // Fixed text only; the raw error is logged, never shown.
+    expect(d.errors).toEqual(['That vertical does not exist; showing all verticals.', 'Could not load Needs confirmation; reload before deciding anything.'])
+    expect(d.errors.join(' ')).not.toContain('db down')
   })
 
   it('loads 24 h of gate decisions and campaign picks for Recent outcomes', async () => {

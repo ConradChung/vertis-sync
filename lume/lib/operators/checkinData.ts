@@ -19,6 +19,7 @@ import {
   type DecisionEventItem,
   type OutcomeItem,
 } from '@/lib/operators/checkin'
+import { resolveCampaignQuery, type CampaignLite } from '@/lib/validate/campaignQuery'
 import { hasLiveMaster, routeItemForAction, verticalFor } from '@/lib/operators/route'
 import { listOperators, listVerticals, touchOperator } from '@/lib/operators/store'
 import type { Operator, Vertical } from '@/lib/operators/types'
@@ -56,18 +57,46 @@ export interface CheckinData {
   operatorLabels: Record<string, string>
   campaigns: CampaignStat[]
   campaignsNote: string | null
-  /** Parts that failed to load (the page still renders the rest). */
+  /** Matches for a several-match campaign-name search (`?cq=`), under the same Instantly budget. */
+  campaignMatches: CampaignLite[] | 'unavailable' | null
+  /** Parts that failed to load, as fixed text (LOAD_ERRORS); the page still renders the rest. */
   errors: string[]
 }
 
-/** Instantly stats get this long in total; slower → the page says so and shows what it has. */
+/** All Instantly reads for one page load (stats + a campaign-name search) share this budget. */
 export const STATS_BUDGET_MS = 6_000
+
+/**
+ * Load problems shown on the page as fixed text (details go to the log): the
+ * page is read by a bot, so it never shows a raw error message.
+ */
+export const LOAD_ERRORS = {
+  unknown_vertical: 'That vertical does not exist; showing all verticals.',
+  gates: 'Could not load Needs confirmation; reload before deciding anything.',
+  alerts: 'Could not load alerts.',
+  outcomes: 'Could not load recent actions.',
+  operators: 'Could not load the bot list.',
+  events: 'Could not load recent gate decisions.',
+  checkin: 'Your check-in was not recorded.',
+  stats: 'Campaign stats failed this time.',
+} as const
+export type LoadError = keyof typeof LOAD_ERRORS
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
-export async function loadCheckin(opts: { operator: Operator | null; verticalParam: string | null; now?: Date }): Promise<CheckinData> {
+export async function loadCheckin(opts: {
+  operator: Operator | null
+  verticalParam: string | null
+  /** A several-match campaign-name search to list again (`?cq=` after several_matches). */
+  campaignQuery?: string | null
+  now?: Date
+}): Promise<CheckinData> {
   const now = opts.now ?? new Date()
   const errors: string[] = []
+  const fail = (code: LoadError, e?: unknown) => {
+    if (e !== undefined) console.error(`[operator] ${code}:`, errText(e))
+    errors.push(LOAD_ERRORS[code])
+  }
   const op = opts.operator
 
   const verticals = await listVerticals()
@@ -81,16 +110,16 @@ export async function loadCheckin(opts: { operator: Operator | null; verticalPar
   } else if (!op && opts.verticalParam) {
     const v = verticals.find((x) => x.id === opts.verticalParam)
     if (v) scope = { all: false, vertical: v }
-    else errors.push(`Unknown vertical ${opts.verticalParam}; showing all verticals`)
+    else fail('unknown_vertical')
   }
 
   const since = new Date(now.getTime() - 24 * 60 * 60 * 1000)
   const [gates, alerts, decided, operators, events] = await Promise.all([
-    getGates().catch((e) => (errors.push(`gates: ${errText(e)}`), [])),
-    listAlerts({ unackedOnly: true, limit: ALERTS_MAX_LIMIT }).catch((e) => (errors.push(`alerts: ${errText(e)}`), [] as AlertRow[])),
-    listDecidedSince(since).catch((e) => (errors.push(`outcomes: ${errText(e)}`), [])),
-    listOperators({ includeRevoked: true }).catch((e) => (errors.push(`operators: ${errText(e)}`), [] as Operator[])),
-    listEventsSince(DECISION_EVENT_TYPES, since).catch((e) => (errors.push(`decision events: ${errText(e)}`), [] as EventRow[])),
+    getGates().catch((e) => (fail('gates', e), [])),
+    listAlerts({ unackedOnly: true, limit: ALERTS_MAX_LIMIT }).catch((e) => (fail('alerts', e), [] as AlertRow[])),
+    listDecidedSince(since).catch((e) => (fail('outcomes', e), [])),
+    listOperators({ includeRevoked: true }).catch((e) => (fail('operators', e), [] as Operator[])),
+    listEventsSince(DECISION_EVENT_TYPES, since).catch((e) => (fail('events', e), [] as EventRow[])),
   ])
 
   // The check-in before this one: the bot's own, or (owner) the latest of the scope's bots.
@@ -107,7 +136,7 @@ export async function loadCheckin(opts: { operator: Operator | null; verticalPar
     try {
       await touchOperator(op.id)
     } catch (e) {
-      errors.push(`check-in not recorded: ${errText(e)}`)
+      fail('checkin', e)
     }
   }
 
@@ -120,11 +149,25 @@ export async function loadCheckin(opts: { operator: Operator | null; verticalPar
   const alertVerticals = Object.fromEntries(scopedAlerts.map((a) => [a.id, verticalFor(a, verticals, routeOpts)?.name ?? null]))
   const operatorLabels = Object.fromEntries(operators.map((o) => [o.id, o.label]))
 
+  // One budget and one AbortSignal for every Instantly read on this page.
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), STATS_BUDGET_MS)
   const campaignIds = [...new Set((scope.all ? verticals : [scope.vertical]).flatMap((v) => v.campaign_ids))]
-  const { campaigns, note } = await campaignStats(campaignIds, now).catch((e) => ({
-    campaigns: [] as CampaignStat[],
-    note: `Campaign stats failed: ${errText(e)}`,
-  }))
+  let stats: { campaigns: CampaignStat[]; note: string | null }
+  let campaignMatches: CampaignLite[] | 'unavailable' | null = null
+  try {
+    const [st, matches] = await Promise.all([
+      campaignStats(campaignIds, now, controller.signal).catch((e) => {
+        fail('stats', e)
+        return { campaigns: [] as CampaignStat[], note: null }
+      }),
+      opts.campaignQuery ? campaignMatchesFor(opts.campaignQuery, controller.signal) : Promise.resolve(null),
+    ])
+    stats = st
+    campaignMatches = matches
+  } finally {
+    clearTimeout(timer)
+  }
 
   return {
     scope,
@@ -137,19 +180,36 @@ export async function loadCheckin(opts: { operator: Operator | null; verticalPar
     decisionEvents,
     alertVerticals,
     operatorLabels,
-    campaigns,
-    campaignsNote: note,
+    campaigns: stats.campaigns,
+    campaignsNote: stats.note,
+    campaignMatches,
     errors,
   }
 }
+
+/** The campaigns a several-match name search lists again on /operator; 'unavailable' when Instantly is off or slow. */
+async function campaignMatchesFor(query: string, signal: AbortSignal): Promise<CampaignLite[] | 'unavailable'> {
+  if (!isInstantlyConfigured()) return 'unavailable'
+  try {
+    const r = resolveCampaignQuery(query, await listCampaigns({ signal }))
+    if (r.kind === 'several') return r.matches
+    if (r.kind === 'resolved') return [r.campaign]
+    return []
+  } catch {
+    return 'unavailable'
+  }
+}
+
+const isAbort = (e: unknown) => e instanceof Error && e.name === 'AbortError'
 
 /**
  * Sent / replies / bounces for today and the last 7 days, per Instantly
  * campaign, from Instantly's analytics overview (the Campaigns screen's
  * source; the adapter caches each call 60 s). Non-Instantly ids (Gmail,
- * Muse) are listed without stats. Capped at STATS_BUDGET_MS overall.
+ * Muse) are listed without stats. When the page's budget runs out (`signal`)
+ * the campaigns that already answered keep their stats and the rest say so.
  */
-async function campaignStats(ids: string[], now: Date): Promise<{ campaigns: CampaignStat[]; note: string | null }> {
+async function campaignStats(ids: string[], now: Date, signal: AbortSignal): Promise<{ campaigns: CampaignStat[]; note: string | null }> {
   if (!ids.length) return { campaigns: [], note: 'This vertical has no campaigns mapped yet (Settings → Verticals).' }
   const registry = await getCampaigns().catch(() => [])
   const nameOf = new Map<string, string>()
@@ -168,37 +228,31 @@ async function campaignStats(ids: string[], now: Date): Promise<{ campaigns: Cam
   if (!isInstantlyConfigured()) return { campaigns: base, note: 'Instantly is not configured: no send stats.' }
 
   const ranges = statsRanges(now)
-  const work = (async () => {
-    const list = await listCampaigns().catch(() => [])
-    for (const c of list) if (instantlyIds.has(c.id)) nameOf.set(c.id, c.name)
-    const stats = await mapLimit([...instantlyIds], 4, async (id) => {
-      try {
-        const [t, w] = await Promise.all([getAnalyticsOverview(id, ranges.today), getAnalyticsOverview(id, ranges.week)])
-        return [id, { t, w }] as const
-      } catch {
-        return [id, null] as const
-      }
-    })
-    return { stats: new Map(stats), names: nameOf }
-  })()
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<'timeout'>((r) => {
-    timer = setTimeout(() => r('timeout'), STATS_BUDGET_MS)
-  })
-  const got = await Promise.race([work, timeout])
-  if (timer) clearTimeout(timer)
-  if (got === 'timeout') {
-    return { campaigns: base, note: `Instantly took longer than ${STATS_BUDGET_MS / 1000} s; stats skipped this time (reload to retry).` }
-  }
   const pick = (o: { sent: number; replies: number; bounced: number }) => ({ sent: o.sent, replies: o.replies, bounced: o.bounced })
+  const got = new Map<string, { today: CampaignStat['today']; week: CampaignStat['week'] } | 'error' | 'timeout'>()
+  try {
+    for (const c of await listCampaigns({ signal })) if (instantlyIds.has(c.id)) nameOf.set(c.id, c.name)
+  } catch {
+    // names fall back to the ids
+  }
+  await mapLimit([...instantlyIds], 4, async (id) => {
+    try {
+      const [t, w] = await Promise.all([getAnalyticsOverview(id, ranges.today, signal), getAnalyticsOverview(id, ranges.week, signal)])
+      got.set(id, { today: pick(t), week: pick(w) })
+    } catch (e) {
+      got.set(id, isAbort(e) || signal.aborted ? 'timeout' : 'error')
+    }
+  })
+  const slow = [...got.values()].some((v) => v === 'timeout')
   return {
     campaigns: base.map((c) => {
-      const s = got.stats.get(c.id)
-      const name = got.names.get(c.id) ?? c.name
       if (!instantlyIds.has(c.id)) return c
-      if (!s) return { ...c, name, note: 'Instantly stats unavailable' }
-      return { ...c, name, today: pick(s.t), week: pick(s.w) }
+      const name = nameOf.get(c.id) ?? c.name
+      const s = got.get(c.id)
+      if (!s || s === 'timeout') return { ...c, name, note: 'Instantly was too slow this time (reload to retry)' }
+      if (s === 'error') return { ...c, name, note: 'Instantly stats unavailable' }
+      return { ...c, name, today: s.today, week: s.week }
     }),
-    note: null,
+    note: slow ? `Instantly took longer than ${STATS_BUDGET_MS / 1000} s; the campaigns it answered for are shown.` : null,
   }
 }

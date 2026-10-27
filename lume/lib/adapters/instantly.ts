@@ -85,7 +85,29 @@ export function retryAfterMs(header: string | null, now = Date.now()): number {
  * of Overview loads makes one upstream call. Expired entries are pruned on
  * every write.
  */
-async function instantlyGet(path: string, params: Record<string, string | undefined> = {}): Promise<unknown> {
+/**
+ * `signal` stops the caller WAITING (rejects with an AbortError); the shared
+ * upstream request itself runs on (its own 15 s cap) and still fills the
+ * cache, so a page that gave up gets the answer on its next load.
+ */
+function abortable<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return p
+  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException('Aborted', 'AbortError'))
+    signal.addEventListener('abort', onAbort, { once: true })
+    p.then(
+      (v) => (signal.removeEventListener('abort', onAbort), resolve(v)),
+      (e) => (signal.removeEventListener('abort', onAbort), reject(e))
+    )
+  })
+}
+
+async function instantlyGet(path: string, params: Record<string, string | undefined> = {}, signal?: AbortSignal): Promise<unknown> {
+  return abortable(instantlyGetShared(path, params), signal)
+}
+
+async function instantlyGetShared(path: string, params: Record<string, string | undefined> = {}): Promise<unknown> {
   const key = process.env.INSTANTLY_API_KEY?.trim()
   if (!key) throw new InstantlyError(0, 'INSTANTLY_API_KEY is not configured')
 
@@ -163,8 +185,8 @@ async function getAllPages(path: string, extra: Record<string, string> = {}): Pr
   return out
 }
 
-export async function listCampaigns(): Promise<InstantlyCampaign[]> {
-  return mapCampaigns(await getAllPages('/campaigns'))
+export async function listCampaigns(opts: { signal?: AbortSignal } = {}): Promise<InstantlyCampaign[]> {
+  return mapCampaigns(await abortable(getAllPages('/campaigns'), opts.signal))
 }
 
 /**
@@ -173,10 +195,11 @@ export async function listCampaigns(): Promise<InstantlyCampaign[]> {
  */
 export async function getAnalyticsOverview(
   campaignId?: string,
-  range?: { startDate: string; endDate: string }
+  range?: { startDate: string; endDate: string },
+  signal?: AbortSignal
 ): Promise<AnalyticsOverview> {
   return mapAnalyticsOverview(
-    await instantlyGet('/campaigns/analytics/overview', { id: campaignId, start_date: range?.startDate, end_date: range?.endDate })
+    await instantlyGet('/campaigns/analytics/overview', { id: campaignId, start_date: range?.startDate, end_date: range?.endDate }, signal)
   )
 }
 
