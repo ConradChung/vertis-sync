@@ -37,12 +37,15 @@ export async function getActionStatuses(ids: string[]): Promise<Map<string, stri
 
 /**
  * Same claim telegram-inbox's lume_ok/lume_no runs, with decided_via='lume'
- * (the owner's tap) or 'agent' (skip-permissions mode approving for them).
+ * (the owner's tap), 'agent' (skip-permissions mode approving for them) or
+ * 'operator' (a Grok Bot signed in with its operator key; `operatorId` is
+ * stored as `decided_by_operator`).
  */
 export async function claimDecision(
   id: string,
   approve: boolean,
-  via: 'lume' | 'agent' = 'lume'
+  via: 'lume' | 'agent' | 'operator' = 'lume',
+  operatorId?: string | null
 ): Promise<PendingActionRow | null> {
   const sb = createServiceClient()
   const res = await sb
@@ -52,6 +55,7 @@ export async function claimDecision(
       status: approve ? 'approved' : 'rejected',
       decided_via: via,
       decided_at: new Date().toISOString(),
+      ...(operatorId ? { decided_by_operator: operatorId } : {}),
     })
     .eq('id', id)
     .eq('claim_status', 'awaiting')

@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { Ellipsis, Search } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
+import { OperatorChip } from '@/components/shell/OperatorChip'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { TABS, isActiveTab } from '@/components/shell/tabs'
 import { cn } from '@/lib/utils'
@@ -41,7 +42,16 @@ function useVisualViewport() {
   }, [])
 }
 
-export function MobileNav({ pathname, warm }: { pathname: string; warm: (href: string) => void }) {
+export function MobileNav({
+  pathname,
+  warm,
+  operator = null,
+}: {
+  pathname: string
+  warm: (href: string) => void
+  /** Grok Bot operator chip label (vertical name or "Master"), when one holds the session. */
+  operator?: string | null
+}) {
   useVisualViewport()
   const [more, setMore] = useState(false)
   useEffect(() => setMore(false), [pathname])
@@ -59,6 +69,7 @@ export function MobileNav({ pathname, warm }: { pathname: string; warm: (href: s
         </Link>
         {current && <span className="ml-2 truncate border-l border-border pl-2.5 text-[14px] text-fg-70">{current.label}</span>}
         <span className="flex-1" />
+        {operator && <OperatorChip label={operator} className="max-w-[9rem]" />}
         <button type="button" onClick={openPalette} aria-label="Search" className="grid size-10 place-items-center rounded-full text-fg-70 outline-none hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring">
           <Search className="size-[18px]" strokeWidth={1.75} />
         </button>

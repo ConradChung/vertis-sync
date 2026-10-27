@@ -25,6 +25,9 @@ import type { Json } from '@/lib/db/types'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { parseJsonBody, UUID_RE } from '@/lib/http/json'
 import { internalOrigin } from '@/lib/http/origin'
+import { operatorPromptLine } from '@/lib/operators/context'
+import { currentOperator } from '@/lib/operators/session'
+import { getVertical } from '@/lib/operators/store'
 
 /**
  * POST `{ prompt, conversation_id?, skip_permissions?, auto? }` → the agent,
@@ -56,6 +59,11 @@ import { internalOrigin } from '@/lib/http/origin'
  * Skills: `skill_id` + `skill_mode` ('run' | 'reference') load a saved skill
  * and put its steps ahead of the prompt (`skillContext`); 'run' also bumps
  * its run count. 404 `skill_not_found` when it is missing or deleted.
+ *
+ * Grok Bot operators (a valid `lume_op` cookie on the owner session): a new
+ * conversation stores the bot's `vertical_id` + `operator_id`, and every run's
+ * prompt opens with a line naming the bot, its vertical's campaigns and its
+ * full owner authority (`operatorPromptLine`).
  *
  * SSE events (`data: <json>\n\n`): run (`{ id, conversation_id }`), text,
  * tool_start, tool_end, approval, done, error.
@@ -103,6 +111,9 @@ export async function POST(req: Request) {
     console.error('[api/agent/run] stale run cleanup failed:', err instanceof Error ? err.message : err)
   }
 
+  // A Grok Bot on the owner session; never the agent's internal bearer.
+  const operator = auth.via === 'session' ? await currentOperator(req) : null
+
   let runId: string
   let conversationId: string
   let prompt = message
@@ -121,11 +132,19 @@ export async function POST(req: Request) {
       conversationId = conversation.id
       prompt = buildPrompt(contextFromMessages(await getMessages(conversationId)), message)
     } else {
-      conversationId = (await createConversation(titleFromPrompt(message))).id
+      const title = titleFromPrompt(message)
+      const created = operator
+        ? await createConversation(title, { vertical_id: operator.vertical_id, operator_id: operator.id })
+        : await createConversation(title)
+      conversationId = created.id
     }
     if (skill) {
       prompt = `${skillContext(skill, skillMode)}\n\n${prompt}`
       if (skillMode === 'run') await markSkillRun(skill.id)
+    }
+    if (operator) {
+      const vertical = operator.vertical_id ? await getVertical(operator.vertical_id) : null
+      prompt = `${operatorPromptLine(operator, vertical)}\n\n${prompt}`
     }
     runId = (await insertAgentRun(prompt, MODEL)).id
     await insertMessage({ conversation_id: conversationId, role: 'user', text: message, run_id: runId, ...(body.data.auto ? { auto: true } : {}) })

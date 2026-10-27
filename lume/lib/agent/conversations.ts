@@ -8,9 +8,16 @@ import type { ConversationSummary, StoredApproval, StoredMessage, StoredToolEntr
 
 const COLS = 'id, title, created_at, updated_at'
 
-export async function createConversation(title: string): Promise<ConversationSummary> {
+/** A Grok Bot's chats carry its vertical (null for the master bot) and operator. */
+export interface ConversationOrigin {
+  vertical_id: string | null
+  operator_id: string
+}
+
+export async function createConversation(title: string, origin?: ConversationOrigin): Promise<ConversationSummary> {
   const sb = createServiceClient()
-  const res = await sb.from('agent_conversations').insert({ title }).select(COLS).single()
+  const row: Record<string, string | null> = origin ? { title, vertical_id: origin.vertical_id, operator_id: origin.operator_id } : { title }
+  const res = await sb.from('agent_conversations').insert(row).select(COLS).single()
   if (res.error || !res.data) throw new DbError('createConversation', res.error ?? new Error('no data'))
   return res.data as ConversationSummary
 }

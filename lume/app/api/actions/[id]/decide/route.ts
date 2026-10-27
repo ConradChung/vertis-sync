@@ -6,6 +6,7 @@ import { claimDecision, getAction } from '@/lib/actions/store'
 import { editMessage, sendDecisionNote } from '@/lib/adapters/telegram'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { parseJsonBody, uuidParam } from '@/lib/http/json'
+import { currentOperator } from '@/lib/operators/session'
 
 /**
  * Confirm / Cancel a pending action from Lume. Runs the same claim as
@@ -15,7 +16,9 @@ import { parseJsonBody, uuidParam } from '@/lib/http/json'
  * already_handled. On approve this request runs the executor itself.
  *
  * Owner session only: the agent's internal bearer is a 403, so a tool call
- * can never approve its own pending action.
+ * can never approve its own pending action. A Grok Bot signed in with its
+ * operator key (valid `lume_op` cookie) is recorded as `decided_via='operator'`
+ * + `decided_by_operator`.
  */
 
 // executeAction may wait on pipeline.decide() (170 s); outlive it.
@@ -34,9 +37,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (!body.ok) return body.response
   const approve = body.data.decision === 'approve'
 
+  const op = await currentOperator(req)
+
   let claimed
   try {
-    claimed = await claimDecision(id, approve)
+    claimed = await claimDecision(id, approve, op ? 'operator' : 'lume', op?.id)
     if (!claimed) {
       const row = await getAction(id)
       if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 })
@@ -50,7 +55,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const verdict = approve ? '✅ Approved' : '❌ Rejected'
   try {
     if (claimed.telegram_message_id) {
-      await editMessage(claimed.telegram_message_id, `${verdict} — ${claimed.kind} (from Lume)`)
+      await editMessage(claimed.telegram_message_id, `${verdict} — ${claimed.kind} (from ${op ? `Grok Bot “${op.label}”` : 'Lume'})`)
     }
     await sendDecisionNote(approve ? 'lume_ok' : 'lume_no', id)
   } catch (err) {

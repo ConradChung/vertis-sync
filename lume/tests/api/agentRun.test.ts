@@ -26,7 +26,11 @@ const h = vi.hoisted(() => ({
   executeAction: vi.fn(),
   editMessage: vi.fn(),
   getAction: vi.fn(),
+  currentOperator: vi.fn(),
+  getVertical: vi.fn(),
 }))
+vi.mock('@/lib/operators/session', () => ({ currentOperator: h.currentOperator }))
+vi.mock('@/lib/operators/store', () => ({ getVertical: h.getVertical }))
 
 vi.mock('@/lib/auth/guards', () => ({ requireOwner: h.requireOwner }))
 vi.mock('@/lib/agent/runs', () => ({ insertAgentRun: h.insertAgentRun, updateAgentRun: h.updateAgentRun, failStaleRuns: h.failStaleRuns }))
@@ -118,6 +122,7 @@ beforeEach(() => {
   h.getMessages.mockResolvedValue([])
   h.insertMessage.mockResolvedValue(undefined)
   h.loadKnowledge.mockResolvedValue('')
+  h.currentOperator.mockResolvedValue(null)
   process.env.ANTHROPIC_API_KEY = 'test-key'
 })
 
@@ -268,6 +273,44 @@ describe('POST /api/agent/run', () => {
       })
       // The user turn is stored before the model runs.
       expect(h.insertMessage.mock.invocationCallOrder[0]).toBeLessThan(h.toolRunner.mock.invocationCallOrder[0])
+    })
+
+    it('a Grok Bot operator: the new conversation stores its vertical + operator; the prompt names the bot', async () => {
+      h.currentOperator.mockResolvedValue({ id: 'op-1', vertical_id: 'v-roof', is_master: false, label: 'Roofers bot', revoked_at: null })
+      h.getVertical.mockResolvedValue({ id: 'v-roof', name: 'Roofers', campaign_ids: ['camp-r1'] })
+      fakeRunner([{ text: 'On it.' }])
+      await events(await post('What needs me?'))
+      expect(h.createConversation).toHaveBeenCalledWith('What needs me?', { vertical_id: 'v-roof', operator_id: 'op-1' })
+      const sent = h.toolRunner.mock.calls[0][0].messages[0].content as string
+      expect(sent).toMatch(/^You are being operated by the Roofers Grok Bot \(operator\)\. Its campaigns: camp-r1\. It has the owner’s full authority\.\n\nWhat needs me\?$/)
+      // The stored user turn stays the bot's own words.
+      expect(h.insertMessage).toHaveBeenNthCalledWith(1, expect.objectContaining({ text: 'What needs me?' }))
+    })
+
+    it('the master bot: no vertical on the conversation; the prompt says it oversees all verticals', async () => {
+      h.currentOperator.mockResolvedValue({ id: 'op-m', vertical_id: null, is_master: true, label: 'Master', revoked_at: null })
+      fakeRunner([{ text: 'ok' }])
+      await events(await post('Stand up a dentists vertical'))
+      expect(h.createConversation).toHaveBeenCalledWith('Stand up a dentists vertical', { vertical_id: null, operator_id: 'op-m' })
+      expect(h.getVertical).not.toHaveBeenCalled()
+      expect(h.toolRunner.mock.calls[0][0].messages[0].content).toMatch(/^You are being operated by the master Grok Bot.*oversees all verticals/)
+    })
+
+    it('an existing conversation keeps its tags; the operator line still leads the prompt', async () => {
+      h.currentOperator.mockResolvedValue({ id: 'op-1', vertical_id: 'v-roof', is_master: false, label: 'Roofers bot', revoked_at: null })
+      h.getVertical.mockResolvedValue({ id: 'v-roof', name: 'Roofers', campaign_ids: [] })
+      fakeRunner([{ text: 'ok' }])
+      await events(await post('next', { conversation_id: CONV }))
+      expect(h.createConversation).not.toHaveBeenCalled()
+      expect(h.toolRunner.mock.calls[0][0].messages[0].content).toMatch(/^You are being operated by the Roofers Grok Bot[^\n]*Its campaigns: none\./)
+    })
+
+    it('the internal bearer is never treated as an operator', async () => {
+      h.requireOwner.mockResolvedValue({ ok: true, via: 'internal', user: null })
+      fakeRunner([{ text: 'ok' }])
+      await events(await post('hi'))
+      expect(h.currentOperator).not.toHaveBeenCalled()
+      expect(h.createConversation).toHaveBeenCalledWith('hi')
     })
 
     it('with conversation_id: packs the stored turns ahead of the new message (never client-supplied)', async () => {

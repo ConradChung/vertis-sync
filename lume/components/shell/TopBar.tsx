@@ -7,6 +7,7 @@ import { useSWRConfig } from 'swr'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
 import { CommandPalette } from '@/components/shell/CommandPalette'
 import { MobileNav } from '@/components/shell/MobileNav'
+import { OperatorChip } from '@/components/shell/OperatorChip'
 import { cn } from '@/lib/utils'
 import { prefetchTab, TAB_KEYS } from '@/lib/prefetch/tabs'
 import { TABS, isActiveTab } from '@/components/shell/tabs'
@@ -18,8 +19,11 @@ export { TABS, isActiveTab } from '@/components/shell/tabs'
  * minus a 12 px gutter on phones, tabs scroll inside it). Logo mark at left,
  * theme toggle at right. Active tab is a lime pill with black/ink text (light
  * adds a thin olive edge). Page content scrolls beneath it.
+ *
+ * `operator`: the Grok Bot's vertical name (or "Master") when an operator key
+ * holds the session, from the server layout; shown as a small chip.
  */
-export function TopBar() {
+export function TopBar({ operator = null }: { operator?: string | null } = {}) {
   const pathname = usePathname()
   const { cache, mutate } = useSWRConfig()
   const warm = useCallback(
@@ -47,7 +51,7 @@ export function TopBar() {
   return (
     <>
     {/* Phones get a slim header + bottom tab bar (MobileNav); the pill below is sm and up. */}
-    <MobileNav pathname={pathname} warm={warm} />
+    <MobileNav pathname={pathname} warm={warm} operator={operator} />
     <header className="glass fixed inset-x-3 top-4 max-sm:hidden z-30 mx-auto flex h-14 items-center gap-1 rounded-full bg-(--bar-fill) py-2 pr-2 pl-4 shadow-(--bar-shadow) backdrop-blur-xl sm:inset-x-0 sm:w-fit sm:max-w-[calc(100%-2rem)]">
       <Link href="/overview" className="brand mr-2 shrink-0" aria-label="Lume home">
         <span className="inline-block size-3 rounded-[3px] bg-primary dark:shadow-(--primary-glow) light:ring-1 light:ring-(--lime-edge)" aria-hidden />
@@ -75,6 +79,8 @@ export function TopBar() {
           )
         })}
       </nav>
+
+      {operator && <OperatorChip label={operator} className="ml-1" />}
 
       <div className="ml-1 shrink-0 border-l border-border pl-1">
         <ThemeToggle />

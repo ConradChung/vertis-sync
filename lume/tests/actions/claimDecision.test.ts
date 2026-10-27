@@ -42,5 +42,10 @@ describe('claimDecision', () => {
     expect(row).toEqual({ id: 'a1' })
     // Only an untouched row is claimable: a Telegram tap or Lume click that won first leaves nothing.
     expect(filters).toEqual(expect.arrayContaining([['id', 'a1'], ['claim_status', 'awaiting'], ['status', 'awaiting']]))
+    expect(updates[0]).not.toHaveProperty('decided_by_operator')
+  })
+  it("records decided_via 'operator' and the deciding Grok Bot", async () => {
+    await claimDecision('a1', false, 'operator', 'op-1')
+    expect(updates[0]).toMatchObject({ decided_via: 'operator', decided_by_operator: 'op-1', status: 'rejected' })
   })
 })

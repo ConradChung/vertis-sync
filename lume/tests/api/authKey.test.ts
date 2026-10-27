@@ -44,4 +44,9 @@ describe('/auth/key', () => {
     expect(h.verifyOtp).toHaveBeenCalledWith({ token_hash: 'th', type: 'magiclink' })
     expect(res.headers.get('location')).toMatch(/\/overview$/)
   })
+
+  it("clears a Grok Bot's lume_op cookie: the owner signing in is not attributed to a bot", async () => {
+    const res = await GET(req('k'.repeat(43)))
+    expect(res.headers.get('set-cookie') ?? '').toMatch(/lume_op=;.*(Max-Age=0|Expires=Thu, 01 Jan 1970)/i)
+  })
 })

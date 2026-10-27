@@ -52,6 +52,9 @@ vi.mock('@/lib/adapters/instantlyWrite', () => ins)
 const tg = vi.hoisted(() => ({ sendMessage: vi.fn(), editMessage: vi.fn(), sendDecisionNote: vi.fn(), sendActionPrompt: vi.fn() }))
 vi.mock('@/lib/adapters/telegram', () => tg)
 
+const ops = vi.hoisted(() => ({ getOperator: vi.fn() }))
+vi.mock('@/lib/operators/store', () => ops)
+
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({ auth: { getClaims: async () => ({ data: { claims: { sub: 'owner-id', email: 'owner@example.com' } } }) } }),
 }))
@@ -61,6 +64,7 @@ import { EXECUTABLE_KINDS, executeAction, recoverInterruptedActions, sweepStuckA
 import { POST as decidePOST, maxDuration } from '@/app/api/actions/[id]/decide/route'
 import { POST as executePOST } from '@/app/api/actions/[id]/execute/route'
 import { POST as createPOST } from '@/app/api/actions/route'
+import { signOperatorCookie } from '@/lib/operators/cookie'
 
 const ID = '0a4c1e2f-5b6d-4e7f-8a9b-0c1d2e3f4a5b'
 const JOB = '7db3d841-252c-4572-95ec-bc110727df8d'
@@ -411,10 +415,39 @@ describe('POST /api/actions/[id]/decide', () => {
     store.claimExecution.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }))
     const res = await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve' }), params(ID))
     expect(res.status).toBe(200)
-    expect(store.claimDecision).toHaveBeenCalledWith(ID, true)
+    expect(store.claimDecision).toHaveBeenCalledWith(ID, true, 'lume', undefined)
     expect(tg.editMessage).toHaveBeenCalledWith(42, expect.stringContaining('Approved'))
     expect(tg.sendDecisionNote).toHaveBeenCalledWith('lume_ok', ID)
     expect(ins.pauseCampaign).toHaveBeenCalledOnce()
+  })
+
+  it('a Grok Bot operator session is attributed: decided_via operator + decided_by_operator', async () => {
+    const OP = '9b2f4c1e-0d3a-4e5b-8c7d-6e5f4a3b2c1d'
+    vi.stubEnv('LUME_INTERNAL_SECRET', 'internal-secret')
+    ops.getOperator.mockResolvedValue({ id: OP, vertical_id: 'v1', is_master: false, label: 'Roofers bot', revoked_at: null })
+    store.claimDecision.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }, { status: 'rejected', telegram_message_id: 42 }))
+    const res = await decidePOST(
+      req(`/api/actions/${ID}/decide`, { decision: 'reject' }, { cookie: `lume_op=${signOperatorCookie(OP, 'internal-secret')}` }),
+      params(ID)
+    )
+    vi.unstubAllEnvs()
+    expect(res.status).toBe(200)
+    expect(store.claimDecision).toHaveBeenCalledWith(ID, false, 'operator', OP)
+    expect(tg.editMessage).toHaveBeenCalledWith(42, expect.stringContaining('Roofers bot'))
+  })
+
+  it('a revoked operator or a forged cookie decides as the owner (lume)', async () => {
+    const OP = '9b2f4c1e-0d3a-4e5b-8c7d-6e5f4a3b2c1d'
+    vi.stubEnv('LUME_INTERNAL_SECRET', 'internal-secret')
+    ops.getOperator.mockResolvedValue({ id: OP, vertical_id: 'v1', is_master: false, label: 'x', revoked_at: '2026-10-26T00:00:00Z' })
+    store.claimDecision.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }, { status: 'rejected' }))
+    await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'reject' }, { cookie: `lume_op=${signOperatorCookie(OP, 'internal-secret')}` }), params(ID))
+    await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'reject' }, { cookie: `lume_op=${signOperatorCookie(OP, 'forged')}` }), params(ID))
+    vi.unstubAllEnvs()
+    expect(store.claimDecision.mock.calls).toEqual([
+      [ID, false, 'lume', undefined],
+      [ID, false, 'lume', undefined],
+    ])
   })
 
   it('403 session_required for the internal bearer: the agent cannot approve its own action', async () => {
@@ -433,7 +466,7 @@ describe('POST /api/actions/[id]/decide', () => {
     store.claimDecision.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }, { status: 'rejected' }))
     const res = await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'reject' }), params(ID))
     expect(res.status).toBe(200)
-    expect(store.claimDecision).toHaveBeenCalledWith(ID, false)
+    expect(store.claimDecision).toHaveBeenCalledWith(ID, false, 'lume', undefined)
     expect(store.claimExecution).not.toHaveBeenCalled()
     noSideEffects()
   })

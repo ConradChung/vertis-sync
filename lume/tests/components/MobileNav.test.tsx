@@ -10,6 +10,13 @@ import { TABS } from '@/components/shell/tabs'
 afterEach(cleanup)
 
 describe('MobileNav (phones)', () => {
+  it('shows the Operator chip only when a Grok Bot holds the session', () => {
+    const { rerender } = render(<MobileNav pathname="/overview" warm={vi.fn()} operator="Roofers" />)
+    expect(screen.getByText('Operator:').textContent).toBe('Operator: Roofers')
+    rerender(<MobileNav pathname="/overview" warm={vi.fn()} />)
+    expect(screen.queryByText('Operator:')).toBeNull()
+  })
+
   it('shows the four primary tabs plus More in the bottom bar, marking the current page', () => {
     render(<MobileNav pathname="/agent" warm={vi.fn()} />)
     const bar = screen.getByRole('navigation', { name: 'Primary' })
