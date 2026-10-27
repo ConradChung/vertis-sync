@@ -457,9 +457,13 @@ export const PUSH_REVIEW_STATUSES = ['configuring', 'reviewing_company'] as cons
  * Campaign pick (what the root app's `/api/instantly/push` writes, minus the
  * push): name + id, clear the Telegram candidates, move to `configuring` —
  * only while the job is still waiting for a campaign. `false` = the gate had
- * already moved on (409).
+ * already moved on (409); otherwise the Telegram campaign prompt's message id
+ * (so the caller can close that stale prompt).
  */
-export async function pickCampaign(jobId: string, campaign: { id: string; name: string }): Promise<boolean> {
+export async function pickCampaign(
+  jobId: string,
+  campaign: { id: string; name: string }
+): Promise<false | { prompt_message_id: number | null }> {
   const sb = createServiceClient()
   const res = await sb
     .from('validation_jobs')
@@ -471,9 +475,10 @@ export async function pickCampaign(jobId: string, campaign: { id: string; name: 
     })
     .eq('id', jobId)
     .in('instantly_status', [...CAMPAIGN_CHOICE_STATUSES])
-    .select('id')
+    .select('id, instantly_prompt_message_id')
   if (res.error) throw new DbError('pickCampaign', res.error)
-  return (res.data ?? []).length > 0
+  const row = ((res.data ?? []) as { instantly_prompt_message_id: number | null }[])[0]
+  return row ? { prompt_message_id: row.instantly_prompt_message_id ?? null } : false
 }
 
 export interface BarrierPatch {

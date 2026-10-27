@@ -37,7 +37,11 @@ const getPushPreview = vi.fn()
 vi.mock('@/lib/adapters/instantlyPush', () => ({ getPushPreview: (...a: unknown[]) => getPushPreview(...a) }))
 
 const sendActionPrompt = vi.fn()
-vi.mock('@/lib/adapters/telegram', () => ({ sendActionPrompt: (...a: unknown[]) => sendActionPrompt(...a) }))
+const editMessage = vi.fn()
+vi.mock('@/lib/adapters/telegram', () => ({
+  sendActionPrompt: (...a: unknown[]) => sendActionPrompt(...a),
+  editMessage: (...a: unknown[]) => editMessage(...a),
+}))
 
 import { POST as decidePOST, maxDuration } from '@/app/api/gates/decide/route'
 import { PATCH as barriersPATCH, POST as campaignPOST } from '@/app/api/gates/campaign/[jobId]/route'
@@ -195,6 +199,21 @@ describe('/api/gates/campaign/[jobId]', () => {
     const res = await campaignPOST(post(`/api/gates/campaign/${JOB}`, { campaign_id: 'c1' }), params('jobId', JOB))
     expect(res.status).toBe(200)
     expect(svc.logEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'lume.campaign_pick' }))
+  })
+
+  it('a Lume pick closes the stale Telegram campaign prompt (only while Telegram is on)', async () => {
+    listCampaigns.mockResolvedValue([{ id: 'c1', name: 'Kaspen R3', status: 1, statusLabel: 'active' }])
+    svc.pickCampaign.mockResolvedValue({ prompt_message_id: 555 })
+    editMessage.mockReset()
+    editMessage.mockResolvedValue({ ok: true })
+    delete process.env.ALERT_CHANNELS
+    await campaignPOST(post(`/api/gates/campaign/${JOB}`, { campaign_id: 'c1' }), params('jobId', JOB))
+    expect(editMessage).toHaveBeenCalledWith(555, '✅ Campaign set in Lume: Kaspen R3')
+    editMessage.mockReset()
+    process.env.ALERT_CHANNELS = 'feed'
+    await campaignPOST(post(`/api/gates/campaign/${JOB}`, { campaign_id: 'c1' }), params('jobId', JOB))
+    delete process.env.ALERT_CHANNELS
+    expect(editMessage).not.toHaveBeenCalled()
   })
 
   it('POST 400 for an unknown campaign or when Instantly is not configured', async () => {

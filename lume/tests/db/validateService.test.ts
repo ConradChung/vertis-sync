@@ -41,8 +41,8 @@ beforeEach(() => {
 
 describe('pickCampaign', () => {
   it('updates only while awaiting a campaign, clears candidates, moves to configuring', async () => {
-    results.push({ data: [{ id: JOB }], error: null })
-    expect(await pickCampaign(JOB, { id: 'c1', name: 'R3' })).toBe(true)
+    results.push({ data: [{ id: JOB, instantly_prompt_message_id: 77 }], error: null })
+    expect(await pickCampaign(JOB, { id: 'c1', name: 'R3' })).toEqual({ prompt_message_id: 77 })
     const c = chains[0]
     expect(has(c, 'from', 'validation_jobs')).toBe(true)
     expect(has(c, 'update', { instantly_campaign_id: 'c1', instantly_campaign_name: 'R3', instantly_campaign_candidates: null, instantly_status: 'configuring' })).toBe(true)

@@ -8,6 +8,8 @@ import { dbErrorResponse } from '@/lib/http/errors'
 import { instantlyErrorResponse } from '@/lib/http/instantly'
 import { parseJsonBody, uuidParam } from '@/lib/http/json'
 import { formAnswer, formRedirect, readJsonOrForm } from '@/lib/http/form'
+import { editMessage } from '@/lib/adapters/telegram'
+import { parseChannels } from '@/lib/alerts'
 import type { FlashOk } from '@/lib/http/flash'
 import { currentOperator } from '@/lib/operators/session'
 import { resolveCampaignQuery } from '@/lib/validate/campaignQuery'
@@ -105,11 +107,21 @@ export async function POST(req: Request, ctx: Ctx) {
   }
   if (!campaign) return answer(NextResponse.json({ error: 'unknown_campaign' }, { status: 400 }))
 
+  let promptId: number | null = null
   try {
     const moved = await pickCampaign(jobId, { id: campaign.id, name: campaign.name })
     if (!moved) return answer(NextResponse.json({ error: 'already_handled' }, { status: 409 }))
+    promptId = typeof moved === 'object' ? moved.prompt_message_id : null
   } catch (err) {
     return answer(dbErrorResponse(err, 'api/gates/campaign'))
+  }
+  // Close the stale Telegram campaign prompt (best effort; only while Telegram is on).
+  if (promptId !== null && parseChannels(process.env.ALERT_CHANNELS).has('telegram')) {
+    try {
+      await editMessage(promptId, `✅ Campaign set in Lume: ${campaign.name}`)
+    } catch (err) {
+      console.error('[api/gates/campaign] telegram prompt edit failed:', err instanceof Error ? err.message : err)
+    }
   }
   const op = await currentOperator(req)
   try {
