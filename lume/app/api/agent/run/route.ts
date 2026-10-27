@@ -392,7 +392,7 @@ async function executeRun({
       skills: { list: () => listSkills(), get: getSkill, findByName: findSkillByName, create: createSkill },
       notify: async (raw) => {
         // Telegram and the feed both get the masked text: a sign-in link is never sent or stored in plaintext.
-        const text = maskKeyText(raw)
+        const text = maskKeyText(raw, { bare: true })
         const r = await alert({
           source: 'lume.agent', severity: 'info', title: titleFrom(text), body: text,
           link: alertLink(`/agent?c=${conversationId}`),

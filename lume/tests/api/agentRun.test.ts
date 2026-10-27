@@ -606,11 +606,11 @@ describe('agent run alerts (G4)', () => {
 
   it('notify never carries an operator sign-in link in plaintext (Telegram text and feed row)', async () => {
     h.sendMessage.mockResolvedValue({ ok: true, messageId: 1 })
-    fakeRunner([{ text: 'x', call: { name: 'notify', input: { text: 'new bot: https://l.test/auth/operator?k=SECRETKEY987' } } }, { text: 'ok' }], [])
+    fakeRunner([{ text: 'x', call: { name: 'notify', input: { text: 'new bot: https://l.test/auth/operator?k=SECRETKEY9876543210abcdefghijklmnopqrstuvwx' } } }, { text: 'ok' }], [])
     await events(await post('tell me', { conversation_id: CONV }))
-    expect(JSON.stringify(h.sendMessage.mock.calls)).not.toContain('SECRETKEY987')
+    expect(JSON.stringify(h.sendMessage.mock.calls)).not.toContain('SECRETKEY9876543210abcdefghijklmnopqrstuvwx')
     expect(JSON.stringify(h.sendMessage.mock.calls)).toContain('k=SECR****')
-    expect(JSON.stringify(feed.rows)).not.toContain('SECRETKEY987')
+    expect(JSON.stringify(feed.rows)).not.toContain('SECRETKEY9876543210abcdefghijklmnopqrstuvwx')
   })
 
   it('notify with ALERT_CHANNELS=feed: no Telegram send, the tool still reports sent', async () => {

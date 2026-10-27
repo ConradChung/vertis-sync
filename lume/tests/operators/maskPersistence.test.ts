@@ -31,7 +31,8 @@ import { createSkill } from '@/lib/agent/skills'
 import { renameConversation } from '@/lib/agent/conversations'
 import { alert } from '@/lib/alerts'
 
-const RAW = 'https://lume.test/auth/operator?k=SECRETKEY987654'
+const KEY = 'SECRETKEY9876543210abcdefghijklmnopqrstuvwx'
+const RAW = `https://lume.test/auth/operator?k=${KEY}`
 beforeEach(() => {
   writes.length = 0
 })
@@ -47,7 +48,7 @@ describe('no plaintext operator sign-in link is persisted', () => {
     await addMemory('fact' as never, `link ${RAW}`, null).catch(() => {})
     const all = JSON.stringify(writes)
     expect(writes.length).toBeGreaterThanOrEqual(7)
-    expect(all).not.toContain('SECRETKEY987654')
+    expect(all).not.toContain(KEY)
     expect(all).toContain('k=SECR****')
   })
 })
@@ -60,12 +61,28 @@ describe('no plaintext link: the review-found paths', () => {
     await renameConversation('c', `t ${RAW}`)
     const tables = writes.map((w) => w.table)
     expect(tables).toEqual(expect.arrayContaining(['pending_actions', 'lume_alert_upsert', 'agent_skills', 'agent_conversations']))
-    expect(JSON.stringify(writes)).not.toContain('SECRETKEY987654')
+    expect(JSON.stringify(writes)).not.toContain(KEY)
   })
 
   it('alert() hands Telegram its own text, so callers mask before building it (see notify)', async () => {
     const telegram = vi.fn(async () => ({ ok: true }))
     await alert({ source: 's', title: 'x', telegram })
     expect(telegram).toHaveBeenCalled()
+  })
+})
+
+describe('the mask is narrow', () => {
+  it('an unrelated ?k= and a bare token survive in pending_actions and events; agent text masks the bare key', async () => {
+    await insertPendingAction({ kind: 'run_actor', payload: { input: { url: 'https://www.amazon.com/s?k=laptops', token: KEY }, summary: 's' }, requested_by: 'agent' }).catch(() => {})
+    await logEvent({ type: 't', source: 's', title: 'x', payload: { url: 'https://amazon.com/s?k=laptops', token: KEY } })
+    await insertMessage({ conversation_id: 'c', role: 'assistant', text: `bare ${KEY}` })
+    const pa = writes.find((w) => w.table === 'pending_actions')!
+    const ev = writes.find((w) => w.table === 'events')!
+    const msg = writes.find((w) => w.table === 'agent_messages')!
+    expect(JSON.stringify(pa.row)).toContain('s?k=laptops')
+    expect(JSON.stringify(pa.row)).toContain(KEY)
+    expect(JSON.stringify(ev.row)).toContain(KEY)
+    expect(JSON.stringify(msg.row)).not.toContain(KEY)
+    expect(JSON.stringify(msg.row)).toContain('SECR****')
   })
 })

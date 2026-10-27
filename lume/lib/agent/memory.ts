@@ -1,5 +1,8 @@
 import 'server-only'
 import { maskOperatorKeys } from '@/lib/operators/mask'
+
+/** Agent-written text: also mask a bare 43-character key. */
+const AGENT_TEXT = { bare: true } as const
 import { createServiceClient } from '@/lib/supabase/service'
 import { DbError } from '@/lib/db/service'
 import { knowledgeBlock, KNOWLEDGE_MAX_MEMORIES, KNOWLEDGE_MAX_TITLES, snippet, type Memory, type MemoryKind } from '@/lib/agent/memoryModel'
@@ -18,7 +21,7 @@ export async function listMemories(limit = 200): Promise<Memory[]> {
 export async function addMemory(kind: MemoryKind, content: string, conversationId: string | null): Promise<{ memory: Memory; duplicate: boolean }> {
   const sb = createServiceClient()
   // Never remember an operator sign-in link in plaintext.
-  const text = maskOperatorKeys(content.trim())
+  const text = maskOperatorKeys(content.trim(), AGENT_TEXT)
   const existing = await sb.from('agent_memory').select(COLS).is('archived_at', null).ilike('content', text.replace(/[%_\\]/g, (c) => `\\${c}`)).limit(1).maybeSingle()
   if (existing.error) throw new DbError('addMemory', existing.error)
   if (existing.data) {

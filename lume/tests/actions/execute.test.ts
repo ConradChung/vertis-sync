@@ -760,23 +760,23 @@ describe('issue_operator_key (G9)', () => {
     ops.getVertical.mockReset()
     ops.createOperatorKey.mockReset()
     ops.getVertical.mockResolvedValue({ id: VID, name: 'Roofers', archived_at: null })
-    ops.createOperatorKey.mockResolvedValue({ operator: { id: 'op-new', label: 'Roofers bot' }, rawKey: 'RAWKEY0123456789' })
+    ops.createOperatorKey.mockResolvedValue({ operator: { id: 'op-new', label: 'Roofers bot' }, rawKey: 'RAWKEY0123456789abcdefghijklmnopqrstuvwxyzA' })
   })
 
   it('reveals the sign-in link once; the stored result, event and outcome keep only a masked copy', async () => {
     store.claimExecution.mockResolvedValue(keyRow())
     const out = await executeAction(ID, { revealOnce: true, origin: 'https://lume.test' })
-    expect(out).toMatchObject({ ran: true, status: 'executed', reveal: { sign_in_url: 'https://lume.test/auth/operator?k=RAWKEY0123456789' } })
+    expect(out).toMatchObject({ ran: true, status: 'executed', reveal: { sign_in_url: 'https://lume.test/auth/operator?k=RAWKEY0123456789abcdefghijklmnopqrstuvwxyzA' } })
     expect(ops.createOperatorKey).toHaveBeenCalledWith({ verticalId: VID, label: 'Roofers bot' })
     const [, , stored] = lastFinish()
     expect(stored).toEqual({
       operator_id: 'op-new', vertical_id: VID, vertical_name: 'Roofers', label: 'Roofers bot',
       sign_in_url_masked: 'https://lume.test/auth/operator?k=RAWK****',
     })
-    expect(JSON.stringify(store.finishAction.mock.calls)).not.toContain('RAWKEY0123456789')
-    expect(JSON.stringify(svc.logEvent.mock.calls)).not.toContain('RAWKEY0123456789')
-    expect(JSON.stringify(tg.sendMessage.mock.calls)).not.toContain('RAWKEY0123456789')
-    expect(JSON.stringify(feed.rows)).not.toContain('RAWKEY0123456789')
+    expect(JSON.stringify(store.finishAction.mock.calls)).not.toContain('RAWKEY0123456789abcdefghijklmnopqrstuvwxyzA')
+    expect(JSON.stringify(svc.logEvent.mock.calls)).not.toContain('RAWKEY0123456789abcdefghijklmnopqrstuvwxyzA')
+    expect(JSON.stringify(tg.sendMessage.mock.calls)).not.toContain('RAWKEY0123456789abcdefghijklmnopqrstuvwxyzA')
+    expect(JSON.stringify(feed.rows)).not.toContain('RAWKEY0123456789abcdefghijklmnopqrstuvwxyzA')
   })
 
   it('refuses to mint without revealOnce (Telegram lume_ok, the sweeper): the link could never be shown', async () => {
@@ -800,8 +800,8 @@ describe('issue_operator_key (G9)', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('cache-control')).toBe('no-store')
     const body = await res.json()
-    expect(body.sign_in_url).toBe('http://localhost/auth/operator?k=RAWKEY0123456789')
-    expect(JSON.stringify(body.result)).not.toContain('RAWKEY0123456789')
+    expect(body.sign_in_url).toBe('http://localhost/auth/operator?k=RAWKEY0123456789abcdefghijklmnopqrstuvwxyzA')
+    expect(JSON.stringify(body.result)).not.toContain('RAWKEY0123456789abcdefghijklmnopqrstuvwxyzA')
   })
 
   it('decide route: a form post is refused before any claim (a redirect cannot carry the link)', async () => {

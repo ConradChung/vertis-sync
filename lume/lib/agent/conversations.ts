@@ -5,6 +5,9 @@ import type { Json } from '@/lib/db/types'
 import type { ConversationSummary, StoredApproval, StoredMessage, StoredToolEntry } from '@/lib/agent/history'
 import { maskOperatorKeys } from '@/lib/operators/mask'
 
+/** Agent-written text: also mask a bare 43-character key. */
+const AGENT_TEXT = { bare: true } as const
+
 /** `agent_conversations` / `agent_messages` (service role, after the owner guard). */
 
 const COLS = 'id, title, created_at, updated_at'
@@ -21,7 +24,7 @@ export interface ConversationOrigin {
 
 export async function createConversation(title: string, origin?: ConversationOrigin): Promise<ConversationSummary> {
   const sb = createServiceClient()
-  const safeTitle = maskOperatorKeys(title)
+  const safeTitle = maskOperatorKeys(title, AGENT_TEXT)
   const row: Record<string, string | null> = origin
     ? { title: safeTitle, vertical_id: origin.vertical_id, operator_id: origin.operator_id }
     : { title: safeTitle }
@@ -76,10 +79,10 @@ export async function insertMessage(m: NewMessage): Promise<void> {
   const res = await sb.from('agent_messages').insert({
     conversation_id: m.conversation_id,
     role: m.role,
-    text: maskOperatorKeys(m.text),
-    tools: maskOperatorKeys(m.tools ?? []) as unknown as Json,
-    approvals: maskOperatorKeys(m.approvals ?? []) as unknown as Json,
-    error: m.error ? maskOperatorKeys(m.error) : null,
+    text: maskOperatorKeys(m.text, AGENT_TEXT),
+    tools: maskOperatorKeys(m.tools ?? [], AGENT_TEXT) as unknown as Json,
+    approvals: maskOperatorKeys(m.approvals ?? [], AGENT_TEXT) as unknown as Json,
+    error: m.error ? maskOperatorKeys(m.error, AGENT_TEXT) : null,
     run_id: m.run_id ?? null,
     auto: m.auto ?? false,
   })
@@ -91,7 +94,7 @@ export async function insertMessage(m: NewMessage): Promise<void> {
 /** Rename; false when the conversation does not exist or is archived. */
 export async function renameConversation(id: string, title: string): Promise<boolean> {
   const sb = createServiceClient()
-  const res = await sb.from('agent_conversations').update({ title: maskOperatorKeys(title) }).eq('id', id).is('archived_at', null).select('id')
+  const res = await sb.from('agent_conversations').update({ title: maskOperatorKeys(title, AGENT_TEXT) }).eq('id', id).is('archived_at', null).select('id')
   if (res.error) throw new DbError('renameConversation', res.error)
   return (res.data ?? []).length > 0
 }

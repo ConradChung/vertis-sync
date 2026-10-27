@@ -4,11 +4,14 @@ import { DbError } from '@/lib/db/service'
 import type { AgentRunRow, Json } from '@/lib/db/types'
 import { maskOperatorKeys } from '@/lib/operators/mask'
 
+/** Agent-written text: also mask a bare 43-character key. */
+const AGENT_TEXT = { bare: true } as const
+
 /** `agent_runs` writes for the run route (service role, after `requireOwner`). */
 
 export async function insertAgentRun(prompt: string, model: string): Promise<AgentRunRow> {
   const sb = createServiceClient()
-  const res = await sb.from('agent_runs').insert({ prompt: maskOperatorKeys(prompt), model, status: 'running' }).select().single()
+  const res = await sb.from('agent_runs').insert({ prompt: maskOperatorKeys(prompt, AGENT_TEXT), model, status: 'running' }).select().single()
   if (res.error || !res.data) throw new DbError('insertAgentRun', res.error ?? new Error('no data'))
   return res.data as AgentRunRow
 }
@@ -20,7 +23,7 @@ export type AgentRunPatch = Partial<
 export async function updateAgentRun(id: string, patch: AgentRunPatch): Promise<void> {
   const sb = createServiceClient()
   // The final text (outcome) or a tool error could quote a sign-in link the agent was handed once.
-  const res = await sb.from('agent_runs').update(maskOperatorKeys(patch) as Record<string, Json>).eq('id', id)
+  const res = await sb.from('agent_runs').update(maskOperatorKeys(patch, AGENT_TEXT) as Record<string, Json>).eq('id', id)
   if (res.error) throw new DbError('updateAgentRun', res.error)
 }
 

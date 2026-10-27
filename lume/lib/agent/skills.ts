@@ -1,5 +1,8 @@
 import 'server-only'
 import { maskOperatorKeys } from '@/lib/operators/mask'
+
+/** Agent-written text: also mask a bare 43-character key. */
+const AGENT_TEXT = { bare: true } as const
 import { createServiceClient } from '@/lib/supabase/service'
 import { DbError } from '@/lib/db/service'
 import type { Json } from '@/lib/db/types'
@@ -45,10 +48,10 @@ export async function createSkill(skill: NewSkill): Promise<Skill> {
     .from('agent_skills')
     // An operator sign-in link is never stored in plaintext (lib/operators/mask.ts).
     .insert({
-      name: maskOperatorKeys(skill.name),
-      description: maskOperatorKeys(skill.description),
-      steps: maskOperatorKeys(skill.steps) as unknown as Json,
-      variables: maskOperatorKeys(skill.variables) as unknown as Json,
+      name: maskOperatorKeys(skill.name, AGENT_TEXT),
+      description: maskOperatorKeys(skill.description, AGENT_TEXT),
+      steps: maskOperatorKeys(skill.steps, AGENT_TEXT) as unknown as Json,
+      variables: maskOperatorKeys(skill.variables, AGENT_TEXT) as unknown as Json,
       source_conversation_id: skill.source_conversation_id ?? null,
     })
     .select(COLS)
