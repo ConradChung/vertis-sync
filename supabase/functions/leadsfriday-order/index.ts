@@ -12,6 +12,7 @@
 // Helpers copied from telegram-inbox; polling pattern from jobsearch-puller.
 
 import { parseCsv } from '../_shared/jobsearch/pure.ts'
+import { alert, type AlertInput, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 
@@ -72,6 +73,17 @@ async function tg(method: string, body: unknown): Promise<Record<string, unknown
 
 function sendTelegram(text: string, reply_markup?: unknown): Promise<Record<string, unknown>> {
   return tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text, reply_markup, disable_web_page_preview: true })
+}
+
+// Every notice lands in lume_alerts; Telegram sends exactly as before while
+// ALERT_CHANNELS includes telegram (the default). Resolves to the Telegram
+// response, or undefined when Telegram is switched off.
+type NotifyMeta = Pick<AlertInput<unknown>, 'severity' | 'link' | 'campaign_id' | 'scope' | 'dedupe_key'>
+function notify(text: string, meta: NotifyMeta, reply_markup?: unknown): Promise<Record<string, unknown> | undefined> {
+  return alert({
+    source: 'leadsfriday-order', title: titleFrom(text), body: text, scope: 'orders', ...meta,
+    telegram: () => sendTelegram(text, reply_markup),
+  })
 }
 
 // ---- Email column detection (mirrors telegram-inbox / app/api/validate/start) ----
@@ -163,7 +175,8 @@ async function failOrder(id: string, fromStatus: string, message: string): Promi
     'PATCH', `apollo_orders?id=eq.${id}&status=eq.${fromStatus}`, { status: 'failed', error: message }, { returning: true },
   )) as ApolloOrder[]
   if (rows?.length) {
-    await sendTelegram(`❌ Leadsfriday order${rows[0].leadsfriday_order_id ? ` #${rows[0].leadsfriday_order_id}` : ''} failed\n${message}`)
+    await notify(`❌ Leadsfriday order${rows[0].leadsfriday_order_id ? ` #${rows[0].leadsfriday_order_id}` : ''} failed\n${message}`,
+      { severity: 'warn', link: lumeLink('/import') })
   }
 }
 
@@ -219,14 +232,15 @@ async function phaseOrder(order: ApolloOrder): Promise<void> {
 
   const deducted = placed.credits_deducted !== undefined ? `${placed.credits_deducted} credits deducted` : 'credits deducted: not reported'
   const balance = placed.new_balance !== undefined ? ` · balance ${placed.new_balance}` : ''
-  const sent = await sendTelegram(
+  const sent = await notify(
     `💳 Leadsfriday order #${placed.order_id} placed\n` +
     `${count} contacts (verified emails) from your Apollo link\n` +
     `${deducted}${balance}\n\n` +
     `I'll pull the CSV as soon as it's delivered and send you the usual Approve / Deny prompt.`,
+    { severity: 'urgent', link: lumeLink('/import') },
     abortKeyboard(order.id),
   )
-  const mid = (sent.result as { message_id?: number } | undefined)?.message_id
+  const mid = (sent?.result as { message_id?: number } | undefined)?.message_id
   if (mid) await supabaseRequest('PATCH', `apollo_orders?id=eq.${order.id}`, { telegram_message_id: mid })
 
   selfInvoke({ order_id: order.id, phase: 'poll', ordered_at: new Date().toISOString() })
@@ -333,8 +347,11 @@ async function ingest(order: ApolloOrder, st: LeadsfridayStatus): Promise<void> 
       ]] }
     : { inline_keyboard: [[{ text: '❌ Deny', callback_data: `deny:${ing.id}` }]] }
 
-  const sent = await sendTelegram(ownerText, keyboard)
-  const mid = (sent.result as { message_id?: number } | undefined)?.message_id
+  const sent = await notify(ownerText, {
+    severity: 'urgent', link: lumeLink(`/validate?gate=ingest_approval:${ing.id}`), scope: 'validation',
+    dedupe_key: `${ing.id}:ingest_approval`,
+  }, keyboard)
+  const mid = (sent?.result as { message_id?: number } | undefined)?.message_id
   if (mid) await supabaseRequest('PATCH', `telegram_ingests?id=eq.${ing.id}`, { telegram_message_id: mid })
 
   await supabaseRequest('PATCH', `apollo_orders?id=eq.${order.id}&status=eq.delivered`, { status: 'ingested', ingest_id: ing.id })

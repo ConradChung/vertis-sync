@@ -12,6 +12,7 @@
 // them made invalid_count useless on partly-blank lists.
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
+import { alert, type AlertInput, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -68,6 +69,16 @@ async function isHalted(jobId: string): Promise<boolean> {
     console.error('[contact-email-finder] halt check failed, continuing:', err)
     return false
   }
+}
+
+// Every notice lands in lume_alerts; Telegram sends exactly as before while
+// ALERT_CHANNELS includes telegram (the default).
+type NotifyMeta = Pick<AlertInput<void>, 'severity' | 'link' | 'campaign_id' | 'scope' | 'dedupe_key'>
+function notify(message: string, meta: NotifyMeta): Promise<void | undefined> {
+  return alert({
+    source: 'contact-email-finder', title: titleFrom(message), body: message, ...meta,
+    telegram: () => sendTelegram(message),
+  })
 }
 
 async function sendTelegram(message: string): Promise<void> {
@@ -209,9 +220,10 @@ async function processJob(jobId: string): Promise<void> {
 
   if (!CONNECTOR_OS_API_KEY) {
     // Don't strand the job: validate what already has addresses and say why.
-    await sendTelegram(
+    await notify(
       '⚠️ CONNECTOR_OS_API_KEY is not set on this Supabase project — skipping the ' +
       'email finder and validating only the rows that already have an address.',
+      { severity: 'warn', link: lumeLink('/validate'), scope: 'validation' },
     )
     await invokeValidator(jobId)
     return
@@ -334,7 +346,8 @@ async function processJob(jobId: string): Promise<void> {
         const milestone = Math.floor((done / totalMissing) * 100 / MILESTONE_STEP) * MILESTONE_STEP
         if (milestone > lastMilestone && milestone <= 100) {
           lastMilestone = milestone
-          await sendTelegram(`🔍 Email finder ${milestone}% (${done}/${totalMissing}) — ${found} found so far.`)
+          await notify(`🔍 Email finder ${milestone}% (${done}/${totalMissing}) — ${found} found so far.`,
+            { severity: 'info', link: lumeLink('/validate'), scope: 'validation' })
         }
       }
 
@@ -367,7 +380,7 @@ async function processJob(jobId: string): Promise<void> {
     emails_not_found: notFound,
   })
 
-  await sendTelegram(
+  await notify(
     [
       `🔍 Email finder complete — ${job.filename}`,
       `Found: ${found}`,
@@ -375,6 +388,7 @@ async function processJob(jobId: string): Promise<void> {
       ``,
       `Validating ${toValidate.length} addresses now.`,
     ].join('\n'),
+    { severity: 'info', link: lumeLink('/validate'), scope: 'validation' },
   )
 
   if (toValidate.length === 0) {
@@ -421,7 +435,8 @@ Deno.serve(async (req: Request) => {
     } catch (patchErr) {
       console.error('[contact-email-finder] Failed to patch job to failed:', patchErr)
     }
-    await sendTelegram(`⚠️ Email finder failed for job ${jobId}: ${message}`).catch(() => {})
+    await notify(`⚠️ Email finder failed for job ${jobId}: ${message}`,
+      { severity: 'warn', link: lumeLink('/validate'), scope: 'validation' }).catch(() => {})
   })
 
   EdgeRuntime.waitUntil(asyncWork)

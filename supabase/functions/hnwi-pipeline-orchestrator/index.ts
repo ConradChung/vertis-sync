@@ -1,5 +1,6 @@
 // supabase/functions/hnwi-pipeline-orchestrator/index.ts
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
+import { alert, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -249,13 +250,17 @@ async function run(payload: Payload): Promise<void> {
     )
 
     // Telegram: HNWI done, switching to RIA
-    await sendTelegram(
+    const hnwiDoneText =
       `🎯 HNWI Demand Scraper — complete\n\n` +
       `${hnwiRecords.length} signals scraped\n` +
       `├ ${streamALen} with emails → direct validation\n` +
       `└ ${streamBLen} without emails → email finder\n\n` +
-      `🔄 Starting RIA Supply Scraper...`,
-    )
+      `🔄 Starting RIA Supply Scraper...`
+    await alert({
+      source: 'hnwi-pipeline-orchestrator', severity: 'info', title: titleFrom(hnwiDoneText), body: hnwiDoneText,
+      link: lumeLink('/validate'), scope: 'validation',
+      telegram: () => sendTelegram(hnwiDoneText),
+    })
 
     // Start RIA actor now that HNWI is done
     const riaRunId = await startActorRun(WEALTH_ACTOR_ID, payload.ria_input)

@@ -4,6 +4,7 @@
 // normal validation pipeline (validation_jobs/validation_rows + email-validator).
 
 import { LUME_MIN_COUNT, LUME_MAX_COUNT, parseLumeAction, secretsMatch } from '../_shared/lume/action.ts'
+import { alert, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 
@@ -315,7 +316,12 @@ async function handleDocument(message: NonNullable<TelegramUpdate['message']>): 
         ? "That file is over Telegram's 20MB bot download limit — split it into smaller files, or send it another way."
         : 'Could not read that file — try sending it again.',
     })
-    await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: `⚠️ getFile failed for ${name}: ${reason}` })
+    const getFileText = `⚠️ getFile failed for ${name}: ${reason}`
+    await alert({
+      source: 'telegram-inbox', severity: 'warn', title: titleFrom(getFileText), body: getFileText,
+      link: lumeLink('/import'), scope: 'validation',
+      telegram: () => tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: getFileText }),
+    })
     return
   }
 
@@ -383,8 +389,13 @@ async function handleDocument(message: NonNullable<TelegramUpdate['message']>): 
         { text: '❌ Deny', callback_data: `deny:${ingest.id}` },
       ]] }
 
-  const sent = await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: ownerText, reply_markup: keyboard })
-  const ownerMessageId = (sent.result as { message_id?: number } | undefined)?.message_id
+  const sent = await alert({
+    source: 'telegram-inbox', severity: 'urgent', title: titleFrom(ownerText), body: ownerText,
+    link: lumeLink(`/validate?gate=ingest_approval:${ingest.id}`), scope: 'validation',
+    dedupe_key: `${ingest.id}:ingest_approval`,
+    telegram: () => tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: ownerText, reply_markup: keyboard }),
+  })
+  const ownerMessageId = (sent?.result as { message_id?: number } | undefined)?.message_id
   if (ownerMessageId) {
     await supabaseRequest('PATCH', `telegram_ingests?id=eq.${ingest.id}`, { telegram_message_id: ownerMessageId })
   }
@@ -693,7 +704,12 @@ async function showBarrierScreen(job: InstantlyJob, edit?: { chatId: number; mes
       reply_markup: screen.reply_markup,
     })
   } else {
-    await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: screen.text, reply_markup: screen.reply_markup })
+    await alert({
+      source: 'telegram-inbox', severity: 'urgent', title: titleFrom(screen.text), body: screen.text,
+      link: lumeLink(`/validate?gate=push_review:${job.id}`), scope: 'validation',
+      campaign_id: job.instantly_campaign_id ?? null, dedupe_key: `${job.id}:push_review`,
+      telegram: () => tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: screen.text, reply_markup: screen.reply_markup }),
+    })
   }
 }
 
@@ -1100,18 +1116,24 @@ async function sendFinderPrompt(
 ): Promise<void> {
   const withEmail = totalRows - missingEmail
   const extraSecs = missingEmail * SEC_PER_ROW_FIND
-  await tg('sendMessage', {
-    chat_id: TELEGRAM_CHAT_ID,
-    text:
-      `📥 ${filename}\n` +
-      `${totalRows} rows loaded — ${missingEmail} have no email address.\n\n` +
-      `Find the missing ones first, or validate only the ${withEmail} that already have one?`,
-    reply_markup: {
-      inline_keyboard: [[
-        { text: `🔍 Find them first (~${formatDuration(extraSecs)} extra)`, callback_data: `finder_go:${jobId}` },
-        { text: `⏭ Validate only ${withEmail}`, callback_data: `finder_skip:${jobId}` },
-      ]],
-    },
+  const finderText =
+    `📥 ${filename}\n` +
+    `${totalRows} rows loaded — ${missingEmail} have no email address.\n\n` +
+    `Find the missing ones first, or validate only the ${withEmail} that already have one?`
+  await alert({
+    source: 'telegram-inbox', severity: 'urgent', title: titleFrom(finderText), body: finderText,
+    link: lumeLink(`/validate?gate=finder_decision:${jobId}`), scope: 'validation',
+    dedupe_key: `${jobId}:finder_decision`,
+    telegram: () => tg('sendMessage', {
+      chat_id: TELEGRAM_CHAT_ID,
+      text: finderText,
+      reply_markup: {
+        inline_keyboard: [[
+          { text: `🔍 Find them first (~${formatDuration(extraSecs)} extra)`, callback_data: `finder_go:${jobId}` },
+          { text: `⏭ Validate only ${withEmail}`, callback_data: `finder_skip:${jobId}` },
+        ]],
+      },
+    }),
   })
 }
 
@@ -1488,16 +1510,22 @@ async function handleApolloOrPasteText(message: NonNullable<TelegramUpdate['mess
     const url = apollo[0]
     const rows = (await supabaseRequest('POST', 'apollo_orders', { apollo_url: url, status: 'awaiting_count' }, { returning: true })) as ApolloOrderRow[]
     const order = rows[0]
-    const sent = await tg('sendMessage', {
-      chat_id: TELEGRAM_CHAT_ID,
-      text:
-        `🔗 Apollo search received.\n` +
-        `How many contacts should Leadsfriday export? Minimum 500; emails are verified. ` +
-        `Credits are deducted when the order is placed, and the receipt shows the exact amount and your balance.`,
-      reply_markup: lfoCountKeyboard(order.id),
-      disable_web_page_preview: true,
+    const countText =
+      `🔗 Apollo search received.\n` +
+      `How many contacts should Leadsfriday export? Minimum 500; emails are verified. ` +
+      `Credits are deducted when the order is placed, and the receipt shows the exact amount and your balance.`
+    const sent = await alert({
+      source: 'telegram-inbox', severity: 'urgent', title: titleFrom(countText), body: countText,
+      link: lumeLink(`/validate?gate=lfo_count:${order.id}`), scope: 'orders',
+      dedupe_key: `${order.id}:lfo_count`,
+      telegram: () => tg('sendMessage', {
+        chat_id: TELEGRAM_CHAT_ID,
+        text: countText,
+        reply_markup: lfoCountKeyboard(order.id),
+        disable_web_page_preview: true,
+      }),
     })
-    const mid = (sent.result as { message_id?: number } | undefined)?.message_id
+    const mid = (sent?.result as { message_id?: number } | undefined)?.message_id
     if (mid) await supabaseRequest('PATCH', `apollo_orders?id=eq.${order.id}`, { telegram_message_id: mid })
     return true
   }
@@ -1515,12 +1543,17 @@ async function handleApolloOrPasteText(message: NonNullable<TelegramUpdate['mess
     status: 'ordered', count_status: 'claimed', leadsfriday_order_id: lfId, leadsfriday_status: 'pending',
   }, { returning: true })) as ApolloOrderRow[]
   const order = rows[0]
-  const sent = await tg('sendMessage', {
-    chat_id: TELEGRAM_CHAT_ID,
-    text: `👀 Tracking Leadsfriday order #${lfId}. I'll pull the CSV when it's delivered and send the Approve / Deny prompt.`,
-    reply_markup: { inline_keyboard: [[{ text: '⛔ Stop tracking', callback_data: `lfo_abort:${order.id}` }]] },
+  const trackText = `👀 Tracking Leadsfriday order #${lfId}. I'll pull the CSV when it's delivered and send the Approve / Deny prompt.`
+  const sent = await alert({
+    source: 'telegram-inbox', severity: 'info', title: titleFrom(trackText), body: trackText,
+    link: lumeLink('/import'), scope: 'orders',
+    telegram: () => tg('sendMessage', {
+      chat_id: TELEGRAM_CHAT_ID,
+      text: trackText,
+      reply_markup: { inline_keyboard: [[{ text: '⛔ Stop tracking', callback_data: `lfo_abort:${order.id}` }]] },
+    }),
   })
-  const mid = (sent.result as { message_id?: number } | undefined)?.message_id
+  const mid = (sent?.result as { message_id?: number } | undefined)?.message_id
   if (mid) await supabaseRequest('PATCH', `apollo_orders?id=eq.${order.id}`, { telegram_message_id: mid })
   invokeOrderFunction(order.id)
   return true
@@ -1669,9 +1702,14 @@ async function handleLumeActionCallback(
     // The row is now `approved` with nothing to run it. Say so, loudly, rather
     // than leave it stuck where only a DB query would find it.
     console.warn(`[telegram-inbox] lume_ok ${actionId} (${row.kind}) approved but LUME_URL is not set`)
-    await tg('sendMessage', {
-      chat_id: TELEGRAM_CHAT_ID,
-      text: `⚠️ Approved but LUME_URL is not set — nothing executed (${row.kind} ${actionId.slice(0, 8)})`,
+    const unsetText = `⚠️ Approved but LUME_URL is not set — nothing executed (${row.kind} ${actionId.slice(0, 8)})`
+    await alert({
+      source: 'telegram-inbox', severity: 'warn', title: titleFrom(unsetText), body: unsetText,
+      link: lumeLink(`/actions/${actionId}`),
+      telegram: () => tg('sendMessage', {
+        chat_id: TELEGRAM_CHAT_ID,
+        text: unsetText,
+      }),
     })
     return
   }
@@ -2012,10 +2050,15 @@ Deno.serve(async (req: Request) => {
       }
       console.log('[lume]', parsed.action, parsed.targetId, claimed === null ? 'unobservable' : claimed ? 'claimed' : 'no-op')
       if (claimed !== false) {
-        await tg('sendMessage', {
-          chat_id: TELEGRAM_CHAT_ID,
-          text: `🖥 ${parsed.action} on ${id8} — decided in Lume`,
-          reply_markup: lumeBrakeKeyboard(parsed.action, parsed.targetId),
+        const decidedText = `🖥 ${parsed.action} on ${id8} — decided in Lume`
+        await alert({
+          source: 'telegram-inbox', severity: 'info', title: titleFrom(decidedText), body: decidedText,
+          link: lumeLink(parsed.action.startsWith('lume_') ? `/actions/${parsed.targetId}` : '/validate'),
+          telegram: () => tg('sendMessage', {
+            chat_id: TELEGRAM_CHAT_ID,
+            text: decidedText,
+            reply_markup: lumeBrakeKeyboard(parsed.action, parsed.targetId),
+          }),
         })
       }
       return new Response(
@@ -2028,9 +2071,14 @@ Deno.serve(async (req: Request) => {
       // notification channel or a browser.
       const message = err instanceof Error ? err.message : String(err)
       console.error(`[telegram-inbox] lume action error (${parsed.action} ${parsed.targetId}):`, message)
-      await tg('sendMessage', {
-        chat_id: TELEGRAM_CHAT_ID,
-        text: `⚠️ telegram-inbox (Lume) error on ${parsed.action} ${id8}`,
+      const lumeErrText = `⚠️ telegram-inbox (Lume) error on ${parsed.action} ${id8}`
+      await alert({
+        source: 'telegram-inbox', severity: 'warn', title: titleFrom(lumeErrText), body: lumeErrText,
+        link: lumeLink(parsed.action.startsWith('lume_') ? `/actions/${parsed.targetId}` : '/validate'),
+        telegram: () => tg('sendMessage', {
+          chat_id: TELEGRAM_CHAT_ID,
+          text: lumeErrText,
+        }),
       }).catch(() => {})
       return new Response(JSON.stringify({ ok: false, error: 'handler failed' }), {
         status: 500, headers: { 'Content-Type': 'application/json' },
@@ -2074,7 +2122,11 @@ Deno.serve(async (req: Request) => {
   })().catch(async (err: unknown) => {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[telegram-inbox] handler error:', message)
-    await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: `⚠️ telegram-inbox error: ${message}` }).catch(() => {})
+    const errText = `⚠️ telegram-inbox error: ${message}`
+    await alert({
+      source: 'telegram-inbox', severity: 'warn', title: titleFrom(errText), body: errText, link: lumeLink('/overview'),
+      telegram: () => tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: errText }),
+    }).catch(() => {})
   })
 
   EdgeRuntime.waitUntil(work)

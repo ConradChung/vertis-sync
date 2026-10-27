@@ -44,6 +44,7 @@ import {
   type Pool,
 } from '../_shared/jobsearch/pool.ts'
 import { getAccessToken, readRange } from '../_shared/jobsearch/sheets.ts'
+import { alert, type AlertInput, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 
@@ -115,6 +116,16 @@ async function tg(method: string, body: unknown): Promise<Record<string, unknown
 
 function sendTelegram(text: string, reply_markup?: unknown): Promise<unknown> {
   return tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text, reply_markup, disable_web_page_preview: true })
+}
+
+// Every notice lands in lume_alerts; Telegram sends exactly as before while
+// ALERT_CHANNELS includes telegram (the default).
+type NotifyMeta = Pick<AlertInput<unknown>, 'severity' | 'link' | 'campaign_id' | 'scope' | 'dedupe_key'>
+function notify(text: string, meta: NotifyMeta, reply_markup?: unknown): Promise<unknown> {
+  return alert({
+    source: 'jobsearch-puller', title: titleFrom(text), body: text, scope: 'orders', ...meta,
+    telegram: () => sendTelegram(text, reply_markup),
+  })
 }
 
 // ---- Types ----------------------------------------------------------------
@@ -387,11 +398,12 @@ async function fillRound(batch: JobBatch, mode: 'gate' | 'fill_more' | 'refill')
   console.log(`[jobsearch-puller] ${mode}: pool ${poolLine(pool)}; took ${chosen.length} (t1 ${tiers[1]}, t2 ${tiers[2]}, t3 ${tiers[3]}); ${poolLeft} left`)
 
   if (mode === 'gate') {
-    await sendTelegram(
+    await notify(
       `🔎 Filling batch ${formatBatchDate(batch.batch_date)}\n` +
       `Eligible pool (not in gtm, last ${batch.lookback_days ?? 365} days): ${poolLine(pool)}.\n` +
       `Taking ${chosen.length} companies this round (strict ${tiers[1]}, adjacent ${tiers[2]}, other ${tiers[3]}); ` +
       `target ${companiesNeeded()} resolved for a ${LEADSFRIDAY_MIN_CONTACTS}-contact order.`,
+      { severity: 'info', link: lumeLink('/validate') },
       { inline_keyboard: [[{ text: '⛔ Abort batch', callback_data: `jobs_abort:${batch.id}` }]] },
     )
   }
@@ -407,12 +419,15 @@ async function fillRound(batch: JobBatch, mode: 'gate' | 'fill_more' | 'refill')
 async function parkWaitingFill(batch: JobBatch, resolved: number, poolLeft: number): Promise<void> {
   if (!(await claimStatus(batch.id, 'resolving', { status: 'waiting_fill' }))) return
   const need = companiesNeeded()
-  await sendTelegram(
+  await notify(
     `⏳ Batch ${formatBatchDate(batch.batch_date)} is waiting to fill\n` +
     `${resolved} ${resolved === 1 ? 'company' : 'companies'} resolved (~${resolved * 15} contacts); ` +
     `Leadsfriday needs ${LEADSFRIDAY_MIN_CONTACTS} (${need} companies).\n` +
     `Eligible pool left: ${poolLeft}. New scrapes top this batch up automatically (checked hourly).\n\n` +
     `Order anyway places a ${LEADSFRIDAY_MIN_CONTACTS}-contact order for the ${resolved} resolved now.`,
+    // Money decision. Keyed on the resolved count so a retry adds nothing but
+    // a later re-park (after a refill) gets its own row.
+    { severity: 'urgent', link: lumeLink(`/validate?gate=jobs_fill:${batch.id}`), dedupe_key: `${batch.id}:jobs_fill:${resolved}` },
     {
       inline_keyboard: [[
         { text: `💳 Order anyway (${LEADSFRIDAY_MIN_CONTACTS} min)`, callback_data: `jobs_order_now:${batch.id}` },
@@ -598,12 +613,13 @@ async function phaseOrder(batch: JobBatch): Promise<void> {
   // Cost report the moment money moves. Apollo's account lookups are free.
   const deducted = order.credits_deducted !== undefined ? `${order.credits_deducted} credits deducted` : 'credits deducted: not reported'
   const balance = order.new_balance !== undefined ? ` · balance ${order.new_balance}` : ''
-  await sendTelegram(
+  await notify(
     `💳 Leadsfriday order #${order.order_id} — batch ${formatBatchDate(batch.batch_date)}\n` +
     `${contactCount} contacts requested across ${resolvedCount} ${resolvedCount === 1 ? 'company' : 'companies'} (verified emails)\n` +
     `${deducted}${balance}\n` +
     `Apollo: ${resolvedCount} org lookups, free.\n\n` +
     `Abort stops the pipeline here; Leadsfriday credits already spent are not refunded.`,
+    { severity: 'urgent', link: lumeLink('/validate') },
     { inline_keyboard: [[{ text: '⛔ Abort batch', callback_data: `jobs_abort:${batch.id}` }]] },
   )
   selfInvoke({ batch_id: batch.id, phase: 'poll', ordered_at: orderedAt })
@@ -780,7 +796,7 @@ async function phaseRank(batch: JobBatch): Promise<void> {
     `${contacts.length} people across ${groups.size} ${groups.size === 1 ? 'company' : 'companies'} · ${withEmail} with email\n` +
     `kept top ${KEEP_TOP} per company → ${keptCount} rows` +
     unresolvedLine
-  await sendTelegram(text, {
+  await notify(text, { severity: 'urgent', link: lumeLink(`/validate?gate=jobs_write:${batch.id}`), dedupe_key: `${batch.id}:jobs_write` }, {
     inline_keyboard: [[
       { text: '✍️ Write to gtm tab', callback_data: `jobs_write:${batch.id}` },
       { text: '🗑 Discard', callback_data: `jobs_discard:${batch.id}` },
@@ -799,7 +815,7 @@ async function failBatch(batchId: string, fromStatus: string, phase: string, mes
     { returning: true },
   )) as JobBatch[]
   if (rows?.length) {
-    await sendTelegram(`❌ Job batch ${formatBatchDate(rows[0].batch_date)} failed at ${phase}\n${message}`)
+    await notify(`❌ Job batch ${formatBatchDate(rows[0].batch_date)} failed at ${phase}\n${message}`, { severity: 'warn', link: lumeLink('/validate') })
   }
 }
 

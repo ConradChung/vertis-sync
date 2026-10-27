@@ -22,6 +22,7 @@
 // exact code that later pushes them.
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
+import { alert, type AlertInput, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -52,6 +53,16 @@ async function supabaseRequest(method: string, path: string, body?: unknown): Pr
   const ct = res.headers.get('content-type') ?? ''
   if (ct.includes('application/json')) return res.json()
   return null
+}
+
+// Every notice lands in lume_alerts; Telegram sends exactly as before while
+// ALERT_CHANNELS includes telegram (the default).
+type NotifyMeta = Pick<AlertInput<void>, 'severity' | 'link' | 'campaign_id' | 'scope' | 'dedupe_key'>
+function notify(message: string, meta: NotifyMeta, replyMarkup?: unknown): Promise<void | undefined> {
+  return alert({
+    source: 'instantly-push', title: titleFrom(message), body: message, ...meta,
+    telegram: () => sendTelegram(message, replyMarkup),
+  })
 }
 
 async function sendTelegram(message: string, replyMarkup?: unknown): Promise<void> {
@@ -553,9 +564,10 @@ async function processJob(jobId: string): Promise<void> {
               instantly_filtered: filtered,
               instantly_errors: errors,
             })
-            await sendTelegram(
+            await notify(
               `⚠️ Stopped the Instantly push after 1 lead — ${problem}.\n` +
               `Campaign: ${job.instantly_campaign_name}\nNothing else was sent.`,
+              { severity: 'warn', link: lumeLink('/campaigns'), scope: 'campaign', campaign_id: targetCampaign },
             )
             return
           }
@@ -613,7 +625,7 @@ async function processJob(jobId: string): Promise<void> {
   // The launch button is the end of the road: everything is in the campaign,
   // so the only thing left is to start sending. telegram-inbox handles the tap
   // and refuses to activate a campaign with no sequence written.
-  await sendTelegram(
+  await notify(
     [
       `📤 Instantly push complete — ${job.filename}`,
       `Campaign: ${job.instantly_campaign_name}`,
@@ -629,6 +641,10 @@ async function processJob(jobId: string): Promise<void> {
       ``,
       `Ready to launch when your sequence is written.`,
     ].join('\n'),
+    pushed > 0
+      // The Launch button asks a decision; without it this is a report.
+      ? { severity: 'urgent', link: lumeLink('/campaigns'), scope: 'campaign', campaign_id: campaignId, dedupe_key: `${jobId}:camp_launch` }
+      : { severity: 'info', link: lumeLink('/campaigns'), scope: 'campaign', campaign_id: campaignId },
     pushed > 0
       ? { inline_keyboard: [[{ text: '🚀 Launch campaign', callback_data: `camp_launch:${jobId}` }]] }
       : undefined,
@@ -682,7 +698,8 @@ Deno.serve(async (req: Request) => {
     } catch (patchErr) {
       console.error('[instantly-push] Failed to patch instantly_status:', patchErr)
     }
-    await sendTelegram(`⚠️ Instantly push failed for job ${jobId}: ${message}`).catch(() => {})
+    await notify(`⚠️ Instantly push failed for job ${jobId}: ${message}`,
+      { severity: 'warn', link: lumeLink('/campaigns'), scope: 'campaign' }).catch(() => {})
   })
 
   EdgeRuntime.waitUntil(asyncWork)

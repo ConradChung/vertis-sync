@@ -4,6 +4,7 @@
 // uploads valid-only CSV to Storage, sets job status to completed or failed.
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
+import { alert, type AlertInput, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -216,6 +217,17 @@ async function validateEmail(
   }
 }
 
+// Every notice lands in lume_alerts; Telegram sends exactly as before while
+// ALERT_CHANNELS includes telegram (the default).
+type NotifyMeta = Pick<AlertInput<void>, 'severity' | 'link' | 'campaign_id' | 'scope' | 'dedupe_key'>
+function notify(message: string, meta: NotifyMeta): Promise<void | undefined> {
+  return alert({
+    source: 'email-validator', title: titleFrom(message), body: message, ...meta,
+    telegram: () => sendTelegram(message),
+  })
+}
+const VALIDATE = { link: lumeLink('/validate'), scope: 'validation' } as const
+
 async function sendTelegram(message: string): Promise<void> {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return
   try {
@@ -370,8 +382,9 @@ async function processJob(jobId: string): Promise<void> {
         const milestonePct = Math.floor(currentPct / 10) * 10
         if (milestonePct > lastMilestonePct && milestonePct <= 100) {
           lastMilestonePct = milestonePct
-          await sendTelegram(
+          await notify(
             `Email validation ${milestonePct}% complete (${processed}/${totalRows}) — ${validCount} valid so far.`,
+            { severity: 'info', ...VALIDATE },
           )
         }
       }
@@ -388,9 +401,10 @@ async function processJob(jobId: string): Promise<void> {
       if (Date.now() - startTime > CHUNK_LIMIT_MS) {
         const handedOff = await handOff('email-validator', jobId)
         if (!handedOff) {
-          await sendTelegram(
+          await notify(
             `⚠️ ${job.filename}: could not start the next validation chunk after 4 attempts.\n` +
             `${processed}/${totalRows} done. The stall watchdog will offer a Resume in ~10 min.`,
+            { severity: 'warn', ...VALIDATE },
           )
         }
         return
@@ -421,10 +435,11 @@ async function processJob(jobId: string): Promise<void> {
         // A mostly-dead list isn't worth Perplexity/Haiku credits. Say so and
         // fall through to the export rather than silently spending.
         await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { enrich_started: true })
-        await sendTelegram(
+        await notify(
           `⏭ Skipped enrichment — ${job.filename}\n` +
           `Only ${validCount} of ${totalRows} rows validated (${(validShare * 100).toFixed(1)}%), ` +
           `below the 10% floor. Building the CSV from what's there.`,
+          { severity: 'info', ...VALIDATE },
         )
       } else {
         const latched = (await supabaseRequest(
@@ -440,10 +455,11 @@ async function processJob(jobId: string): Promise<void> {
             `validation_rows?job_id=eq.${jobId}&status=eq.valid&enrichment_status=eq.skipped`,
             { enrichment_status: 'pending' },
           )
-          await sendTelegram(
+          await notify(
             `✅ Validation complete — ${job.filename}\n` +
             `${validCount} valid / ${invalidCount} invalid\n\n` +
             `🔎 Enriching ${validCount} rows with operating-city research…`,
+            { severity: 'info', ...VALIDATE },
           )
           fetch(`${SUPABASE_URL}/functions/v1/operating-city-enricher`, {
             method: 'POST',
@@ -546,7 +562,7 @@ async function processJob(jobId: string): Promise<void> {
       ? `4. Valid % of found: ${pct}%`
       : `4. Valid % of found: N/A`,
   ]
-  await sendTelegram(lines.join('\n'))
+  await notify(lines.join('\n'), { severity: 'info', ...VALIDATE })
 
   // 6. This is the true end of the job — the same point whether or not
   // enrichment ran. Ask which Instantly campaign the valid leads should go
@@ -561,28 +577,36 @@ async function processJob(jobId: string): Promise<void> {
 }
 
 async function promptForCampaign(jobId: string, filename: string, validCount: number): Promise<void> {
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: TELEGRAM_CHAT_ID,
-        text:
-          `📤 Push ${validCount} valid leads to Instantly?\n${filename}\n\n` +
-          `Reply to this message with the campaign NAME (partial is fine — I'll match it against your campaign list).`,
-        reply_markup: { force_reply: true },
-      }),
-    })
-    const sent = await res.json() as { result?: { message_id?: number } }
-    const messageId = sent.result?.message_id
-    if (!messageId) return
-    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
-      instantly_prompt_message_id: messageId,
-      instantly_status: 'awaiting_campaign',
-    })
-  } catch (err) {
-    console.error('[email-validator] Instantly campaign prompt failed:', err)
-  }
+  const text =
+    `📤 Push ${validCount} valid leads to Instantly?\n${filename}\n\n` +
+    `Reply to this message with the campaign NAME (partial is fine — I'll match it against your campaign list).`
+  await alert({
+    source: 'email-validator', severity: 'urgent', title: titleFrom(text), body: text,
+    link: lumeLink(`/validate?gate=campaign_choice:${jobId}`), scope: 'validation',
+    dedupe_key: `${jobId}:campaign_choice`,
+    telegram: async () => {
+      try {
+        const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: TELEGRAM_CHAT_ID,
+            text,
+            reply_markup: { force_reply: true },
+          }),
+        })
+        const sent = await res.json() as { result?: { message_id?: number } }
+        const messageId = sent.result?.message_id
+        if (!messageId) return
+        await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
+          instantly_prompt_message_id: messageId,
+          instantly_status: 'awaiting_campaign',
+        })
+      } catch (err) {
+        console.error('[email-validator] Instantly campaign prompt failed:', err)
+      }
+    },
+  })
 }
 
 Deno.serve(async (req: Request) => {
@@ -614,7 +638,7 @@ Deno.serve(async (req: Request) => {
     // A key failure is silent by nature — MailTester returns 200 for it — so
     // it gets an explicit alert rather than just a row in the jobs table.
     if (err instanceof MailTesterKeyError) {
-      await sendTelegram(`🔑 Validation halted — MailTester key problem.\n\n${message}`)
+      await notify(`🔑 Validation halted — MailTester key problem.\n\n${message}`, { severity: 'warn', ...VALIDATE })
     }
     try {
       await supabaseRequest(

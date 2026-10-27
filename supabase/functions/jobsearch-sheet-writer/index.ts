@@ -9,6 +9,7 @@
 // Helpers copied from telegram-inbox/index.ts.
 
 import { normalizeDomain, type Role, toCsv } from '../_shared/jobsearch/pure.ts'
+import { alert, type AlertInput, lumeLink, titleFrom } from '../_shared/alert.ts'
 import { appendRows, getAccessToken, readRange, sheetTabLink } from '../_shared/jobsearch/sheets.ts'
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
@@ -49,6 +50,16 @@ async function supabaseRequest(
   const ct = res.headers.get('content-type') ?? ''
   if (ct.includes('application/json')) return res.json()
   return null
+}
+
+// Every notice lands in lume_alerts; Telegram sends exactly as before while
+// ALERT_CHANNELS includes telegram (the default).
+type NotifyMeta = Pick<AlertInput<void>, 'severity' | 'link' | 'campaign_id' | 'scope' | 'dedupe_key'>
+function notify(text: string, meta: NotifyMeta): Promise<void | undefined> {
+  return alert({
+    source: 'jobsearch-sheet-writer', title: titleFrom(text), body: text, ...meta,
+    telegram: () => sendTelegram(text),
+  })
 }
 
 async function sendTelegram(text: string): Promise<void> {
@@ -219,10 +230,11 @@ async function write(batchId: string): Promise<{ written: number; skipped: numbe
   if (!claimed?.length) throw new Error('batch left ranked while writing; not marking written')
 
   const link = sheetTabLink(JOBSEARCH_SHEET_ID, GTM_GID)
-  await sendTelegram(
+  await notify(
     `✍️ ${rows.length} ${rows.length === 1 ? 'row' : 'rows'} written to gtm — batch ${formatBatchDate(batch.batch_date)}` +
     (skipped ? `\n${skipped} already present, skipped` : '') +
     `\n${link}`,
+    { severity: 'info', link: lumeLink('/validate'), scope: 'orders' },
   )
   return { written: rows.length, skipped }
 }
@@ -249,7 +261,8 @@ Deno.serve(async (req: Request) => {
       { status: 'failed', error: message },
       { returning: true },
     ).catch(() => null)) as JobBatch[] | null
-    if (rows?.length) await sendTelegram(`❌ Writing batch ${formatBatchDate(rows[0].batch_date)} to gtm failed\n${message}`)
+    if (rows?.length) await notify(`❌ Writing batch ${formatBatchDate(rows[0].batch_date)} to gtm failed\n${message}`,
+      { severity: 'warn', link: lumeLink('/validate'), scope: 'orders' })
   })
   EdgeRuntime.waitUntil(work)
 

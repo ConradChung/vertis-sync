@@ -9,6 +9,8 @@
 // function secret instead of being copied into the database vault. pg_cron's
 // only job is to POST to this function every 5 minutes.
 
+import { alert, lumeLink, titleFrom } from '../_shared/alert.ts'
+
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const TELEGRAM_BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN') ?? ''
@@ -108,10 +110,11 @@ async function checkForStalls(): Promise<{ scanned: number; notified: string[] }
 
     // Claim the notification slot before sending. Two overlapping ticks then
     // cannot produce two prompts for the same job.
+    const notifiedAt = new Date().toISOString()
     const claimed = (await supabaseRequest(
       'PATCH',
       `validation_jobs?id=eq.${job.id}&watchdog_status=eq.idle`,
-      { watchdog_status: 'awaiting', watchdog_notified_at: new Date().toISOString() },
+      { watchdog_status: 'awaiting', watchdog_notified_at: notifiedAt },
       { returning: true },
     )) as Job[]
     if (!claimed || claimed.length === 0) continue
@@ -124,23 +127,33 @@ async function checkForStalls(): Promise<{ scanned: number; notified: string[] }
     // 10% milestone messages exactly.
     const done = claimed[0].processed_rows ?? 0
 
-    if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
-      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: TELEGRAM_CHAT_ID,
-          text:
-            `⚠️ Job ${job.filename} looks stalled at ${done}/${job.total_rows}\n` +
-            `No rows written in ${Math.floor(idleMinutes)} minutes.\n\nResume?`,
-          reply_markup: {
-            inline_keyboard: [[
-              { text: '▶️ Resume', callback_data: `wd_resume:${job.id}` },
-            ]],
-          },
-        }),
-      })
-    }
+    const stallText =
+      `⚠️ Job ${job.filename} looks stalled at ${done}/${job.total_rows}\n` +
+      `No rows written in ${Math.floor(idleMinutes)} minutes.\n\nResume?`
+    // A stall gate: the feed row links to the Lume card that decides it; one
+    // row per notification slot (the claim time), so a re-stall gets its own.
+    await alert({
+      source: 'pipeline-watchdog', severity: 'urgent', title: titleFrom(stallText), body: stallText,
+      link: lumeLink(`/validate?gate=stall:${job.id}`), scope: 'validation',
+      dedupe_key: `${job.id}:stall:${notifiedAt}`,
+      telegram: async () => {
+        if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
+          await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: TELEGRAM_CHAT_ID,
+              text: stallText,
+              reply_markup: {
+                inline_keyboard: [[
+                  { text: '▶️ Resume', callback_data: `wd_resume:${job.id}` },
+                ]],
+              },
+            }),
+          })
+        }
+      },
+    })
     notified.push(job.id)
   }
 
@@ -191,32 +204,41 @@ async function checkJobBatchStalls(): Promise<{ scanned: number; notified: strin
     // Claim the slot before sending so two overlapping ticks cannot produce
     // two prompts. (The claim itself bumps updated_at through the trigger;
     // the next tick is gated by watchdog_status, not by the heartbeat.)
+    const notifiedAt = new Date().toISOString()
     const claimed = (await supabaseRequest(
       'PATCH',
       `job_batches?id=eq.${batch.id}&watchdog_status=eq.idle`,
-      { watchdog_status: 'awaiting', watchdog_notified_at: new Date().toISOString() },
+      { watchdog_status: 'awaiting', watchdog_notified_at: notifiedAt },
       { returning: true },
     )) as JobBatch[]
     if (!claimed || claimed.length === 0) continue
 
-    if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
-      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: TELEGRAM_CHAT_ID,
-          text:
-            `⚠️ Job batch ${formatBatchDate(batch.batch_date)} stalled at ${batch.status}\n` +
-            `No heartbeat in ${idleMinutes} minutes.\n\nResume?`,
-          reply_markup: {
-            inline_keyboard: [[
-              { text: '▶️ Resume', callback_data: `jobs_resume:${batch.id}` },
-              { text: '⛔ Abort', callback_data: `jobs_abort:${batch.id}` },
-            ]],
-          },
-        }),
-      })
-    }
+    const stallText =
+      `⚠️ Job batch ${formatBatchDate(batch.batch_date)} stalled at ${batch.status}\n` +
+      `No heartbeat in ${idleMinutes} minutes.\n\nResume?`
+    await alert({
+      source: 'pipeline-watchdog', severity: 'urgent', title: titleFrom(stallText), body: stallText,
+      link: lumeLink(`/validate?gate=jobs_stall:${batch.id}`), scope: 'orders',
+      dedupe_key: `${batch.id}:jobs_stall:${notifiedAt}`,
+      telegram: async () => {
+        if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
+          await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: TELEGRAM_CHAT_ID,
+              text: stallText,
+              reply_markup: {
+                inline_keyboard: [[
+                  { text: '▶️ Resume', callback_data: `jobs_resume:${batch.id}` },
+                  { text: '⛔ Abort', callback_data: `jobs_abort:${batch.id}` },
+                ]],
+              },
+            }),
+          })
+        }
+      },
+    })
     notified.push(batch.id)
   }
 

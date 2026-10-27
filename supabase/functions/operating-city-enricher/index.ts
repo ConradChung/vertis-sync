@@ -6,6 +6,7 @@
 // HAIKU_SYSTEM parameterized on job.icp_description, otherwise verbatim.
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
+import { alert, type AlertInput, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -107,6 +108,17 @@ async function isHalted(jobId: string): Promise<boolean> {
     return false
   }
 }
+
+// Every notice lands in lume_alerts; Telegram sends exactly as before while
+// ALERT_CHANNELS includes telegram (the default).
+type NotifyMeta = Pick<AlertInput<void>, 'severity' | 'link' | 'campaign_id' | 'scope' | 'dedupe_key'>
+function notify(message: string, meta: NotifyMeta): Promise<void | undefined> {
+  return alert({
+    source: 'operating-city-enricher', title: titleFrom(message), body: message, ...meta,
+    telegram: () => sendTelegram(message),
+  })
+}
+const VALIDATE = { link: lumeLink('/validate'), scope: 'validation' } as const
 
 async function sendTelegram(message: string): Promise<void> {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return
@@ -397,7 +409,7 @@ async function processJob(jobId: string): Promise<void> {
         const milestonePct = Math.floor(currentPct / 10) * 10
         if (milestonePct > lastMilestonePct && milestonePct <= 100) {
           lastMilestonePct = milestonePct
-          await sendTelegram(`City enrichment ${milestonePct}% complete (${enriched}/${enrichableCount}).`)
+          await notify(`City enrichment ${milestonePct}% complete (${enriched}/${enrichableCount}).`, { severity: 'info', ...VALIDATE })
         }
       }
 
@@ -407,9 +419,10 @@ async function processJob(jobId: string): Promise<void> {
       if (Date.now() - startTime > CHUNK_LIMIT_MS) {
         const handedOff = await handOff(jobId)
         if (!handedOff) {
-          await sendTelegram(
+          await notify(
             `⚠️ ${job.filename}: could not start the next enrichment chunk after 4 attempts.\n` +
             `${enriched}/${enrichableCount} enriched. The stall watchdog will offer a Resume.`,
+            { severity: 'warn', ...VALIDATE },
           )
         }
         return
@@ -434,7 +447,7 @@ async function processJob(jobId: string): Promise<void> {
   const excludedByMembrane = job.icp_filter ? enrichableCount - confirmedCount : 0
   const resolvedPct = enrichableCount > 0 ? ((doneCount / enrichableCount) * 100).toFixed(1) : '0.0'
 
-  await sendTelegram(
+  await notify(
     [
       `🏙️ City enrichment complete — ${job.filename}`,
       `Resolved: ${doneCount}/${enrichableCount} valid-email rows (${resolvedPct}%)`,
@@ -443,6 +456,7 @@ async function processJob(jobId: string): Promise<void> {
         ? `Excluded by ICP filter: ${excludedByMembrane}`
         : 'ICP filter: off (all valid-email rows will export)',
     ].join('\n'),
+    { severity: 'info', ...VALIDATE },
   )
 
   fetch(`${SUPABASE_URL}/functions/v1/email-validator`, {
@@ -484,7 +498,7 @@ Deno.serve(async (req: Request) => {
     } catch (patchErr) {
       console.error('[operating-city-enricher] Failed to patch job status to failed:', patchErr)
     }
-    await sendTelegram(`⚠️ operating-city-enricher failed for job ${jobId}: ${message}`).catch(() => {})
+    await notify(`⚠️ operating-city-enricher failed for job ${jobId}: ${message}`, { severity: 'warn', ...VALIDATE }).catch(() => {})
   })
 
   EdgeRuntime.waitUntil(asyncWork)

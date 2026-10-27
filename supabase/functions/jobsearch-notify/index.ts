@@ -10,6 +10,7 @@
 import { normalizeCompanyName, normalizeDomain, optionalHeaderIndex } from '../_shared/jobsearch/pure.ts'
 import { classifyPool, companiesNeeded, LEADSFRIDAY_MIN_CONTACTS, type Pool } from '../_shared/jobsearch/pool.ts'
 import { getAccessToken, readRange, sheetTabLink } from '../_shared/jobsearch/sheets.ts'
+import { alert, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -182,10 +183,15 @@ async function mergeIntoOpen(batch: JobBatch): Promise<JobBatch | null> {
   const t = updated?.[0] ?? target
 
   if (t.status === 'waiting_fill') {
-    await tg('sendMessage', {
-      chat_id: TELEGRAM_CHAT_ID,
-      text: `➕ ${batch.companies_added} new ${batch.companies_added === 1 ? 'company' : 'companies'} from the ${formatBatchDate(batch.batch_date)} scrape ` +
-        `added to the open batch of ${formatBatchDate(t.batch_date)} — refilling now.`,
+    const mergedText = `➕ ${batch.companies_added} new ${batch.companies_added === 1 ? 'company' : 'companies'} from the ${formatBatchDate(batch.batch_date)} scrape ` +
+      `added to the open batch of ${formatBatchDate(t.batch_date)} — refilling now.`
+    await alert({
+      source: 'jobsearch-notify', severity: 'info', title: titleFrom(mergedText), body: mergedText,
+      link: lumeLink('/validate'), scope: 'orders',
+      telegram: () => tg('sendMessage', {
+        chat_id: TELEGRAM_CHAT_ID,
+        text: mergedText,
+      }),
     })
     invokeBatchFunction('jobsearch-puller', { batch_id: t.id, phase: 'refill' })
   }
@@ -215,32 +221,53 @@ async function notify(batchId: string): Promise<{ message_id: number | null; edi
   // already tapped must not re-arm a decided batch.
   const reply_markup = batch.status === 'awaiting_review' ? gateOneKeyboard(batch) : undefined
 
+  // Gate 1 in the feed: one row per batch (a re-post / merge refresh edits the
+  // Telegram prompt but does not add a second feed row).
+  const open = batch.status === 'awaiting_review'
+  const gate = {
+    source: 'jobsearch-notify', severity: open ? 'urgent' : 'info', title: titleFrom(text), body: text,
+    link: lumeLink(`/validate?gate=jobs_review:${batch.id}`), scope: 'orders', dedupe_key: `${batch.id}:jobs_review`,
+  } as const
+
   if (batch.telegram_message_id) {
-    const res = await tg('editMessageText', {
-      chat_id: TELEGRAM_CHAT_ID,
-      message_id: batch.telegram_message_id,
-      text,
-      reply_markup,
-      disable_web_page_preview: true,
+    const editedId = batch.telegram_message_id
+    await alert({
+      ...gate,
+      telegram: async () => {
+        const res = await tg('editMessageText', {
+          chat_id: TELEGRAM_CHAT_ID,
+          message_id: editedId,
+          text,
+          reply_markup,
+          disable_web_page_preview: true,
+        })
+        // "message is not modified" is Telegram's way of saying the edit was a no-op.
+        if (!res.ok && !String(res.description ?? '').includes('not modified')) {
+          throw new Error(`Telegram editMessageText failed: ${res.description}`)
+        }
+      },
     })
-    // "message is not modified" is Telegram's way of saying the edit was a no-op.
-    if (!res.ok && !String(res.description ?? '').includes('not modified')) {
-      throw new Error(`Telegram editMessageText failed: ${res.description}`)
-    }
     return { message_id: batch.telegram_message_id, edited: true, merged_into: mergedInto }
   }
 
-  const res = await tg('sendMessage', {
-    chat_id: TELEGRAM_CHAT_ID,
-    text,
-    reply_markup,
-    disable_web_page_preview: true,
-  })
-  if (!res.ok) throw new Error(`Telegram sendMessage failed: ${res.description}`)
-  const messageId = (res.result as { message_id?: number } | undefined)?.message_id ?? null
-  if (messageId) {
-    await supabaseRequest('PATCH', `job_batches?id=eq.${batch.id}`, { telegram_message_id: messageId })
-  }
+  const gateBatchId = batch.id
+  const messageId = (await alert({
+    ...gate,
+    telegram: async () => {
+      const res = await tg('sendMessage', {
+        chat_id: TELEGRAM_CHAT_ID,
+        text,
+        reply_markup,
+        disable_web_page_preview: true,
+      })
+      if (!res.ok) throw new Error(`Telegram sendMessage failed: ${res.description}`)
+      const messageId = (res.result as { message_id?: number } | undefined)?.message_id ?? null
+      if (messageId) {
+        await supabaseRequest('PATCH', `job_batches?id=eq.${gateBatchId}`, { telegram_message_id: messageId })
+      }
+      return messageId
+    },
+  })) ?? null
   return { message_id: messageId, edited: false, merged_into: mergedInto }
 }
 
