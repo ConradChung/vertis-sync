@@ -67,7 +67,12 @@ export function titleFrom(text: string): string {
   return line
     .replace(/<[^>]+>/g, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[*_`~]/g, '')
+    // Paired markers only, so snake_case (push_to_instantly) survives.
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/~~([^~]+)~~/g, '$1')
+    .replace(/(^|[^\p{L}\p{N}])_([^_]+)_(?=[^\p{L}\p{N}]|$)/gu, '$1$2')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 200)

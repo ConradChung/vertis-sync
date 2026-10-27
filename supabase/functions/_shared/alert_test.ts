@@ -50,6 +50,8 @@ Deno.test('parseChannels: nothing recognised falls back to the default (Telegram
 Deno.test('titleFrom: first non-empty line, markdown stripped', () => {
   assertEquals(titleFrom('\n*Batch* `ready` — [open](https://x)\nsecond'), 'Batch ready — open')
   assertEquals(titleFrom('<b>Order</b> placed'), 'Order placed')
+  assertEquals(titleFrom('✅ Done — push_to_instantly'), '✅ Done — push_to_instantly')
+  assertEquals(titleFrom('_italic_ and **bold** and ~~gone~~'), 'italic and bold and gone')
   assertEquals(titleFrom('🔍 Email finder 50% (5/10)'), '🔍 Email finder 50% (5/10)')
   assertEquals(titleFrom(''), '')
   assertEquals(titleFrom('x'.repeat(500)).length, 200)
