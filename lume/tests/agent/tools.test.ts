@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { TOOL_TIERS, HIGH_RISK_KIND } from '@/lib/agent/permissions'
-import { buildTools } from '@/lib/agent/tools'
+import { buildTools, type ToolDeps } from '@/lib/agent/tools'
 import { orbStateFrom, withStaleRun } from '@/lib/agent/orbState'
 
 const JOB = '0b9f6a52-1c3e-4d7a-9f00-1234567890ab'
 
-function setup(response: Response = new Response('{"ok":true}')) {
+function setup(response: Response = new Response('{"ok":true}'), extra: Partial<ToolDeps> = {}) {
   const fetch = vi.fn().mockResolvedValue(response)
   const createAction = vi.fn().mockResolvedValue({ id: 'a1' })
   const notify = vi.fn().mockResolvedValue({ ok: true })
@@ -24,6 +24,7 @@ function setup(response: Response = new Response('{"ok":true}')) {
     baseUrl: 'https://lume.test/',
     secret: 's3cret',
     notify,
+    ...extra,
   })
   const tool = (name: string) => tools.find((t) => t.name === name)!
   return { fetch, createAction, prepare, notify, tools, tool }
@@ -167,6 +168,48 @@ describe('buildTools', () => {
     const { notify, tool } = setup()
     await expect(tool('notify').run({ text: 'done' })).resolves.toEqual({ status: 'sent' })
     expect(notify).toHaveBeenCalledWith('Lume agent: done')
+  })
+})
+
+describe('skip-permissions mode', () => {
+  const done = { status: 'executed' as const, result: { paused: true }, error: null }
+
+  it('approves and executes a skippable kind at once', async () => {
+    const autoApprove = vi.fn().mockResolvedValue(done)
+    const { tool } = setup(undefined, { skipPermissions: true, autoApprove })
+    const out = await tool('pause_campaign').run({ campaign_id: JOB })
+    expect(autoApprove).toHaveBeenCalledWith('a1')
+    expect(out).toMatchObject({ status: 'auto_approved', action_id: 'a1', deep_link: '/actions/a1', summary: 'built pause_campaign', outcome: 'executed', result: { paused: true } })
+    expect(out).not.toHaveProperty('error')
+  })
+
+  it('carries a failed outcome and its error', async () => {
+    const autoApprove = vi.fn().mockResolvedValue({ status: 'failed', result: null, error: 'boom' })
+    const { tool } = setup(undefined, { skipPermissions: true, autoApprove })
+    await expect(tool('pause_campaign').run({ campaign_id: JOB })).resolves.toMatchObject({ status: 'auto_approved', outcome: 'failed', error: 'boom' })
+  })
+
+  it('always-ask kinds still wait for the owner', async () => {
+    const autoApprove = vi.fn().mockResolvedValue(done)
+    const { tool } = setup(undefined, { skipPermissions: true, autoApprove })
+    const out = await tool('send_reply').run({ eaccount: 'me@send.com', campaign_id: 'c', reply_to_uuid: 'e', body: 'hi' })
+    expect(out).toMatchObject({ status: 'awaiting_approval', action_id: 'a1' })
+    expect(autoApprove).not.toHaveBeenCalled()
+  })
+
+  it('off: skippable kinds wait too', async () => {
+    const autoApprove = vi.fn().mockResolvedValue(done)
+    const { tool } = setup(undefined, { skipPermissions: false, autoApprove })
+    await expect(tool('pause_campaign').run({ campaign_id: JOB })).resolves.toMatchObject({ status: 'awaiting_approval' })
+    expect(autoApprove).not.toHaveBeenCalled()
+  })
+
+  it('never auto-approves a duplicate', async () => {
+    const autoApprove = vi.fn().mockResolvedValue(done)
+    const { tool, createAction } = setup(undefined, { skipPermissions: true, autoApprove })
+    createAction.mockRejectedValueOnce(Object.assign(new Error('dup'), { name: 'DuplicateActionError', existingId: 'old' }))
+    await expect(tool('pause_campaign').run({ campaign_id: JOB })).resolves.toMatchObject({ status: 'awaiting_approval', action_id: 'old' })
+    expect(autoApprove).not.toHaveBeenCalled()
   })
 })
 

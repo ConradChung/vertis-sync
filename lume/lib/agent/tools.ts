@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { Json, PendingActionKind } from '@/lib/db/types'
-import { HIGH_RISK_KIND, TOOL_TIERS, type ToolName, type ToolTier } from '@/lib/agent/permissions'
+import { HIGH_RISK_KIND, TOOL_TIERS, skippable, type ToolName, type ToolTier } from '@/lib/agent/permissions'
 import { FilterCriteria } from '@/lib/review/model'
 import { APOLLO_STEPS } from '@/lib/apollo/records'
 import { describeStep, newSkillSchema, placeholdersIn, skillStepSchema, skillVariableSchema, type NewSkill, type Skill } from '@/lib/agent/skillModel'
@@ -19,7 +19,10 @@ import { describeStep, newSkillSchema, placeholdersIn, skillStepSchema, skillVar
  *    summary are computed exactly as for a click), then calls
  *    `createAction(kind, payload, 'agent', { agentRunId, ruleId })` and returns
  *    `{ status: 'awaiting_approval', action_id, deep_link }`. There is no code
- *    path from a high-risk tool to a route or a write adapter.
+ *    path from a high-risk tool to a route or a write adapter. In
+ *    skip-permissions mode a skippable kind (lib/agent/permissions.ts) is then
+ *    handed to `deps.autoApprove` (claim as 'agent' + execute, server-side)
+ *    and returns `auto_approved` with the outcome; a duplicate never is.
  *
  * Pure (deps injected) so the tiering is unit-tested without a network.
  * `toRunnableTools` in `lib/agent/runnable.ts` adapts these for the SDK runner.
@@ -57,6 +60,14 @@ export interface ToolDeps {
   skills?: SkillStore
   /** The conversation this run belongs to (recorded as a saved skill's source). */
   conversationId?: string
+  /** Skip-permissions mode for this run: skippable kinds are approved + executed at once. */
+  skipPermissions?: boolean
+  /** Claims (decided_via 'agent') and executes a pending action. Server-side only. */
+  autoApprove?: (actionId: string) => Promise<{
+    status: 'executed' | 'failed' | 'not_claimable'
+    result: Record<string, Json> | null
+    error: string | null
+  }>
 }
 
 /** What the skill tools need from storage. */
@@ -113,7 +124,7 @@ export function tiered<S extends z.ZodType>(spec: RunSpec<S> | HighSpec<S>, tier
     return (deps) => ({
       name: spec.name,
       tier,
-      description: `${spec.description} Needs the owner's approval: this only creates a pending action and returns awaiting_approval; it does not run.`,
+      description: `${spec.description} Needs the owner's approval: this only creates a pending action and returns awaiting_approval; it does not run. If the owner has skip permissions on for this chat it may instead return auto_approved with the outcome (it ran).`,
       inputSchema: spec.inputSchema,
       run: async (input) => requestApproval(deps, kind, spec.payload(input)),
     })
@@ -138,6 +149,18 @@ async function requestApproval(
   try {
     const meta = built.ruleId ? { agentRunId: deps.agentRunId, ruleId: built.ruleId } : { agentRunId: deps.agentRunId }
     const action = await deps.createAction(built.kind, built.payload, 'agent', meta)
+    if (deps.skipPermissions && deps.autoApprove && skippable(built.kind)) {
+      const done = await deps.autoApprove(action.id)
+      return {
+        status: 'auto_approved',
+        action_id: action.id,
+        deep_link: `/actions/${action.id}`,
+        summary: built.payload.summary,
+        outcome: done.status,
+        result: done.result,
+        ...(done.error ? { error: done.error } : {}),
+      }
+    }
     return {
       status: 'awaiting_approval',
       action_id: action.id,
