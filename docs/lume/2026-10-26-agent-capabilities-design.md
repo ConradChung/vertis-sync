@@ -84,3 +84,21 @@ Each phase reviewed and deployed before the next.
   contact count / plan limit, interest status, blocklist.
 - Balance endpoints for Leadsfriday, connector-os, mailtester.ninja.
 - Leadsfriday count endpoint for re-counting an edited Apollo search.
+
+## API research results (2026-10-26)
+
+**Instantly v2** (OpenAPI `https://api.instantly.ai/openapi/api_v2.json`; 100 rps / 6,000 per min workspace-wide; `GET /emails` 20/min):
+- Lead states: `POST /leads/list` with `campaign` + `filter` (`FILTER_VAL_COMPLETED_NO_REPLY`, `FILTER_VAL_REPLIED`, `FILTER_VAL_BOUNCED`, `FILTER_VAL_CONTACTED`, …; interest `FILTER_LEAD_*`), `limit` ≤100, `starting_after`. Fields: `status` (1 active, 2 paused, 3 completed, -1 bounced, -2 unsub, -3 skipped), `timestamp_last_contact`, `timestamp_last_reply`, `email_reply_count`, `lt_interest_status`, `payload` (custom vars, e.g. country).
+- Delete: `DELETE /leads/{id}`; bulk `DELETE /leads` `{campaign_id, ids[]?, status?, limit≤10000}` → `{count}`. Deleting from a campaign frees uploaded-contacts quota after 5–10 min.
+- Cap: `GET /workspace-billing/plan-details` → `subscriptions.outreach.current_lead_count` / `total_lead_limit`.
+- Inbox: `GET /emails?campaign_id&email_type=received&is_unread&i_status` → `id` (= `reply_to_uuid`), `eaccount`, `from_address_email`, `subject`, `body`, `thread_id`, `i_status`.
+- Labels: `POST /leads/update-interest-status` `{lead_email, interest_value, campaign_id}`; 1 interested, 0 OOO, -1 not interested, -2 wrong person, -3 lost, null reset. May mark the lead completed.
+- Blocklist: `POST /block-lists-entries` `{bl_value}`; bulk `/block-lists-entries/bulk-create`.
+
+**Leadsfriday:** order `POST /api/export-apollo/` → `{order_id, credits_deducted, new_balance}`. **No count endpoint and no balance endpoint.** Balance = last `apollo_orders.new_balance`. Price $3 / 1,000 (1 credit = $1), fractional.
+
+**mailtester.ninja:** subscription with a daily cap (Pro $23.99/mo, 100k/day); no per-lead price, no balance endpoint. Show plan + daily cap, not a per-lead cost.
+
+**connector-os (finder):** undocumented. `GET /api/email/v2/quota` → `{quota:{remaining, reset_date, bonus_remaining}}`; 1 credit per found email (not-found free); packs ~$0.025–0.033/credit.
+
+**Design impact:** "Apollo count at the gate" / `edit_order` re-count cannot come from Leadsfriday — needs another source (Apollo search API is owner-rejected for enrichment; a count-only call or the existing gate count path must be checked in Phase 4 planning).
