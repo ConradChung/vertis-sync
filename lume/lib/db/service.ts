@@ -908,3 +908,16 @@ export async function expireStaleActions(
   if (res.error) throw new DbError('expireStaleActions', res.error)
   return (res.data ?? []) as Pick<PendingActionRow, 'id' | 'kind' | 'telegram_message_id' | 'payload'>[]
 }
+
+/** Events of these types since `since`, newest first (the /operator Recent outcomes). */
+export async function listEventsSince(types: readonly string[], since: Date, limit = 200): Promise<EventRow[]> {
+  const sb = createServiceClient()
+  const res = await sb
+    .from('events')
+    .select('*')
+    .in('type', [...types])
+    .gte('created_at', since.toISOString())
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  return unwrap('listEventsSince', res) as EventRow[]
+}

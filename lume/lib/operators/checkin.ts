@@ -1,6 +1,6 @@
-import type { GateRow, Json, PendingActionRow } from '@/lib/db/types'
+import type { EventRow, GateRow, Json, PendingActionRow } from '@/lib/db/types'
 import type { Vertical } from '@/lib/operators/types'
-import { scopeForGate, verticalFor, type RouteOptions } from '@/lib/operators/route'
+import { scopeForGate, scopeForGateAction, verticalFor, type RouteOptions } from '@/lib/operators/route'
 import { BUTTON_SPECS, KIND_LABEL, LFO_PRESETS, SPENDING_ACTIONS } from '@/lib/validate/actions'
 
 /**
@@ -363,6 +363,57 @@ export function outcomesForScope(
       vertical_id: verticalFor(routeOf(a), verticals, opts)?.id ?? null,
     }))
     .filter((o) => inScope(o.vertical_id, scope))
+}
+
+/** Event types shown under Recent outcomes next to pending actions. */
+export const DECISION_EVENT_TYPES = ['lume.decision', 'lume.campaign_pick'] as const
+
+export interface DecisionEventItem {
+  id: number
+  /** The gate action (`deny`, `lfo_count`, …) or `campaign_pick`. */
+  kind: string
+  summary: string
+  /** `done`, or why it did not apply. */
+  status: string
+  ok: boolean
+  by_operator: string | null
+  at: string
+  vertical_id: string | null
+}
+
+/**
+ * Gate decisions (`lume.decision`: Lume clicks and Grok Bot forms) and
+ * campaign picks (`lume.campaign_pick`), routed like the gate they decided.
+ * A decision whose claim was lost (`claimed: false`, someone else decided
+ * first) is marked not applied. Newest first.
+ */
+export function decisionEventsForScope(
+  events: readonly EventRow[],
+  verticals: readonly Vertical[],
+  scope: CheckinScope,
+  opts: RouteOptions = {}
+): DecisionEventItem[] {
+  const out: DecisionEventItem[] = []
+  for (const e of events) {
+    const p = e.payload ?? {}
+    const operator = str(p.operator_id)
+    if (e.type === 'lume.decision') {
+      const action = str(p.action) ?? 'decision'
+      const lost = p.claimed === false
+      const vertical = verticalFor({ campaign_id: e.campaign_id, scope: scopeForGateAction(action) }, verticals, opts)
+      out.push({
+        id: e.id, kind: action, summary: e.title, status: lost ? 'not applied: already handled elsewhere' : 'done', ok: !lost,
+        by_operator: operator, at: e.created_at, vertical_id: vertical?.id ?? null,
+      })
+    } else if (e.type === 'lume.campaign_pick') {
+      const vertical = verticalFor({ campaign_id: e.campaign_id ?? str(p.campaign_id), scope: 'validation' }, verticals, opts)
+      out.push({
+        id: e.id, kind: 'campaign_pick', summary: e.title, status: 'done', ok: true,
+        by_operator: operator, at: e.created_at, vertical_id: vertical?.id ?? null,
+      })
+    }
+  }
+  return out.filter((o) => inScope(o.vertical_id, scope)).sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
 }
 
 // ---------------------------------------------------------------------------

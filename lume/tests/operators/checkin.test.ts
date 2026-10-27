@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { GateRow, PendingActionRow } from '@/lib/db/types'
+import type { EventRow, GateRow, PendingActionRow } from '@/lib/db/types'
 import type { Vertical } from '@/lib/operators/types'
 import {
   alertsForScope,
   checkinSummary,
+  decisionEventsForScope,
   describeGate,
   formatUsd,
   groupByVertical,
@@ -189,5 +190,34 @@ describe('owner-only and master fallback on /operator (review fixes)', () => {
     expect(needsConfirmation([stall], verticals, { all: false, vertical: KASPEN })).toHaveLength(1)
     expect(needsConfirmation([stall], verticals, { all: false, vertical: KASPEN }, { masterLive: true })).toEqual([])
     expect(needsConfirmation([stall], verticals, { all: true }, { masterLive: true })[0].vertical_id).toBeNull()
+  })
+})
+
+describe('decisionEventsForScope (gate decisions and campaign picks in Recent outcomes)', () => {
+  const ev = (id: number, type: string, extra: Partial<EventRow> = {}): EventRow => ({
+    id, type, source: 'lume', source_id: 'job-1', campaign_id: null, lead_email: null, title: 't', payload: {}, webhook_id: null,
+    created_at: `2026-10-26T0${id}:00:00Z`, ...extra,
+  })
+  const events = [
+    ev(1, 'lume.decision', { title: 'deny from Grok Bot “Roof bot”', payload: { claimed: true, action: 'deny', decided_via: 'operator', operator_id: 'op-r' } }),
+    ev(2, 'lume.decision', { title: 'lfo_count from Lume', payload: { claimed: false, action: 'lfo_count' } }),
+    ev(3, 'lume.campaign_pick', { campaign_id: 'camp-r', title: 'Campaign picked in Lume: R', payload: { campaign_id: 'camp-r' } }),
+    ev(4, 'agent.run'),
+  ]
+
+  it('maps decisions and picks, newest first; a lost claim is marked failed', () => {
+    const out = decisionEventsForScope(events, verticals, { all: true })
+    expect(out.map((o) => [o.kind, o.status, o.ok])).toEqual([
+      ['campaign_pick', 'done', true],
+      ['lfo_count', 'not applied: already handled elsewhere', false],
+      ['deny', 'done', true],
+    ])
+    expect(out[2]).toMatchObject({ by_operator: 'op-r', summary: 'deny from Grok Bot “Roof bot”' })
+  })
+
+  it('routes by campaign, else by the action scope', () => {
+    expect(decisionEventsForScope(events, verticals, { all: false, vertical: ROOF }).map((o) => o.kind)).toEqual(['campaign_pick'])
+    expect(decisionEventsForScope(events, verticals, { all: false, vertical: JOBS }).map((o) => o.kind)).toEqual(['lfo_count'])
+    expect(decisionEventsForScope(events, verticals, { all: false, vertical: KASPEN }).map((o) => o.kind)).toEqual(['deny'])
   })
 })

@@ -6,6 +6,7 @@ const h = vi.hoisted(() => ({
   touchOperator: vi.fn(),
   getGates: vi.fn(),
   getCampaigns: vi.fn(),
+  listEventsSince: vi.fn(),
   listAlerts: vi.fn(),
   listDecidedSince: vi.fn(),
   isInstantlyConfigured: vi.fn(),
@@ -13,7 +14,7 @@ const h = vi.hoisted(() => ({
   getAnalyticsOverview: vi.fn(),
 }))
 vi.mock('@/lib/operators/store', () => ({ listVerticals: h.listVerticals, listOperators: h.listOperators, touchOperator: h.touchOperator }))
-vi.mock('@/lib/db/service', () => ({ getGates: h.getGates, getCampaigns: h.getCampaigns }))
+vi.mock('@/lib/db/service', () => ({ getGates: h.getGates, getCampaigns: h.getCampaigns, listEventsSince: h.listEventsSince }))
 vi.mock('@/lib/alertsStore', () => ({ listAlerts: h.listAlerts, ALERTS_MAX_LIMIT: 200 }))
 vi.mock('@/lib/actions/store', () => ({ listDecidedSince: h.listDecidedSince }))
 vi.mock('@/lib/adapters/instantly', () => ({
@@ -39,6 +40,7 @@ beforeEach(() => {
   h.getCampaigns.mockResolvedValue([])
   h.listAlerts.mockResolvedValue([])
   h.listDecidedSince.mockResolvedValue([])
+  h.listEventsSince.mockResolvedValue([])
   h.isInstantlyConfigured.mockReturnValue(true)
   h.listCampaigns.mockResolvedValue([{ id: IC, name: 'Kaspen R3', status: 1 }])
   h.getAnalyticsOverview.mockImplementation(async (_id: string, r: { startDate: string }) =>
@@ -77,5 +79,14 @@ describe('loadCheckin', () => {
     const d = await loadCheckin({ operator: null, verticalParam: 'nope', now })
     expect(d.scope).toEqual({ all: true })
     expect(d.errors.join(' ')).toMatch(/Unknown vertical.*gates: db down/)
+  })
+
+  it('loads 24 h of gate decisions and campaign picks for Recent outcomes', async () => {
+    h.listEventsSince.mockResolvedValue([
+      { id: 1, type: 'lume.campaign_pick', source: 'lume', source_id: 'j', campaign_id: IC, lead_email: null, title: 'Campaign picked', payload: {}, webhook_id: null, created_at: '2026-10-26T09:00:00Z' },
+    ])
+    const d = await loadCheckin({ operator: null, verticalParam: 'v-k', now })
+    expect(h.listEventsSince).toHaveBeenCalledWith(['lume.decision', 'lume.campaign_pick'], new Date('2026-10-25T10:00:00Z'))
+    expect(d.decisionEvents.map((e) => e.kind)).toEqual(['campaign_pick'])
   })
 })

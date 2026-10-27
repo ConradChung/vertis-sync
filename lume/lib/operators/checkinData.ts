@@ -2,10 +2,13 @@ import 'server-only'
 import { getAnalyticsOverview, isInstantlyConfigured, listCampaigns, mapLimit } from '@/lib/adapters/instantly'
 import { listDecidedSince } from '@/lib/actions/store'
 import { listAlerts, ALERTS_MAX_LIMIT, type AlertRow } from '@/lib/alertsStore'
-import { getCampaigns, getGates } from '@/lib/db/service'
+import { getCampaigns, getGates, listEventsSince } from '@/lib/db/service'
+import type { EventRow } from '@/lib/db/types'
 import {
   alertsForScope,
   checkinSummary,
+  decisionEventsForScope,
+  DECISION_EVENT_TYPES,
   instantlyCampaignIds,
   needsConfirmation,
   outcomesForScope,
@@ -13,9 +16,10 @@ import {
   type CheckinItem,
   type CheckinScope,
   type CheckinSummary,
+  type DecisionEventItem,
   type OutcomeItem,
 } from '@/lib/operators/checkin'
-import { hasLiveMaster, routeItemForAction } from '@/lib/operators/route'
+import { hasLiveMaster, routeItemForAction, verticalFor } from '@/lib/operators/route'
 import { listOperators, listVerticals, touchOperator } from '@/lib/operators/store'
 import type { Operator, Vertical } from '@/lib/operators/types'
 
@@ -45,6 +49,10 @@ export interface CheckinData {
   items: CheckinItem[]
   alerts: AlertRow[]
   outcomes: OutcomeItem[]
+  /** Gate decisions and campaign picks in the last 24 h (events). */
+  decisionEvents: DecisionEventItem[]
+  /** Alert id → the vertical name it routes to (null: owner / master). */
+  alertVerticals: Record<string, string | null>
   operatorLabels: Record<string, string>
   campaigns: CampaignStat[]
   campaignsNote: string | null
@@ -77,11 +85,12 @@ export async function loadCheckin(opts: { operator: Operator | null; verticalPar
   }
 
   const since = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-  const [gates, alerts, decided, operators] = await Promise.all([
+  const [gates, alerts, decided, operators, events] = await Promise.all([
     getGates().catch((e) => (errors.push(`gates: ${errText(e)}`), [])),
     listAlerts({ unackedOnly: true, limit: ALERTS_MAX_LIMIT }).catch((e) => (errors.push(`alerts: ${errText(e)}`), [] as AlertRow[])),
     listDecidedSince(since).catch((e) => (errors.push(`outcomes: ${errText(e)}`), [])),
     listOperators({ includeRevoked: true }).catch((e) => (errors.push(`operators: ${errText(e)}`), [] as Operator[])),
+    listEventsSince(DECISION_EVENT_TYPES, since).catch((e) => (errors.push(`decision events: ${errText(e)}`), [] as EventRow[])),
   ])
 
   // The check-in before this one: the bot's own, or (owner) the latest of the scope's bots.
@@ -107,6 +116,8 @@ export async function loadCheckin(opts: { operator: Operator | null; verticalPar
   const items = needsConfirmation(gates, verticals, scope, routeOpts)
   const scopedAlerts = alertsForScope(alerts, verticals, scope, routeOpts)
   const outcomes = outcomesForScope(decided, verticals, scope, routeItemForAction, routeOpts)
+  const decisionEvents = decisionEventsForScope(events, verticals, scope, routeOpts)
+  const alertVerticals = Object.fromEntries(scopedAlerts.map((a) => [a.id, verticalFor(a, verticals, routeOpts)?.name ?? null]))
   const operatorLabels = Object.fromEntries(operators.map((o) => [o.id, o.label]))
 
   const campaignIds = [...new Set((scope.all ? verticals : [scope.vertical]).flatMap((v) => v.campaign_ids))]
@@ -123,6 +134,8 @@ export async function loadCheckin(opts: { operator: Operator | null; verticalPar
     items,
     alerts: scopedAlerts,
     outcomes,
+    decisionEvents,
+    alertVerticals,
     operatorLabels,
     campaigns,
     campaignsNote: note,
