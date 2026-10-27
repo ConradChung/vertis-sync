@@ -5,6 +5,7 @@
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 import { alert, type AlertInput, lumeLink, titleFrom } from '../_shared/alert.ts'
+import { promptForCampaign } from './campaign_prompt.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -571,42 +572,15 @@ async function processJob(jobId: string): Promise<void> {
   // this job, so no separate state machine is needed.
   // Guarded on 'idle' because operating-city-enricher chains back into this
   // function, and a re-invocation must not re-prompt.
-  if (validCount > 0 && job.instantly_status === 'idle' && TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
-    await promptForCampaign(jobId, job.filename, validCount)
+  // The gate opens whether or not Telegram is configured or switched on
+  // (ALERT_CHANNELS); the Telegram prompt itself is unchanged when it sends.
+  if (validCount > 0 && job.instantly_status === 'idle') {
+    await promptForCampaign(jobId, job.filename, validCount, {
+      botToken: TELEGRAM_BOT_TOKEN,
+      chatId: TELEGRAM_CHAT_ID,
+      patchJob: (id, body) => supabaseRequest('PATCH', `validation_jobs?id=eq.${id}`, body),
+    })
   }
-}
-
-async function promptForCampaign(jobId: string, filename: string, validCount: number): Promise<void> {
-  const text =
-    `📤 Push ${validCount} valid leads to Instantly?\n${filename}\n\n` +
-    `Reply to this message with the campaign NAME (partial is fine — I'll match it against your campaign list).`
-  await alert({
-    source: 'email-validator', severity: 'urgent', title: titleFrom(text), body: text,
-    link: lumeLink(`/validate?gate=campaign_choice:${jobId}`), scope: 'validation',
-    dedupe_key: `${jobId}:campaign_choice`,
-    telegram: async () => {
-      try {
-        const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: TELEGRAM_CHAT_ID,
-            text,
-            reply_markup: { force_reply: true },
-          }),
-        })
-        const sent = await res.json() as { result?: { message_id?: number } }
-        const messageId = sent.result?.message_id
-        if (!messageId) return
-        await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
-          instantly_prompt_message_id: messageId,
-          instantly_status: 'awaiting_campaign',
-        })
-      } catch (err) {
-        console.error('[email-validator] Instantly campaign prompt failed:', err)
-      }
-    },
-  })
 }
 
 Deno.serve(async (req: Request) => {
