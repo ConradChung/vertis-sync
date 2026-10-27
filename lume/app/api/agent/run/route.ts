@@ -27,7 +27,7 @@ import type { Json } from '@/lib/db/types'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { parseJsonBody, UUID_RE } from '@/lib/http/json'
 import { internalOrigin } from '@/lib/http/origin'
-import { operatorPromptLine } from '@/lib/operators/context'
+import { operatorPromptLine, verticalPromptLine } from '@/lib/operators/context'
 import { currentOperator } from '@/lib/operators/session'
 import { getVertical } from '@/lib/operators/store'
 
@@ -86,6 +86,8 @@ const Body = z.object({
   skill_mode: z.enum(['run', 'reference']).optional(),
   skip_permissions: z.boolean().optional(),
   auto: z.boolean().optional(),
+  /** Owner only, new conversations only: tag the chat with this vertical (from /operator). */
+  vertical_id: z.string().regex(UUID_RE).optional(),
 })
 
 type SseEvent = Record<string, unknown> & { type: string }
@@ -119,6 +121,7 @@ export async function POST(req: Request) {
   let runId: string
   let conversationId: string
   let prompt = message
+  let ownerVertical: Awaited<ReturnType<typeof getVertical>> = null
   const skillMode = body.data.skill_mode ?? 'reference'
   let skill: Awaited<ReturnType<typeof getSkill>> = null
   try {
@@ -135,9 +138,12 @@ export async function POST(req: Request) {
       prompt = buildPrompt(contextFromMessages(await getMessages(conversationId)), message)
     } else {
       const title = titleFromPrompt(message)
+      if (!operator && body.data.vertical_id) ownerVertical = await getVertical(body.data.vertical_id.toLowerCase())
       const created = operator
         ? await createConversation(title, { vertical_id: operator.vertical_id, operator_id: operator.id })
-        : await createConversation(title)
+        : ownerVertical
+          ? await createConversation(title, { vertical_id: ownerVertical.id, operator_id: null })
+          : await createConversation(title)
       conversationId = created.id
     }
     if (skill) {
@@ -147,6 +153,8 @@ export async function POST(req: Request) {
     if (operator) {
       const vertical = operator.vertical_id ? await getVertical(operator.vertical_id) : null
       prompt = `${operatorPromptLine(operator, vertical)}\n\n${prompt}`
+    } else if (ownerVertical) {
+      prompt = `${verticalPromptLine(ownerVertical)}\n\n${prompt}`
     }
     runId = (await insertAgentRun(prompt, MODEL)).id
     await insertMessage({ conversation_id: conversationId, role: 'user', text: message, run_id: runId, ...(body.data.auto ? { auto: true } : {}) })

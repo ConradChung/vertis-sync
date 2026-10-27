@@ -69,6 +69,8 @@ export interface AgentChat {
 export interface AgentChatOptions {
   /** The conversation to show; null starts a new chat. */
   conversationId?: string | null
+  /** Tag a NEW conversation with this vertical (`/agent?vertical=<id>`, from /operator). */
+  verticalId?: string | null
   /** The server created (or confirmed) the conversation for this run. */
   onConversation?: (id: string) => void
   /** A run finished (stored on the server): refresh anything that lists conversations. */
@@ -251,7 +253,7 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prompt: text,
-            ...(currentRef.current ? { conversation_id: currentRef.current } : {}),
+            ...(currentRef.current ? { conversation_id: currentRef.current } : optsRef.current.verticalId ? { vertical_id: optsRef.current.verticalId } : {}),
             ...(skill ? { skill_id: skill.id, skill_mode: skill.mode } : {}),
             ...(sendOpts.auto ? { auto: true } : {}),
             ...(skipRef.current ? { skip_permissions: true } : {}),

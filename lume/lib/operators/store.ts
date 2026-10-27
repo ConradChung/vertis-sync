@@ -204,3 +204,13 @@ export async function touchOperator(id: string): Promise<void> {
   const res = await sb.from('lume_operators').update({ last_seen_at: new Date().toISOString() }).eq('id', id)
   if (res.error) throw new DbError('touchOperator', res.error)
 }
+
+/** Every key row (no hashes), newest first; `includeRevoked` keeps revoked ones for the settings list. */
+export async function listOperators(opts: { includeRevoked?: boolean } = {}): Promise<Operator[]> {
+  const sb = createServiceClient()
+  let q = sb.from('lume_operators').select(OPERATOR_COLS)
+  if (!opts.includeRevoked) q = q.is('revoked_at', null)
+  const res = await q.order('created_at', { ascending: false })
+  if (res.error) throw new DbError('listOperators', res.error)
+  return (res.data ?? []) as Operator[]
+}

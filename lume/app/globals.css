@@ -670,3 +670,25 @@
     transform: none;
   }
 }
+
+/* /operator check-in page (Phase G5): plain, static, no motion. Read by a
+   browsing Grok Bot, so semantic HTML with just enough styling to scan. */
+.operator-page { max-width: 72rem; font-size: 0.875rem; line-height: 1.5; }
+.operator-page h1 { font-size: 1.5rem; font-weight: 600; margin: 0.5rem 0 0.25rem; }
+.operator-page h2 { font-size: 1.125rem; font-weight: 600; margin: 1.75rem 0 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem; }
+.operator-page h3 { font-size: 1rem; font-weight: 600; margin: 1rem 0 0.25rem; }
+.operator-page pre { background: color-mix(in oklab, var(--foreground) 6%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.75rem; overflow-x: auto; font-size: 0.8125rem; }
+.operator-page table { width: 100%; border-collapse: collapse; margin: 0.25rem 0 0.75rem; }
+.operator-page th, .operator-page td { border: 1px solid var(--border); padding: 0.375rem 0.5rem; text-align: left; vertical-align: top; }
+.operator-page th { font-weight: 600; }
+.operator-page form { display: inline; margin-right: 0.375rem; }
+.operator-page form.block { display: block; margin: 0.375rem 0; }
+.operator-page button { border: 1px solid var(--border); border-radius: 6px; padding: 0.125rem 0.625rem; margin: 0.125rem 0; background: transparent; color: var(--foreground); cursor: pointer; }
+.operator-page button[data-tone='approve'] { background: var(--lime); color: #050505; border-color: var(--lime); }
+.operator-page button[data-tone='reject'] { border-color: var(--destructive); color: var(--destructive); }
+.operator-page input[type='text'], .operator-page input[type='number'], .operator-page input[type='url'] { border: 1px solid var(--border); border-radius: 6px; padding: 0.125rem 0.375rem; background: transparent; color: var(--foreground); min-width: 14rem; }
+.operator-page .flash { border: 1px solid var(--lime); border-radius: 6px; padding: 0.375rem 0.75rem; margin: 0.5rem 0; }
+.operator-page .flash-error { border: 1px solid var(--destructive); border-radius: 6px; padding: 0.375rem 0.75rem; margin: 0.5rem 0; color: var(--destructive); }
+.operator-page .muted { color: var(--muted-foreground); }
+.operator-page .urgent { color: var(--destructive); font-weight: 600; }
+.operator-page a { text-decoration: underline; }

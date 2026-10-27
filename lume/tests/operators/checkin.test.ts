@@ -1,0 +1,177 @@
+import { describe, expect, it } from 'vitest'
+import type { GateRow, PendingActionRow } from '@/lib/db/types'
+import type { Vertical } from '@/lib/operators/types'
+import {
+  alertsForScope,
+  checkinSummary,
+  describeGate,
+  formatUsd,
+  groupByVertical,
+  instantlyCampaignIds,
+  leadsfridayCostText,
+  leadsfridayUsd,
+  needsConfirmation,
+  outcomesForScope,
+  statsRanges,
+} from '@/lib/operators/checkin'
+import { routeItemForAction } from '@/lib/operators/route'
+
+const V = (id: string, name: string, extra: Partial<Vertical> = {}): Vertical => ({
+  id, name, campaign_ids: [], scopes: [], is_default: false, created_at: '', archived_at: null, ...extra,
+})
+const JOBS = V('v-jobs', 'Job search', { scopes: ['orders'], campaign_ids: ['camp-js'] })
+const KASPEN = V('v-k', 'Kaspen', { scopes: ['campaign', 'validation'], is_default: true, campaign_ids: ['camp-k'] })
+const ROOF = V('v-r', 'Roofers', { scopes: ['campaign'], campaign_ids: ['camp-r'] })
+const verticals = [JOBS, KASPEN, ROOF]
+
+const gate = (kind: GateRow['kind'], extra: Partial<GateRow> = {}): GateRow => ({
+  kind, target_table: 'validation_jobs', target_id: `${kind}-id`, title: 't', subtitle: 's', actions: [], counts: {},
+  telegram_message_id: null, created_at: '2026-10-26T10:00:00Z', ...extra,
+})
+
+describe('Leadsfriday cost', () => {
+  it('count × $0.003, fractional cents kept', () => {
+    expect(leadsfridayUsd(1234)).toBe(3.702)
+    expect(formatUsd(leadsfridayUsd(1234))).toBe('$3.702')
+    expect(formatUsd(leadsfridayUsd(500))).toBe('$1.50')
+    expect(formatUsd(leadsfridayUsd(5000))).toBe('$15.00')
+    expect(formatUsd(leadsfridayUsd(1001))).toBe('$3.003')
+    expect(leadsfridayCostText(1234)).toBe('$3.702 (Leadsfriday: 1,234 × $0.003)')
+  })
+})
+
+describe('describeGate', () => {
+  it('lfo_count: money, routed by scope to the one orders vertical, count control', () => {
+    const it = describeGate(gate('lfo_count', { target_table: 'apollo_orders' }), verticals)
+    expect(it).toMatchObject({ priority: 'money', vertical_id: 'v-jobs', what: 'Leadsfriday count' })
+    expect(it.cost).toContain('minimum 500 = $1.50')
+    expect(it.control).toMatchObject({ type: 'lfo_count', target_id: 'lfo_count-id', cancel: { callback_data: 'lfo_cancel:lfo_count-id' } })
+  })
+
+  it('a decide_gate pending action with an lfo count shows the exact cost', () => {
+    const g = gate('lume_action', {
+      target_table: 'pending_actions', target_id: 'a1', title: 'decide_gate', subtitle: 'Gate decision',
+      counts: { callback_data: 'lfo_count:o1:1234', summary: 'x' },
+    })
+    const it = describeGate(g, verticals)
+    expect(it).toMatchObject({ priority: 'money', leads: 1234, cost: '$3.702 (Leadsfriday: 1,234 × $0.003)' })
+    expect(it.control).toEqual({ type: 'approve_deny', action_id: 'a1' })
+  })
+
+  it('run_actor shows its Apify cap', () => {
+    const g = gate('lume_action', {
+      target_table: 'pending_actions', target_id: 'a2', title: 'run_actor',
+      counts: { budget_usd: 5, estimate_usd: 1.25, cap_usd: 20 },
+    })
+    expect(describeGate(g, verticals)).toMatchObject({ priority: 'money', cost: 'Apify hard cap $5.00, estimate $1.25, ceiling $20.00' })
+  })
+
+  it('push_to_instantly routes by campaign and counts eligible leads', () => {
+    const g = gate('lume_action', { target_table: 'pending_actions', title: 'push_to_instantly', counts: { campaign_id: 'camp-r', eligible: 42 } })
+    expect(describeGate(g, verticals)).toMatchObject({ priority: 'validation', vertical_id: 'v-r', leads: 42 })
+  })
+
+  it('issue_operator_key links to the action page (the link is shown once there)', () => {
+    const g = gate('lume_action', { target_table: 'pending_actions', target_id: 'a3', title: 'issue_operator_key' })
+    expect(describeGate(g, verticals).control).toMatchObject({ type: 'link', href: '/actions/a3' })
+  })
+
+  it('campaign_choice: name input + stored candidates', () => {
+    const g = gate('campaign_choice', { counts: { valid_count: 80, candidates: [{ id: 'c1', name: 'A' }, { bad: 1 }] } })
+    const it = describeGate(g, verticals)
+    expect(it).toMatchObject({ priority: 'validation', leads: 80, vertical_id: 'v-k' })
+    expect(it.control).toMatchObject({ type: 'campaign_pick', job_id: 'campaign_choice-id', candidates: [{ id: 'c1', name: 'A' }] })
+  })
+
+  it('ingest_approval: only the offered buttons, spend flagged', () => {
+    const it = describeGate(gate('ingest_approval', { actions: ['approve', 'approve_enrich', 'deny'], counts: { row_count: 300 } }), verticals)
+    expect(it.control).toEqual({
+      type: 'gate_buttons',
+      buttons: [
+        { label: 'Approve', callback_data: 'approve:ingest_approval-id', tone: 'approve', spends: false },
+        { label: 'Approve + Enrich', callback_data: 'approve_enrich:ingest_approval-id', tone: 'approve', spends: true },
+        { label: 'Deny', callback_data: 'deny:ingest_approval-id', tone: 'reject', spends: false },
+      ],
+    })
+    const denyOnly = describeGate(gate('ingest_approval', { actions: ['deny'] }), verticals)
+    expect(denyOnly.control.type === 'gate_buttons' && denyOnly.control.buttons.map((b) => b.label)).toEqual(['Deny'])
+  })
+})
+
+describe('needsConfirmation', () => {
+  const gates = [
+    gate('lume_action', { target_table: 'pending_actions', target_id: 'p', title: 'pause_campaign', counts: { campaign_id: 'camp-k' }, created_at: '2026-10-26T01:00:00Z' }),
+    gate('ingest_approval', { target_id: 'i', created_at: '2026-10-26T02:00:00Z' }),
+    gate('lfo_count', { target_id: 'l', created_at: '2026-10-26T03:00:00Z' }),
+    gate('jobs_fill', { target_id: 'f', created_at: '2026-10-26T00:30:00Z' }),
+  ]
+  it('all: money first, then validation, then the rest; oldest first inside', () => {
+    expect(needsConfirmation(gates, verticals, { all: true }).map((i) => i.key)).toEqual([
+      'jobs_fill:f', 'lfo_count:l', 'ingest_approval:i', 'lume_action:p',
+    ])
+  })
+  it('one vertical: only its items', () => {
+    expect(needsConfirmation(gates, verticals, { all: false, vertical: KASPEN }).map((i) => i.key)).toEqual([
+      'ingest_approval:i', 'lume_action:p',
+    ])
+  })
+  it('groupByVertical: by name, unrouted last', () => {
+    const groups = groupByVertical([
+      { vertical_id: null, vertical_name: null },
+      { vertical_id: 'v-r', vertical_name: 'Roofers' },
+      { vertical_id: 'v-k', vertical_name: 'Kaspen' },
+    ])
+    expect(groups.map((g) => g.vertical_name)).toEqual(['Kaspen', 'Roofers', 'No vertical (owner)'])
+  })
+})
+
+describe('alertsForScope', () => {
+  const alerts = [
+    { id: '1', severity: 'info' as const, campaign_id: 'camp-r', scope: null, created_at: '2026-10-26T03:00:00Z' },
+    { id: '2', severity: 'urgent' as const, campaign_id: 'camp-r', scope: null, created_at: '2026-10-26T01:00:00Z' },
+    { id: '3', severity: 'warn' as const, campaign_id: 'camp-k', scope: null, created_at: '2026-10-26T04:00:00Z' },
+    { id: '4', severity: 'urgent' as const, campaign_id: null, scope: 'orders' as const, created_at: '2026-10-26T02:00:00Z' },
+  ]
+  it('urgent on top, newest first', () => {
+    expect(alertsForScope(alerts, verticals, { all: true }).map((a) => a.id)).toEqual(['4', '2', '3', '1'])
+  })
+  it('a vertical sees only its own', () => {
+    expect(alertsForScope(alerts, verticals, { all: false, vertical: ROOF }).map((a) => a.id)).toEqual(['2', '1'])
+  })
+})
+
+describe('outcomes, summary, ranges', () => {
+  it('outcomesForScope routes decided actions like pending ones', () => {
+    const row = (id: string, campaign: string) =>
+      ({ id, kind: 'pause_campaign', payload: { campaign_id: campaign, summary: `Pause ${campaign}` }, status: 'executed', decided_via: 'operator',
+        decided_by_operator: 'op1', decided_at: 'x', executed_at: 'y', error: null }) as unknown as PendingActionRow
+    const out = outcomesForScope([row('a', 'camp-r'), row('b', 'camp-k')], verticals, { all: false, vertical: ROOF }, routeItemForAction)
+    expect(out).toEqual([
+      { id: 'a', kind: 'pause_campaign', summary: 'Pause camp-r', status: 'executed', decided_via: 'operator', decided_by_operator: 'op1',
+        decided_at: 'x', executed_at: 'y', error: null, vertical_id: 'v-r' },
+    ])
+  })
+
+  it('checkinSummary', () => {
+    const s = checkinSummary({
+      scope: { all: false, vertical: ROOF },
+      items: [describeGate(gate('stall'), verticals)],
+      alerts: [{ id: '1', severity: 'urgent', campaign_id: null, scope: null, created_at: '' }, { id: '2', severity: 'info', campaign_id: null, scope: null, created_at: '' }],
+      lastCheckedAt: '2026-10-26T09:00:00Z',
+      now: new Date('2026-10-26T10:00:00Z'),
+    })
+    expect(s).toEqual({
+      vertical: { id: 'v-r', name: 'Roofers' }, needs_confirmation: 1, unacked_alerts: 2, urgent_alerts: 1,
+      last_checked_at: '2026-10-26T09:00:00Z', generated_at: '2026-10-26T10:00:00.000Z',
+    })
+    expect(checkinSummary({ scope: { all: true }, items: [], alerts: [], lastCheckedAt: null, now: new Date(0) }).vertical).toBe('all')
+  })
+
+  it('statsRanges + instantlyCampaignIds', () => {
+    expect(statsRanges(new Date('2026-10-26T10:00:00Z'))).toEqual({
+      today: { startDate: '2026-10-26', endDate: '2026-10-26' },
+      week: { startDate: '2026-10-20', endDate: '2026-10-26' },
+    })
+    expect(instantlyCampaignIds(['gmail:recruiter', '04ca2257-5ea6-434e-bf62-f55add156914'])).toEqual(['04ca2257-5ea6-434e-bf62-f55add156914'])
+  })
+})

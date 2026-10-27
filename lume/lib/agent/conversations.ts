@@ -8,10 +8,14 @@ import type { ConversationSummary, StoredApproval, StoredMessage, StoredToolEntr
 
 const COLS = 'id, title, created_at, updated_at'
 
-/** A Grok Bot's chats carry its vertical (null for the master bot) and operator. */
+/**
+ * A Grok Bot's chats carry its vertical (null for the master bot) and
+ * operator; an owner chat opened from a vertical's /operator page carries the
+ * vertical only.
+ */
 export interface ConversationOrigin {
   vertical_id: string | null
-  operator_id: string
+  operator_id: string | null
 }
 
 export async function createConversation(title: string, origin?: ConversationOrigin): Promise<ConversationSummary> {

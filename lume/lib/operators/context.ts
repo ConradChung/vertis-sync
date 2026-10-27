@@ -15,6 +15,12 @@ export function operatorPromptLine(op: Pick<Operator, 'is_master'>, vertical: Pi
   return `You are being operated by the ${vertical.name} Grok Bot (operator). Its campaigns: ${campaigns}. It has the owner’s full authority.`
 }
 
+/** The line put ahead of an owner chat opened for one vertical (from its /operator page). */
+export function verticalPromptLine(vertical: Pick<Vertical, 'name' | 'campaign_ids'>): string {
+  const campaigns = vertical.campaign_ids.length ? vertical.campaign_ids.join(', ') : 'none'
+  return `This conversation is about the ${vertical.name} vertical. Its campaigns: ${campaigns}.`
+}
+
 /** "Master" or the vertical's name, for the "Operator: …" chip. */
 export function operatorChipLabel(op: Pick<Operator, 'is_master' | 'label'>, vertical: Pick<Vertical, 'name'> | null): string {
   if (op.is_master) return 'Master'

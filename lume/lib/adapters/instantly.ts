@@ -167,9 +167,17 @@ export async function listCampaigns(): Promise<InstantlyCampaign[]> {
   return mapCampaigns(await getAllPages('/campaigns'))
 }
 
-/** One campaign's totals, or the whole workspace's when `campaignId` is omitted. */
-export async function getAnalyticsOverview(campaignId?: string): Promise<AnalyticsOverview> {
-  return mapAnalyticsOverview(await instantlyGet('/campaigns/analytics/overview', { id: campaignId }))
+/**
+ * One campaign's totals, or the whole workspace's when `campaignId` is
+ * omitted; `range` (YYYY-MM-DD, inclusive) limits them to those dates.
+ */
+export async function getAnalyticsOverview(
+  campaignId?: string,
+  range?: { startDate: string; endDate: string }
+): Promise<AnalyticsOverview> {
+  return mapAnalyticsOverview(
+    await instantlyGet('/campaigns/analytics/overview', { id: campaignId, start_date: range?.startDate, end_date: range?.endDate })
+  )
 }
 
 export async function getDailyAnalytics(opts: { campaignId?: string; startDate?: string; endDate?: string } = {}): Promise<DailyPoint[]> {

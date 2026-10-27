@@ -79,6 +79,7 @@ export function AgentChat() {
   const [manageOpen, setManageOpen] = useState(false)
   const chat = useAgentChat({
     conversationId: urlId,
+    verticalId: params.get('vertical'),
     onConversation: (id) => {
       router.replace(`${pathname}?c=${id}`, { scroll: false })
       bump()

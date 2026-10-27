@@ -310,6 +310,24 @@ describe('POST /api/agent/run', () => {
       expect(h.toolRunner.mock.calls[0][0].messages[0].content).toMatch(/^You are being operated by the Roofers Grok Bot[^\n]*Its campaigns: none\./)
     })
 
+    it('the owner opening a vertical (from /operator): the new chat is tagged with it and the prompt names it', async () => {
+      const VID = '3941b73f-c74e-4cc5-9766-f0140e6ad9c9'
+      h.getVertical.mockResolvedValue({ id: VID, name: 'Roofers', campaign_ids: ['camp-r1'] })
+      fakeRunner([{ text: 'ok' }])
+      await events(await post('How are we doing?', { vertical_id: VID }))
+      expect(h.getVertical).toHaveBeenCalledWith(VID)
+      expect(h.createConversation).toHaveBeenCalledWith('How are we doing?', { vertical_id: VID, operator_id: null })
+      expect(h.toolRunner.mock.calls[0][0].messages[0].content).toMatch(/^This conversation is about the Roofers vertical\. Its campaigns: camp-r1\.\n\nHow are we doing\?$/)
+    })
+
+    it('an operator ignores a requested vertical_id (its own vertical wins)', async () => {
+      h.currentOperator.mockResolvedValue({ id: 'op-1', vertical_id: 'v-roof', is_master: false, label: 'Roofers bot', revoked_at: null })
+      h.getVertical.mockResolvedValue({ id: 'v-roof', name: 'Roofers', campaign_ids: [] })
+      fakeRunner([{ text: 'ok' }])
+      await events(await post('hi', { vertical_id: '3941b73f-c74e-4cc5-9766-f0140e6ad9c9' }))
+      expect(h.createConversation).toHaveBeenCalledWith('hi', { vertical_id: 'v-roof', operator_id: 'op-1' })
+    })
+
     it('the internal bearer is never treated as an operator', async () => {
       h.requireOwner.mockResolvedValue({ ok: true, via: 'internal', user: null })
       fakeRunner([{ text: 'ok' }])
