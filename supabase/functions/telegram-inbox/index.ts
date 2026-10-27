@@ -805,9 +805,15 @@ async function startPush(job: InstantlyJob): Promise<void> {
   }).catch(err => console.error('[telegram-inbox] instantly-push invoke error:', err))
 }
 
+// Only while the job still waits for a campaign: Lume can pick one too
+// (/api/gates/campaign/<job>), so every campaign write here is conditional and
+// a lost race says so instead of overwriting Lume's pick.
+const STILL_CHOOSING = 'instantly_status=in.(awaiting_campaign,choosing_campaign)'
+const ALREADY_SET_IN_LUME = 'That campaign was already set in Lume.'
+
 // A plain-text reply to the campaign prompt. Telegram's reply threading is the
 // whole state machine: reply_to_message.message_id identifies the job.
-async function handleCampaignNameReply(
+export async function handleCampaignNameReply(
   text: string,
   repliedToMessageId: number,
 ): Promise<boolean> {
@@ -845,11 +851,15 @@ async function handleCampaignNameReply(
   const resolved = exact.length === 1 ? exact[0] : (matches.length === 1 ? matches[0] : null)
 
   if (resolved) {
-    await supabaseRequest('PATCH', `validation_jobs?id=eq.${job.id}`, {
+    const moved = (await supabaseRequest('PATCH', `validation_jobs?id=eq.${job.id}&${STILL_CHOOSING}`, {
       instantly_campaign_id: resolved.id,
       instantly_campaign_name: resolved.name,
       instantly_campaign_candidates: null,
-    })
+    }, { returning: true })) as unknown[] | null
+    if (!moved?.length) {
+      await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: ALREADY_SET_IN_LUME })
+      return true
+    }
     const refreshed = await getInstantlyJob(job.id)
     if (refreshed) await showBarrierScreen(refreshed)
     return true
@@ -858,10 +868,14 @@ async function handleCampaignNameReply(
   // Several hits — store them so a 2-byte index in callback_data can resolve
   // back to a full campaign id (Telegram caps callback_data at 64 bytes).
   const candidates = matches.slice(0, 8).map(c => ({ id: c.id, name: c.name }))
-  await supabaseRequest('PATCH', `validation_jobs?id=eq.${job.id}`, {
+  const listed = (await supabaseRequest('PATCH', `validation_jobs?id=eq.${job.id}&${STILL_CHOOSING}`, {
     instantly_campaign_candidates: candidates,
     instantly_status: 'choosing_campaign',
-  })
+  }, { returning: true })) as unknown[] | null
+  if (!listed?.length) {
+    await tg('sendMessage', { chat_id: TELEGRAM_CHAT_ID, text: ALREADY_SET_IN_LUME })
+    return true
+  }
   await tg('sendMessage', {
     chat_id: TELEGRAM_CHAT_ID,
     text: `${matches.length} campaigns match "${query}" — which one?`,
@@ -908,11 +922,15 @@ async function handlePushCallback(
       await tg('answerCallbackQuery', { callback_query_id: cb.id, text: 'That option expired.' })
       return
     }
-    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
+    const picked = (await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}&${STILL_CHOOSING}`, {
       instantly_campaign_id: candidate.id,
       instantly_campaign_name: candidate.name,
       instantly_campaign_candidates: null,
-    })
+    }, { returning: true })) as unknown[] | null
+    if (!picked?.length) {
+      await tg('answerCallbackQuery', { callback_query_id: cb.id, text: ALREADY_SET_IN_LUME })
+      return
+    }
     await tg('answerCallbackQuery', { callback_query_id: cb.id, text: candidate.name })
     const refreshed = await getInstantlyJob(jobId)
     if (refreshed) await showBarrierScreen(refreshed, edit)
