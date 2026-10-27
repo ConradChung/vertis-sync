@@ -528,7 +528,8 @@ export async function insertPendingAction(row: {
   rule_id?: string | null
 }): Promise<PendingActionRow> {
   const sb = createServiceClient()
-  const res = await sb.from('pending_actions').insert(row).select().single()
+  // An operator sign-in link is never stored in plaintext (lib/operators/mask.ts).
+  const res = await sb.from('pending_actions').insert({ ...row, payload: maskOperatorKeys(row.payload) }).select().single()
   return unwrap('insertPendingAction', res) as PendingActionRow
 }
 

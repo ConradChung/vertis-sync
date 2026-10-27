@@ -91,7 +91,7 @@ export async function insertMessage(m: NewMessage): Promise<void> {
 /** Rename; false when the conversation does not exist or is archived. */
 export async function renameConversation(id: string, title: string): Promise<boolean> {
   const sb = createServiceClient()
-  const res = await sb.from('agent_conversations').update({ title }).eq('id', id).is('archived_at', null).select('id')
+  const res = await sb.from('agent_conversations').update({ title: maskOperatorKeys(title) }).eq('id', id).is('archived_at', null).select('id')
   if (res.error) throw new DbError('renameConversation', res.error)
   return (res.data ?? []).length > 0
 }

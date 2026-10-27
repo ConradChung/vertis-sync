@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { maskKeyText } from '@/lib/operators/mask'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireOwner } from '@/lib/auth/guards'
@@ -389,7 +390,9 @@ async function executeRun({
       skipPermissions,
       autoApprove,
       skills: { list: () => listSkills(), get: getSkill, findByName: findSkillByName, create: createSkill },
-      notify: async (text) => {
+      notify: async (raw) => {
+        // Telegram and the feed both get the masked text: a sign-in link is never sent or stored in plaintext.
+        const text = maskKeyText(raw)
         const r = await alert({
           source: 'lume.agent', severity: 'info', title: titleFrom(text), body: text,
           link: alertLink(`/agent?c=${conversationId}`),

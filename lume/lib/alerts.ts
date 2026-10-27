@@ -1,4 +1,5 @@
 import 'server-only'
+import { maskKeyText } from '@/lib/operators/mask'
 import { createServiceClient } from '@/lib/supabase/service'
 import { configuredBaseUrl } from '@/lib/http/origin'
 import type { TelegramResult } from '@/lib/adapters/telegram'
@@ -106,12 +107,13 @@ async function insertFeed<T>(input: AlertInput<T>): Promise<void> {
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
+    // An operator sign-in link is never stored in plaintext (lib/operators/mask.ts).
     const args = {
       p_source: input.source,
       p_severity: input.severity ?? 'info',
-      p_title: input.title || input.source,
-      p_body: input.body ?? null,
-      p_link: input.link ?? null,
+      p_title: maskKeyText(input.title || input.source),
+      p_body: input.body == null ? null : maskKeyText(input.body),
+      p_link: input.link == null ? null : maskKeyText(input.link),
       p_campaign_id: input.campaign_id ?? null,
       p_scope: input.scope ?? null,
       p_dedupe_key: input.dedupe_key ?? null,
