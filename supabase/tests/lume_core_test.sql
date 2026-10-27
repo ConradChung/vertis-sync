@@ -1,6 +1,6 @@
 -- supabase/tests/lume_core_test.sql
 begin;
-select plan(30);
+select plan(34);
 
 -- structure
 select has_table('public', 'events', 'events exists');
@@ -12,6 +12,8 @@ select has_table('public', 'lume_external_schedules', 'lume_external_schedules e
 select col_has_check('public', 'pending_actions', 'claim_status', 'pending_actions.claim_status is a claim slot');
 select has_column('public', 'events', 'webhook_id', 'events.webhook_id exists');
 select has_column('public', 'pending_actions', 'executed_at', 'pending_actions.executed_at exists');
+select has_column('public', 'agent_messages', 'auto', 'agent_messages.auto exists');
+select col_default_is('public', 'agent_messages', 'auto', 'false', 'agent_messages.auto defaults to false');
 select has_index('public', 'events', 'events_webhook_id_idx', 'events has the webhook_id dedupe index');
 -- Non-partial on purpose (20261015071538): PostgREST's upsert emits
 -- `on conflict (webhook_id)` without a predicate, which cannot use a partial index.
@@ -47,6 +49,8 @@ select is((select count(*)::int from pg_proc p
 select throws_ok($$insert into pending_actions (kind) values ('nope')$$, '23514', null, 'pending_actions.kind rejects unknown kinds');
 select throws_ok($$insert into pending_actions (kind, claim_status) values ('decide_gate', 'x')$$, '23514', null, 'pending_actions.claim_status rejects unknown values');
 select lives_ok($$insert into pending_actions (kind, status) values ('decide_gate', 'executing')$$, 'pending_actions.status accepts executing');
+select lives_ok($$insert into pending_actions (kind, decided_via) values ('pause_campaign', 'agent')$$, 'pending_actions.decided_via accepts agent (skip mode)');
+select throws_ok($$insert into pending_actions (kind, decided_via) values ('pause_campaign', 'nope')$$, '23514', null, 'pending_actions.decided_via rejects unknown values');
 
 -- behaviour: webhook dedupe
 -- Plain `on conflict (webhook_id)`: the exact arbiter PostgREST emits for
