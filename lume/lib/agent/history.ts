@@ -25,6 +25,8 @@ export interface StoredApproval {
   deep_link: string
   summary: string | null
   tool: string
+  /** awaiting the owner's tap, or approved by skip-permissions mode and run (or failed). */
+  state?: 'awaiting' | 'auto_executed' | 'auto_failed'
 }
 
 export interface StoredMessage {
@@ -36,6 +38,8 @@ export interface StoredMessage {
   approvals: StoredApproval[]
   error: string | null
   run_id: string | null
+  /** An automatic follow-up turn (an approval outcome), shown as a compact line, not a bubble. */
+  auto: boolean
   created_at: string
 }
 

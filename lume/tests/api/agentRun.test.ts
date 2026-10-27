@@ -22,6 +22,9 @@ const h = vi.hoisted(() => ({
   insertMessage: vi.fn(),
   getSkill: vi.fn(),
   markSkillRun: vi.fn(),
+  claimDecision: vi.fn(),
+  executeAction: vi.fn(),
+  editMessage: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/guards', () => ({ requireOwner: h.requireOwner }))
@@ -42,7 +45,9 @@ vi.mock('@/lib/agent/skills', () => ({
 vi.mock('@/lib/actions/create', () => ({ createAction: h.createAction }))
 vi.mock('@/lib/agent/memory', () => ({ loadKnowledge: h.loadKnowledge }))
 vi.mock('@/lib/db/service', () => ({ logEvent: h.logEvent, isDbError: () => false }))
-vi.mock('@/lib/adapters/telegram', () => ({ sendMessage: h.sendMessage }))
+vi.mock('@/lib/adapters/telegram', () => ({ sendMessage: h.sendMessage, editMessage: h.editMessage }))
+vi.mock('@/lib/actions/store', () => ({ claimDecision: h.claimDecision }))
+vi.mock('@/lib/actions/execute', () => ({ executeAction: h.executeAction }))
 vi.mock('@anthropic-ai/sdk', () => {
   class APIError extends Error {
     status?: number
@@ -305,7 +310,7 @@ describe('POST /api/agent/run', () => {
       expect(reply.text).toBe('Plan: pause it.\n\nWaiting for your approval.')
       expect(reply.tools).toEqual([expect.objectContaining({ name: 'pause_campaign', tier: 'high', status: 'awaiting' })])
       expect(reply.tools[0]).not.toHaveProperty('input')
-      expect(reply.approvals).toEqual([{ action_id: 'act-1', deep_link: '/actions/act-1', summary: expect.anything(), tool: 'pause_campaign' }])
+      expect(reply.approvals).toEqual([{ action_id: 'act-1', deep_link: '/actions/act-1', summary: expect.anything(), tool: 'pause_campaign', state: 'awaiting' }])
     })
 
     it('stores the error when the run fails', async () => {
@@ -333,6 +338,82 @@ describe('POST /api/agent/run', () => {
       expect(res.status).toBe(500)
       expect(h.toolRunner).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe('POST /api/agent/run in skip-permissions mode', () => {
+  const pause = [
+    { text: 'Pausing it.', call: { name: 'pause_campaign', input: { campaign_id: 'c1' } } },
+    { text: 'Paused.' },
+  ]
+
+  beforeEach(() => {
+    h.claimDecision.mockResolvedValue({ id: 'act-1', kind: 'pause_campaign', telegram_message_id: 42 })
+    h.executeAction.mockResolvedValue({ ran: true, status: 'executed', result: { paused: true }, error: null })
+    h.editMessage.mockResolvedValue({ ok: true })
+  })
+
+  it('a skippable kind is claimed as the agent, executed, and the run ends done', async () => {
+    fakeRunner(pause)
+    const ev = await events(await post('pause c1', { skip_permissions: true }))
+    expect(h.createAction).toHaveBeenCalledWith('pause_campaign', expect.anything(), 'agent', { agentRunId: 'run-1' })
+    expect(h.claimDecision).toHaveBeenCalledWith('act-1', true, 'agent')
+    expect(h.executeAction).toHaveBeenCalledWith('act-1')
+    expect(h.editMessage).toHaveBeenCalledWith(42, expect.stringContaining('Auto-approved'))
+    expect(ev).toContainEqual(expect.objectContaining({ type: 'approval', action_id: 'act-1', tool: 'pause_campaign', state: 'auto_executed' }))
+    expect(ev.at(-1)).toMatchObject({ type: 'done', status: 'done' })
+    expect(h.updateAgentRun).not.toHaveBeenCalledWith('run-1', expect.objectContaining({ status: 'needs_approval' }))
+    const last = h.updateAgentRun.mock.calls.at(-1)![1]
+    expect(last).not.toHaveProperty('approval_action_id')
+    expect(last.tool_calls).toEqual([expect.objectContaining({ name: 'pause_campaign', status: 'ok', action_id: 'act-1' })])
+    const reply = h.insertMessage.mock.calls.at(-1)![0]
+    expect(reply.tools).toEqual([expect.objectContaining({ name: 'pause_campaign', status: 'ok' })])
+    expect(reply.approvals).toEqual([expect.objectContaining({ action_id: 'act-1', state: 'auto_executed' })])
+  })
+
+  it('a failed execution is auto_failed and its tool entry an error', async () => {
+    h.executeAction.mockResolvedValue({ ran: true, status: 'failed', result: {}, error: 'instantly 500' })
+    fakeRunner(pause)
+    const ev = await events(await post('pause c1', { skip_permissions: true }))
+    expect(ev).toContainEqual(expect.objectContaining({ type: 'approval', state: 'auto_failed' }))
+    expect(ev.at(-1)).toMatchObject({ type: 'done', status: 'done' })
+    expect(h.insertMessage.mock.calls.at(-1)![0].tools).toEqual([expect.objectContaining({ status: 'error' })])
+  })
+
+  it('a lost claim reports not_claimable and runs nothing', async () => {
+    h.claimDecision.mockResolvedValue(null)
+    fakeRunner(pause)
+    const ev = await events(await post('pause c1', { skip_permissions: true }))
+    expect(h.executeAction).not.toHaveBeenCalled()
+    expect(ev).toContainEqual(expect.objectContaining({ type: 'approval', state: 'auto_failed' }))
+  })
+
+  it('without skip_permissions nothing is auto-approved', async () => {
+    fakeRunner(pause)
+    const ev = await events(await post('pause c1'))
+    expect(h.claimDecision).not.toHaveBeenCalled()
+    expect(ev).toContainEqual(expect.objectContaining({ type: 'approval', state: 'awaiting' }))
+    expect(ev.at(-1)).toMatchObject({ type: 'done', status: 'needs_approval' })
+  })
+
+  it('an always-ask kind still waits in skip mode', async () => {
+    fakeRunner([
+      { text: '', call: { name: 'send_reply', input: { eaccount: 'me@send.com', campaign_id: 'c', reply_to_uuid: 'e', body: 'hi' } } },
+      { text: 'Waiting.' },
+    ])
+    const ev = await events(await post('reply', { skip_permissions: true }))
+    expect(h.claimDecision).not.toHaveBeenCalled()
+    expect(ev.at(-1)).toMatchObject({ type: 'done', status: 'needs_approval' })
+  })
+
+  it('stores auto: true on an automatic follow-up turn', async () => {
+    fakeRunner([{ text: 'Noted.' }])
+    await events(await post('Approved: pause c1', { auto: true }))
+    expect(h.insertMessage.mock.calls[0][0]).toMatchObject({ role: 'user', text: 'Approved: pause c1', auto: true })
+  })
+
+  it('400 for a non-boolean skip_permissions', async () => {
+    expect((await post('hi', { skip_permissions: 'yes' })).status).toBe(400)
   })
 })
 

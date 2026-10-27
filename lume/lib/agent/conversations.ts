@@ -34,7 +34,7 @@ export async function getMessages(conversationId: string): Promise<StoredMessage
   const sb = createServiceClient()
   const res = await sb
     .from('agent_messages')
-    .select('id, conversation_id, role, text, tools, approvals, error, run_id, created_at')
+    .select('id, conversation_id, role, text, tools, approvals, error, run_id, auto, created_at')
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: true })
     .limit(500)
@@ -50,6 +50,8 @@ export interface NewMessage {
   approvals?: StoredApproval[]
   error?: string | null
   run_id?: string | null
+  /** An automatic follow-up turn (defaults to false). */
+  auto?: boolean
 }
 
 /** Insert a message and bump the conversation's `updated_at` (sidebar order). */
@@ -63,6 +65,7 @@ export async function insertMessage(m: NewMessage): Promise<void> {
     approvals: (m.approvals ?? []) as unknown as Json,
     error: m.error ?? null,
     run_id: m.run_id ?? null,
+    auto: m.auto ?? false,
   })
   if (res.error) throw new DbError('insertMessage', res.error)
   const touch = await sb.from('agent_conversations').update({ updated_at: new Date().toISOString() }).eq('id', m.conversation_id)

@@ -4,7 +4,9 @@ import { z } from 'zod'
 import { requireOwner } from '@/lib/auth/guards'
 import { buildActionRequest } from '@/lib/actions/build'
 import { createAction } from '@/lib/actions/create'
-import { sendMessage } from '@/lib/adapters/telegram'
+import { executeAction } from '@/lib/actions/execute'
+import { claimDecision } from '@/lib/actions/store'
+import { editMessage, sendMessage } from '@/lib/adapters/telegram'
 import { buildPrompt } from '@/lib/agent/chat'
 import { createConversation, getConversation, getMessages, insertMessage } from '@/lib/agent/conversations'
 import { contextFromMessages, titleFromPrompt, type StoredApproval, type StoredToolEntry } from '@/lib/agent/history'
@@ -15,7 +17,7 @@ import { skillContext } from '@/lib/agent/skillModel'
 import { createSkill, findSkillByName, getSkill, listSkills, markSkillRun } from '@/lib/agent/skills'
 import { toRunnableTools, type ToolHooks } from '@/lib/agent/runnable'
 import { failStaleRuns, insertAgentRun, updateAgentRun, type AgentRunPatch } from '@/lib/agent/runs'
-import { buildTools } from '@/lib/agent/tools'
+import { buildTools, type ToolDeps } from '@/lib/agent/tools'
 import { WEB_TOOLS, logServerToolUses } from '@/lib/agent/webTools'
 import { STALE_RUN_MS, type ToolCallEntry } from '@/lib/agent/orbState'
 import { logEvent } from '@/lib/db/service'
@@ -25,7 +27,8 @@ import { parseJsonBody, UUID_RE } from '@/lib/http/json'
 import { internalOrigin } from '@/lib/http/origin'
 
 /**
- * POST `{ prompt, conversation_id? }` → the agent, streamed as Server-Sent Events.
+ * POST `{ prompt, conversation_id?, skip_permissions?, auto? }` → the agent,
+ * streamed as Server-Sent Events.
  *
  * Chat history: without `conversation_id` a new `agent_conversations` row is
  * created (titled from the prompt); with one (404 when missing or deleted),
@@ -41,6 +44,14 @@ import { internalOrigin } from '@/lib/http/origin'
  * → ok/error); a high-risk result sets `status='needs_approval'` and
  * `approval_action_id`. Finish → `done` (or stays `needs_approval`) /
  * `failed`, with `usage` and the final text as `outcome`.
+ *
+ * Skip permissions (`skip_permissions: true`, per chat, sent by the client):
+ * a skippable high-risk kind is still filed as a pending action, then claimed
+ * at once (decided_via 'agent') and executed here; its approval event carries
+ * `state: 'auto_executed' | 'auto_failed'` and the run does not wait. Always-ask
+ * kinds (lib/agent/permissions.ts) wait as usual (`state: 'awaiting'`).
+ * `auto: true` marks a client-sent automatic follow-up turn (an approval
+ * outcome); it is stored on the user message.
  *
  * Skills: `skill_id` + `skill_mode` ('run' | 'reference') load a saved skill
  * and put its steps ahead of the prompt (`skillContext`); 'run' also bumps
@@ -63,6 +74,8 @@ const Body = z.object({
   conversation_id: z.string().regex(UUID_RE).optional(),
   skill_id: z.string().regex(UUID_RE).optional(),
   skill_mode: z.enum(['run', 'reference']).optional(),
+  skip_permissions: z.boolean().optional(),
+  auto: z.boolean().optional(),
 })
 
 type SseEvent = Record<string, unknown> & { type: string }
@@ -115,7 +128,7 @@ export async function POST(req: Request) {
       if (skillMode === 'run') await markSkillRun(skill.id)
     }
     runId = (await insertAgentRun(prompt, MODEL)).id
-    await insertMessage({ conversation_id: conversationId, role: 'user', text: message, run_id: runId })
+    await insertMessage({ conversation_id: conversationId, role: 'user', text: message, run_id: runId, ...(body.data.auto ? { auto: true } : {}) })
   } catch (err) {
     return dbErrorResponse(err, 'api/agent/run')
   }
@@ -142,7 +155,15 @@ export async function POST(req: Request) {
         console.error('[api/agent/run] memory load failed:', err instanceof Error ? err.message : err)
         return ''
       })
-      const reply = await executeRun({ runId, prompt: withKnowledge(knowledge, prompt), title: message, origin, conversationId, send })
+      const reply = await executeRun({
+        runId,
+        prompt: withKnowledge(knowledge, prompt),
+        title: message,
+        origin,
+        conversationId,
+        skipPermissions: body.data.skip_permissions === true,
+        send,
+      })
       try {
         await insertMessage({ conversation_id: conversationId, role: 'assistant', run_id: runId, ...reply })
       } catch (err) {
@@ -169,6 +190,24 @@ export async function POST(req: Request) {
   })
 }
 
+/**
+ * Skip mode's approval: the same claim a Lume click runs (decided_via
+ * 'agent'), then the executor, server-side. The tool never reaches this
+ * without the owner's per-chat opt-in and a skippable kind.
+ */
+const autoApprove: NonNullable<ToolDeps['autoApprove']> = async (id) => {
+  const claimed = await claimDecision(id, true, 'agent')
+  if (!claimed) return { status: 'not_claimable', result: null, error: null }
+  // Best effort: strip the Telegram prompt's buttons so nobody taps a handled action.
+  try {
+    if (claimed.telegram_message_id) await editMessage(claimed.telegram_message_id, `⚡ Auto-approved (skip mode) — ${claimed.kind}`)
+  } catch (err) {
+    console.error('[api/agent/run] telegram edit failed:', err instanceof Error ? err.message : err)
+  }
+  const o = await executeAction(id)
+  return o.ran ? { status: o.status, result: o.result, error: o.error } : { status: 'not_claimable', result: null, error: null }
+}
+
 /** What the run said and did, stored as the assistant message. */
 interface RunReply {
   text: string
@@ -183,6 +222,7 @@ async function executeRun({
   title,
   origin,
   conversationId,
+  skipPermissions,
   send: emit,
 }: {
   runId: string
@@ -191,6 +231,7 @@ async function executeRun({
   title: string
   origin: string
   conversationId: string
+  skipPermissions: boolean
   send: (e: SseEvent) => void
 }): Promise<RunReply> {
   // Mirror what the browser shows, so a reloaded conversation looks the same.
@@ -198,13 +239,21 @@ async function executeRun({
   const send = (e: SseEvent) => {
     if (e.type === 'text') reply.text += String(e.delta ?? '')
     else if (e.type === 'approval') {
-      const a = { action_id: String(e.action_id), deep_link: String(e.deep_link ?? `/actions/${e.action_id}`), summary: (e.summary as string | null) ?? null, tool: String(e.tool ?? '') }
+      const a: StoredApproval = {
+        action_id: String(e.action_id),
+        deep_link: String(e.deep_link ?? `/actions/${e.action_id}`),
+        summary: (e.summary as string | null) ?? null,
+        tool: String(e.tool ?? ''),
+        ...(e.state ? { state: e.state as StoredApproval['state'] } : {}),
+      }
       reply.approvals = [...reply.approvals.filter((x) => x.action_id !== a.action_id), a]
     } else if (e.type === 'error') reply.error = String(e.message ?? 'The run failed.')
     emit(e)
   }
   const toolCalls: ToolCallEntry[] = []
   let approvalActionId: string | null = null
+  // Tool calls skip mode approved and ran: stored as ok / error, not awaiting.
+  const autoRan = new Map<string, 'ok' | 'error'>()
   const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 
   // Writes are chained so `tool_calls` snapshots land in order.
@@ -227,10 +276,19 @@ async function executeRun({
       const entry = toolCalls.find((c) => c.id === id)
       if (entry) Object.assign(entry, { status: ok ? 'ok' : 'error', ms, ...(error ? { error } : {}) })
       send({ type: 'tool_end', id, name, tier, ok, ms, ...(error ? { error } : {}) })
+      if (ok && result?.status === 'auto_approved' && typeof result.action_id === 'string' && result.action_id) {
+        // Skip mode already ran it: show the card, but the run does not wait.
+        if (entry) entry.action_id = result.action_id
+        const executed = result.outcome === 'executed'
+        autoRan.set(id, executed ? 'ok' : 'error')
+        send({ type: 'approval', action_id: result.action_id, deep_link: result.deep_link, summary: result.summary ?? null, tool: name, state: executed ? 'auto_executed' : 'auto_failed' })
+        await save({ tool_calls: snapshot() })
+        return
+      }
       if (ok && result?.status === 'awaiting_approval' && typeof result.action_id === 'string' && result.action_id) {
         approvalActionId = result.action_id
         if (entry) entry.action_id = result.action_id
-        send({ type: 'approval', action_id: result.action_id, deep_link: result.deep_link, summary: result.summary ?? null, tool: name })
+        send({ type: 'approval', action_id: result.action_id, deep_link: result.deep_link, summary: result.summary ?? null, tool: name, state: 'awaiting' })
         await save({ status: 'needs_approval', approval_action_id: approvalActionId, tool_calls: snapshot() })
         return
       }
@@ -246,6 +304,8 @@ async function executeRun({
       agentRunId: runId,
       baseUrl: origin,
       conversationId,
+      skipPermissions,
+      autoApprove,
       skills: { list: () => listSkills(), get: getSkill, findByName: findSkillByName, create: createSkill },
       notify: async (text) => {
         const r = await sendMessage(text, { disablePreview: true })
@@ -341,7 +401,7 @@ async function executeRun({
     id: c.id,
     name: c.name,
     tier: c.tier,
-    status: c.status === 'ok' && c.tier === 'high' ? 'awaiting' : c.status,
+    status: autoRan.get(c.id) ?? (c.status === 'ok' && c.tier === 'high' ? 'awaiting' : c.status),
     ...(c.ms !== undefined ? { ms: c.ms } : {}),
     ...(c.error ? { error: c.error } : {}),
   }))
