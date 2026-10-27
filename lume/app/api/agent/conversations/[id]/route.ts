@@ -1,13 +1,17 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireOwnerSession } from '@/lib/auth/guards'
+import { getActionStatuses } from '@/lib/actions/store'
 import { archiveConversation, getConversation, getMessages, renameConversation } from '@/lib/agent/conversations'
+import type { StoredMessage } from '@/lib/agent/history'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { parseJsonBody, uuidParam } from '@/lib/http/json'
 
 /**
  * One Agent conversation (owner session only).
- *  GET    → `{ conversation, messages }` (404 when missing or deleted).
+ *  GET    → `{ conversation, messages }` (404 when missing or deleted); each
+ *           approval carries its action's live `status` so a reload shows
+ *           whether it was since approved, run or denied.
  *  PATCH  → `{ title }` rename.
  *  DELETE → soft delete (`archived_at`); the rows stay for the run log.
  */
@@ -18,6 +22,16 @@ const Rename = z.object({ title: z.string().trim().min(1).max(120) }).strict()
 const notFound = () => NextResponse.json({ error: 'not_found' }, { status: 404 })
 const badId = () => NextResponse.json({ error: 'invalid_id' }, { status: 400 })
 
+/** One `in` query for every approval's row status; null when the row is gone. */
+async function withLiveStatus(messages: StoredMessage[]): Promise<StoredMessage[]> {
+  const ids = messages.flatMap((m) => (m.approvals ?? []).map((a) => a.action_id))
+  if (!ids.length) return messages
+  const statuses = await getActionStatuses(ids)
+  return messages.map((m) =>
+    m.approvals?.length ? { ...m, approvals: m.approvals.map((a) => ({ ...a, status: statuses.get(a.action_id) ?? null })) } : m
+  )
+}
+
 export async function GET(req: Request, ctx: Ctx) {
   const auth = await requireOwnerSession(req)
   if (!auth.ok) return auth.response
@@ -26,7 +40,7 @@ export async function GET(req: Request, ctx: Ctx) {
   try {
     const conversation = await getConversation(id)
     if (!conversation) return notFound()
-    return NextResponse.json({ conversation, messages: await getMessages(id) })
+    return NextResponse.json({ conversation, messages: await withLiveStatus(await getMessages(id)) })
   } catch (err) {
     return dbErrorResponse(err, 'api/agent/conversations/[id]')
   }

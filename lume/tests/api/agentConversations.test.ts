@@ -8,6 +8,7 @@ const h = vi.hoisted(() => ({
   getMessages: vi.fn(),
   renameConversation: vi.fn(),
   archiveConversation: vi.fn(),
+  getActionStatuses: vi.fn(),
 }))
 vi.mock('@/lib/auth/guards', () => ({ requireOwnerSession: h.requireOwnerSession }))
 vi.mock('@/lib/agent/conversations', () => ({
@@ -18,6 +19,7 @@ vi.mock('@/lib/agent/conversations', () => ({
   archiveConversation: h.archiveConversation,
 }))
 vi.mock('@/lib/db/service', () => ({ isDbError: () => false }))
+vi.mock('@/lib/actions/store', () => ({ getActionStatuses: h.getActionStatuses }))
 
 import { GET as listGET } from '@/app/api/agent/conversations/route'
 import { DELETE, GET, PATCH } from '@/app/api/agent/conversations/[id]/route'
@@ -66,6 +68,28 @@ describe('/api/agent/conversations/[id]', () => {
     const res = await GET(req(), ctx(ID.toUpperCase()))
     expect(h.getConversation).toHaveBeenCalledWith(ID)
     expect(await res.json()).toEqual({ conversation: conv, messages: [{ id: 'm1', role: 'user', text: 'hi' }] })
+  })
+
+  it('GET attaches each approval\'s live status from one lookup (null when the row is gone)', async () => {
+    h.getConversation.mockResolvedValue(conv)
+    const approval = (id: string) => ({ action_id: id, deep_link: `/actions/${id}`, summary: 's', tool: 'pause_campaign', state: 'awaiting' })
+    h.getMessages.mockResolvedValue([
+      { id: 'm1', role: 'assistant', text: 'a', approvals: [approval('a1')] },
+      { id: 'm2', role: 'assistant', text: 'b', approvals: [approval('gone')] },
+    ])
+    h.getActionStatuses.mockResolvedValue(new Map([['a1', 'executed']]))
+    const body = await (await GET(req(), ctx())).json()
+    expect(h.getActionStatuses).toHaveBeenCalledTimes(1)
+    expect(h.getActionStatuses).toHaveBeenCalledWith(['a1', 'gone'])
+    expect(body.messages[0].approvals[0]).toEqual({ ...approval('a1'), status: 'executed' })
+    expect(body.messages[1].approvals[0]).toEqual({ ...approval('gone'), status: null })
+  })
+
+  it('GET with no approvals runs no status lookup', async () => {
+    h.getConversation.mockResolvedValue(conv)
+    h.getMessages.mockResolvedValue([{ id: 'm1', role: 'user', text: 'hi', approvals: [] }])
+    await GET(req(), ctx())
+    expect(h.getActionStatuses).not.toHaveBeenCalled()
   })
 
   it('GET 404 when missing or deleted, 400 for a bad id', async () => {

@@ -25,6 +25,16 @@ export async function getAction(id: string): Promise<PendingActionRow | null> {
   return (res.data as PendingActionRow | null) ?? null
 }
 
+/** Many rows' status in one `in` query (a reloaded chat's approval cards). Missing ids are absent. */
+export async function getActionStatuses(ids: string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(ids)]
+  if (!unique.length) return new Map()
+  const sb = createServiceClient()
+  const res = await sb.from('pending_actions').select('id,status').in('id', unique)
+  if (res.error) throw new DbError('getActionStatuses', res.error)
+  return new Map(((res.data ?? []) as Pick<PendingActionRow, 'id' | 'status'>[]).map((r) => [r.id, r.status]))
+}
+
 /**
  * Same claim telegram-inbox's lume_ok/lume_no runs, with decided_via='lume'
  * (the owner's tap) or 'agent' (skip-permissions mode approving for them).

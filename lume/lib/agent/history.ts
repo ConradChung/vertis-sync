@@ -30,6 +30,8 @@ export interface StoredApproval {
    * failed); or claimed / run by someone else first (handled_elsewhere).
    */
   state?: 'awaiting' | 'auto_executed' | 'auto_failed' | 'handled_elsewhere'
+  /** The pending_actions row's live status, attached when a conversation loads (null: row gone). Never stored. */
+  status?: string | null
 }
 
 export interface StoredMessage {
