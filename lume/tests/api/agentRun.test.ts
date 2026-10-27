@@ -168,6 +168,8 @@ describe('POST /api/agent/run', () => {
     fakeRunner([{ text: 'All quiet.' }])
     const res = await post('status?')
     expect(res.headers.get('content-type')).toContain('text/event-stream')
+    // A stream may carry a sign-in link once: never cached anywhere.
+    expect(res.headers.get('cache-control')).toBe('no-store, no-transform')
     const ev = await events(res)
     expect(ev[0]).toEqual({ type: 'run', id: 'run-1', conversation_id: 'conv-new' })
     expect(ev).toContainEqual({ type: 'text', delta: 'All quiet.' })
