@@ -21,7 +21,17 @@ export function isFormPost(req: Request): boolean {
   return (req.headers.get('content-type') ?? '').toLowerCase().startsWith(FORM_CONTENT_TYPE)
 }
 
-/** Same-origin check for a cookie-authenticated form post. */
+/**
+ * Same-origin check for a cookie-authenticated POST (form or JSON).
+ *
+ * A request with neither `Origin` nor `Sec-Fetch-Site` is accepted: every
+ * current browser sends `Origin` on a cross-site POST (and `Sec-Fetch-Site`
+ * on all requests), so a request with neither did not come from a page a
+ * victim's browser loaded, which is the only way a CSRF could carry the
+ * owner's cookie. The session cookies are also `SameSite=Lax`, so a browser
+ * never attaches them to a cross-site POST in the first place; this check is
+ * the second line.
+ */
 export function formSameOrigin(req: Request): boolean {
   const origin = req.headers.get('origin')
   if (origin && origin !== 'null') {
@@ -68,7 +78,10 @@ export async function readJsonOrForm<T>(
   fromForm: (fields: URLSearchParams) => unknown
 ): Promise<BodyRead<T>> {
   const form = isFormPost(req)
-  if (form && !formSameOrigin(req)) return { ok: false, response: NextResponse.json({ error: 'cross_origin' }, { status: 403 }) }
+  // Cookie-authenticated callers (forms and JSON alike) must be same-origin;
+  // the agent's server-to-server bearer calls carry no browser headers.
+  const bearer = /^Bearer\s/i.test(req.headers.get('authorization') ?? '')
+  if (!bearer && !formSameOrigin(req)) return { ok: false, response: NextResponse.json({ error: 'cross_origin' }, { status: 403 }) }
   const body = await readBodyCapped(req, maxBytes)
   if (!body.ok) {
     return {

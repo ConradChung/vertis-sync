@@ -66,6 +66,17 @@ describe('readJsonOrForm', () => {
     expect(r.response.headers.get('location')).toBe('http://localhost/operator?flash_error=invalid_body')
   })
 
+  it('a cross-origin JSON post with the cookie is a 403 too; the bearer (no browser headers) passes', async () => {
+    const json = (headers: Record<string, string>) =>
+      new Request('http://localhost/x', { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: '{"decision":"approve"}' })
+    const evil = await readJsonOrForm(json({ origin: 'https://evil.test' }), Schema, 256, fromForm)
+    expect(evil.ok).toBe(false)
+    if (!evil.ok) expect(evil.response.status).toBe(403)
+    expect((await readJsonOrForm(json({ 'sec-fetch-site': 'cross-site' }), Schema, 256, fromForm)).ok).toBe(false)
+    expect((await readJsonOrForm(json({ origin: 'http://localhost' }), Schema, 256, fromForm)).ok).toBe(true)
+    expect((await readJsonOrForm(json({ authorization: 'Bearer x', origin: 'https://evil.test' }), Schema, 256, fromForm)).ok).toBe(true)
+  })
+
   it('a cross-origin form post is a 403', async () => {
     const r = await readJsonOrForm(formReq('decision=approve', { origin: 'https://evil.test' }), Schema, 256, fromForm)
     expect(r.ok).toBe(false)
