@@ -20,7 +20,8 @@ const OPERATOR_COOKIE = 'lume_op'
  *    (a redirect, not a rewrite: Next drops a custom status on rewrites, so
  *    the URL changes and the 403 intent is carried by the page itself).
  *  - a Grok Bot whose operator key was revoked (valid `lume_op` cookie, row
- *    revoked or gone): signed out locally (Supabase signOut, local scope;
+ *    revoked or gone), or any `lume_op` cookie that is present but does not
+ *    verify (forged, stale key derivation, malformed): signed out locally (Supabase signOut, local scope;
  *    every auth cookie and `lume_op` cleared) → /login, or 401 for the API.
  *    `/auth/*` is exempt so a re-issued key can sign in over a stale cookie.
  */
@@ -67,7 +68,7 @@ export async function middleware(request: NextRequest) {
     return isApi ? jsonError('forbidden', 403, response) : redirectTo('/forbidden', request, response)
   }
 
-  if (await revokedOperatorCookie(request)) {
+  if (await operatorCookieRejected(request)) {
     try {
       await supabase.auth.signOut({ scope: 'local' })
     } catch (err) {
@@ -80,12 +81,17 @@ export async function middleware(request: NextRequest) {
   return response
 }
 
-/** A verified `lume_op` cookie for an operator that is revoked or deleted. Unsigned / forged cookies never reach the DB. */
-async function revokedOperatorCookie(request: NextRequest): Promise<boolean> {
+/**
+ * A `lume_op` cookie that must end the session: present but unverifiable
+ * (forged, signed with an older key derivation, malformed — fail closed, no
+ * DB lookup), or verified for an operator that is revoked or deleted. No
+ * cookie (the owner) is never rejected; a failed revocation lookup fails open.
+ */
+async function operatorCookieRejected(request: NextRequest): Promise<boolean> {
   const value = request.cookies.get(OPERATOR_COOKIE)?.value
   if (!value) return false
   const id = await verifyOperatorCookieWeb(value, process.env.LUME_INTERNAL_SECRET)
-  if (!id) return false
+  if (!id) return true
   return (await isOperatorRevoked(id)) === true
 }
 

@@ -17,6 +17,7 @@ vi.mock('@/lib/supabase/middleware', () => ({
   }),
 }))
 
+import { createHmac } from 'node:crypto'
 import { middleware } from '@/middleware'
 import { signOperatorCookie } from '@/lib/operators/cookie'
 import { verifyOperatorCookieWeb } from '@/lib/operators/revocation'
@@ -93,13 +94,26 @@ describe('middleware: revoked Grok Bot operator', () => {
     expect(cleared(res)).toEqual([])
   })
 
-  it('the owner (no lume_op cookie) and a forged cookie never hit the DB', async () => {
-    for (const cookie of [signedIn(), signedIn(signOperatorCookie(OP, 'forged'))]) {
-      const res = await middleware(request('/overview', cookie))
-      expect(res.headers.get('location')).toBeNull()
-    }
+  it('the owner (no lume_op cookie) passes without a DB lookup', async () => {
+    const res = await middleware(request('/overview', signedIn()))
+    expect(res.headers.get('location')).toBeNull()
     expect(fetchMock).not.toHaveBeenCalled()
     expect(h.signOut).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['forged (wrong secret)', () => signOperatorCookie(OP, 'forged')],
+    ['stale (raw-secret key, pre key-derivation)', () => `${OP}.${createHmac('sha256', SECRET).update(OP).digest('base64url')}`],
+    ['malformed', () => 'garbage'],
+  ])('a present but unverifiable lume_op cookie (%s) signs out like a revoked one, without a DB lookup', async (_label, make) => {
+    const page = await middleware(request('/overview', signedIn(make())))
+    expect(new URL(page.headers.get('location')!).pathname).toBe('/login')
+    expect(cleared(page)).toEqual(expect.arrayContaining(['lume_op', `${SB}.0`, `${SB}.1`]))
+    const api = await middleware(request('/api/alerts', signedIn(make())))
+    expect(api.status).toBe(401)
+    expect(await api.json()).toEqual({ error: 'operator_revoked' })
+    expect(h.signOut).toHaveBeenCalledWith({ scope: 'local' })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('a lookup failure fails open (the owner is never locked out by a DB blip)', async () => {
