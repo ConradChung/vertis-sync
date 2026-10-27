@@ -9,6 +9,7 @@ import { findAwaitingActionBy } from '@/lib/campaigns/service'
 import type { Json, PendingActionKind, PendingActionRow } from '@/lib/db/types'
 import { CRM_CLOSE_KIND, parseCrmClosePayload } from '@/lib/crm/actions'
 import { updateSequencePayloadError } from '@/lib/campaigns/sequenceAction'
+import { removeLeadsPayloadError } from '@/lib/actions/removeLeadsPayload'
 
 /**
  * Create a high-risk `pending_actions` row and ask for confirmation in
@@ -123,6 +124,12 @@ export async function createAction(
       throw new InvalidActionPayloadError('payload.vertical_id must be a lowercase uuid')
     }
     campaignKey = { field: 'vertical_id', value: payload.vertical_id }
+  } else if (kind === 'remove_leads') {
+    // One awaiting agent/user removal per campaign (pending_actions_one_awaiting_remove_leads_idx);
+    // a cycle-out rule's removal is one-per-rule instead (meta.ruleId).
+    const err = removeLeadsPayloadError(payload)
+    if (err) throw new InvalidActionPayloadError(err)
+    campaignKey = { field: 'campaign_id', value: String(payload.campaign_id) }
   } else if (kind === 'update_sequence') {
     const err = updateSequencePayloadError(payload)
     if (err) throw new InvalidActionPayloadError(err)

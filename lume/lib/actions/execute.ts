@@ -16,6 +16,7 @@ import { maskKeyText } from '@/lib/operators/mask'
 import { configuredBaseUrl } from '@/lib/http/origin'
 import { actionLink } from '@/lib/adapters/telegram.messages'
 import { getPushJob, logEvent } from '@/lib/db/service'
+import { executeRemoveLeads, RemovalFailure } from '@/lib/actions/removeLeads'
 import { getDeal, setStage } from '@/lib/crm/service'
 import { startRun } from '@/lib/adapters/apify'
 import { getSequenceFresh, patchSequence } from '@/lib/adapters/instantlySequences'
@@ -322,6 +323,21 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
       label: operator.label,
       sign_in_url_masked: maskKeyText(url),
       [REVEAL]: { sign_in_url: url },
+    }
+  },
+
+  /**
+   * Delete confirmed leads from an Instantly campaign (lib/actions/removeLeads.ts):
+   * re-reads them, always skips replied / interested ones, snapshots each into
+   * lume_cycled_leads, deletes by id; a cycle-out rule's refill is filed as an
+   * assign_leads action. A failed delete is `uncertain` (it may have partly run).
+   */
+  async remove_leads(p, action) {
+    try {
+      return await executeRemoveLeads(p, action)
+    } catch (err) {
+      if (err instanceof RemovalFailure) throw new ActionFailure(err.message, err.result)
+      throw err
     }
   },
 

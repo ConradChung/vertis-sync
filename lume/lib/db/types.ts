@@ -178,6 +178,7 @@ export type PendingActionKind =
   | 'run_actor'
   | 'update_sequence'
   | 'issue_operator_key'
+  | 'remove_leads'
 
 export type PendingActionStatus =
   | 'awaiting'
@@ -244,7 +245,13 @@ export interface RotationRuleRow {
   last_run_at: string | null
   last_result: Record<string, Json> | null
   created_at: string
+  /** 'rotate' (lead bank → campaign) or 'cycle_out' (remove finished leads, then refill). */
+  kind: RotationRuleKind
+  /** cycle_out: `{ after_days, refill_to? }`; rotate: `{}`. */
+  params: Record<string, Json>
 }
+
+export type RotationRuleKind = 'rotate' | 'cycle_out'
 
 export interface LumeCampaignRow {
   id: string

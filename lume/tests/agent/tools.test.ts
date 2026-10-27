@@ -51,6 +51,7 @@ describe('buildTools', () => {
       run_apify_actor: { actor_id: 'compass/crawler-google-places', input: { q: 'roofers' }, inputs_confirmed_by_owner: true },
       update_campaign_sequence: { campaign_id: 'c1', steps: [{ delay: 0, variants: [{ subject: 'Hi', body: 'Hello' }] }] },
       issue_operator_key: { vertical_id: JOB.toUpperCase(), label: 'Dentists bot' },
+      remove_leads: { campaign_id: 'c1', state: 'bounced', reason: 'free the cap' },
     }
     const { fetch, createAction, tool } = setup()
     for (const [name, tier] of Object.entries(TOOL_TIERS)) {

@@ -684,7 +684,8 @@ export async function getRule(id: string): Promise<RotationRuleRow | null> {
   return (res.data as RotationRuleRow | null) ?? null
 }
 
-export type RuleInsert = Pick<RotationRuleRow, 'name' | 'campaign_id' | 'filter' | 'daily_cap' | 'order_by' | 'cron'>
+export type RuleInsert = Pick<RotationRuleRow, 'name' | 'campaign_id' | 'filter' | 'daily_cap' | 'order_by' | 'cron'> &
+  Partial<Pick<RotationRuleRow, 'kind' | 'params'>>
 
 /** Always inserted inactive: activation is a pending action (`activate_rule`). */
 export async function insertRule(row: RuleInsert): Promise<RotationRuleRow> {
@@ -717,14 +718,14 @@ export async function deleteInactiveRule(id: string): Promise<boolean> {
   return (res.data ?? []).length > 0
 }
 
-export type DueRule = Pick<RotationRuleRow, 'id' | 'name' | 'campaign_id' | 'filter' | 'daily_cap' | 'order_by' | 'cron' | 'next_run_at'>
+export type DueRule = Pick<RotationRuleRow, 'id' | 'name' | 'campaign_id' | 'filter' | 'daily_cap' | 'order_by' | 'cron' | 'next_run_at' | 'kind' | 'params'>
 
 /** Active rules whose `next_run_at` is unset or not after `nowIso`. */
 export async function getDueRules(nowIso: string): Promise<DueRule[]> {
   const sb = createServiceClient()
   const res = await sb
     .from('rotation_rules')
-    .select('id,name,campaign_id,filter,daily_cap,order_by,cron,next_run_at')
+    .select('id,name,campaign_id,filter,daily_cap,order_by,cron,next_run_at,kind,params')
     .eq('active', true)
     .or(`next_run_at.is.null,next_run_at.lte."${nowIso}"`)
     .order('next_run_at', { ascending: true, nullsFirst: true })

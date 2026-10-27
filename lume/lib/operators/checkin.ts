@@ -101,6 +101,7 @@ const ACTION_LABEL: Record<string, string> = {
   run_actor: 'Run Apify actor (spends money)',
   decide_gate: 'Pipeline gate decision',
   issue_operator_key: 'Issue a Grok Bot operator key',
+  remove_leads: 'Remove leads from a campaign',
 }
 
 function priorityOf(gate: GateRow): Priority {

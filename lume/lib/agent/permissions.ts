@@ -19,12 +19,13 @@ export const TOOL_TIERS = {
   open_website: 'read', review_leads: 'read', search_past_chats: 'read',
   search_apify_store: 'read', get_actor_input_schema: 'read', get_actor_run: 'read', rank_campaigns: 'read',
   get_campaign_sequence: 'read', list_skills: 'read', get_skill: 'read', list_verticals: 'read',
+  list_campaign_leads: 'read', contact_usage: 'read',
   create_order: 'low', draft_reply: 'low', create_rotation_rule: 'low', notify: 'low', import_actor_run: 'low', save_skill: 'low',
-  remember: 'low', forget: 'low', create_vertical: 'low', update_vertical: 'low',
+  remember: 'low', forget: 'low', create_vertical: 'low', update_vertical: 'low', create_cycle_out_rule: 'low',
   load_actor_results: 'low', filter_leads: 'low', restore_leads: 'low', export_for_apollo: 'low',
   decide_validation: 'high', assign_leads: 'high', activate_rule: 'high', send_reply: 'high',
   pause_campaign: 'high', resume_campaign: 'high', activate_campaign: 'high', duplicate_campaign: 'high', delete_rule: 'high',
-  run_apify_actor: 'high', update_campaign_sequence: 'high', issue_operator_key: 'high',
+  run_apify_actor: 'high', update_campaign_sequence: 'high', issue_operator_key: 'high', remove_leads: 'high',
 } as const satisfies Record<string, 'read' | 'low' | 'high'>
 
 export type ToolName = keyof typeof TOOL_TIERS
@@ -33,7 +34,7 @@ export const HIGH_RISK_KIND: Record<string, PendingKind> = {
   decide_validation: 'decide_gate', assign_leads: 'assign_leads', activate_rule: 'activate_rule', send_reply: 'send_reply',
   pause_campaign: 'pause_campaign', resume_campaign: 'resume_campaign', activate_campaign: 'launch_campaign',
   duplicate_campaign: 'create_campaign', delete_rule: 'delete_rule', run_apify_actor: 'run_actor',
-  update_campaign_sequence: 'update_sequence', issue_operator_key: 'issue_operator_key',
+  update_campaign_sequence: 'update_sequence', issue_operator_key: 'issue_operator_key', remove_leads: 'remove_leads',
 }
 
 /**
@@ -44,9 +45,13 @@ export const HIGH_RISK_KIND: Record<string, PendingKind> = {
  * any kind added later asks until it is listed here. issue_operator_key is
  * listed (owner decision, Phase G9): the master Grok Bot hands a new bot its
  * sign-in link without waiting; the link is returned once and stored masked.
+ * remove_leads is listed (owner decision, Phase 2): deleting leads from a
+ * campaign frees the contact cap; the executor always skips replied and
+ * interested leads and snapshots every lead it removes.
  */
 export const SKIPPABLE_KINDS: ReadonlySet<PendingKind> = new Set<PendingKind>([
   'pause_campaign', 'create_campaign', 'delete_rule', 'activate_rule', 'assign_leads', 'update_sequence', 'issue_operator_key',
+  'remove_leads',
 ])
 
 /**

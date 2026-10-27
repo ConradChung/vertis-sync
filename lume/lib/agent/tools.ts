@@ -3,6 +3,7 @@ import type { Json, PendingActionKind } from '@/lib/db/types'
 import { HIGH_RISK_KIND, TOOL_TIERS, skippable, type ToolName, type ToolTier } from '@/lib/agent/permissions'
 import { FilterCriteria } from '@/lib/review/model'
 import { APOLLO_STEPS } from '@/lib/apollo/records'
+import { parseLeadQuery } from '@/lib/adapters/instantlyLeads.map'
 import { describeStep, newSkillSchema, placeholdersIn, skillStepSchema, skillVariableSchema, type NewSkill, type Skill } from '@/lib/agent/skillModel'
 
 /**
@@ -263,6 +264,14 @@ const BLOCKED_GATE_ACTIONS = new Set(['push_go', 'camp_launch', 'lume_ok', 'lume
 
 const json = (v: unknown) => (v === undefined ? null : (v as Json))
 
+/** Instantly-backed routes answer `{ configured: false }` without a key: say so instead of returning nothing. */
+function configured(body: unknown): ToolResult {
+  if (body && typeof body === 'object' && (body as { configured?: unknown }).configured === false) {
+    throw new Error('Instantly is not configured (INSTANTLY_API_KEY missing in Lume), so this cannot be read. Nothing was guessed.')
+  }
+  return body as ToolResult
+}
+
 // ---------------------------------------------------------------------------
 // The tools
 
@@ -343,6 +352,39 @@ const SPECS: Built[] = [
       description: 'Instantly sending accounts: status, warmup status/score, daily limit.',
       inputSchema: z.object({}),
       run: async (_i, { call }) => ({ inboxes: await call('/api/instantly/accounts') }),
+    },
+    'read'
+  ),
+
+  tiered(
+    {
+      name: 'list_campaign_leads',
+      description:
+        "Leads in one Instantly campaign by state: finished_no_reply (sequence completed, never replied), replied, bounced, contacted, interested, " +
+        "or no_reply_after_days:N (contacted, no reply, last email at least N days ago). Returns each lead's id, email, name, status, last contact, " +
+        'last reply, reply count and interest, plus matched (total in that state), a summary by status, and truncated when the scan hit its cap (2,000 leads). Read-only.',
+      inputSchema: z.object({
+        campaign_id: campaignId,
+        state: z
+          .string()
+          .max(40)
+          .refine((v) => parseLeadQuery(v) !== null, 'finished_no_reply | replied | bounced | contacted | interested | no_reply_after_days:N (1-365)'),
+        limit: z.number().int().min(1).max(1000).optional().describe('leads to return (default 100); matched counts all of them'),
+      }),
+      run: async ({ campaign_id, state, limit }, { call }) =>
+        configured(
+          await call(`/api/campaigns/${encodeURIComponent(campaign_id)}/leads?state=${encodeURIComponent(state)}&limit=${limit ?? 100}`)
+        ),
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'contact_usage',
+      description:
+        "Instantly uploaded contacts vs the plan's limit (the contact cap): current, limit, headroom, used_pct, plan name. Deleting leads (remove_leads) frees room 5-10 minutes later.",
+      inputSchema: z.object({}),
+      run: async (_i, { call }) => configured(await call('/api/instantly/usage')),
     },
     'read'
   ),
@@ -658,6 +700,39 @@ const SPECS: Built[] = [
   ),
   tiered(
     {
+      name: 'create_cycle_out_rule',
+      description:
+        'Create a cycle-out rule for one Instantly campaign: on its cron (default daily 07:00 Pacific) it asks to remove leads whose sequence finished more than after_days ago with no reply ' +
+        '(never replied, interested or bounced leads; each removal is snapshotted), then, with refill_to, asks to top the campaign back up to that many leads from the lead bank. ' +
+        'It is created INACTIVE; turning it on is activate_rule, which needs approval. Each run still asks before removing or assigning.',
+      inputSchema: z.object({
+        name: z.string().min(1).max(80),
+        campaign_id: campaignId,
+        after_days: z.number().int().min(1).max(365).optional().describe('days since the last email before a finished lead is removed (default 14)'),
+        refill_to: z.number().int().min(1).max(100_000).optional().describe('target leads in the campaign after removal; refilled from the lead bank'),
+        refill_filter: leadFilter.optional().describe('which lead-bank leads refill it (default unassigned validated leads)'),
+        max_per_run: z.number().int().min(1).max(1000).optional().describe('most leads removed per run (default 1000)'),
+        cron: z.string().min(9).max(100).optional().describe("5-field cron in the owner's time zone, default '0 7 * * *' (daily 07:00)"),
+      }),
+      run: async ({ name, campaign_id, after_days, refill_to, refill_filter, max_per_run, cron }, { call }) => ({
+        created: await call('/api/rules', {
+          method: 'POST',
+          body: {
+            name,
+            campaign_id,
+            kind: 'cycle_out',
+            cron: cron ?? '0 7 * * *',
+            params: { after_days: after_days ?? 14, ...(refill_to ? { refill_to } : {}) },
+            filter: refill_filter ?? {},
+            ...(max_per_run ? { daily_cap: max_per_run } : {}),
+          },
+        }),
+      }),
+    },
+    'low'
+  ),
+  tiered(
+    {
       name: 'notify',
       description: "Send the owner a short Telegram message (status, a finished summary). Not for lead-facing email.",
       inputSchema: z.object({ text: z.string().min(1).max(1500) }),
@@ -861,6 +936,31 @@ const SPECS: Built[] = [
       description: 'Delete a rotation rule.',
       inputSchema: z.object({ rule_id: uuid }),
       payload: ({ rule_id }) => ({ rule_id: rule_id.toLowerCase() }),
+    },
+    'high'
+  ),
+  tiered(
+    {
+      name: 'remove_leads',
+      description:
+        'Delete leads from an Instantly campaign to free the contact cap (only deleting frees it, 5-10 minutes later). Pick them by lead_ids (from list_campaign_leads) ' +
+        'or by state: finished_no_reply, bounced, or no_reply_after_days (with older_than_days); older_than_days also narrows the other states by last contact. ' +
+        'Replied and interested leads are ALWAYS skipped, whatever you pass. Each lead is snapshotted in Lume before deletion and its CRM deal stays. ' +
+        'At most 1,000 leads per request; the approval shows the count and campaign.',
+      inputSchema: z
+        .object({
+          campaign_id: campaignId,
+          lead_ids: z.array(id).min(1).max(1000).optional(),
+          state: z.enum(['finished_no_reply', 'bounced', 'no_reply_after_days']).optional(),
+          older_than_days: z.number().int().min(1).max(365).optional(),
+          reason: z.string().trim().min(1).max(300).describe('why, shown on the approval and kept with the snapshot'),
+        })
+        .refine((v) => (v.lead_ids ? !v.state && v.older_than_days === undefined : !!v.state), 'lead_ids, or state (+ older_than_days), not both')
+        .refine((v) => v.state !== 'no_reply_after_days' || v.older_than_days !== undefined, 'no_reply_after_days needs older_than_days'),
+      payload: ({ campaign_id, lead_ids, state, older_than_days, reason }): Record<string, Json> =>
+        lead_ids
+          ? { campaign_id, lead_ids, reason }
+          : { campaign_id, filter: { state: state ?? null, ...(older_than_days !== undefined ? { older_than_days } : {}) }, reason },
     },
     'high'
   ),

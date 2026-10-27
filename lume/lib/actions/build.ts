@@ -13,6 +13,7 @@ import { ACTOR_ID_RE, checkRunActor, runActorPayload } from '@/lib/apify/service
 import { ACTOR_RUN_CAP_USD } from '@/lib/apify/pricing'
 import { buildUpdateSequence } from '@/lib/campaigns/sequenceAction'
 import { getVertical } from '@/lib/operators/store'
+import { buildRemoveLeads, removeLeadsBody } from '@/lib/actions/removeLeads'
 
 /**
  * Turn a requested action `{ kind, payload }` into the snapshot the owner
@@ -33,6 +34,8 @@ import { getVertical } from '@/lib/operators/store'
  *  run_actor          { actor_id, input, max_charge_usd?, expected_items? } →
  *                     lib/apify/service.ts: input validated against the
  *                     actor's schema, run options capped at $20, summary
+ *  remove_leads       { campaign_id, reason, lead_ids | filter } → lib/actions/removeLeads.ts:
+ *                     Instantly read now, replied / interested dropped, ids frozen
  *  update_sequence    { campaign_id, steps, base_hash? } → lib/campaigns/sequenceAction.ts:
  *                     fresh Instantly read, stale check, diff, frozen PATCH body
  *  send_reply / pause_campaign / resume_campaign / create_campaign:
@@ -77,9 +80,10 @@ const RunActorBody = z.object({
 })
 
 const UpdateSequenceBody = z.object({ kind: z.literal('update_sequence'), payload: z.record(z.string(), z.unknown()) })
+const RemoveLeadsBody = z.object({ kind: z.literal('remove_leads'), payload: z.record(z.string(), z.unknown()) })
 
 /** Shape check for `POST /api/actions`; `buildActionRequest` validates each payload fully. */
-export const ActionRequestBody = z.union([JobBody, rotateActionBody, OtherBody, RunActorBody, UpdateSequenceBody, CampaignBody])
+export const ActionRequestBody = z.union([JobBody, rotateActionBody, OtherBody, RunActorBody, UpdateSequenceBody, RemoveLeadsBody, CampaignBody])
 export type ActionRequest = z.infer<typeof ActionRequestBody>
 
 export type ActionBuild =
@@ -155,6 +159,12 @@ export async function buildActionRequest(input: unknown): Promise<ActionBuild> {
     }
     case 'update_sequence': {
       const b = await buildUpdateSequence(req.payload, campaignName)
+      return b.ok ? { ok: true, kind: req.kind, payload: b.payload } : b
+    }
+    case 'remove_leads': {
+      const r = removeLeadsBody.safeParse(req.payload)
+      if (!r.success) return fail(400, 'invalid_payload')
+      const b = await buildRemoveLeads(r.data, { campaignName })
       return b.ok ? { ok: true, kind: req.kind, payload: b.payload } : b
     }
     case 'push_to_instantly':

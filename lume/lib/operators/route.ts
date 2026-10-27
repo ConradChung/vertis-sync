@@ -89,6 +89,7 @@ const KIND_SCOPE: Record<PendingActionKind, VerticalScope | null> = {
   resume_campaign: 'campaign',
   create_campaign: 'campaign',
   update_sequence: 'campaign',
+  remove_leads: 'campaign',
   send_reply: 'replies',
   crm_close_deal: 'replies',
   // An Apify scrape is a paid data order.

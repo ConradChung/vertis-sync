@@ -82,7 +82,7 @@ describe('scopes', () => {
       push_to_instantly: 'campaign', launch_campaign: 'campaign', assign_leads: 'campaign', activate_rule: 'campaign',
       delete_rule: 'campaign', pause_campaign: 'campaign', resume_campaign: 'campaign', create_campaign: 'campaign',
       update_sequence: 'campaign', send_reply: 'replies', crm_close_deal: 'replies', run_actor: 'orders', decide_gate: null,
-      issue_operator_key: null,
+      issue_operator_key: null, remove_leads: 'campaign',
     }
     for (const [kind, scope] of Object.entries(expected)) expect(scopeForPendingKind(kind)).toBe(scope)
     expect(scopeForPendingKind('nope')).toBeNull()

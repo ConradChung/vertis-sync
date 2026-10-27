@@ -113,7 +113,7 @@ describe('executeAction dispatch table', () => {
   it('has a handler for every kind the DB allows', () => {
     expect(EXECUTABLE_KINDS.sort()).toEqual([
       'activate_rule', 'assign_leads', 'create_campaign', 'crm_close_deal', 'decide_gate', 'delete_rule', 'issue_operator_key',
-      'launch_campaign', 'pause_campaign', 'push_to_instantly', 'resume_campaign', 'run_actor', 'send_reply',
+      'launch_campaign', 'pause_campaign', 'push_to_instantly', 'remove_leads', 'resume_campaign', 'run_actor', 'send_reply',
       'update_sequence',
     ])
   })

@@ -62,8 +62,8 @@ function details(payload: Record<string, Json>): [string, string][] {
   const out: [string, string][] = []
   for (const [k, v] of Object.entries(payload ?? {})) {
     if (k === 'summary') continue
-    if (k === 'leads' && Array.isArray(v)) {
-      out.push(['leads', `${v.length} rows`])
+    if ((k === 'leads' || k === 'lead_ids') && Array.isArray(v)) {
+      out.push([k, `${v.length} rows`])
       continue
     }
     if (v === null || typeof v === 'object') continue

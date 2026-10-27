@@ -1,0 +1,271 @@
+import 'server-only'
+import { z } from 'zod'
+import { createAction, DuplicateActionError } from '@/lib/actions/create'
+import { InstantlyError, isInstantlyConfigured } from '@/lib/adapters/instantly'
+import { getCampaignLeadCount, getLeadsByIds, listCampaignLeads, MAX_SCAN_PAGES } from '@/lib/adapters/instantlyLeads'
+import { MAX_DAYS, protectedReason, type CampaignLead } from '@/lib/adapters/instantlyLeads.map'
+import { deleteLeads } from '@/lib/adapters/instantlyWrite'
+import { countCandidates, getCampaignByExternalId, getRule } from '@/lib/db/service'
+import type { Json, PendingActionRow } from '@/lib/db/types'
+import { archiveLeadBankRows, countQueuedForCampaign, insertCycledLeads } from '@/lib/leads/cycledStore'
+import { parseCycleParams, refillCount } from '@/lib/rules/cycle'
+import { parseRuleFilter, summarizeFilter } from '@/lib/rules/filter'
+import { CAMPAIGN_ID_RE } from '@/lib/rules/schema'
+import { LEAD_ID, MAX_REMOVE, removeLeadsPayloadError } from '@/lib/actions/removeLeadsPayload'
+
+export { MAX_REMOVE, removeLeadsPayloadError }
+
+/**
+ * remove_leads: delete leads from an Instantly campaign to free the contact
+ * cap (only deleting frees it; Instantly releases the slots 5–10 min later).
+ *
+ * Request (POST /api/actions, the agent, the cycle-out tick):
+ *   { campaign_id, reason, lead_ids: [..] }                      or
+ *   { campaign_id, reason, filter: { state, older_than_days? } }
+ *   state: finished_no_reply | bounced | no_reply_after_days (needs older_than_days)
+ *
+ * The builder reads the leads from Instantly NOW and freezes the removable
+ * ids (≤ 1,000) in the payload, so the owner approves an exact count:
+ *   { campaign_id, campaign_name, lead_ids, count, reason, kept_replied,
+ *     kept_interested, not_found, filter?, sample, summary }
+ *
+ * The executor re-reads those leads and ALWAYS skips any that replied or are
+ * interested by then (or are gone), snapshots each remaining lead into
+ * lume_cycled_leads, deletes them by id, archives their lead_bank rows (like
+ * the rotator does) and, for a cycle-out rule with refill_to, files the
+ * refill as an assign_leads action. CRM deals and their history are untouched.
+ */
+
+
+export const removeLeadsBody = z
+  .strictObject({
+    campaign_id: z.string().trim().regex(CAMPAIGN_ID_RE),
+    reason: z.string().trim().min(1).max(300),
+    lead_ids: z.array(LEAD_ID).min(1).max(MAX_REMOVE).optional(),
+    filter: z
+      .strictObject({
+        state: z.enum(['finished_no_reply', 'bounced', 'no_reply_after_days']),
+        older_than_days: z.number().int().min(1).max(MAX_DAYS).optional(),
+      })
+      .refine((f) => f.state !== 'no_reply_after_days' || f.older_than_days !== undefined, 'no_reply_after_days needs older_than_days')
+      .optional(),
+  })
+  .refine((v) => !!v.lead_ids !== !!v.filter, 'lead_ids or filter, not both')
+
+export type RemoveLeadsRequest = z.infer<typeof removeLeadsBody>
+
+export type RemoveBuild =
+  | { ok: true; payload: Record<string, Json> & { summary: string } }
+  | { ok: false; status: number; error: string }
+
+const fmt = new Intl.NumberFormat('en-US')
+const plural = (n: number, w: string) => `${fmt.format(n)} ${w}${n === 1 ? '' : 's'}`
+const STATE_LABEL: Record<string, string> = {
+  finished_no_reply: 'sequence finished, no reply',
+  bounced: 'bounced',
+  no_reply_after_days: 'no reply',
+}
+
+export async function buildRemoveLeads(
+  p: RemoveLeadsRequest,
+  opts: { campaignName: (id: string) => Promise<string>; max?: number; now?: Date }
+): Promise<RemoveBuild> {
+  if (!isInstantlyConfigured()) return { ok: false, status: 503, error: 'instantly_not_configured' }
+  const max = Math.min(opts.max ?? MAX_REMOVE, MAX_REMOVE)
+  let candidates: CampaignLead[]
+  let notFound = 0
+  let more = false
+  try {
+    if (p.lead_ids) {
+      const unique = [...new Set(p.lead_ids)]
+      candidates = (await getLeadsByIds(p.campaign_id, unique)).map((f) => f.lead)
+      notFound = unique.length - candidates.length
+    } else {
+      const f = p.filter!
+      const r = await listCampaignLeads(
+        p.campaign_id,
+        { state: f.state, ...(f.older_than_days !== undefined ? { days: f.older_than_days } : {}) },
+        { limit: MAX_REMOVE, maxPages: MAX_SCAN_PAGES, now: opts.now }
+      )
+      candidates = r.leads
+      more = r.truncated || r.matched > r.leads.length
+    }
+  } catch (err) {
+    console.error('[remove_leads] Instantly read failed:', err instanceof Error ? err.message : err)
+    return { ok: false, status: 502, error: err instanceof InstantlyError && err.status === 0 ? 'instantly_unreachable' : 'instantly_failed' }
+  }
+
+  let keptReplied = 0
+  let keptInterested = 0
+  const removable: CampaignLead[] = []
+  for (const l of candidates) {
+    const why = protectedReason(l)
+    if (why === 'replied') keptReplied++
+    else if (why === 'interested') keptInterested++
+    else removable.push(l)
+  }
+  if (removable.length > max) more = true
+  const take = removable.slice(0, max)
+  if (!take.length) return { ok: false, status: 409, error: 'nothing_to_remove' }
+
+  const name = await opts.campaignName(p.campaign_id)
+  const kept = keptReplied + keptInterested
+  const what = p.filter
+    ? ` (${STATE_LABEL[p.filter.state]}${p.filter.older_than_days ? `, last email ${p.filter.older_than_days}+ days ago` : ''})`
+    : ''
+  const payload: Record<string, Json> & { summary: string } = {
+    campaign_id: p.campaign_id,
+    campaign_name: name,
+    lead_ids: take.map((l) => l.id),
+    count: take.length,
+    reason: p.reason,
+    kept_replied: keptReplied,
+    kept_interested: keptInterested,
+    not_found: notFound,
+    sample: take.slice(0, 5).map((l) => l.email ?? l.id),
+    summary:
+      `Remove ${plural(take.length, 'lead')} from ${name}${what}: ${p.reason}. ` +
+      (kept ? `${plural(kept, 'replied/interested lead')} kept. ` : '') +
+      (more ? 'More match; this takes the first batch. ' : '') +
+      'Each lead is snapshotted first; contacts free up in Instantly 5–10 min after.',
+  }
+  if (p.filter) payload.filter = p.filter as Record<string, Json>
+  return { ok: true, payload }
+}
+
+export class RemovalFailure extends Error {
+  readonly result: Record<string, Json>
+  constructor(message: string, result: Record<string, Json>) {
+    super(message)
+    this.name = 'RemovalFailure'
+    this.result = result
+  }
+}
+
+const CHUNK = 100
+const SKIPPED_SHOWN = 50
+const msg = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300)
+
+/** Execute a confirmed remove_leads row. Throws RemovalFailure (with a partial result) on failure. */
+export async function executeRemoveLeads(p: Record<string, Json>, action: Pick<PendingActionRow, 'id' | 'rule_id'>, now = new Date()): Promise<Record<string, Json>> {
+  const err = removeLeadsPayloadError(p)
+  if (err) throw new RemovalFailure(err, {})
+  const campaignId = p.campaign_id as string
+  const ids = [...new Set(p.lead_ids as string[])]
+  const reason = typeof p.reason === 'string' ? p.reason.slice(0, 300) : null
+
+  // 1. Re-read: anything that replied, turned interested or vanished since approval is skipped.
+  const fetched = await getLeadsByIds(campaignId, ids)
+  const byId = new Map(fetched.map((f) => [f.lead.id, f]))
+  const skipped: { id: string; email: string | null; why: string }[] = []
+  const removable: typeof fetched = []
+  for (const id of ids) {
+    const f = byId.get(id)
+    if (!f) {
+      skipped.push({ id, email: null, why: 'not_found' })
+      continue
+    }
+    const why = protectedReason(f.lead)
+    if (why) skipped.push({ id, email: f.lead.email, why })
+    else removable.push(f)
+  }
+  const skippedCounts: Record<string, number> = { replied: 0, interested: 0, not_found: 0 }
+  for (const s of skipped) skippedCounts[s.why] = (skippedCounts[s.why] ?? 0) + 1
+
+  // Refill needs the campaign's size before the delete (Instantly's count lags it).
+  const rule = action.rule_id ? await getRule(action.rule_id).catch(() => null) : null
+  const cycle = rule && rule.kind === 'cycle_out' ? parseCycleParams(rule.params) : null
+  const leadsBefore = cycle?.refill_to && removable.length ? await getCampaignLeadCount(campaignId).catch(() => null) : null
+
+  let removed = 0
+  let deleted = 0
+  const base = (): Record<string, Json> => ({
+    campaign_id: campaignId,
+    requested: ids.length,
+    removed,
+    instantly_deleted: deleted,
+    skipped: skippedCounts,
+    skipped_leads: skipped.slice(0, SKIPPED_SHOWN),
+  })
+
+  // 2. Snapshot, then delete, 100 at a time. A failed delete keeps its
+  // snapshots (a snapshot of a lead that survived is harmless; a deleted lead
+  // without one is not) and reports the run as uncertain.
+  for (let i = 0; i < removable.length; i += CHUNK) {
+    const chunk = removable.slice(i, i + CHUNK)
+    await insertCycledLeads(
+      chunk.map((f) => ({
+        campaign_id: campaignId,
+        instantly_lead_id: f.lead.id,
+        email: f.lead.email,
+        snapshot: f.raw as Record<string, Json>,
+        reason,
+        action_id: action.id,
+      }))
+    )
+    try {
+      deleted += await deleteLeads(campaignId, chunk.map((f) => f.lead.id))
+    } catch (e) {
+      throw new RemovalFailure(`Instantly delete failed after ${removed} removed: ${msg(e)}`, { ...base(), uncertain: true })
+    }
+    removed += chunk.length
+  }
+
+  const result = base()
+
+  // 3. lead_bank bookkeeping (never fails the removal).
+  if (removed) {
+    try {
+      result.lead_bank_archived = await archiveLeadBankRows(
+        campaignId,
+        removable.filter((f) => f.lead.email).map((f) => ({ email: f.lead.email!, status: f.lead.status })),
+        now.toISOString()
+      )
+    } catch (e) {
+      result.lead_bank_error = msg(e)
+    }
+  }
+
+  // 4. Cycle-out refill: an assign_leads action, exactly as the rotation tick files one.
+  if (cycle?.refill_to && rule) {
+    result.refill = await fileRefill(rule, cycle.refill_to, leadsBefore === null ? null : leadsBefore - removed)
+  }
+  return result
+}
+
+async function fileRefill(
+  rule: { id: string; name: string; campaign_id: string; filter: unknown; order_by: 'newest' | 'oldest'; daily_cap: number },
+  refillTo: number,
+  inCampaign: number | null
+): Promise<Record<string, Json>> {
+  try {
+    if (inCampaign === null) return { skipped: 'lead_count_unknown' }
+    const filter = parseRuleFilter(rule.filter)
+    const [queued, available] = await Promise.all([countQueuedForCampaign(rule.campaign_id), countCandidates(filter, rule.campaign_id)])
+    const count = refillCount({ refillTo, inCampaign, queued, available })
+    if (!count) return { skipped: available ? 'at_target' : 'no_candidates', in_campaign: inCampaign, queued, available }
+    const campaignName = (await getCampaignByExternalId(rule.campaign_id).catch(() => null))?.name ?? rule.campaign_id
+    const action = await createAction(
+      'assign_leads',
+      {
+        campaign_id: rule.campaign_id,
+        campaign_name: campaignName,
+        filter: filter as Record<string, Json>,
+        order_by: rule.order_by,
+        count,
+        available,
+        rule_id: rule.id,
+        rule_name: rule.name,
+        summary:
+          `Refill ${plural(count, 'lead')} → ${campaignName} to reach ${fmt.format(refillTo)} ` +
+          `(cycle-out rule "${rule.name}": ${summarizeFilter(filter)}, ${rule.order_by} first; ${fmt.format(available)} available)`,
+      },
+      'rule',
+      { ruleId: rule.id }
+    )
+    return { action_id: action.id, count, in_campaign: inCampaign, queued, available }
+  } catch (e) {
+    if (e instanceof DuplicateActionError) return { skipped: 'action_awaiting', ...(e.existingId ? { action_id: e.existingId } : {}) }
+    return { error: msg(e) }
+  }
+}
