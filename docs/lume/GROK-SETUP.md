@@ -221,7 +221,7 @@ still gets them; unset means both.
 | Vertical | Default | Scopes | Campaign ids | Status |
 | --- | --- | --- | --- | --- |
 | Job search / GTM roles | no | orders, validation, campaign | `gmail:recruiter` (Recruiter · GTM engineers, Gmail), `muse:auto-apply` (Muse auto-apply) | Mapped. No Instantly campaign, so `/operator` shows no send stats for it |
-| Kaspen / Zenport | **yes** (gets anything unrouted) | orders, validation, campaign | `04ca2257-5ea6-434e-bf62-f55add156914`, `869d73b3-5bf3-4f1c-ba8c-43ac6d0f529d` (Instantly) | Mapped |
+| Kaspen / Zenport | **yes** (gets unrouted items while no master key exists) | orders, validation, campaign | `04ca2257-5ea6-434e-bf62-f55add156914`, `869d73b3-5bf3-4f1c-ba8c-43ac6d0f529d` (Instantly) | Mapped |
 | HNWI / wealth management | no | validation, campaign | none | **Needs campaigns: fill in Settings → Verticals** |
 | PM reactions | no | campaign, validation | none | **Needs campaigns: fill in Settings → Verticals** |
 | Roofers | no | campaign | none | **Needs campaigns: fill in Settings → Verticals** |
@@ -231,7 +231,9 @@ The "Muse" seed is not a separate vertical: migration
 
 Routing, in order: an item whose campaign is in a vertical's list goes to that
 vertical; else, if exactly one vertical has the item's scope, to that one;
-else to the default (Kaspen / Zenport). Several verticals share `validation`
-and `campaign`, so until HNWI, PM reactions and Roofers have campaign ids,
-their items land on Kaspen / Zenport's page. Map their campaigns before
-handing them to bots.
+else, while a live master key exists, to the master bot only (under "No
+vertical (owner)"); with no master key, to the default (Kaspen / Zenport).
+Operator-key requests always go to the owner and the master only. Several
+verticals share `validation` and `campaign`, so until HNWI, PM reactions and
+Roofers have campaign ids, their items are unrouted. Map their campaigns
+before handing them to bots.
