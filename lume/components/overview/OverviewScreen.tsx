@@ -2,6 +2,7 @@
 
 import { useOverview, useOverviewInstantly } from '@/hooks/useOverview'
 import { OverviewView } from '@/components/overview/OverviewView'
+import { VerticalStrip } from '@/components/overview/VerticalStrip'
 
 /**
  * `/overview`: the database half revalidates on relevant Realtime inserts
@@ -11,13 +12,16 @@ export function OverviewScreen() {
   const db = useOverview()
   const ins = useOverviewInstantly()
   return (
-    <OverviewView
+    <>
+      <VerticalStrip />
+      <OverviewView
       data={db.data}
       error={db.error}
       onRetry={() => void db.mutate()}
       instantly={ins.data}
       instantlyError={ins.error}
       onRetryInstantly={() => void ins.mutate()}
-    />
+      />
+    </>
   )
 }

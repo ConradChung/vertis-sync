@@ -23,9 +23,9 @@ describe('prefetchTab', () => {
 
   it('skips keys already cached and keys warmed recently', () => {
     const d = deps({ hasData: (k: string) => k === '/api/overview' })
-    expect(prefetchTab('/overview', d)).toEqual(['/api/overview/instantly'])
+    expect(prefetchTab('/overview', d)).toEqual(['/api/overview/instantly', '/api/overview/verticals'])
     expect(prefetchTab('/overview', d)).toEqual([])
-    expect(prefetchTab('/overview', { ...d, now: () => 1_000 + WARM_MS + 1 })).toEqual(['/api/overview/instantly'])
+    expect(prefetchTab('/overview', { ...d, now: () => 1_000 + WARM_MS + 1 })).toEqual(['/api/overview/instantly', '/api/overview/verticals'])
   })
 
   it('forgets a failed warm so the next hover retries', async () => {

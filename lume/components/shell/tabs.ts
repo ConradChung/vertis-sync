@@ -1,4 +1,4 @@
-import { Bot, FlaskConical, LayoutDashboard, Megaphone, Repeat2, ShieldCheck, Upload, Users, type LucideIcon } from 'lucide-react'
+import { Bot, ClipboardCheck, FlaskConical, LayoutDashboard, Megaphone, Repeat2, Settings, ShieldCheck, Upload, Users, type LucideIcon } from 'lucide-react'
 
 /** Primary navigation. `primary` tabs sit in the phone bottom bar; the rest live under More. */
 export const TABS: readonly { href: string; label: string; icon: LucideIcon; primary?: boolean }[] = [
@@ -10,6 +10,8 @@ export const TABS: readonly { href: string; label: string; icon: LucideIcon; pri
   { href: '/crm', label: 'CRM', icon: Users, primary: true },
   { href: '/agent', label: 'Agent', icon: Bot, primary: true },
   { href: '/playground', label: 'Playground', icon: FlaskConical },
+  { href: '/operator', label: 'Operator', icon: ClipboardCheck },
+  { href: '/settings', label: 'Settings', icon: Settings },
 ]
 
 export const isActiveTab = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`)
