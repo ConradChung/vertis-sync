@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ChatApproval } from '@/components/agent/ApprovalCard'
+import type { ApprovalDecision, ChatApproval } from '@/components/agent/ApprovalCard'
 import type { ToolLogEntry } from '@/components/orb/ToolLog'
 import { parseSseFrames, type AgentEvent } from '@/lib/agent/chat'
 import type { StoredMessage } from '@/lib/agent/history'
@@ -21,6 +21,13 @@ export interface ChatMessage {
   status?: string
   /** A saved skill sent with this message (shown on the bubble; not stored). */
   skill?: { name: string; mode: SkillMode }
+  /** An automatic follow-up turn (an approval outcome): a muted line, not a bubble. */
+  auto?: boolean
+}
+
+export interface SendOptions {
+  /** Sent by Lume itself (an approval outcome), not typed by the owner. */
+  auto?: boolean
 }
 
 /** A saved skill to send with the next message: run it, or attach it as reference. */
@@ -47,7 +54,9 @@ export interface AgentChat {
   liveStatus: string | null
   /** Assistant text is arriving for the live run. */
   streaming: boolean
-  send: (text: string, skill?: SkillRef) => Promise<void>
+  send: (text: string, skill?: SkillRef, opts?: SendOptions) => Promise<void>
+  /** Tell the agent how an in-chat approval came out: sent now, or after the live run settles. */
+  followUp: (d: ApprovalDecision) => void
   reset: () => void
 }
 
@@ -106,6 +115,13 @@ export function applyAgentEvent(m: ChatMessage, e: AgentEvent): ChatMessage {
   }
 }
 
+/** The automatic turn that tells the agent what the owner decided in an approval card. */
+export function approvalFollowUp(d: ApprovalDecision): string {
+  return d.decision === 'approve'
+    ? `[approval] I approved ${d.tool} (${d.summary ?? ''}). Outcome: ${d.status}${d.error ? ` — ${d.error}` : ''}. Continue.`
+    : `[approval] I denied ${d.tool} (${d.summary ?? ''}). Don't retry it; tell me what you'd do instead.`
+}
+
 /** A stored message, as the chat renders it. */
 export function storedToChat(m: StoredMessage): ChatMessage {
   return {
@@ -115,6 +131,7 @@ export function storedToChat(m: StoredMessage): ChatMessage {
     tools: (m.tools ?? []) as ToolLogEntry[],
     approvals: (m.approvals ?? []) as ChatApproval[],
     ...(m.error ? { error: m.error } : {}),
+    ...(m.auto ? { auto: true } : {}),
   }
 }
 
@@ -136,6 +153,9 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
   const busyRef = useRef(false)
   // The conversation on screen; a URL change to it (after `run`) must not reload it.
   const currentRef = useRef<string | null>(null)
+  // Approval follow-ups waiting for the live run to settle, one per action.
+  const queueRef = useRef(new Map<string, string>())
+  const [queued, setQueued] = useState(0)
   const optsRef = useRef(opts)
   useEffect(() => {
     optsRef.current = opts
@@ -145,6 +165,8 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
     if (conversationId === currentRef.current) return
     currentRef.current = conversationId
     setCurrent(conversationId)
+    // A follow-up belongs to the conversation it was decided in.
+    queueRef.current.clear()
     setNotFound(false)
     setMessages([])
     if (!conversationId) {
@@ -175,12 +197,20 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
   }, [])
 
   const send = useCallback(
-    async (raw: string, skill?: SkillRef) => {
+    async (raw: string, skill?: SkillRef, sendOpts: SendOptions = {}) => {
       const text = raw.trim()
       if (!text || busyRef.current) return
       busyRef.current = true
       setBusy(true)
-      const userMsg: ChatMessage = { id: nextId(), role: 'user', text, tools: [], approvals: [], ...(skill ? { skill: { name: skill.name, mode: skill.mode } } : {}) }
+      const userMsg: ChatMessage = {
+        id: nextId(),
+        role: 'user',
+        text,
+        tools: [],
+        approvals: [],
+        ...(skill ? { skill: { name: skill.name, mode: skill.mode } } : {}),
+        ...(sendOpts.auto ? { auto: true } : {}),
+      }
       const aid = nextId()
       setMessages((ms) => [...ms, userMsg, { id: aid, role: 'assistant', text: '', tools: [], approvals: [], streaming: true }])
       try {
@@ -192,6 +222,7 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
             prompt: text,
             ...(currentRef.current ? { conversation_id: currentRef.current } : {}),
             ...(skill ? { skill_id: skill.id, skill_mode: skill.mode } : {}),
+            ...(sendOpts.auto ? { auto: true } : {}),
           }),
         })
         if (!res.ok || !res.body) {
@@ -234,9 +265,32 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
     [patch]
   )
 
+  const followUp = useCallback(
+    (d: ApprovalDecision) => {
+      const text = approvalFollowUp(d)
+      if (!busyRef.current) {
+        void send(text, undefined, { auto: true })
+        return
+      }
+      queueRef.current.set(d.action_id, text)
+      setQueued((n) => n + 1)
+    },
+    [send]
+  )
+
+  // The live run settled: send the next queued follow-up (its own run drains the rest).
+  useEffect(() => {
+    if (busy) return
+    const next = queueRef.current.entries().next()
+    if (next.done) return
+    queueRef.current.delete(next.value[0])
+    void send(next.value[1], undefined, { auto: true })
+  }, [busy, queued, send])
+
   /** Clear the screen for a new chat (the caller also drops `?c=` from the URL). */
   const reset = useCallback(() => {
     if (busyRef.current) return
+    queueRef.current.clear()
     currentRef.current = null
     setCurrent(null)
     setNotFound(false)
@@ -255,6 +309,7 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
     liveStatus: live?.status ?? null,
     streaming: !!live?.text,
     send,
+    followUp,
     reset,
   }
 }

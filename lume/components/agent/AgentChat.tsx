@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { ArrowUp, BookMarked, Brain, PanelRight, ChevronRight, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, SquarePen, Wrench } from 'lucide-react'
+import { ArrowUp, BookMarked, Brain, PanelRight, ChevronRight, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, ShieldCheck, ShieldX, SquarePen, Wrench } from 'lucide-react'
 import { AgentHistory, useConversationList } from '@/components/agent/AgentHistory'
-import { ApprovalCard } from '@/components/agent/ApprovalCard'
+import { ApprovalCard, type ApprovalDecision } from '@/components/agent/ApprovalCard'
 import { ManageSkills, SkillCard, SkillMenu, useSkillList } from '@/components/agent/AgentSkills'
 import { Markdown } from '@/components/agent/Markdown'
 import { Waveform } from '@/components/agent/Waveform'
@@ -327,6 +327,7 @@ export function AgentChat() {
                   <li key={m.id} className="min-w-0">
                     <Message
                       m={m}
+                      onDecided={chat.followUp}
                       activeFlow={split && activeKey?.startsWith(`${m.id}:`) ? Number(activeKey.split(':').at(-1)) : null}
                       onViewFlow={(k) => viewDiagram(`${m.id}:${k}`)}
                     />
@@ -580,7 +581,18 @@ function EmptyState({ hello, onPick, disabled }: { hello: string; onPick: (t: st
   )
 }
 
-function Message({ m, activeFlow = null, onViewFlow }: { m: ChatMessage; activeFlow?: number | null; onViewFlow?: (k: number) => void }) {
+function Message({
+  m,
+  activeFlow = null,
+  onViewFlow,
+  onDecided,
+}: {
+  m: ChatMessage
+  activeFlow?: number | null
+  onViewFlow?: (k: number) => void
+  onDecided?: (d: ApprovalDecision) => void
+}) {
+  if (m.role === 'user' && m.auto) return <AutoTurn text={m.text} />
   if (m.role === 'user') {
     return (
       <div className="flex justify-end">
@@ -600,7 +612,7 @@ function Message({ m, activeFlow = null, onViewFlow }: { m: ChatMessage; activeF
     <div className="flex min-w-0 flex-col gap-3">
       {m.tools.length > 0 && <ToolChips tools={m.tools} live={!!m.streaming} />}
       {m.text && <Markdown text={htmlLinksToMarkdown(m.text)} flow={onViewFlow ? { onView: onViewFlow, active: activeFlow } : undefined} />}
-      <ApprovalCard approvals={m.approvals} />
+      <ApprovalCard approvals={m.approvals} onDecided={onDecided} />
       {m.notConfigured ? (
         <div className="flex items-start gap-3 rounded-panel border border-amber/40 bg-amber/8 px-4 py-3 text-[13px]" role="status">
           <KeyRound className="mt-0.5 size-4 shrink-0 text-amber" />
@@ -620,6 +632,18 @@ function Message({ m, activeFlow = null, onViewFlow }: { m: ChatMessage; activeF
         )
       )}
     </div>
+  )
+}
+
+/** Lume told the agent how an approval came out: one muted line, not a bubble. */
+function AutoTurn({ text }: { text: string }) {
+  const denied = text.startsWith('[approval] I denied')
+  const Icon = denied ? ShieldX : ShieldCheck
+  return (
+    <p className="flex items-start gap-1.5 text-[12px] text-fg-46" aria-label="Approval outcome sent to Lume">
+      <Icon className="mt-px size-3.5 shrink-0" />
+      <span className="min-w-0">{text.replace(/^\[approval\]\s*/, '')}</span>
+    </p>
   )
 }
 

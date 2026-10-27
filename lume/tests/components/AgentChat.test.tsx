@@ -92,6 +92,30 @@ describe('AgentChat', () => {
     expect(nav.replace).toHaveBeenCalledWith(`/agent?c=${CONV}`, { scroll: false })
   })
 
+  it('approving in the chat sends an automatic follow-up turn, shown as a muted line', async () => {
+    let runs = 0
+    const fetchMock = router({
+      run: () =>
+        runs++ === 0
+          ? sseResponse([
+              { type: 'run', id: 'r1', conversation_id: CONV },
+              { type: 'approval', action_id: 'abc', summary: 'Pause A', tool: 'pause_campaign', state: 'awaiting' },
+              { type: 'done' },
+            ])
+          : sseResponse([{ type: 'text', delta: 'Paused, carrying on.' }, { type: 'done' }]),
+      other: (url) => (url === '/api/actions/abc/decide' ? Response.json({ ok: true, status: 'executed', result: {}, error: null }) : Response.json({ ok: true })),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<AgentChat />)
+    fireEvent.click(screen.getByRole('button', { name: SUGGESTIONS[0] }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }))
+    await screen.findByText('Paused, carrying on.')
+    const bodies = fetchMock.mock.calls.filter((c) => c[0] === '/api/agent/run').map((c) => JSON.parse(c[1]!.body as string))
+    expect(bodies[1]).toEqual({ prompt: '[approval] I approved pause_campaign (Pause A). Outcome: executed. Continue.', conversation_id: CONV, auto: true })
+    expect(screen.getByLabelText('Approval outcome sent to Lume').textContent).toBe('I approved pause_campaign (Pause A). Outcome: executed. Continue.')
+    expect(screen.getByText('Executed')).toBeTruthy()
+  })
+
   it('Shift+Enter does not send', () => {
     const fetchMock = router({})
     vi.stubGlobal('fetch', fetchMock)
