@@ -42,3 +42,24 @@ describe('planning playbook', () => {
     expect(SYSTEM_PROMPT).not.toMatch(/\d{4}-\d{2}-\d{2}T/)
   })
 })
+
+describe('approvals in the chat', () => {
+  it('awaiting_approval: one line, the owner decides in the card; no link to open', () => {
+    at('awaiting_approval')
+    expect(SYSTEM_PROMPT).toMatch(/card right in the chat/)
+    expect(SYSTEM_PROMPT).toMatch(/don't tell him to open a link/i)
+    expect(SYSTEM_PROMPT).not.toMatch(/give the deep link/)
+  })
+
+  it('auto_approved: report the outcome; an uncertain failure is checked, never retried', () => {
+    at('auto_approved')
+    at('outcome')
+    expect(SYSTEM_PROMPT).toMatch(/uncertain/)
+    expect(SYSTEM_PROMPT).toMatch(/never retry it yourself/)
+  })
+
+  it('[approval] messages are the decision outcome; continue without re-asking', () => {
+    at('[approval]')
+    expect(SYSTEM_PROMPT).toMatch(/without asking again/)
+  })
+})
