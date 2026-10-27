@@ -31,6 +31,9 @@ import { internalOrigin } from '@/lib/http/origin'
 import { operatorPromptLine, verticalPromptLine } from '@/lib/operators/context'
 import { currentOperator } from '@/lib/operators/session'
 import { getVertical } from '@/lib/operators/store'
+import { MASTER_ONLY_ERROR } from '@/lib/operators/guard'
+import { requestOrigin } from '@/lib/http/origin'
+import type { Operator } from '@/lib/operators/types'
 
 /**
  * POST `{ prompt, conversation_id?, skip_permissions?, auto? }` → the agent,
@@ -190,6 +193,8 @@ export async function POST(req: Request) {
         prompt: withKnowledge(knowledge, prompt),
         title: message,
         origin,
+        publicOrigin: requestOrigin(req),
+        operator,
         conversationId,
         skipPermissions: body.data.skip_permissions === true,
         send,
@@ -240,8 +245,22 @@ async function handledElsewhere(id: string, status?: string): Promise<Awaited<Re
  * 'agent'), then the executor, server-side. The tool never reaches this
  * without the owner's per-chat opt-in and a skippable kind. Never throws: a
  * throw would fail the tool call and invite the model to file it again.
+ * `publicOrigin` makes a revealed sign-in link absolute. A vertical Grok Bot's
+ * run never auto-approves an operator-key request (it stays awaiting for the
+ * master bot or the owner).
  */
-const autoApprove: NonNullable<ToolDeps['autoApprove']> = async (id) => {
+const makeAutoApprove = (ctx: { operator: Operator | null; publicOrigin: string }): NonNullable<ToolDeps['autoApprove']> => async (id) => {
+  if (ctx.operator && !ctx.operator.is_master) {
+    let kind: string | null = null
+    try {
+      kind = (await getAction(id))?.kind ?? null
+    } catch (err) {
+      return { status: 'failed', result: { still_awaiting: true }, error: `${errText(err)} — not approved; it still awaits the owner at /actions/${id}` }
+    }
+    if (kind === 'issue_operator_key') {
+      return { status: 'failed', result: { still_awaiting: true }, error: `${MASTER_ONLY_ERROR}; it awaits the owner at /actions/${id}` }
+    }
+  }
   let claimed
   try {
     claimed = await claimDecision(id, true, 'agent')
@@ -273,7 +292,7 @@ const autoApprove: NonNullable<ToolDeps['autoApprove']> = async (id) => {
     // Skip mode shows the outcome to whoever runs this chat: a minted sign-in
     // link rides back in the tool result once (agent_messages / agent_runs
     // store only a masked copy; lib/operators/mask.ts).
-    const o = await executeAction(id, { revealOnce: true })
+    const o = await executeAction(id, { revealOnce: true, origin: ctx.publicOrigin })
     if (!o.ran) return handledElsewhere(id, o.status)
     const result = o.reveal
       ? { ...o.result, sign_in_url: o.reveal.sign_in_url, sign_in_url_note: 'Shown once. Lume keeps only a masked copy; give this link to the new Grok Bot now.' }
@@ -303,6 +322,8 @@ async function executeRun({
   prompt,
   title,
   origin,
+  publicOrigin,
+  operator,
   conversationId,
   skipPermissions,
   send: emit,
@@ -312,6 +333,9 @@ async function executeRun({
   /** The owner's own words (the prompt may carry packed history). */
   title: string
   origin: string
+  /** The public origin (LUME_URL or the request's) for links shown to the user. */
+  publicOrigin: string
+  operator: Operator | null
   conversationId: string
   skipPermissions: boolean
   send: (e: SseEvent) => void
@@ -388,7 +412,8 @@ async function executeRun({
       baseUrl: origin,
       conversationId,
       skipPermissions,
-      autoApprove,
+      autoApprove: makeAutoApprove({ operator, publicOrigin }),
+      operator,
       skills: { list: () => listSkills(), get: getSkill, findByName: findSkillByName, create: createSkill },
       notify: async (raw) => {
         // Telegram and the feed both get the masked text: a sign-in link is never sent or stored in plaintext.

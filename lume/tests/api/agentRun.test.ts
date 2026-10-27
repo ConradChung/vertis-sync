@@ -426,7 +426,7 @@ describe('POST /api/agent/run in skip-permissions mode', () => {
     const ev = await events(await post('pause c1', { skip_permissions: true }))
     expect(h.createAction).toHaveBeenCalledWith('pause_campaign', expect.anything(), 'agent', { agentRunId: 'run-1' })
     expect(h.claimDecision).toHaveBeenCalledWith('act-1', true, 'agent')
-    expect(h.executeAction).toHaveBeenCalledWith('act-1', { revealOnce: true })
+    expect(h.executeAction).toHaveBeenCalledWith('act-1', { revealOnce: true, origin: expect.any(String) })
     expect(h.editMessage).toHaveBeenCalledWith(42, expect.stringContaining('Auto-approved'))
     expect(ev).toContainEqual(expect.objectContaining({ type: 'approval', action_id: 'act-1', tool: 'pause_campaign', state: 'auto_executed' }))
     expect(ev.at(-1)).toMatchObject({ type: 'done', status: 'done' })
@@ -437,6 +437,22 @@ describe('POST /api/agent/run in skip-permissions mode', () => {
     const reply = h.insertMessage.mock.calls.at(-1)![0]
     expect(reply.tools).toEqual([expect.objectContaining({ name: 'pause_campaign', status: 'ok' })])
     expect(reply.approvals).toEqual([expect.objectContaining({ action_id: 'act-1', state: 'auto_executed' })])
+  })
+
+  it('a vertical Grok Bot run never auto-approves an operator-key request (defence in depth)', async () => {
+    h.currentOperator.mockResolvedValue({ id: 'op-1', vertical_id: 'v-roof', is_master: false, label: 'Roof bot', revoked_at: null })
+    h.getVertical.mockResolvedValue({ id: 'v-roof', name: 'Roofers', campaign_ids: [] })
+    h.getAction.mockResolvedValue({ id: 'act-1', kind: 'issue_operator_key', status: 'awaiting' })
+    fakeRunner(pause)
+    await events(await post('pause c1', { skip_permissions: true }))
+    expect(h.claimDecision).not.toHaveBeenCalled()
+    expect(h.executeAction).not.toHaveBeenCalled()
+  })
+
+  it('skip mode passes the public origin so a revealed link is absolute', async () => {
+    fakeRunner(pause)
+    await events(await post('pause c1', { skip_permissions: true }))
+    expect(h.executeAction).toHaveBeenCalledWith('act-1', { revealOnce: true, origin: expect.stringMatching(/^https?:\/\//) })
   })
 
   it('a failed execution is auto_failed and its tool entry an error', async () => {
@@ -516,7 +532,7 @@ describe('POST /api/agent/run in skip-permissions mode', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     fakeRunner(pause)
     const ev = await events(await post('pause c1', { skip_permissions: true }))
-    expect(h.executeAction).toHaveBeenCalledWith('act-1', { revealOnce: true })
+    expect(h.executeAction).toHaveBeenCalledWith('act-1', { revealOnce: true, origin: expect.any(String) })
     expect(ev).toContainEqual(expect.objectContaining({ type: 'approval', state: 'auto_executed' }))
   })
 

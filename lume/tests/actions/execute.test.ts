@@ -819,3 +819,36 @@ describe('issue_operator_key (G9)', () => {
     expect(store.claimDecision).not.toHaveBeenCalled()
   })
 })
+
+describe('issue_operator_key: only the master bot or the owner may decide it', () => {
+  const VID = '3941b73f-c74e-4cc5-9766-f0140e6ad9c9'
+  const OP = '9b2f4c1e-0d3a-4e5b-8c7d-6e5f4a3b2c1d'
+  const asBot = (is_master: boolean) => {
+    ops.getOperator.mockResolvedValue({ id: OP, vertical_id: is_master ? null : 'v1', is_master, label: 'bot', revoked_at: null })
+    return { cookie: `lume_op=${signOperatorCookie(OP, 'internal-secret')}` }
+  }
+  beforeEach(() => vi.stubEnv('LUME_INTERNAL_SECRET', 'internal-secret'))
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('a vertical bot gets 403 master_only before any claim', async () => {
+    store.getAction.mockResolvedValue(row('issue_operator_key', { vertical_id: VID }, { status: 'awaiting' }))
+    const res = await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve' }, asBot(false)), params(ID))
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: 'master_only', message: expect.stringContaining('only the master bot or owner can issue keys') })
+    expect(store.claimDecision).not.toHaveBeenCalled()
+  })
+
+  it('a vertical bot may still decide other kinds', async () => {
+    store.getAction.mockResolvedValue(row('pause_campaign', {}, { status: 'awaiting' }))
+    store.claimDecision.mockResolvedValue(row('pause_campaign', { campaign_id: 'c' }, { status: 'rejected' }))
+    const res = await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'reject' }, asBot(false)), params(ID))
+    expect(res.status).toBe(200)
+  })
+
+  it('the master bot may', async () => {
+    store.claimDecision.mockResolvedValue(row('issue_operator_key', { vertical_id: VID }, { status: 'rejected' }))
+    const res = await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'reject' }, asBot(true)), params(ID))
+    expect(res.status).toBe(200)
+    expect(store.claimDecision).toHaveBeenCalledWith(ID, false, 'operator', OP)
+  })
+})

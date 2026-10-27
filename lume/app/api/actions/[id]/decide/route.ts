@@ -11,6 +11,7 @@ import { formRedirect, readJsonOrForm } from '@/lib/http/form'
 import { uuidParam } from '@/lib/http/json'
 import { internalOrigin, requestOrigin } from '@/lib/http/origin'
 import { currentOperator } from '@/lib/operators/session'
+import { MASTER_ONLY_ERROR } from '@/lib/operators/guard'
 
 /**
  * Confirm / Cancel a pending action from Lume. Runs the same claim as
@@ -33,7 +34,8 @@ import { currentOperator } from '@/lib/operators/session'
  * `issue_operator_key`: the executor runs here with `revealOnce`, and the raw
  * sign-in link comes back in this one JSON response (`sign_in_url`, no-store)
  * and nowhere else. A form post for it is refused (a redirect cannot carry it
- * safely); it is decided on its /actions page.
+ * safely); it is decided on its /actions page. A vertical Grok Bot may not
+ * decide it at all (403 master_only): only the master bot or the owner.
  */
 
 // executeAction may wait on pipeline.decide() (170 s); outlive it.
@@ -55,14 +57,21 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   const op = await currentOperator(req)
 
-  if (form) {
+  // Kinds with their own rules are checked before any claim.
+  if (form || (op && !op.is_master)) {
+    let kind: string | null = null
     try {
-      const row = await getAction(id)
-      if (row?.kind === 'issue_operator_key') {
-        return formRedirect(req, form.returnTo, { error: 'key_on_action_page' })
+      kind = (await getAction(id))?.kind ?? null
+    } catch (err) {
+      if (form) return formRedirect(req, form.returnTo, { error: 'db_error' })
+      return dbErrorResponse(err, 'api/actions/decide')
+    }
+    if (kind === 'issue_operator_key') {
+      if (op && !op.is_master) {
+        if (form) return formRedirect(req, form.returnTo, { error: 'master_only' })
+        return NextResponse.json({ error: 'master_only', message: MASTER_ONLY_ERROR }, { status: 403 })
       }
-    } catch {
-      return formRedirect(req, form.returnTo, { error: 'db_error' })
+      if (form) return formRedirect(req, form.returnTo, { error: 'key_on_action_page' })
     }
   }
 

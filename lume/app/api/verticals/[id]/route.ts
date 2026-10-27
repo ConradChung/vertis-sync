@@ -5,12 +5,15 @@ import { dbErrorResponse } from '@/lib/http/errors'
 import { parseJsonBody, uuidParam } from '@/lib/http/json'
 import { archiveVertical, updateVertical } from '@/lib/operators/store'
 import { verticalConflict, VerticalFields } from '@/lib/operators/verticalSchema'
+import { nonMasterOperatorForbidden } from '@/lib/operators/guard'
+import { currentOperator } from '@/lib/operators/session'
 
 /**
  * PATCH one live vertical: `{ name?, scopes?, campaign_ids?, is_default? }`
  * → `{ vertical }`, or `{ archived: true }` alone → `{ archived: true }`.
  * 404 when missing or already archived; 409 duplicate_name / default_taken.
  * Owner (session or the agent's internal bearer: update_vertical is low).
+ * A vertical Grok Bot gets 403 master_only; the master bot and the owner may.
  */
 
 const Body = z.union([
@@ -29,6 +32,8 @@ const Body = z.union([
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const auth = await requireOwner(req)
   if (!auth.ok) return auth.response
+  const refused = nonMasterOperatorForbidden(await currentOperator(req))
+  if (refused) return refused
   const id = uuidParam((await ctx.params).id)
   if (!id) return NextResponse.json({ error: 'bad_id' }, { status: 400 })
   const body = await parseJsonBody(req, Body, 8 * 1024)

@@ -14,6 +14,8 @@ const s = vi.hoisted(() => ({
   createOperatorKey: vi.fn(),
   revokeOperator: vi.fn(),
 }))
+const sess = vi.hoisted(() => ({ currentOperator: vi.fn() }))
+vi.mock('@/lib/operators/session', () => sess)
 vi.mock('@/lib/operators/store', async () => {
   class DuplicateVerticalNameError extends Error {}
   class DefaultVerticalConflictError extends Error {}
@@ -38,6 +40,8 @@ const params = (id: string) => ({ params: Promise.resolve({ id }) })
 
 beforeEach(() => {
   for (const f of Object.values(s)) f.mockReset()
+  sess.currentOperator.mockReset()
+  sess.currentOperator.mockResolvedValue(null)
   process.env.LUME_ALLOWED_EMAIL = 'owner@example.com'
   vi.stubEnv('LUME_INTERNAL_SECRET', 'internal-secret')
   vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -116,5 +120,24 @@ describe('/api/operators', () => {
     expect((await oPOST(req('/api/operators', 'POST', { vertical_id: VID, label: 'x' }))).status).toBe(404)
     s.revokeOperator.mockResolvedValue(true)
     expect(await (await revokePOST(req(`/api/operators/${OID}/revoke`, 'POST', {}), params(OID))).json()).toEqual({ ok: true, revoked: true })
+  })
+})
+
+describe('verticals: master-only for Grok Bots', () => {
+  it('a vertical bot may list but not create or change a vertical', async () => {
+    sess.currentOperator.mockResolvedValue({ id: OID, is_master: false, vertical_id: VID })
+    s.listVerticals.mockResolvedValue([])
+    expect((await vGET(req('/api/verticals'))).status).toBe(200)
+    const created = await vPOST(req('/api/verticals', 'POST', { name: 'X' }))
+    expect(created.status).toBe(403)
+    expect(await created.json()).toMatchObject({ error: 'master_only', message: expect.stringContaining('only the master bot or owner') })
+    expect((await vPATCH(req(`/api/verticals/${VID}`, 'PATCH', { name: 'Y' }), params(VID))).status).toBe(403)
+    expect(s.createVertical).not.toHaveBeenCalled()
+    expect(s.updateVertical).not.toHaveBeenCalled()
+  })
+  it('the master bot may', async () => {
+    sess.currentOperator.mockResolvedValue({ id: OID, is_master: true, vertical_id: null })
+    s.createVertical.mockResolvedValue({ id: VID })
+    expect((await vPOST(req('/api/verticals', 'POST', { name: 'X' }))).status).toBe(201)
   })
 })

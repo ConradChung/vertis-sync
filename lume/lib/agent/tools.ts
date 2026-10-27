@@ -61,6 +61,11 @@ export interface ToolDeps {
   skills?: SkillStore
   /** The conversation this run belongs to (recorded as a saved skill's source). */
   conversationId?: string
+  /**
+   * The Grok Bot running this chat, if any. A vertical (non-master) bot does
+   * not get the vertical-management tools (MASTER_ONLY_TOOLS); list_verticals stays.
+   */
+  operator?: { is_master: boolean } | null
   /** Skip-permissions mode for this run: skippable kinds are approved + executed at once. */
   skipPermissions?: boolean
   /** Claims (decided_via 'agent') and executes a pending action. Server-side only. */
@@ -980,7 +985,11 @@ function skillStore(deps: ToolDeps): SkillStore {
   return deps.skills
 }
 
+/** Only the owner or the master Grok Bot may create / change verticals or issue keys. */
+export const MASTER_ONLY_TOOLS: ReadonlySet<string> = new Set(['create_vertical', 'update_vertical', 'issue_operator_key'])
+
 export function buildTools(deps: ToolDeps): AgentTool[] {
   const call = routeCaller(deps)
-  return SPECS.map((build) => build(deps, call))
+  const vertBot = !!deps.operator && !deps.operator.is_master
+  return SPECS.map((build) => build(deps, call)).filter((t) => !(vertBot && MASTER_ONLY_TOOLS.has(t.name)))
 }

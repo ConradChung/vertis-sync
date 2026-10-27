@@ -431,3 +431,16 @@ describe('vertical tools (G9)', () => {
     expect(createAction.mock.calls[0][1]).toMatchObject({ vertical_id: VID })
   })
 })
+
+describe('master-only vertical tools', () => {
+  it('a vertical Grok Bot run gets list_verticals but not create/update_vertical or issue_operator_key', () => {
+    const names = (operator: { is_master: boolean } | null) => setup(undefined, { operator }).tools.map((t) => t.name)
+    const vert = names({ is_master: false })
+    expect(vert).toContain('list_verticals')
+    for (const n of ['create_vertical', 'update_vertical', 'issue_operator_key']) {
+      expect(vert).not.toContain(n)
+      expect(names({ is_master: true })).toContain(n)
+      expect(names(null)).toContain(n)
+    }
+  })
+})

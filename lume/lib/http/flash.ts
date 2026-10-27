@@ -32,6 +32,7 @@ export const FLASH_ERROR = {
   approved_failed: 'Approved, but it failed. See Recent outcomes.',
   approved_retry: 'Approved, but it could not finish; it will be retried.',
   key_on_action_page: 'Decide this on its action page: its sign-in link is shown once there.',
+  master_only: 'Only the master bot or the owner can issue keys or manage verticals.',
   several_matches: 'Several campaigns match; pick one from the list.',
   no_campaign_match: 'No campaign matched that name.',
   unknown_campaign: 'That campaign does not exist in Instantly.',
