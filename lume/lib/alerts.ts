@@ -42,6 +42,8 @@ export interface AlertInput<T> {
   link?: string | null
   campaign_id?: string | null
   scope?: AlertScope | null
+  /** Owner / master only: never routed to a vertical (operator-key requests). */
+  owner_only?: boolean
   dedupe_key?: string | null
   mode?: AlertMode
   telegram?: () => Promise<T>
@@ -118,6 +120,7 @@ async function insertFeed<T>(input: AlertInput<T>): Promise<void> {
       p_scope: input.scope ?? null,
       p_dedupe_key: input.dedupe_key ?? null,
       p_mode: input.mode ?? 'reopen',
+      p_owner_only: input.owner_only === true,
     }
     const call = createServiceClient().rpc('lume_alert_upsert', args).abortSignal(controller.signal)
     const timeout = new Promise<'timeout'>((resolve) => {

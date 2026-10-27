@@ -182,7 +182,7 @@ export async function createAction(
   const route = routeItemForAction(row)
   const sent = (await alert({
     source: 'lume.actions', severity: 'urgent', title: titleFrom(promptText), body: promptText,
-    link: alertLink(`/actions/${row.id}`), campaign_id: route.campaign_id, scope: route.scope,
+    link: alertLink(`/actions/${row.id}`), campaign_id: route.campaign_id, scope: route.scope, owner_only: route.owner_only,
     dedupe_key: gateKey(row.id, 'lume_action'),
     telegram: () => sendActionPrompt(row),
   })) ?? telegramSkipped

@@ -283,7 +283,7 @@ const makeAutoApprove = (ctx: { operator: Operator | null; publicOrigin: string 
       const route = routeItemForAction(claimed)
       await alert({
         source: 'lume.agent', severity: 'info', title: titleFrom(autoText), body: autoText,
-        link: alertLink(`/actions/${id}`), campaign_id: route.campaign_id, scope: route.scope,
+        link: alertLink(`/actions/${id}`), campaign_id: route.campaign_id, scope: route.scope, owner_only: route.owner_only,
         telegram: messageId ? () => editMessage(messageId, autoText) : undefined,
       })
     } catch (err) {

@@ -869,3 +869,16 @@ describe('issue_operator_key: only the master bot or the owner may decide it', (
     expect(store.claimDecision).toHaveBeenCalledWith(ID, false, 'operator', OP)
   })
 })
+
+describe('issue_operator_key alerts are owner-only (never routed to a vertical)', () => {
+  it('the outcome alert carries p_owner_only; other kinds do not', async () => {
+    ops.getVertical.mockResolvedValue({ id: 'v', name: 'R', archived_at: null })
+    ops.createOperatorKey.mockResolvedValue({ operator: { id: 'o', label: 'b' }, rawKey: 'RAWKEY0123456789abcdefghijklmnopqrstuvwxyzA' })
+    store.claimExecution.mockResolvedValue(row('issue_operator_key', { vertical_id: 'v' }))
+    await executeAction(ID, { revealOnce: true })
+    expect(feed.rows.at(-1)).toMatchObject({ owner_only: true })
+    store.claimExecution.mockResolvedValue(row('pause_campaign', { campaign_id: 'c' }))
+    await executeAction(ID)
+    expect(feed.rows.at(-1)).not.toHaveProperty('owner_only')
+  })
+})

@@ -221,3 +221,11 @@ describe('decisionEventsForScope (gate decisions and campaign picks in Recent ou
     expect(decisionEventsForScope(events, verticals, { all: false, vertical: KASPEN }).map((o) => o.kind)).toEqual(['deny'])
   })
 })
+
+describe('owner-only alerts', () => {
+  it('never reach a vertical page, the default included; the all view keeps them', () => {
+    const a = [{ id: 'o', severity: 'urgent' as const, campaign_id: null, scope: null, created_at: '', owner_only: true }]
+    for (const v of verticals) expect(alertsForScope(a, verticals, { all: false, vertical: v })).toEqual([])
+    expect(alertsForScope(a, verticals, { all: true })).toHaveLength(1)
+  })
+})

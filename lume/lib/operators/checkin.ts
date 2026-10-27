@@ -309,6 +309,8 @@ export interface AlertLike {
   campaign_id: string | null
   scope: Vertical['scopes'][number] | null
   created_at: string
+  /** Owner / master only (lume_alerts.owner_only). */
+  owner_only?: boolean
 }
 
 /** Unacked alerts for the scope: urgent first, newest first inside each severity band. */

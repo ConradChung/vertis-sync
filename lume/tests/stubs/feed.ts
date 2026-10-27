@@ -11,6 +11,8 @@ export interface FeedRow {
   scope: string | null
   dedupe_key: string | null
   mode?: string
+  /** Present only when the alert is owner-only. */
+  owner_only?: true
 }
 
 export const feed = { rows: [] as FeedRow[] }
@@ -29,6 +31,7 @@ export const serviceModule = {
         scope: (args.p_scope ?? null) as string | null,
         dedupe_key: (args.p_dedupe_key ?? null) as string | null,
         mode: args.p_mode as string,
+        ...(args.p_owner_only === true ? { owner_only: true as const } : {}),
       })
       const result = Promise.resolve({ error: null })
       return { abortSignal: () => result, then: result.then.bind(result) }

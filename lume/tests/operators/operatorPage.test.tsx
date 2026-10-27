@@ -31,7 +31,7 @@ function data(extra: Partial<CheckinData> = {}): CheckinData {
     operator: null,
     summary: { vertical: { id: 'v-k', name: 'Kaspen' }, needs_confirmation: 3, unacked_alerts: 1, urgent_alerts: 1, last_checked_at: null, generated_at: '2026-10-26T10:00:00.000Z' },
     items,
-    alerts: [{ id: 'al1', source: 's', severity: 'urgent', title: 'Stalled', body: null, link: null, campaign_id: null, scope: null, created_at: '', acked_at: null, acked_by_operator: null, dedupe_key: null }],
+    alerts: [{ id: 'al1', source: 's', severity: 'urgent', title: 'Stalled', body: null, link: null, campaign_id: null, scope: null, created_at: '', acked_at: null, acked_by_operator: null, dedupe_key: null, owner_only: false }],
     outcomes: [{ id: 'p1', kind: 'run_actor', summary: 'Run actor', status: 'failed', decided_via: 'operator', decided_by_operator: 'op1', decided_at: 'x', executed_at: 'y', error: 'boom', vertical_id: 'v-k' }],
     decisionEvents: [
       { id: 1, kind: 'deny', summary: 'deny from Grok Bot “K bot”', status: 'done', ok: true, by_operator: 'op1', at: 't1', vertical_id: 'v-k' },

@@ -79,7 +79,7 @@ describe('alert', () => {
         fn: 'lume_alert_upsert',
         args: {
           p_source: 'lume.test', p_severity: 'info', p_title: 'T', p_body: 'B', p_link: '/x', p_campaign_id: 'c1',
-          p_scope: 'campaign', p_dedupe_key: null, p_mode: 'reopen',
+          p_scope: 'campaign', p_dedupe_key: null, p_mode: 'reopen', p_owner_only: false,
         },
       }),
     ])

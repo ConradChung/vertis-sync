@@ -99,7 +99,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   try {
     await alert({
       source: 'lume.actions', severity: 'info', title: titleFrom(decidedText), body: decidedText,
-      link: alertLink(`/actions/${id}`), campaign_id: route.campaign_id, scope: route.scope,
+      link: alertLink(`/actions/${id}`), campaign_id: route.campaign_id, scope: route.scope, owner_only: route.owner_only,
       telegram: async () => {
         if (decided.telegram_message_id) {
           await editMessage(decided.telegram_message_id, decidedText)

@@ -1,7 +1,7 @@
 -- supabase/tests/lume_alerts_test.sql
 -- Grok Bot operator layer (Phase G4): the durable alert feed every notification lands in.
 begin;
-select plan(42);
+select plan(48);
 
 -- structure
 select has_table('public', 'lume_alerts', 'lume_alerts exists');
@@ -48,9 +48,9 @@ select throws_ok($$insert into lume_alerts (source, title) values ('pgtap', null
 -- lume_alert_upsert (20261027 fix): one row per dedupe_key; a re-opened gate
 -- comes back unacked. Modes: reopen (default) / update / touch.
 select has_function('public', 'lume_alert_upsert', 'lume_alert_upsert exists');
-select ok(not has_function_privilege('anon', 'public.lume_alert_upsert(text,text,text,text,text,text,text,text,text)', 'execute'), 'anon cannot call lume_alert_upsert');
-select ok(not has_function_privilege('authenticated', 'public.lume_alert_upsert(text,text,text,text,text,text,text,text,text)', 'execute'), 'authenticated cannot call lume_alert_upsert');
-select ok(has_function_privilege('service_role', 'public.lume_alert_upsert(text,text,text,text,text,text,text,text,text)', 'execute'), 'service_role can call lume_alert_upsert');
+select ok(not has_function_privilege('anon', 'public.lume_alert_upsert(text,text,text,text,text,text,text,text,text,boolean)', 'execute'), 'anon cannot call lume_alert_upsert');
+select ok(not has_function_privilege('authenticated', 'public.lume_alert_upsert(text,text,text,text,text,text,text,text,text,boolean)', 'execute'), 'authenticated cannot call lume_alert_upsert');
+select ok(has_function_privilege('service_role', 'public.lume_alert_upsert(text,text,text,text,text,text,text,text,text,boolean)', 'execute'), 'service_role can call lume_alert_upsert');
 
 select isnt(lume_alert_upsert('pgtap', null, 'no key', null, null, null, null, null), null, 'no dedupe_key: inserts and returns the id');
 select is((select severity from lume_alerts where title = 'no key'), 'info', 'a null severity defaults to info');
@@ -82,6 +82,17 @@ select ok((select acked_at is null and title = 'Gate closed' and source = 'pgtap
 
 select throws_ok($$select lume_alert_upsert('pgtap', 'info', 't', null, null, null, null, 'k', 'bogus')$$,
   '22023', null, 'an unknown mode is rejected');
+
+-- owner_only (migration lume_alerts_owner_only)
+select col_default_is('public', 'lume_alerts', 'owner_only', 'false', 'owner_only defaults to false');
+select col_not_null('public', 'lume_alerts', 'owner_only', 'owner_only is not null');
+select ok(not exists(select 1 from pg_proc where proname = 'lume_alert_upsert' and pronargs = 9), 'the 9-argument upsert is gone (no overloads)');
+do $$ begin perform lume_alert_upsert('pgtap', 'info', 'plain', null, null, null, null, 'pgtap:owner-plain'); end $$;
+select ok((select not owner_only from lume_alerts where dedupe_key = 'pgtap:owner-plain'), 'existing callers (no p_owner_only) write false');
+do $$ begin perform lume_alert_upsert('pgtap', 'urgent', 'key', null, null, null, null, 'pgtap:owner', 'reopen', true); end $$;
+select ok((select owner_only from lume_alerts where dedupe_key = 'pgtap:owner'), 'p_owner_only true is stored');
+do $$ begin perform lume_alert_upsert('pgtap', 'info', 'key decided', null, null, null, null, 'pgtap:owner', 'update'); end $$;
+select ok((select owner_only from lume_alerts where dedupe_key = 'pgtap:owner'), 'once owner-only, a later upsert without the flag keeps it');
 
 select * from finish();
 rollback;

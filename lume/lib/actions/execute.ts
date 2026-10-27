@@ -349,7 +349,7 @@ async function report(a: PendingActionRow, status: 'executed' | 'failed', result
   try {
     await alert({
       source: 'lume.actions', severity: status === 'executed' ? 'info' : 'warn', title: titleFrom(text), body: text,
-      link: alertLink(`/actions/${a.id}`), campaign_id: route.campaign_id, scope: route.scope,
+      link: alertLink(`/actions/${a.id}`), campaign_id: route.campaign_id, scope: route.scope, owner_only: route.owner_only,
       telegram: () => sendMessage(text, { disablePreview: true }),
     })
   } catch (err) {
@@ -476,7 +476,7 @@ export async function recoverInterruptedActions(now: Date): Promise<string[]> {
     try {
       await alert({
         source: 'lume.actions', severity: 'warn', title: titleFrom(text), body: text,
-        link: alertLink(`/actions/${a.id}`), campaign_id: route.campaign_id, scope: route.scope,
+        link: alertLink(`/actions/${a.id}`), campaign_id: route.campaign_id, scope: route.scope, owner_only: route.owner_only,
         telegram: () => sendMessage(text, { disablePreview: true }),
       })
     } catch (err) {
