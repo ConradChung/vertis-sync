@@ -333,3 +333,27 @@ describe('GET /api/orders', () => {
     expect((await get(`?id=${ID}&kind=job_batch`)).status).toBe(404)
   })
 })
+
+describe('POST /api/import/apollo-link as a plain form (/operator)', () => {
+  const form = (body: string) =>
+    apolloPOST(
+      new Request('http://localhost/api/import/apollo-link', {
+        method: 'POST',
+        body,
+        headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'http://localhost' },
+      })
+    )
+  it('creates the order and 303s back', async () => {
+    const url = 'https://app.apollo.io/#/people?personTitles[]=ceo'
+    ingest.createApolloOrder.mockResolvedValue({ order: { id: ID, status: 'awaiting_count' }, telegram: 'skipped' })
+    const res = await form(`url=${encodeURIComponent(url)}&return_to=%2Foperator`)
+    expect(res.status).toBe(303)
+    expect(res.headers.get('location')).toContain('/operator?flash=Apollo+link+received')
+    expect(ingest.createApolloOrder).toHaveBeenCalled()
+  })
+  it('a bad link → flash_error', async () => {
+    const res = await form('url=https%3A%2F%2Fexample.com')
+    expect(res.headers.get('location')).toContain('flash_error=invalid_apollo_url')
+    expect(ingest.createApolloOrder).not.toHaveBeenCalled()
+  })
+})

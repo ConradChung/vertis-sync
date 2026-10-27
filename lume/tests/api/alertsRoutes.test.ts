@@ -6,10 +6,12 @@ const h = vi.hoisted(() => ({
   currentOperator: vi.fn(),
   listAlerts: vi.fn(),
   ackAlerts: vi.fn(),
+  listVerticals: vi.fn(),
 }))
 vi.mock('@/lib/auth/guards', () => ({ requireOwner: h.requireOwner, requireOwnerSession: h.requireOwnerSession }))
 vi.mock('@/lib/operators/session', () => ({ currentOperator: h.currentOperator }))
-vi.mock('@/lib/alertsStore', () => ({ listAlerts: h.listAlerts, ackAlerts: h.ackAlerts, ALERTS_DEFAULT_LIMIT: 50 }))
+vi.mock('@/lib/alertsStore', () => ({ listAlerts: h.listAlerts, ackAlerts: h.ackAlerts, ALERTS_DEFAULT_LIMIT: 50, ALERTS_MAX_LIMIT: 200 }))
+vi.mock('@/lib/operators/store', () => ({ listVerticals: h.listVerticals }))
 
 import { NextResponse } from 'next/server'
 import { GET } from '@/app/api/alerts/route'
@@ -100,6 +102,59 @@ describe('POST /api/alerts/ack', () => {
   ])('400 for %j', async (body) => {
     const res = await ack(body)
     expect(res.status).toBe(400)
+    expect(h.ackAlerts).not.toHaveBeenCalled()
+  })
+})
+
+describe('GET /api/alerts?vertical=', () => {
+  const V1 = '5b54bc53-ac4a-49a3-b13a-a299b2d6b38f'
+  const V2 = '466d9a53-6450-49df-a063-8e66437efa8b'
+  const verticals = [
+    { id: V1, name: 'Job search', campaign_ids: ['camp-js'], scopes: ['orders'], is_default: false, archived_at: null },
+    { id: V2, name: 'Kaspen', campaign_ids: ['camp-k'], scopes: ['campaign'], is_default: true, archived_at: null },
+  ]
+  beforeEach(() => {
+    h.listVerticals.mockResolvedValue(verticals)
+    h.listAlerts.mockResolvedValue([
+      { id: '1', campaign_id: 'camp-js', scope: null },
+      { id: '2', campaign_id: 'camp-k', scope: null },
+      { id: '3', campaign_id: null, scope: 'orders' },
+      { id: '4', campaign_id: null, scope: null },
+    ])
+  })
+
+  it('keeps only the alerts that route to that vertical (campaign, then sole scope, else default)', async () => {
+    const js = await (await GET(new Request(`http://localhost/api/alerts?unacked=1&vertical=${V1}`))).json()
+    expect(js.alerts.map((a: { id: string }) => a.id)).toEqual(['1', '3'])
+    expect(h.listAlerts).toHaveBeenLastCalledWith({ unackedOnly: true, limit: 200 })
+    const k = await (await GET(new Request(`http://localhost/api/alerts?vertical=${V2}&limit=1`))).json()
+    expect(k.alerts.map((a: { id: string }) => a.id)).toEqual(['2'])
+  })
+
+  it('400 on a junk vertical id', async () => {
+    expect((await GET(new Request('http://localhost/api/alerts?vertical=nope'))).status).toBe(400)
+  })
+})
+
+describe('POST /api/alerts/ack as a plain form (/operator)', () => {
+  const form = (body: string) =>
+    POST(
+      new Request('http://localhost/api/alerts/ack', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'http://localhost' },
+        body,
+      })
+    )
+  it('several ids fields → those ids; 303 back with a count', async () => {
+    h.ackAlerts.mockResolvedValue([A, A])
+    const res = await form(`ids=${A}&ids=${A}&return_to=%2Foperator`)
+    expect(res.status).toBe(303)
+    expect(res.headers.get('location')).toBe('http://localhost/operator?flash=Acknowledged+2+alerts')
+    expect(h.ackAlerts).toHaveBeenCalledWith({ ids: [A, A] }, null)
+  })
+  it('a junk id → flash_error, nothing acked', async () => {
+    const res = await form('ids=nope')
+    expect(res.headers.get('location')).toContain('flash_error=invalid_body')
     expect(h.ackAlerts).not.toHaveBeenCalled()
   })
 })

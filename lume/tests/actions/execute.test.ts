@@ -477,6 +477,69 @@ describe('POST /api/actions/[id]/decide', () => {
     noSideEffects()
   })
 
+  describe('plain HTML form (the /operator page)', () => {
+    const form = (body: string, headers: Record<string, string> = {}) =>
+      new Request(`http://localhost/api/actions/${ID}/decide`, {
+        method: 'POST',
+        body,
+        headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'http://localhost', ...headers },
+      })
+
+    it('deny → same claim, 303 back to return_to with a flash, nothing runs', async () => {
+      store.claimDecision.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }, { status: 'rejected' }))
+      const res = await decidePOST(form('decision=reject&return_to=%2Foperator%3Fvertical%3Dv1'), params(ID))
+      expect(res.status).toBe(303)
+      expect(res.headers.get('location')).toBe('http://localhost/operator?vertical=v1&flash=Denied%3A+pause_campaign')
+      expect(store.claimDecision).toHaveBeenCalledWith(ID, false, 'lume', undefined)
+      noSideEffects()
+    })
+
+    it('a Grok Bot form decision is attributed to the operator through its cookie', async () => {
+      const OP = '9b2f4c1e-0d3a-4e5b-8c7d-6e5f4a3b2c1d'
+      vi.stubEnv('LUME_INTERNAL_SECRET', 'internal-secret')
+      ops.getOperator.mockResolvedValue({ id: OP, vertical_id: 'v1', is_master: false, label: 'Roofers bot', revoked_at: null })
+      store.claimDecision.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }, { status: 'rejected' }))
+      const res = await decidePOST(form('decision=reject', { cookie: `lume_op=${signOperatorCookie(OP, 'internal-secret')}` }), params(ID))
+      vi.unstubAllEnvs()
+      expect(res.status).toBe(303)
+      expect(store.claimDecision).toHaveBeenCalledWith(ID, false, 'operator', OP)
+    })
+
+    it('approve → dispatched to the execute route (own function), 303 at once', async () => {
+      store.claimDecision.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }, { status: 'approved' }))
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }))
+      const res = await decidePOST(form('decision=approve'), params(ID))
+      expect(res.status).toBe(303)
+      expect(res.headers.get('location')).toContain('flash=Approved')
+      expect(fetchSpy).toHaveBeenCalledWith(`http://localhost/api/actions/${ID}/execute`, expect.objectContaining({ method: 'POST' }))
+      fetchSpy.mockRestore()
+      expect(store.claimExecution).not.toHaveBeenCalled()
+    })
+
+    it('approve without LUME_ACTION_SECRET runs inline', async () => {
+      delete process.env.LUME_ACTION_SECRET
+      store.claimDecision.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }, { status: 'approved' }))
+      store.claimExecution.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }))
+      const res = await decidePOST(form('decision=approve'), params(ID))
+      expect(res.status).toBe(303)
+      expect(res.headers.get('location')).toContain('flash=Approved+and+ran')
+      expect(ins.pauseCampaign).toHaveBeenCalledOnce()
+    })
+
+    it('claim lost → 303 with flash_error', async () => {
+      store.claimDecision.mockResolvedValue(null)
+      store.getAction.mockResolvedValue(row('pause_campaign', {}, { status: 'approved' }))
+      const res = await decidePOST(form('decision=approve'), params(ID))
+      expect(res.headers.get('location')).toContain('flash_error=already_handled')
+    })
+
+    it('a cross-origin form post is refused before any claim', async () => {
+      const res = await decidePOST(form('decision=approve', { origin: 'https://evil.test' }), params(ID))
+      expect(res.status).toBe(403)
+      expect(store.claimDecision).not.toHaveBeenCalled()
+    })
+  })
+
   it('second decide (claim lost, e.g. Telegram won) → 409 already_handled, nothing runs', async () => {
     store.claimDecision.mockResolvedValue(null)
     store.getAction.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }, { status: 'approved' }))

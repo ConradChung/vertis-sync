@@ -7,6 +7,9 @@ import { logEvent, pickCampaign, setBarriers } from '@/lib/db/service'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { instantlyErrorResponse } from '@/lib/http/instantly'
 import { parseJsonBody, uuidParam } from '@/lib/http/json'
+import { formAnswer, formRedirect, readJsonOrForm } from '@/lib/http/form'
+import { currentOperator } from '@/lib/operators/session'
+import { resolveCampaignQuery } from '@/lib/validate/campaignQuery'
 
 /**
  * Lume-local push settings for one validation job — the parts of the
@@ -18,6 +21,13 @@ import { parseJsonBody, uuidParam } from '@/lib/http/json'
  *   POST  { campaign_id, campaign_name } → campaign pick; only while the job
  *         awaits a campaign (conditional PATCH → 409 otherwise); moves it to
  *         `configuring` (the barrier screen)
+ *   POST  { campaign_query } → the campaign by name, with telegram-inbox's
+ *         reply rules (lib/validate/campaignQuery.ts): one exact or single
+ *         match is picked as above; none → 400 no_campaign_match; several →
+ *         409 several_matches + `matches` (nothing written).
+ *   Both also as a plain HTML form (/operator): 303 back with a flash; on
+ *   several matches the redirect carries `cq_job` + `cq` so the page lists
+ *   the matches to pick from.
  *   PATCH { location_barrier?, company_barrier?, company_strict? } → only
  *         while `configuring|reviewing_company` (409 otherwise) and no push
  *         confirmation is awaiting (409 push_awaiting_confirmation)
@@ -41,48 +51,79 @@ export async function GET(req: Request, ctx: Ctx) {
   return NextResponse.json({ preview: r.preview })
 }
 
-const PickBody = z.object({
-  campaign_id: z.string().trim().min(1).max(100),
-  campaign_name: z.string().max(300).optional(),
-})
+const PickBody = z.union([
+  z.object({
+    campaign_id: z.string().trim().min(1).max(100),
+    campaign_name: z.string().max(300).optional(),
+  }),
+  z.object({ campaign_query: z.string().trim().min(1).max(200) }),
+])
 
 export async function POST(req: Request, ctx: Ctx) {
   const auth = await requireOwner(req)
   if (!auth.ok) return auth.response
   const jobId = await jobIdOf(ctx)
   if (!jobId) return NextResponse.json({ error: 'bad_job_id' }, { status: 400 })
-  const body = await parseJsonBody(req, PickBody, 2048)
+  const body = await readJsonOrForm(req, PickBody, 2048, (f) => {
+    const id = f.get('campaign_id')?.trim()
+    if (id) return { campaign_id: id }
+    return { campaign_query: f.get('campaign_query') ?? '' }
+  })
   if (!body.ok) return body.response
+  const form = body.form
+  const answer = async (res: NextResponse, okText?: string) => (form ? formAnswer(req, form.returnTo, res, okText) : res)
 
-  if (!isInstantlyConfigured()) return NextResponse.json({ error: 'instantly_not_configured' }, { status: 400 })
+  if (!isInstantlyConfigured()) return answer(NextResponse.json({ error: 'instantly_not_configured' }, { status: 400 }))
   // The id must be a real campaign; the stored name comes from Instantly, not the client.
   let campaign: { id: string; name: string } | undefined
   try {
-    campaign = (await listCampaigns()).find((c) => c.id === body.data.campaign_id)
+    const all = await listCampaigns()
+    if ('campaign_query' in body.data) {
+      const query = body.data.campaign_query
+      const r = resolveCampaignQuery(query, all)
+      if (r.kind === 'several') {
+        const matches = r.matches.map((c) => ({ id: c.id, name: c.name, status: c.status }))
+        if (form) {
+          const back = new URL(form.returnTo, 'http://x')
+          back.searchParams.set('cq_job', jobId)
+          back.searchParams.set('cq', query)
+          return formRedirect(req, `${back.pathname}${back.search}`, { error: `${matches.length} campaigns match "${query}"; pick one` })
+        }
+        return NextResponse.json({ error: 'several_matches', matches }, { status: 409 })
+      }
+      if (r.kind !== 'resolved') {
+        return answer(NextResponse.json({ error: form ? `No campaign matched "${query}"` : 'no_campaign_match' }, { status: 400 }))
+      }
+      campaign = r.campaign
+    } else {
+      const wanted = body.data.campaign_id
+      campaign = all.find((c) => c.id === wanted)
+    }
   } catch (err) {
-    return instantlyErrorResponse(err, 'api/gates/campaign')
+    return answer(instantlyErrorResponse(err, 'api/gates/campaign'))
   }
-  if (!campaign) return NextResponse.json({ error: 'unknown_campaign' }, { status: 400 })
+  if (!campaign) return answer(NextResponse.json({ error: 'unknown_campaign' }, { status: 400 }))
 
   try {
     const moved = await pickCampaign(jobId, { id: campaign.id, name: campaign.name })
-    if (!moved) return NextResponse.json({ error: 'already_handled' }, { status: 409 })
+    if (!moved) return answer(NextResponse.json({ error: 'already_handled' }, { status: 409 }))
   } catch (err) {
-    return dbErrorResponse(err, 'api/gates/campaign')
+    return answer(dbErrorResponse(err, 'api/gates/campaign'))
   }
+  const op = await currentOperator(req)
   try {
     await logEvent({
       type: 'lume.campaign_pick',
       source: 'lume',
       source_id: jobId,
       campaign_id: campaign.id,
-      title: `Campaign picked in Lume: ${campaign.name}`,
-      payload: { campaign_id: campaign.id, campaign_name: campaign.name },
+      title: op ? `Campaign picked by Grok Bot “${op.label}”: ${campaign.name}` : `Campaign picked in Lume: ${campaign.name}`,
+      payload: { campaign_id: campaign.id, campaign_name: campaign.name, ...(op ? { decided_via: 'operator', operator_id: op.id } : {}) },
     })
   } catch (err) {
     console.error('[api/gates/campaign] logEvent failed:', err instanceof Error ? err.message : err)
   }
-  return NextResponse.json({ ok: true, campaign })
+  return answer(NextResponse.json({ ok: true, campaign: { id: campaign.id, name: campaign.name } }), `Campaign set: ${campaign.name}`)
 }
 
 const BarrierBody = z

@@ -1,13 +1,15 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireOwnerSession } from '@/lib/auth/guards'
-import { executeAction } from '@/lib/actions/execute'
+import { dispatchExecuteNow, executeAction } from '@/lib/actions/execute'
 import { claimDecision, getAction } from '@/lib/actions/store'
 import { editMessage, sendDecisionNote } from '@/lib/adapters/telegram'
 import { alert, alertLink, titleFrom } from '@/lib/alerts'
 import { routeItemForAction } from '@/lib/operators/route'
 import { dbErrorResponse } from '@/lib/http/errors'
-import { parseJsonBody, uuidParam } from '@/lib/http/json'
+import { formRedirect, readJsonOrForm } from '@/lib/http/form'
+import { uuidParam } from '@/lib/http/json'
+import { internalOrigin } from '@/lib/http/origin'
 import { currentOperator } from '@/lib/operators/session'
 
 /**
@@ -21,6 +23,12 @@ import { currentOperator } from '@/lib/operators/session'
  * can never approve its own pending action. A Grok Bot signed in with its
  * operator key (valid `lume_op` cookie) is recorded as `decided_via='operator'`
  * + `decided_by_operator`.
+ *
+ * Also a plain HTML form (`decision=approve|reject&return_to=/operator…`,
+ * the /operator check-in page): same claim, then a 303 back with a flash. An
+ * approved form decision is dispatched to `/api/actions/<id>/execute` (its own
+ * function, like the sweeper) instead of being awaited here, so the page comes
+ * back at once; without LUME_ACTION_SECRET it runs inline.
  */
 
 // executeAction may wait on pipeline.decide() (170 s); outlive it.
@@ -35,9 +43,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const id = uuidParam((await ctx.params).id)
   if (!id) return NextResponse.json({ error: 'bad_id' }, { status: 400 })
 
-  const body = await parseJsonBody(req, Body, 256)
+  const body = await readJsonOrForm(req, Body, 1024, (f) => ({ decision: f.get('decision') }))
   if (!body.ok) return body.response
   const approve = body.data.decision === 'approve'
+  const form = body.form
 
   const op = await currentOperator(req)
 
@@ -46,10 +55,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     claimed = await claimDecision(id, approve, op ? 'operator' : 'lume', op?.id)
     if (!claimed) {
       const row = await getAction(id)
+      if (form) return formRedirect(req, form.returnTo, { error: row ? `already_handled (${row.status})` : 'not_found' })
       if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 })
       return NextResponse.json({ error: 'already_handled', status: row.status }, { status: 409 })
     }
   } catch (err) {
+    if (form) return formRedirect(req, form.returnTo, { error: 'db_error' })
     return dbErrorResponse(err, 'api/actions/decide')
   }
 
@@ -75,7 +86,24 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     console.error('[api/actions/decide] telegram note failed:', err instanceof Error ? err.message : err)
   }
 
-  if (!approve) return NextResponse.json({ ok: true, status: 'rejected' })
+  if (!approve) {
+    if (form) return formRedirect(req, form.returnTo, { ok: `Denied: ${claimed.kind}` })
+    return NextResponse.json({ ok: true, status: 'rejected' })
+  }
+
+  if (form) {
+    const dispatched = await dispatchExecuteNow(id, internalOrigin(req))
+    if (dispatched === 'dispatched') return formRedirect(req, form.returnTo, { ok: `Approved: ${claimed.kind} (running)` })
+    try {
+      const outcome = await executeAction(id)
+      if (!outcome.ran) return formRedirect(req, form.returnTo, { ok: `Approved: ${claimed.kind}` })
+      return outcome.status === 'executed'
+        ? formRedirect(req, form.returnTo, { ok: `Approved and ran: ${claimed.kind}` })
+        : formRedirect(req, form.returnTo, { error: `Approved, but it failed: ${outcome.error ?? 'error'}` })
+    } catch {
+      return formRedirect(req, form.returnTo, { error: 'Approved, but the executor could not finish; it will be retried' })
+    }
+  }
 
   try {
     const outcome = await executeAction(id)

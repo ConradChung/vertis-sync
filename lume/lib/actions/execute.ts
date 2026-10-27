@@ -370,6 +370,18 @@ export async function sweepStuckActions(now: Date, origin: string): Promise<{ id
   return Promise.all(ids.map(async (id) => ({ id, outcome: await dispatchExecute(`${base}/api/actions/${id}/execute`, secret) })))
 }
 
+/**
+ * Start one approved action in its own function (the sweeper's dispatch) and
+ * return after ~2.5 s, for callers that must answer fast (a plain form post
+ * from /operator). Without LUME_ACTION_SECRET it reports an error and the
+ * caller runs the executor inline instead.
+ */
+export async function dispatchExecuteNow(id: string, origin: string): Promise<SweepOutcome> {
+  const secret = process.env.LUME_ACTION_SECRET
+  if (!secret) return { error: 'LUME_ACTION_SECRET is not set' }
+  return dispatchExecute(`${origin.replace(/\/+$/, '')}/api/actions/${id}/execute`, secret)
+}
+
 async function dispatchExecute(url: string, secret: string): Promise<SweepOutcome> {
   try {
     const res = await fetch(url, {

@@ -138,6 +138,47 @@ describe('POST /api/gates/decide', () => {
   })
 })
 
+describe('POST /api/gates/decide as a plain form (/operator)', () => {
+  const form = (body: string) =>
+    new Request('http://localhost/api/gates/decide', {
+      method: 'POST',
+      body,
+      headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'http://localhost' },
+    })
+
+  it('decides the callback and 303s back with a flash', async () => {
+    decide.mockResolvedValue({ ok: true, claimed: true, action: 'deny', target_id: JOB })
+    const res = await decidePOST(form(`callback_data=deny%3A${JOB}&return_to=%2Foperator`))
+    expect(res.status).toBe(303)
+    expect(res.headers.get('location')).toBe('http://localhost/operator?flash=Decided%3A+deny')
+    expect(decide).toHaveBeenCalledWith(`deny:${JOB}`)
+  })
+
+  it('appends the count field (Leadsfriday count input)', async () => {
+    decide.mockResolvedValue({ ok: true, claimed: true, action: 'lfo_count', target_id: JOB })
+    await decidePOST(form(`callback_data=lfo_count%3A${JOB}&count=1234`))
+    expect(decide).toHaveBeenCalledWith(`lfo_count:${JOB}:1234`)
+  })
+
+  it('a junk count is refused before the entrypoint', async () => {
+    const res = await decidePOST(form(`callback_data=lfo_count%3A${JOB}&count=12abc`))
+    expect(res.status).toBe(303)
+    expect(res.headers.get('location')).toContain('flash_error=invalid_body')
+    expect(decide).not.toHaveBeenCalled()
+  })
+
+  it('a refused action comes back as flash_error', async () => {
+    const res = await decidePOST(form(`callback_data=push_go%3A${JOB}`))
+    expect(res.headers.get('location')).toContain('flash_error=needs_confirmation')
+  })
+
+  it('claim lost → flash_error already_handled', async () => {
+    decide.mockResolvedValue({ ok: true, claimed: false, action: 'deny', target_id: JOB })
+    const res = await decidePOST(form(`callback_data=deny%3A${JOB}`))
+    expect(res.headers.get('location')).toContain('flash_error=already_handled')
+  })
+})
+
 describe('/api/gates/campaign/[jobId]', () => {
   it('POST 409 when the conditional PATCH matched nothing (gate moved on)', async () => {
     listCampaigns.mockResolvedValue([{ id: 'c1', name: 'Kaspen R3', status: 1, statusLabel: 'active' }])
@@ -162,6 +203,77 @@ describe('/api/gates/campaign/[jobId]', () => {
     instantlyConfigured = false
     expect((await campaignPOST(post(`/api/gates/campaign/${JOB}`, { campaign_id: 'c1' }), params('jobId', JOB))).status).toBe(400)
     expect(svc.pickCampaign).not.toHaveBeenCalled()
+  })
+
+  describe('campaign by name (Lume twin of the Telegram campaign-name reply)', () => {
+    const CAMPS = [
+      { id: 'c1', name: 'Scaleport - R3', status: 1, statusLabel: 'active' },
+      { id: 'c2', name: 'Scaleport - Managers', status: 0, statusLabel: 'draft' },
+      { id: 'c3', name: 'Kaspen PM', status: 1, statusLabel: 'active' },
+    ]
+    const form = (body: string) =>
+      new Request(`http://localhost/api/gates/campaign/${JOB}`, {
+        method: 'POST',
+        body,
+        headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'http://localhost' },
+      })
+    beforeEach(() => listCampaigns.mockResolvedValue(CAMPS))
+
+    it('JSON: an exact name picks it', async () => {
+      svc.pickCampaign.mockResolvedValue(true)
+      const res = await campaignPOST(post(`/api/gates/campaign/${JOB}`, { campaign_query: 'scaleport - r3' }), params('jobId', JOB))
+      expect(res.status).toBe(200)
+      expect(svc.pickCampaign).toHaveBeenCalledWith(JOB, { id: 'c1', name: 'Scaleport - R3' })
+    })
+
+    it('JSON: several → 409 with the matches, nothing written', async () => {
+      const res = await campaignPOST(post(`/api/gates/campaign/${JOB}`, { campaign_query: 'scaleport' }), params('jobId', JOB))
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({
+        error: 'several_matches',
+        matches: [
+          { id: 'c1', name: 'Scaleport - R3', status: 1 },
+          { id: 'c2', name: 'Scaleport - Managers', status: 0 },
+        ],
+      })
+      expect(svc.pickCampaign).not.toHaveBeenCalled()
+    })
+
+    it('JSON: no match → 400 no_campaign_match', async () => {
+      const res = await campaignPOST(post(`/api/gates/campaign/${JOB}`, { campaign_query: 'zzz' }), params('jobId', JOB))
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'no_campaign_match' })
+    })
+
+    it('form: a single match picks and 303s back with the name', async () => {
+      svc.pickCampaign.mockResolvedValue(true)
+      const res = await campaignPOST(form('campaign_query=kaspen&return_to=%2Foperator'), params('jobId', JOB))
+      expect(res.status).toBe(303)
+      expect(res.headers.get('location')).toBe('http://localhost/operator?flash=Campaign+set%3A+Kaspen+PM')
+    })
+
+    it('form: several → back to /operator with cq_job + cq to list them', async () => {
+      const res = await campaignPOST(form('campaign_query=scaleport&return_to=%2Foperator'), params('jobId', JOB))
+      const loc = new URL(res.headers.get('location')!)
+      expect(loc.pathname).toBe('/operator')
+      expect(loc.searchParams.get('cq_job')).toBe(JOB)
+      expect(loc.searchParams.get('cq')).toBe('scaleport')
+      expect(loc.searchParams.get('flash_error')).toContain('2 campaigns match')
+      expect(svc.pickCampaign).not.toHaveBeenCalled()
+    })
+
+    it('form: picking one of the listed matches by id', async () => {
+      svc.pickCampaign.mockResolvedValue(true)
+      const res = await campaignPOST(form('campaign_id=c2'), params('jobId', JOB))
+      expect(res.status).toBe(303)
+      expect(svc.pickCampaign).toHaveBeenCalledWith(JOB, { id: 'c2', name: 'Scaleport - Managers' })
+    })
+
+    it('form: gate moved on → flash_error already_handled', async () => {
+      svc.pickCampaign.mockResolvedValue(false)
+      const res = await campaignPOST(form('campaign_id=c2'), params('jobId', JOB))
+      expect(res.headers.get('location')).toContain('flash_error=already_handled')
+    })
   })
 
   it('POST 400 on a bad job id', async () => {
@@ -248,6 +360,35 @@ describe('POST /api/actions', () => {
     expect(res.status).toBe(409)
     expect(await res.json()).toEqual({ error: 'duplicate', existing_id: 'existing-id' })
     expect(svc.findAwaitingAction).toHaveBeenCalledWith('push_to_instantly', JOB) // lowercased
+    expect(svc.insertPendingAction).not.toHaveBeenCalled()
+  })
+
+  it('a plain form (/operator) may file push_to_instantly by job_id → 303 back', async () => {
+    svc.getPushJob.mockResolvedValue(job)
+    svc.findAwaitingAction.mockResolvedValue(null)
+    svc.insertPendingAction.mockImplementation(async (r: Record<string, unknown>) => ({ id: 'a1', ...r }))
+    sendActionPrompt.mockResolvedValue({ ok: true, messageId: 99 })
+    const res = await actionsPOST(
+      new Request('http://localhost/api/actions', {
+        method: 'POST',
+        body: `kind=push_to_instantly&job_id=${JOB}&return_to=%2Foperator`,
+        headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'http://localhost' },
+      })
+    )
+    expect(res.status).toBe(303)
+    expect(res.headers.get('location')).toContain('/operator?flash=Filed')
+    expect(svc.insertPendingAction.mock.calls[0][0]).toMatchObject({ kind: 'push_to_instantly', payload: { job_id: JOB } })
+  })
+
+  it('a form may not file any other kind', async () => {
+    const res = await actionsPOST(
+      new Request('http://localhost/api/actions', {
+        method: 'POST',
+        body: 'kind=send_reply&job_id=x',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'http://localhost' },
+      })
+    )
+    expect(res.headers.get('location')).toContain('flash_error=invalid_body')
     expect(svc.insertPendingAction).not.toHaveBeenCalled()
   })
 

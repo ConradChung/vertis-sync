@@ -4,7 +4,8 @@ import { requireOwnerSession } from '@/lib/auth/guards'
 import { decide } from '@/lib/adapters/pipeline'
 import { parseCallbackData } from '@/lib/adapters/pipeline.actions'
 import { logEvent } from '@/lib/db/service'
-import { parseJsonBody } from '@/lib/http/json'
+import { formAnswer, readJsonOrForm } from '@/lib/http/form'
+import { currentOperator } from '@/lib/operators/session'
 import { decideHttp } from '@/lib/validate/decideResult'
 
 /**
@@ -22,6 +23,12 @@ import { decideHttp } from '@/lib/validate/decideResult'
  *
  * Owner session only: the agent's internal bearer is a 403 (the agent files a
  * `decide_gate` pending action instead of deciding a gate itself).
+ *
+ * Also a plain HTML form (the /operator check-in page): `callback_data`, an
+ * optional `count` appended as `:<count>` (the Leadsfriday count input), and
+ * `return_to`; answered with a 303 back and a flash. A Grok Bot (valid
+ * `lume_op` cookie) is named in the `lume.decision` event (`operator_id`);
+ * the pipeline row itself records the decision as the entrypoint always has.
  */
 
 // decide() waits up to 170 s for the edge function; outlive it.
@@ -35,15 +42,22 @@ export async function POST(req: Request) {
   const auth = await requireOwnerSession(req)
   if (!auth.ok) return auth.response
 
-  const body = await parseJsonBody(req, Body, 1024)
+  const body = await readJsonOrForm(req, Body, 1024, (f) => {
+    const cb = f.get('callback_data') ?? ''
+    const count = (f.get('count') ?? '').trim()
+    if (!count) return { callback_data: cb }
+    return /^\d{1,6}$/.test(count) ? { callback_data: `${cb}:${count}` } : {}
+  })
   if (!body.ok) return body.response
   const callbackData = body.data.callback_data
+  const answer = (res: NextResponse, okText?: string) => (body.form ? formAnswer(req, body.form.returnTo, res, okText) : res)
 
   const parsed = parseCallbackData(callbackData)
-  if (!parsed) return NextResponse.json({ error: 'bad_callback_data' }, { status: 400 })
+  if (!parsed) return answer(NextResponse.json({ error: 'bad_callback_data' }, { status: 400 }))
   if (NEEDS_CONFIRMATION.has(parsed.action)) {
-    return NextResponse.json({ error: 'needs_confirmation' }, { status: 400 })
+    return answer(NextResponse.json({ error: 'needs_confirmation' }, { status: 400 }))
   }
+  const op = await currentOperator(req)
 
   const result = await decide(callbackData)
   const http = decideHttp(result)
@@ -57,8 +71,8 @@ export async function POST(req: Request) {
         type: 'lume.decision',
         source: 'lume',
         source_id: result.target_id || parsed.targetId,
-        title: `${parsed.action} from Lume`,
-        payload: { claimed: result.claimed, action: parsed.action },
+        title: op ? `${parsed.action} from Grok Bot “${op.label}”` : `${parsed.action} from Lume`,
+        payload: { claimed: result.claimed, action: parsed.action, ...(op ? { decided_via: 'operator', operator_id: op.id } : {}) },
       })
     } catch (err) {
       // The decision already happened; a missing feed row must not turn it into an error.
@@ -66,5 +80,7 @@ export async function POST(req: Request) {
     }
   }
 
-  return NextResponse.json(http.body, { status: http.status })
+  const res = NextResponse.json(http.body, { status: http.status })
+  if (body.form && http.status === 202) return formAnswer(req, body.form.returnTo, res, `Sent ${parsed.action}; still working, re-check shortly`)
+  return answer(res, `Decided: ${parsed.action}`)
 }

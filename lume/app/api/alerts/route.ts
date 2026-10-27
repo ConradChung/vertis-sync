@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { requireOwner } from '@/lib/auth/guards'
-import { ALERTS_DEFAULT_LIMIT, listAlerts } from '@/lib/alertsStore'
+import { ALERTS_DEFAULT_LIMIT, ALERTS_MAX_LIMIT, listAlerts } from '@/lib/alertsStore'
+import { uuidParam } from '@/lib/http/json'
+import { verticalFor } from '@/lib/operators/route'
+import { listVerticals } from '@/lib/operators/store'
 import { dbErrorResponse } from '@/lib/http/errors'
 
 /**
@@ -8,6 +11,10 @@ import { dbErrorResponse } from '@/lib/http/errors'
  * pipelines and Lume sent, whatever ALERT_CHANNELS says. `?unacked=1` limits
  * it to unacknowledged rows; `?limit=` (default 50, max 200). Read by the
  * Grok Bot's /operator page.
+ *
+ * `?vertical=<id>`: only the alerts that route to that vertical
+ * (`verticalFor` on the alert's campaign_id / scope; the default vertical
+ * takes the rest), read from the newest 200 then cut to `limit`.
  */
 export async function GET(req: Request) {
   const auth = await requireOwner(req)
@@ -16,8 +23,15 @@ export async function GET(req: Request) {
   const unackedOnly = params.get('unacked') === '1' || params.get('unacked') === 'true'
   const raw = params.get('limit')
   const limit = raw && /^\d+$/.test(raw) ? Number(raw) : ALERTS_DEFAULT_LIMIT
+  const rawVertical = params.get('vertical')
+  const verticalId = rawVertical ? uuidParam(rawVertical) : null
+  if (rawVertical && !verticalId) return NextResponse.json({ error: 'bad_vertical' }, { status: 400 })
   try {
-    return NextResponse.json({ alerts: await listAlerts({ unackedOnly, limit }) })
+    if (!verticalId) return NextResponse.json({ alerts: await listAlerts({ unackedOnly, limit }) })
+    const [alerts, verticals] = await Promise.all([listAlerts({ unackedOnly, limit: ALERTS_MAX_LIMIT }), listVerticals()])
+    const n = Math.min(Math.max(Math.floor(limit), 1), ALERTS_MAX_LIMIT)
+    const mine = alerts.filter((a) => verticalFor(a, verticals)?.id === verticalId).slice(0, n)
+    return NextResponse.json({ alerts: mine })
   } catch (err) {
     return dbErrorResponse(err, 'api/alerts')
   }

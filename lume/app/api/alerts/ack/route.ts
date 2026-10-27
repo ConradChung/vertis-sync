@@ -3,7 +3,8 @@ import { z } from 'zod'
 import { requireOwnerSession } from '@/lib/auth/guards'
 import { ackAlerts } from '@/lib/alertsStore'
 import { dbErrorResponse } from '@/lib/http/errors'
-import { parseJsonBody, UUID_RE } from '@/lib/http/json'
+import { formAnswer, readJsonOrForm } from '@/lib/http/form'
+import { UUID_RE } from '@/lib/http/json'
 import { currentOperator } from '@/lib/operators/session'
 
 /**
@@ -12,6 +13,9 @@ import { currentOperator } from '@/lib/operators/session'
  * bearer is a 403. A Grok Bot signed in with its operator key (valid `lume_op`
  * cookie) is recorded in `acked_by_operator`; the owner leaves it null.
  * Already-acked rows are untouched; the response lists the ids this call acked.
+ * Also a plain HTML form (/operator): one or more `ids` fields (the page's
+ * "Acknowledge all" sends every id it shows, so a vertical bot never acks
+ * another vertical's alerts), or `all=1`; 303 back with a flash.
  */
 
 const Body = z.union([
@@ -23,15 +27,18 @@ export async function POST(req: Request) {
   const auth = await requireOwnerSession(req)
   if (!auth.ok) return auth.response
 
-  const body = await parseJsonBody(req, Body, 32 * 1024)
+  const body = await readJsonOrForm(req, Body, 32 * 1024, (f) => (f.get('all') === '1' ? { all: true } : { ids: f.getAll('ids') }))
   if (!body.ok) return body.response
+  const form = body.form
 
   const op = await currentOperator(req)
   const target = 'all' in body.data ? { all: true as const } : { ids: body.data.ids.map((id) => id.toLowerCase()) }
   try {
     const acked = await ackAlerts(target, op?.id ?? null)
-    return NextResponse.json({ ok: true, acked })
+    const res = NextResponse.json({ ok: true, acked })
+    return form ? formAnswer(req, form.returnTo, res, `Acknowledged ${acked.length} alert${acked.length === 1 ? '' : 's'}`) : res
   } catch (err) {
-    return dbErrorResponse(err, 'api/alerts/ack')
+    const res = dbErrorResponse(err, 'api/alerts/ack')
+    return form ? formAnswer(req, form.returnTo, res) : res
   }
 }
