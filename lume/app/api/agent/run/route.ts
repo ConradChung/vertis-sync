@@ -7,6 +7,8 @@ import { createAction } from '@/lib/actions/create'
 import { executeAction } from '@/lib/actions/execute'
 import { claimDecision, getAction } from '@/lib/actions/store'
 import { editMessage, sendMessage } from '@/lib/adapters/telegram'
+import { alert, alertLink, titleFrom } from '@/lib/alerts'
+import { routeItemForAction } from '@/lib/operators/route'
 import { buildPrompt } from '@/lib/agent/chat'
 import { createConversation, getConversation, getMessages, insertMessage } from '@/lib/agent/conversations'
 import { contextFromMessages, titleFromPrompt, type StoredApproval, type StoredToolEntry } from '@/lib/agent/history'
@@ -248,7 +250,14 @@ const autoApprove: NonNullable<ToolDeps['autoApprove']> = async (id) => {
   try {
     // Best effort: strip the Telegram prompt's buttons so nobody taps a handled action.
     try {
-      if (claimed.telegram_message_id) await editMessage(claimed.telegram_message_id, `⚡ Auto-approved (skip mode) — ${claimed.kind}`)
+      const autoText = `⚡ Auto-approved (skip mode) — ${claimed.kind}`
+      const messageId = claimed.telegram_message_id
+      const route = routeItemForAction(claimed)
+      await alert({
+        source: 'lume.agent', severity: 'info', title: titleFrom(autoText), body: autoText,
+        link: alertLink(`/actions/${id}`), campaign_id: route.campaign_id, scope: route.scope,
+        telegram: messageId ? () => editMessage(messageId, autoText) : undefined,
+      })
     } catch (err) {
       console.error('[api/agent/run] telegram edit failed:', errText(err))
     }
@@ -366,7 +375,13 @@ async function executeRun({
       autoApprove,
       skills: { list: () => listSkills(), get: getSkill, findByName: findSkillByName, create: createSkill },
       notify: async (text) => {
-        const r = await sendMessage(text, { disablePreview: true })
+        const r = await alert({
+          source: 'lume.agent', severity: 'info', title: titleFrom(text), body: text,
+          link: alertLink(`/agent?c=${conversationId}`),
+          telegram: () => sendMessage(text, { disablePreview: true }),
+        })
+        // Telegram switched off: the feed row is the delivery.
+        if (!r) return { ok: true }
         return r.ok ? { ok: true } : { ok: false, error: 'error' in r ? String(r.error) : 'not sent' }
       },
     }),

@@ -13,6 +13,9 @@ vi.mock('@/lib/adapters/telegram', () => ({ sendMessage }))
 const storage = vi.hoisted(() => ({ uploadCsv: vi.fn(), removeObject: vi.fn() }))
 vi.mock('@/lib/import/storage', () => storage)
 
+vi.mock('@/lib/supabase/service', async () => (await import('../stubs/feed')).serviceModule)
+import { feed } from '../stubs/feed'
+
 import { createApolloOrder, createIngest, createIngestForStoredObject } from '@/lib/import/ingest'
 
 const ID = '7db3d841-252c-4572-95ec-bc110727df8d'
@@ -24,6 +27,8 @@ beforeEach(() => {
   svc.insertApolloOrder.mockImplementation(async (url: string) => ({ id: ID, apollo_url: url, status: 'awaiting_count', telegram_message_id: null }))
   svc.logEvent.mockResolvedValue(null)
   process.env.TELEGRAM_CHAT_ID = '4242'
+  feed.rows = []
+  delete process.env.ALERT_CHANNELS
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
@@ -125,5 +130,37 @@ describe('createApolloOrder', () => {
     ])
     expect(svc.setApolloOrderMessageId).toHaveBeenCalledWith(ID, 9)
     expect(r.telegram).toBe('sent')
+  })
+})
+
+describe('alert feed (G4)', () => {
+  it('the ingest prompt is an urgent, deduped validation gate in the feed; Telegram unchanged', async () => {
+    sendMessage.mockResolvedValue({ ok: true, messageId: 77 })
+    await createIngest(enc('Name,Email\nA,a@x.com\n'), 'x.csv', { source: 'csv' })
+    expect(sendMessage).toHaveBeenCalledOnce()
+    expect(feed.rows).toEqual([{
+      source: 'lume.import', severity: 'urgent', title: '📥 New CSV from Lume',
+      body: '📥 New CSV from Lume\nFile: x.csv\nRows: 1\nEmail column: Email',
+      link: `/validate?gate=ingest_approval:${ID}`, campaign_id: null, scope: 'validation', dedupe_key: `${ID}:ingest_approval`,
+    }])
+  })
+
+  it('ALERT_CHANNELS=feed: no Telegram prompt, no message id, outcome skipped, feed row written', async () => {
+    process.env.ALERT_CHANNELS = 'feed'
+    const r = await createIngest(enc('Name,Email\nA,a@x.com\n'), 'x.csv', { source: 'csv' })
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(svc.setIngestMessageId).not.toHaveBeenCalled()
+    expect(r.telegram).toBe('skipped')
+    expect(feed.rows).toHaveLength(1)
+  })
+
+  it('the Apollo count prompt is an urgent orders gate (lfo_count)', async () => {
+    sendMessage.mockResolvedValue({ ok: true, messageId: 5 })
+    await createApolloOrder('https://app.apollo.io/#/people?x=1')
+    expect(feed.rows[0]).toMatchObject({
+      source: 'lume.import', severity: 'urgent', scope: 'orders',
+      link: `/validate?gate=lfo_count:${ID}`, dedupe_key: `${ID}:lfo_count`,
+    })
+    expect(svc.setApolloOrderMessageId).toHaveBeenCalledWith(ID, 5)
   })
 })

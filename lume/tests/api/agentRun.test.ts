@@ -64,6 +64,9 @@ vi.mock('@anthropic-ai/sdk', () => {
   return { default: Anthropic, APIError }
 })
 
+vi.mock('@/lib/supabase/service', async () => (await import('../stubs/feed')).serviceModule)
+import { feed } from '../stubs/feed'
+
 import { POST } from '@/app/api/agent/run/route'
 
 type FakeTool = { name: string; run: (input: unknown, ctx: unknown) => Promise<unknown> }
@@ -124,6 +127,8 @@ beforeEach(() => {
   h.loadKnowledge.mockResolvedValue('')
   h.currentOperator.mockResolvedValue(null)
   process.env.ANTHROPIC_API_KEY = 'test-key'
+  feed.rows = []
+  delete process.env.ALERT_CHANNELS
 })
 
 afterEach(() => {
@@ -560,5 +565,55 @@ describe('POST /api/agent/run with a saved skill', () => {
     expect(h.insertAgentRun).not.toHaveBeenCalled()
     expect(h.createConversation).not.toHaveBeenCalled()
     expect(h.toolRunner).not.toHaveBeenCalled()
+  })
+})
+
+describe('agent run alerts (G4)', () => {
+  const notifyTurns = [
+    { text: 'Telling you.', call: { name: 'notify', input: { text: 'batch is done' } } },
+    { text: 'Sent.' },
+  ]
+
+  it('notify: the exact Telegram message as before, plus an info feed row linked to the conversation', async () => {
+    h.sendMessage.mockResolvedValue({ ok: true, messageId: 1 })
+    const results: unknown[] = []
+    fakeRunner(notifyTurns, results)
+    await events(await post('tell me', { conversation_id: CONV }))
+    expect(h.sendMessage).toHaveBeenCalledWith('Lume agent: batch is done', { disablePreview: true })
+    expect(results[0]).toEqual({ status: 'sent' })
+    expect(feed.rows).toEqual([expect.objectContaining({
+      source: 'lume.agent', severity: 'info', title: 'Lume agent: batch is done', link: `/agent?c=${CONV}`,
+    })])
+  })
+
+  it('notify with ALERT_CHANNELS=feed: no Telegram send, the tool still reports sent', async () => {
+    process.env.ALERT_CHANNELS = 'feed'
+    const results: unknown[] = []
+    fakeRunner(notifyTurns, results)
+    await events(await post('tell me', { conversation_id: CONV }))
+    expect(h.sendMessage).not.toHaveBeenCalled()
+    expect(results[0]).toEqual({ status: 'sent' })
+    expect(feed.rows).toHaveLength(1)
+  })
+
+  it('skip-mode auto-approve: the same Telegram edit, plus an info row; off → no edit, still a row', async () => {
+    h.claimDecision.mockResolvedValue({ id: 'act-1', kind: 'pause_campaign', payload: { campaign_id: 'c1' }, telegram_message_id: 42 })
+    h.executeAction.mockResolvedValue({ ran: true, status: 'executed', result: {}, error: null })
+    h.editMessage.mockResolvedValue({ ok: true })
+    const pause = [{ text: 'Pausing.', call: { name: 'pause_campaign', input: { campaign_id: 'c1' } } }, { text: 'Done.' }]
+    fakeRunner(pause)
+    await events(await post('pause c1', { skip_permissions: true }))
+    expect(h.editMessage).toHaveBeenCalledWith(42, '⚡ Auto-approved (skip mode) — pause_campaign')
+    expect(feed.rows).toEqual([expect.objectContaining({
+      source: 'lume.agent', title: '⚡ Auto-approved (skip mode) — pause_campaign', link: '/actions/act-1', campaign_id: 'c1', scope: 'campaign',
+    })])
+
+    h.editMessage.mockClear()
+    feed.rows = []
+    process.env.ALERT_CHANNELS = 'feed'
+    fakeRunner(pause)
+    await events(await post('pause c1', { skip_permissions: true }))
+    expect(h.editMessage).not.toHaveBeenCalled()
+    expect(feed.rows).toHaveLength(1)
   })
 })

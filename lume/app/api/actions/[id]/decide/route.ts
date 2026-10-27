@@ -4,6 +4,8 @@ import { requireOwnerSession } from '@/lib/auth/guards'
 import { executeAction } from '@/lib/actions/execute'
 import { claimDecision, getAction } from '@/lib/actions/store'
 import { editMessage, sendDecisionNote } from '@/lib/adapters/telegram'
+import { alert, alertLink, titleFrom } from '@/lib/alerts'
+import { routeItemForAction } from '@/lib/operators/route'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { parseJsonBody, uuidParam } from '@/lib/http/json'
 import { currentOperator } from '@/lib/operators/session'
@@ -53,11 +55,22 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   // Tell the Telegram thread: strip the prompt's buttons, then the usual note.
   const verdict = approve ? '✅ Approved' : '❌ Rejected'
+  // The feed gets one row for the decision; Telegram gets exactly the edit and
+  // note as before while ALERT_CHANNELS includes telegram.
+  const decidedText = `${verdict} — ${claimed.kind} (from ${op ? `Grok Bot “${op.label}”` : 'Lume'})`
+  const decided = claimed
+  const route = routeItemForAction(decided)
   try {
-    if (claimed.telegram_message_id) {
-      await editMessage(claimed.telegram_message_id, `${verdict} — ${claimed.kind} (from ${op ? `Grok Bot “${op.label}”` : 'Lume'})`)
-    }
-    await sendDecisionNote(approve ? 'lume_ok' : 'lume_no', id)
+    await alert({
+      source: 'lume.actions', severity: 'info', title: titleFrom(decidedText), body: decidedText,
+      link: alertLink(`/actions/${id}`), campaign_id: route.campaign_id, scope: route.scope,
+      telegram: async () => {
+        if (decided.telegram_message_id) {
+          await editMessage(decided.telegram_message_id, decidedText)
+        }
+        await sendDecisionNote(approve ? 'lume_ok' : 'lume_no', id)
+      },
+    })
   } catch (err) {
     console.error('[api/actions/decide] telegram note failed:', err instanceof Error ? err.message : err)
   }

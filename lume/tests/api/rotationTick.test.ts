@@ -32,6 +32,9 @@ vi.mock('@/lib/actions/execute', () => ({
   recoverInterruptedActions: (...a: unknown[]) => recover(...a),
 }))
 
+vi.mock('@/lib/supabase/service', async () => (await import('../stubs/feed')).serviceModule)
+import { feed } from '../stubs/feed'
+
 import { POST } from '@/app/api/cron/rotation-tick/route'
 
 const SECRET = 'hook-secret-for-tests'
@@ -92,6 +95,8 @@ beforeEach(() => {
   recover.mockResolvedValue([])
   fetchSpy.mockReset()
   vi.stubGlobal('fetch', fetchSpy)
+  feed.rows = []
+  delete process.env.ALERT_CHANNELS
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
@@ -278,5 +283,39 @@ describe('POST /api/cron/rotation-tick', () => {
   it('the sweeper is not called before the hook secret is checked', async () => {
     await tick('wrong')
     expect(sweep).not.toHaveBeenCalled()
+  })
+})
+
+describe('rotation tick alerts (G4)', () => {
+  it('a failed rule is a warn row for its campaign; the Telegram text is unchanged', async () => {
+    svc.countCandidates.mockRejectedValue(new Error('statement timeout'))
+    await tick()
+    expect(tg.sendMessage).toHaveBeenCalledWith('⚠️ Rotation rule "Weekday Austin" failed: statement timeout\nNothing was assigned.')
+    const failed = feed.rows.filter((r) => r.severity === 'warn')
+    expect(failed).toEqual([expect.objectContaining({
+      source: 'lume.rotation', title: '⚠️ Rotation rule "Weekday Austin" failed: statement timeout',
+      link: '/rotate', campaign_id: CAMP, scope: 'campaign',
+    })])
+  })
+
+  it('expiries: one info row each (with or without a Telegram prompt); only prompts get edited', async () => {
+    svc.getDueRules.mockResolvedValue([])
+    svc.expireStaleActions.mockResolvedValue([
+      { id: ACTION, kind: 'assign_leads', telegram_message_id: 55, payload: { summary: 'Assign 40 leads' } },
+      { id: 'b2', kind: 'push_to_instantly', telegram_message_id: null, payload: {} },
+    ])
+    await tick()
+    expect(tg.editMessage).toHaveBeenCalledWith(55, '⌛ Expired (no decision in 24 h)\nassign_leads: Assign 40 leads')
+    expect(feed.rows.map((r) => [r.severity, r.link])).toEqual([['info', `/actions/${ACTION}`], ['info', '/actions/b2']])
+  })
+
+  it('ALERT_CHANNELS=feed: no Telegram edit or failure ping, rows still written', async () => {
+    process.env.ALERT_CHANNELS = 'feed'
+    svc.countCandidates.mockRejectedValue(new Error('boom'))
+    svc.expireStaleActions.mockResolvedValue([{ id: ACTION, kind: 'assign_leads', telegram_message_id: 55, payload: {} }])
+    await tick()
+    expect(tg.editMessage).not.toHaveBeenCalled()
+    expect(tg.sendMessage).not.toHaveBeenCalled()
+    expect(feed.rows).toHaveLength(2)
   })
 })

@@ -3,6 +3,9 @@ import { requireSecret } from '@/lib/auth/guards'
 import { gateOpenedSchema } from '@/lib/api/gateOpened'
 import { getGate, logEvent } from '@/lib/db/service'
 import { sendGatePing } from '@/lib/adapters/telegram'
+import { buildGatePing } from '@/lib/adapters/telegram.messages'
+import { alert, alertLink, telegramSkipped, titleFrom } from '@/lib/alerts'
+import { scopeForGateKind } from '@/lib/operators/route'
 
 /**
  * Target of the `lume_gate_opened()` DB trigger (pg_net POST, fire-and-forget):
@@ -40,7 +43,15 @@ export async function POST(req: Request) {
     console.error('[hooks/gate-opened] getGate failed:', err instanceof Error ? err.message : err)
   }
 
-  const ping = await sendGatePing(kind, target_id, title)
+  // One feed row per gate (the same dedupe_key the pipeline's own prompt
+  // uses), plus the Telegram ping as before while ALERT_CHANNELS includes it.
+  const pingText = buildGatePing(kind, target_id, title).text
+  const ping = (await alert({
+    source: 'lume.gates', severity: 'urgent', title: titleFrom(pingText), body: pingText,
+    link: alertLink(`/validate?gate=${kind}:${target_id}`), scope: scopeForGateKind(kind),
+    dedupe_key: `${target_id}:${kind}`,
+    telegram: () => sendGatePing(kind, target_id, title),
+  })) ?? telegramSkipped
   const pinged = ping.ok
 
   try {

@@ -117,6 +117,11 @@ const GATE_SCOPE: Record<Exclude<GateKind, 'lume_action'>, VerticalScope> = {
   lfo_count: 'orders',
 }
 
+/** The scope a gate kind belongs to; null for `lume_action` (it routes by its action) or an unknown kind. */
+export function scopeForGateKind(kind: string): VerticalScope | null {
+  return (GATE_SCOPE as Record<string, VerticalScope | undefined>)[kind] ?? null
+}
+
 /**
  * A gate's routing key. `push_review` carries its Instantly campaign in
  * `counts.campaign_id`; a `lume_action` gate is a pending action (`title` is

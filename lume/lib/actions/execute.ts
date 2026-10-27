@@ -8,6 +8,8 @@ import {
   sendReply,
 } from '@/lib/adapters/instantlyWrite'
 import { sendMessage } from '@/lib/adapters/telegram'
+import { alert, alertLink, titleFrom } from '@/lib/alerts'
+import { routeItemForAction } from '@/lib/operators/route'
 import { actionLink } from '@/lib/adapters/telegram.messages'
 import { getPushJob, logEvent } from '@/lib/db/service'
 import { getDeal, setStage } from '@/lib/crm/service'
@@ -289,8 +291,14 @@ async function report(a: PendingActionRow, status: 'executed' | 'failed', result
   const lines = [`${head} — ${a.kind}`, summaryOf(a)]
   if (error) lines.push(error)
   if (link) lines.push(link)
+  const text = lines.join('\n')
+  const route = routeItemForAction(a)
   try {
-    await sendMessage(lines.join('\n'), { disablePreview: true })
+    await alert({
+      source: 'lume.actions', severity: status === 'executed' ? 'info' : 'warn', title: titleFrom(text), body: text,
+      link: alertLink(`/actions/${a.id}`), campaign_id: route.campaign_id, scope: route.scope,
+      telegram: () => sendMessage(text, { disablePreview: true }),
+    })
   } catch (err) {
     console.error('[actions] telegram outcome failed:', err instanceof Error ? err.message : err)
   }
@@ -395,8 +403,14 @@ export async function recoverInterruptedActions(now: Date): Promise<string[]> {
       'The run was cut off before it finished. It may have partly happened; check before redoing it.',
     ]
     if (link) lines.push(link)
+    const text = lines.join('\n')
+    const route = routeItemForAction(a)
     try {
-      await sendMessage(lines.join('\n'), { disablePreview: true })
+      await alert({
+        source: 'lume.actions', severity: 'warn', title: titleFrom(text), body: text,
+        link: alertLink(`/actions/${a.id}`), campaign_id: route.campaign_id, scope: route.scope,
+        telegram: () => sendMessage(text, { disablePreview: true }),
+      })
     } catch (err) {
       console.error('[actions] telegram interrupted notice failed:', err instanceof Error ? err.message : err)
     }

@@ -1,5 +1,6 @@
 import 'server-only'
 import { sendMessage, type TelegramResult } from '@/lib/adapters/telegram'
+import { alert, alertLink, telegramSkipped, titleFrom } from '@/lib/alerts'
 import {
   insertApolloOrder,
   insertIngest,
@@ -115,9 +116,18 @@ export async function createIngestForStoredObject(
     status: 'awaiting_approval',
   })
 
-  const sent = await sendMessage(ingestPromptText({ filename, rowCount, detectedColumn }), {
-    replyMarkup: ingestKeyboard(ingest.id, detectedColumn),
-  })
+  // The approval gate: always in the feed, and the same Telegram prompt as
+  // before while ALERT_CHANNELS includes telegram.
+  const promptText = ingestPromptText({ filename, rowCount, detectedColumn })
+  const ingestId = ingest.id
+  const sent = (await alert({
+    source: 'lume.import', severity: 'urgent', title: titleFrom(promptText), body: promptText,
+    link: alertLink(`/validate?gate=ingest_approval:${ingestId}`), scope: 'validation',
+    dedupe_key: `${ingestId}:ingest_approval`,
+    telegram: () => sendMessage(promptText, {
+      replyMarkup: ingestKeyboard(ingestId, detectedColumn),
+    }),
+  })) ?? telegramSkipped
   if (sent.ok && sent.messageId !== null) {
     try {
       await setIngestMessageId(ingest.id, sent.messageId)
@@ -146,7 +156,13 @@ export interface ApolloOrderResult {
 
 export async function createApolloOrder(apolloUrl: string): Promise<ApolloOrderResult> {
   let order = await insertApolloOrder(apolloUrl)
-  const sent = await sendMessage(APOLLO_PROMPT_TEXT, { replyMarkup: lfoCountKeyboard(order.id), disablePreview: true })
+  const orderId = order.id
+  const sent = (await alert({
+    source: 'lume.import', severity: 'urgent', title: titleFrom(APOLLO_PROMPT_TEXT), body: APOLLO_PROMPT_TEXT,
+    link: alertLink(`/validate?gate=lfo_count:${orderId}`), scope: 'orders',
+    dedupe_key: `${orderId}:lfo_count`,
+    telegram: () => sendMessage(APOLLO_PROMPT_TEXT, { replyMarkup: lfoCountKeyboard(orderId), disablePreview: true }),
+  })) ?? telegramSkipped
   if (sent.ok && sent.messageId !== null) {
     try {
       await setApolloOrderMessageId(order.id, sent.messageId)

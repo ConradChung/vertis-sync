@@ -2,6 +2,7 @@ import 'server-only'
 import { createAction, DuplicateActionError } from '@/lib/actions/create'
 import { recoverInterruptedActions, sweepStuckActions } from '@/lib/actions/execute'
 import { editMessage, sendMessage } from '@/lib/adapters/telegram'
+import { alert, alertLink, titleFrom } from '@/lib/alerts'
 import {
   claimRule,
   countCandidates,
@@ -108,10 +109,15 @@ async function expireActions(now: Date): Promise<number> {
   const rows = await expireStaleActions(new Date(now.getTime() - ACTION_TTL_MS).toISOString())
   for (const r of rows) {
     const summary = typeof r.payload?.summary === 'string' && r.payload.summary ? r.payload.summary : r.kind
-    if (r.telegram_message_id !== null) {
-      // Strip the buttons; a late tap would only find nothing to claim.
-      await editMessage(r.telegram_message_id, `⌛ Expired (no decision in 24 h)\n${r.kind}: ${summary}`).catch(() => null)
-    }
+    // Strip the buttons; a late tap would only find nothing to claim. The
+    // feed records the expiry whether or not a Telegram prompt exists.
+    const expiredText = `⌛ Expired (no decision in 24 h)\n${r.kind}: ${summary}`
+    const messageId = r.telegram_message_id
+    await alert({
+      source: 'lume.rotation', severity: 'info', title: titleFrom(expiredText), body: expiredText,
+      link: alertLink(`/actions/${r.id}`),
+      telegram: messageId !== null ? () => editMessage(messageId, expiredText).catch(() => null) : undefined,
+    })
     await logEvent({
       type: 'lume.action_expired',
       source: 'lume',
@@ -202,7 +208,12 @@ async function runRule(rule: DueRule, now: Date): Promise<RuleOutcome> {
     const error = msg(err)
     console.error(`[rotation-tick] rule ${rule.id} failed:`, error)
     await setRuleResult(rule.id, { at: nowIso, error }).catch(() => null)
-    await sendMessage(`⚠️ Rotation rule "${rule.name}" failed: ${error}\nNothing was assigned.`).catch(() => null)
+    const failText = `⚠️ Rotation rule "${rule.name}" failed: ${error}\nNothing was assigned.`
+    await alert({
+      source: 'lume.rotation', severity: 'warn', title: titleFrom(failText), body: failText,
+      link: alertLink('/rotate'), campaign_id: rule.campaign_id ?? null, scope: 'campaign',
+      telegram: () => sendMessage(failText).catch(() => null),
+    }).catch(() => null)
     return { rule_id: rule.id, outcome: 'error', error }
   }
 }

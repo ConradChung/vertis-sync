@@ -55,6 +55,9 @@ vi.mock('@/lib/adapters/telegram', () => tg)
 const ops = vi.hoisted(() => ({ getOperator: vi.fn() }))
 vi.mock('@/lib/operators/store', () => ops)
 
+vi.mock('@/lib/supabase/service', async () => (await import('../stubs/feed')).serviceModule)
+import { feed } from '../stubs/feed'
+
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({ auth: { getClaims: async () => ({ data: { claims: { sub: 'owner-id', email: 'owner@example.com' } } }) } }),
 }))
@@ -96,6 +99,9 @@ beforeEach(() => {
   decide.mockReset()
   decide.mockResolvedValue({ ok: true, claimed: true, action: 'x', target_id: JOB })
   tg.sendMessage.mockResolvedValue({ ok: true, messageId: 1 })
+  feed.rows = []
+  delete process.env.ALERT_CHANNELS
+  delete process.env.LUME_URL
   process.env.LUME_ALLOWED_EMAIL = 'owner@example.com'
   process.env.LUME_ACTION_SECRET = 'action-secret'
   vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -588,5 +594,98 @@ describe('POST /api/actions (create) — new kinds never execute', () => {
     expect((await createPOST(req('/api/actions', { kind: 'nuke', payload: {} }))).status).toBe(400)
     expect((await createPOST(req('/api/actions', { kind: 'send_reply', payload: { eaccount: 'x' } }))).status).toBe(400)
     expect(svc.insertPendingAction).not.toHaveBeenCalled()
+  })
+})
+
+describe('alert feed (G4): every notice lands in lume_alerts; ALERT_CHANNELS gates Telegram', () => {
+  const created = (kind: string, payload: Record<string, unknown>) => ({
+    ...row(kind as PendingActionRow['kind'], payload as PendingActionRow['payload']),
+    status: 'awaiting' as const,
+  })
+
+  it('executor outcome: info row linked to the action, routed by its campaign; Telegram text unchanged', async () => {
+    store.claimExecution.mockResolvedValue(row('push_to_instantly', PUSH_PAYLOAD))
+    svc.getPushJob.mockResolvedValue(JOB_ROW)
+    await executeAction(ID)
+    expect(feed.rows).toHaveLength(1)
+    expect(feed.rows[0]).toMatchObject({
+      source: 'lume.actions', severity: 'info', title: '✅ Done — push_to_instantly', link: `/actions/${ID}`,
+      campaign_id: 'camp-1', dedupe_key: null,
+    })
+    expect(feed.rows[0].body).toBe(tg.sendMessage.mock.calls[0][0])
+    expect(tg.sendMessage.mock.calls[0][1]).toEqual({ disablePreview: true })
+  })
+
+  it('executor failure → warn; absolute link when LUME_URL is set', async () => {
+    process.env.LUME_URL = 'https://lume.example'
+    store.claimExecution.mockResolvedValue(row('push_to_instantly', PUSH_PAYLOAD))
+    svc.getPushJob.mockResolvedValue({ ...JOB_ROW, instantly_campaign_id: 'camp-2' })
+    await executeAction(ID)
+    expect(feed.rows[0]).toMatchObject({ severity: 'warn', link: `https://lume.example/actions/${ID}` })
+  })
+
+  it('ALERT_CHANNELS=feed: the outcome is in the feed and Telegram is not called', async () => {
+    process.env.ALERT_CHANNELS = 'feed'
+    store.claimExecution.mockResolvedValue(row('push_to_instantly', PUSH_PAYLOAD))
+    svc.getPushJob.mockResolvedValue(JOB_ROW)
+    const out = await executeAction(ID)
+    expect(out).toMatchObject({ ran: true, status: 'executed' })
+    expect(tg.sendMessage).not.toHaveBeenCalled()
+    expect(feed.rows).toHaveLength(1)
+  })
+
+  it('interrupted notice → warn row', async () => {
+    store.failInterruptedActions.mockResolvedValue([row('pause_campaign', { campaign_id: 'camp-1', summary: 'Pause X' }, { status: 'failed' })])
+    await recoverInterruptedActions(new Date())
+    expect(feed.rows[0]).toMatchObject({ severity: 'warn', title: '⚠️ Interrupted — pause_campaign', campaign_id: 'camp-1', scope: 'campaign' })
+  })
+
+  it('decide: one info row; Telegram edit + note exactly as before', async () => {
+    store.claimDecision.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }, { status: 'rejected', telegram_message_id: 42 }))
+    await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'reject' }), params(ID))
+    expect(tg.editMessage).toHaveBeenCalledWith(42, '❌ Rejected — pause_campaign (from Lume)')
+    expect(tg.sendDecisionNote).toHaveBeenCalledWith('lume_no', ID)
+    expect(feed.rows).toEqual([expect.objectContaining({ source: 'lume.actions', severity: 'info', title: '❌ Rejected — pause_campaign (from Lume)', link: `/actions/${ID}` })])
+  })
+
+  it('decide with ALERT_CHANNELS=feed: no Telegram edit or note, feed row still written', async () => {
+    process.env.ALERT_CHANNELS = 'feed'
+    store.claimDecision.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }, { status: 'rejected', telegram_message_id: 42 }))
+    const res = await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'reject' }), params(ID))
+    expect(res.status).toBe(200)
+    expect(tg.editMessage).not.toHaveBeenCalled()
+    expect(tg.sendDecisionNote).not.toHaveBeenCalled()
+    expect(feed.rows).toHaveLength(1)
+  })
+
+  it('createAction approval ping: urgent row deduped per action; the Telegram prompt and its message id as before', async () => {
+    svc.getCampaignByExternalId.mockResolvedValue({ name: 'K', external_id: 'camp-1' })
+    svc.resolveLeadRefs.mockImplementation(async (refs: unknown[]) => refs)
+    svc.insertPendingAction.mockImplementation(async (r: { kind: string; payload: Record<string, unknown> }) => created(r.kind, r.payload))
+    tg.sendActionPrompt.mockResolvedValue({ ok: true, messageId: 555 })
+    const lead = { origin: 'validation_rows', id: '11111111-1111-4111-8111-111111111111' }
+    const res = await createPOST(req('/api/actions', { kind: 'assign_leads', payload: { campaign_id: 'camp-1', leads: [lead] } }))
+    expect(res.status).toBe(201)
+    expect(tg.sendActionPrompt).toHaveBeenCalledOnce()
+    expect(svc.setActionMessageId).toHaveBeenCalledWith(ID, 555)
+    expect(feed.rows).toHaveLength(1)
+    expect(feed.rows[0]).toMatchObject({
+      source: 'lume.actions', severity: 'urgent', title: '🛡 assign_leads', link: `/actions/${ID}`,
+      campaign_id: 'camp-1', scope: 'campaign', dedupe_key: `${ID}:lume_action`,
+    })
+    expect(feed.rows[0].body).toContain('🛡 assign_leads')
+  })
+
+  it('createAction with ALERT_CHANNELS=feed: no Telegram prompt, no message id, still 201 + feed row', async () => {
+    process.env.ALERT_CHANNELS = 'feed'
+    svc.getCampaignByExternalId.mockResolvedValue({ name: 'K', external_id: 'camp-1' })
+    svc.resolveLeadRefs.mockImplementation(async (refs: unknown[]) => refs)
+    svc.insertPendingAction.mockImplementation(async (r: { kind: string; payload: Record<string, unknown> }) => created(r.kind, r.payload))
+    const lead = { origin: 'validation_rows', id: '11111111-1111-4111-8111-111111111111' }
+    const res = await createPOST(req('/api/actions', { kind: 'assign_leads', payload: { campaign_id: 'camp-1', leads: [lead] } }))
+    expect(res.status).toBe(201)
+    expect(tg.sendActionPrompt).not.toHaveBeenCalled()
+    expect(svc.setActionMessageId).not.toHaveBeenCalled()
+    expect(feed.rows).toHaveLength(1)
   })
 })
