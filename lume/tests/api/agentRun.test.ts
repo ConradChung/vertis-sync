@@ -412,10 +412,12 @@ describe('POST /api/agent/run in skip-permissions mode', () => {
     fakeRunner(pause, results)
     const ev = await events(await post('pause c1', { skip_permissions: true }))
     expect(h.executeAction).not.toHaveBeenCalled()
-    expect(results[0]).toMatchObject({
-      outcome: 'failed',
-      result: { still_awaiting: true },
-      error: 'db down — not approved and nothing ran; it still awaits the owner at /actions/act-1',
+    expect(results[0]).toEqual({
+      status: 'awaiting_approval',
+      action_id: 'act-1',
+      deep_link: '/actions/act-1',
+      summary: expect.any(String),
+      note: 'Skip mode could not auto-approve; it awaits the owner.',
     })
     expect(ev).toContainEqual(expect.objectContaining({ type: 'approval', action_id: 'act-1', state: 'awaiting' }))
     expect(ev).not.toContainEqual(expect.objectContaining({ type: 'approval', state: 'auto_failed' }))

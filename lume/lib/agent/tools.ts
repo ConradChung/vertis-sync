@@ -65,7 +65,10 @@ export interface ToolDeps {
   skipPermissions?: boolean
   /** Claims (decided_via 'agent') and executes a pending action. Server-side only. */
   autoApprove?: (actionId: string) => Promise<{
-    /** handled_elsewhere: someone else claimed or ran it first; result carries the row status. */
+    /**
+     * handled_elsewhere: someone else claimed or ran it first; result carries the row status.
+     * failed with result `{ still_awaiting: true }`: the claim was never made, so it still awaits the owner.
+     */
     status: 'executed' | 'failed' | 'handled_elsewhere'
     result: Record<string, Json> | null
     error: string | null
@@ -156,6 +159,16 @@ async function requestApproval(
     // Fail closed: a builder that remaps the kind never inherits the tool's skip.
     if (deps.skipPermissions && deps.autoApprove && built.kind === kind && skippable(kind)) {
       const done = await deps.autoApprove(action.id)
+      // The claim itself failed (nothing ran): an ordinary approval the owner still decides.
+      if (done.result?.still_awaiting === true) {
+        return {
+          status: 'awaiting_approval',
+          action_id: action.id,
+          deep_link: `/actions/${action.id}`,
+          summary: built.payload.summary,
+          note: 'Skip mode could not auto-approve; it awaits the owner.',
+        }
+      }
       return {
         status: 'auto_approved',
         action_id: action.id,

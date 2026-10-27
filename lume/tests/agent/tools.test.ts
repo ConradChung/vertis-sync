@@ -189,6 +189,19 @@ describe('skip-permissions mode', () => {
     await expect(tool('pause_campaign').run({ campaign_id: JOB })).resolves.toMatchObject({ status: 'auto_approved', outcome: 'failed', error: 'boom' })
   })
 
+  it('a claim that could not be made leaves it awaiting the owner', async () => {
+    const autoApprove = vi.fn().mockResolvedValue({ status: 'failed', result: { still_awaiting: true }, error: 'db down' })
+    const { tool } = setup(undefined, { skipPermissions: true, autoApprove })
+    const out = await tool('pause_campaign').run({ campaign_id: JOB })
+    expect(out).toEqual({
+      status: 'awaiting_approval',
+      action_id: 'a1',
+      deep_link: '/actions/a1',
+      summary: 'built pause_campaign',
+      note: 'Skip mode could not auto-approve; it awaits the owner.',
+    })
+  })
+
   it('always-ask kinds still wait for the owner', async () => {
     const autoApprove = vi.fn().mockResolvedValue(done)
     const { tool } = setup(undefined, { skipPermissions: true, autoApprove })
