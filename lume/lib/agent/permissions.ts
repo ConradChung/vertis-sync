@@ -35,3 +35,11 @@ export const HIGH_RISK_KIND: Record<string, PendingKind> = {
   duplicate_campaign: 'create_campaign', delete_rule: 'delete_rule', run_apify_actor: 'run_actor',
   update_campaign_sequence: 'update_sequence',
 }
+
+/**
+ * Kinds that still need a tap in skip-permissions mode: they spend money
+ * (Apify runs; gate decisions that buy Leadsfriday / finder / validator work)
+ * or email leads (a reply; launching or resuming a campaign starts sends).
+ */
+export const ALWAYS_ASK_KINDS: ReadonlySet<PendingKind> = new Set<PendingKind>(['run_actor', 'send_reply', 'decide_gate', 'launch_campaign', 'resume_campaign'])
+export const skippable = (kind: PendingKind): boolean => !ALWAYS_ASK_KINDS.has(kind)
