@@ -6,7 +6,9 @@ import type { Json } from '@/lib/db/types'
  * remove the campaign's leads whose sequence finished at least `after_days`
  * ago with no reply (never replied, interested or bounced ones), then, with
  * `refill_to`, ask to top the campaign back up to that many leads from the
- * lead bank (the rotation's own assign_leads mechanism). Pure.
+ * lead bank (the rotation's own assign_leads mechanism). The refill only
+ * follows a removal: a run with nothing to cycle out files nothing, so a
+ * campaign under `refill_to` is not topped up by this rule alone. Pure.
  */
 
 export const DEFAULT_AFTER_DAYS = 14

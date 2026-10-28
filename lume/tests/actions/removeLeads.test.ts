@@ -304,6 +304,23 @@ describe('executeRemoveLeads', () => {
     expect(cr.createAction.mock.calls[0][1].summary).toMatch(/frees the removed leads' slots 5–10 minutes after deletion/)
   })
 
+  it('refill only follows a removal: nothing removed → refill skipped as nothing_removed, no count read', async () => {
+    svc.getRule.mockResolvedValue({ id: RULE, name: 'C', campaign_id: CID, filter: {}, order_by: 'newest', daily_cap: 1, kind: 'cycle_out', params: { after_days: 14, refill_to: 10 } })
+    il.getLeadsByIds.mockResolvedValue([fetched(lead('a', { reply_count: 1 }))])
+    const r = await executeRemoveLeads({ ...p, lead_ids: ['a'] }, { id: 'act-4', rule_id: RULE })
+    expect(r).toMatchObject({ removed: 0, refill: { skipped: 'nothing_removed' } })
+    expect(il.getCampaignLeadCount).not.toHaveBeenCalled()
+    expect(cr.createAction).not.toHaveBeenCalled()
+  })
+
+  it('refill when Instantly would not report the lead count → lead_count_unavailable', async () => {
+    svc.getRule.mockResolvedValue({ id: RULE, name: 'C', campaign_id: CID, filter: {}, order_by: 'newest', daily_cap: 1, kind: 'cycle_out', params: { after_days: 14, refill_to: 10 } })
+    il.getLeadsByIds.mockResolvedValue([fetched(lead('a'))])
+    il.getCampaignLeadCount.mockRejectedValue(new Error('down'))
+    const r = await executeRemoveLeads({ ...p, lead_ids: ['a'] }, { id: 'act-5', rule_id: RULE })
+    expect(r).toMatchObject({ removed: 1, refill: { skipped: 'lead_count_unavailable' } })
+  })
+
   it('refill already awaiting → reported, removal still succeeds', async () => {
     svc.getRule.mockResolvedValue({ id: RULE, name: 'C', campaign_id: CID, filter: {}, order_by: 'oldest', daily_cap: 1, kind: 'cycle_out', params: { after_days: 14, refill_to: 10 } })
     il.getLeadsByIds.mockResolvedValue([fetched(lead('a'))])

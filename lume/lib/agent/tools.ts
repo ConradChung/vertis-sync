@@ -703,7 +703,7 @@ const SPECS: Built[] = [
       name: 'create_cycle_out_rule',
       description:
         'Create a cycle-out rule for one Instantly campaign: on its cron (default daily 07:00 Pacific) it asks to remove leads whose sequence finished more than after_days ago with no reply ' +
-        '(never replied, interested or bounced leads; each removal is snapshotted), then, with refill_to, asks to top the campaign back up to that many leads from the lead bank. ' +
+        '(never replied, interested or bounced leads; each removal is snapshotted), then, with refill_to, asks to top the campaign back up to that many leads from the lead bank (only after a removal; a run with nothing to remove refills nothing). ' +
         'It is created INACTIVE; turning it on is activate_rule, which needs approval. Each run still asks before removing or assigning.',
       inputSchema: z.object({
         name: z.string().min(1).max(80),

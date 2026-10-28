@@ -317,9 +317,16 @@ export async function executeRemoveLeads(
     }
   }
 
-  // 4. Cycle-out refill: an assign_leads action, exactly as the rotation tick files one.
+  // 4. Cycle-out refill: an assign_leads action, exactly as the rotation tick
+  // files one. A refill only ever follows a removal: when this run removed
+  // nothing (and the tick files no removal when there is nothing to cycle
+  // out) the campaign is not topped up, even if it is under refill_to.
   if (cycle?.refill_to && rule) {
-    result.refill = await fileRefill(rule, cycle.refill_to, leadsBefore === null ? null : leadsBefore - removed)
+    result.refill = !removed
+      ? { skipped: 'nothing_removed' }
+      : leadsBefore === null
+        ? { skipped: 'lead_count_unavailable' }
+        : await fileRefill(rule, cycle.refill_to, leadsBefore - removed)
   }
   return result
 }
@@ -327,10 +334,9 @@ export async function executeRemoveLeads(
 async function fileRefill(
   rule: { id: string; name: string; campaign_id: string; filter: unknown; order_by: 'newest' | 'oldest'; daily_cap: number },
   refillTo: number,
-  inCampaign: number | null
+  inCampaign: number
 ): Promise<Record<string, Json>> {
   try {
-    if (inCampaign === null) return { skipped: 'lead_count_unknown' }
     const filter = parseRuleFilter(rule.filter)
     const [queued, available] = await Promise.all([countQueuedForCampaign(rule.campaign_id), countCandidates(filter, rule.campaign_id)])
     const count = refillCount({ refillTo, inCampaign, queued, available })
