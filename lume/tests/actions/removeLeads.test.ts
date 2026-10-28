@@ -301,6 +301,7 @@ describe('executeRemoveLeads', () => {
       { ruleId: RULE }
     )
     expect(r.refill).toEqual({ action_id: 'refill-1', count: 52, in_campaign: 898, queued: 50, available: 5000 })
+    expect(cr.createAction.mock.calls[0][1].summary).toMatch(/frees the removed leads' slots 5–10 minutes after deletion/)
   })
 
   it('refill already awaiting → reported, removal still succeeds', async () => {

@@ -349,7 +349,8 @@ async function fileRefill(
         rule_name: rule.name,
         summary:
           `Refill ${plural(count, 'lead')} → ${campaignName} to reach ${fmt.format(refillTo)} ` +
-          `(cycle-out rule "${rule.name}": ${summarizeFilter(filter)}, ${rule.order_by} first; ${fmt.format(available)} available)`,
+          `(cycle-out rule "${rule.name}": ${summarizeFilter(filter)}, ${rule.order_by} first; ${fmt.format(available)} available). ` +
+          'Instantly frees the removed leads\' slots 5–10 minutes after deletion; approve after that so the push has room.',
       },
       'rule',
       { ruleId: rule.id }

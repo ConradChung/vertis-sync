@@ -223,6 +223,26 @@ describe('executeAction dispatch table', () => {
     expect(out).toMatchObject({ status: 'executed', result: { mode: 'filter', requested: 1, inserted: 1 } })
   })
 
+  it('assign_leads only queues lead_bank rows: no Instantly call, so no cap error from here', async () => {
+    store.claimExecution.mockResolvedValue(row('assign_leads', { campaign_id: 'camp-1', filter: {}, count: 5 }))
+    store.resolveLeadsByFilter.mockResolvedValue([{ campaign_id: 'camp-1', email: 'a@x.com' }])
+    store.insertQueuedLeads.mockResolvedValue(1)
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    await executeAction(ID)
+    expect(fetchSpy).not.toHaveBeenCalledWith(expect.stringContaining('api.instantly.ai'), expect.anything())
+    for (const f of Object.values(ins)) expect(f).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
+  it('assign_leads: a contact-cap error becomes "cap not yet freed, retry in 10 min"', async () => {
+    store.claimExecution.mockResolvedValue(row('assign_leads', { campaign_id: 'camp-1', filter: {}, count: 5 }))
+    store.resolveLeadsByFilter.mockResolvedValue([{ campaign_id: 'camp-1', email: 'a@x.com' }])
+    store.insertQueuedLeads.mockRejectedValue(new Error('Instantly: lead limit reached for this workspace (upload limit)'))
+    const out = await executeAction(ID)
+    expect(out).toMatchObject({ status: 'failed', error: expect.stringMatching(/cap not yet freed, retry in 10 min/), result: { cap_not_freed: true } })
+  })
+
   it('assign_leads (filter from a drag): defaults to newest first', async () => {
     store.claimExecution.mockResolvedValue(row('assign_leads', { campaign_id: 'camp-1', filter: { icp_status: 'fit' }, count: 312 }))
     store.resolveLeadsByFilter.mockResolvedValue([])
