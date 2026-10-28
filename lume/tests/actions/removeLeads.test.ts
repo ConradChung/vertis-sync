@@ -181,6 +181,28 @@ describe('executeRemoveLeads', () => {
     expect(cs.insertCycledLeads).toHaveBeenCalled()
   })
 
+  it('a snapshot failure on a later chunk is uncertain and reports what was already removed', async () => {
+    const many = Array.from({ length: 150 }, (_, i) => lead(`id${i}`))
+    il.getLeadsByIds.mockResolvedValue(many.map(fetched))
+    iw.deleteLeads.mockResolvedValue(100)
+    cs.insertCycledLeads.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('db down'))
+    const err = await executeRemoveLeads({ ...p, lead_ids: many.map((l) => l.id), count: 150 }, action).catch((e) => e)
+    expect(err).toBeInstanceOf(RemovalFailure)
+    expect(err.message).toMatch(/snapshot failed after 100 removed/)
+    expect(err.result).toMatchObject({ uncertain: true, removed: 100, instantly_deleted: 100 })
+    expect(iw.deleteLeads).toHaveBeenCalledTimes(1) // the unsnapshotted chunk is never deleted
+  })
+
+  it('a snapshot failure before anything was removed is a plain failure', async () => {
+    il.getLeadsByIds.mockResolvedValue([fetched(lead('a'))])
+    cs.insertCycledLeads.mockRejectedValueOnce(new Error('db down'))
+    const err = await executeRemoveLeads(p, action).catch((e) => e)
+    expect(err).toBeInstanceOf(RemovalFailure)
+    expect(err.result).toMatchObject({ removed: 0 })
+    expect(err.result.uncertain).toBeUndefined()
+    expect(iw.deleteLeads).not.toHaveBeenCalled()
+  })
+
   it('refuses a malformed payload', async () => {
     await expect(executeRemoveLeads({ campaign_id: CID }, action)).rejects.toBeInstanceOf(RemovalFailure)
     expect(il.getLeadsByIds).not.toHaveBeenCalled()

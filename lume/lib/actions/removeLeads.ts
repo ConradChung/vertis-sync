@@ -197,16 +197,22 @@ export async function executeRemoveLeads(p: Record<string, Json>, action: Pick<P
   // without one is not) and reports the run as uncertain.
   for (let i = 0; i < removable.length; i += CHUNK) {
     const chunk = removable.slice(i, i + CHUNK)
-    await insertCycledLeads(
-      chunk.map((f) => ({
-        campaign_id: campaignId,
-        instantly_lead_id: f.lead.id,
-        email: f.lead.email,
-        snapshot: f.raw as Record<string, Json>,
-        reason,
-        action_id: action.id,
-      }))
-    )
+    try {
+      await insertCycledLeads(
+        chunk.map((f) => ({
+          campaign_id: campaignId,
+          instantly_lead_id: f.lead.id,
+          email: f.lead.email,
+          snapshot: f.raw as Record<string, Json>,
+          reason,
+          action_id: action.id,
+        }))
+      )
+    } catch (e) {
+      // This chunk is never deleted without its snapshot. Earlier chunks were:
+      // the run partly happened, so it is uncertain.
+      throw new RemovalFailure(`Lead snapshot failed after ${removed} removed: ${msg(e)}`, { ...base(), ...(removed ? { uncertain: true } : {}) })
+    }
     try {
       deleted += await deleteLeads(campaignId, chunk.map((f) => f.lead.id))
     } catch (e) {
