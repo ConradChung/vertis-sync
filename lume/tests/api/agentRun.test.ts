@@ -28,7 +28,11 @@ const h = vi.hoisted(() => ({
   getAction: vi.fn(),
   currentOperator: vi.fn(),
   getVertical: vi.fn(),
+  getProject: vi.fn(),
+  projectForVertical: vi.fn(),
+  itemsForBlock: vi.fn(),
 }))
+vi.mock('@/lib/agent/projects', () => ({ getProject: h.getProject, projectForVertical: h.projectForVertical, itemsForBlock: h.itemsForBlock }))
 vi.mock('@/lib/operators/session', () => ({ currentOperator: h.currentOperator }))
 vi.mock('@/lib/operators/store', () => ({ getVertical: h.getVertical }))
 
@@ -126,6 +130,9 @@ beforeEach(() => {
   h.insertMessage.mockResolvedValue(undefined)
   h.loadKnowledge.mockResolvedValue('')
   h.currentOperator.mockResolvedValue(null)
+  h.getProject.mockResolvedValue(null)
+  h.projectForVertical.mockResolvedValue(null)
+  h.itemsForBlock.mockResolvedValue([])
   process.env.ANTHROPIC_API_KEY = 'test-key'
   feed.rows = []
   delete process.env.ALERT_CHANNELS
@@ -660,5 +667,104 @@ describe('agent run alerts (G4)', () => {
     await events(await post('pause c1', { skip_permissions: true }))
     expect(h.editMessage).not.toHaveBeenCalled()
     expect(feed.rows).toHaveLength(1)
+  })
+})
+
+describe('projects', () => {
+  const PID = '7a1c2b3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d'
+  const VID = '3941b73f-c74e-4cc5-9766-f0140e6ad9c9'
+  const FID = '5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e'
+  const roofers = { id: PID, name: 'Roofers Austin', instructions: 'Never order more than 2k.', vertical_id: VID, position: 0, created_at: '', updated_at: '' }
+  const note = { id: FID, kind: 'note', name: 'Tone', mime: 'text/plain', size_bytes: 6, readable: true, truncated: false, created_at: '2026-10-01T00:00:00Z', text_content: 'casual' }
+  const system = () => h.toolRunner.mock.calls[0][0].system as unknown
+
+  it('without a project the system prompt is the plain cached string', async () => {
+    fakeRunner([{ text: 'ok' }])
+    await events(await post('hi'))
+    expect(typeof system()).toBe('string')
+    expect(h.itemsForBlock).not.toHaveBeenCalled()
+  })
+
+  it("an existing chat in a project gets that project's block after the stable prompt, each block cached", async () => {
+    h.getConversation.mockResolvedValue({ id: CONV, title: 'Old', created_at: '', updated_at: '', project_id: PID })
+    h.getProject.mockImplementation(async (id: string) => (id === PID ? roofers : null))
+    h.itemsForBlock.mockResolvedValue([note])
+    fakeRunner([{ text: 'ok' }])
+    const ev = await events(await post('next', { conversation_id: CONV }))
+    expect(h.itemsForBlock).toHaveBeenCalledWith(PID)
+    const blocks = system() as { type: string; text: string; cache_control?: unknown }[]
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0].cache_control).toEqual({ type: 'ephemeral' })
+    expect(blocks[1].cache_control).toEqual({ type: 'ephemeral' })
+    expect(blocks[1].text).toContain('Project: Roofers Austin')
+    expect(blocks[1].text).toContain('Never order more than 2k.')
+    expect(blocks[1].text).toContain('casual')
+    // The per-run user turn carries no project text (it stays in the cached prefix).
+    expect(h.toolRunner.mock.calls[0][0].messages[0].content).not.toContain('Roofers Austin')
+    expect(ev[0]).toMatchObject({ type: 'run', conversation_id: CONV, project_id: PID })
+  })
+
+  it("read_project_file reads from the chat's own project", async () => {
+    h.getConversation.mockResolvedValue({ id: CONV, title: 'Old', created_at: '', updated_at: '', project_id: PID })
+    h.getProject.mockResolvedValue(roofers)
+    h.fetch.mockResolvedValue(new Response('{"text":"abc"}'))
+    process.env.LUME_INTERNAL_SECRET = 's'
+    fakeRunner([{ text: 'reading', call: { name: 'read_project_file', input: { id: FID } } }, { text: 'done' }])
+    await events(await post('read it', { conversation_id: CONV }))
+    expect(String(h.fetch.mock.calls[0][0])).toContain(`/api/agent/projects/${PID}/files/${FID}?offset=0`)
+  })
+
+  it('"New chat in project": the new conversation is filed there', async () => {
+    h.getProject.mockImplementation(async (id: string) => (id === PID ? roofers : null))
+    fakeRunner([{ text: 'ok' }])
+    await events(await post('hello', { project_id: PID }))
+    expect(h.createConversation).toHaveBeenCalledWith('hello', undefined, PID)
+    expect(Array.isArray(system())).toBe(true)
+  })
+
+  it('an unknown project_id is 404 and creates nothing', async () => {
+    const res = await post('hello', { project_id: PID })
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'project_not_found' })
+    expect(h.createConversation).not.toHaveBeenCalled()
+    expect(h.insertAgentRun).not.toHaveBeenCalled()
+  })
+
+  it("the owner's /operator chat for a vertical auto-files into the vertical's linked project", async () => {
+    h.getVertical.mockResolvedValue({ id: VID, name: 'Roofers', campaign_ids: [] })
+    h.projectForVertical.mockImplementation(async (v: string) => (v === VID ? { id: PID, name: 'Roofers Austin' } : null))
+    h.getProject.mockResolvedValue(roofers)
+    fakeRunner([{ text: 'ok' }])
+    await events(await post('How are we doing?', { vertical_id: VID }))
+    expect(h.createConversation).toHaveBeenCalledWith('How are we doing?', { vertical_id: VID, operator_id: null }, PID)
+    expect((system() as { text: string }[])[1].text).toContain('Roofers Austin')
+  })
+
+  it("a vertical Grok Bot's new chat auto-files into its vertical's project", async () => {
+    h.currentOperator.mockResolvedValue({ id: 'op-1', vertical_id: 'v-roof', is_master: false, label: 'Roofers bot', revoked_at: null })
+    h.getVertical.mockResolvedValue({ id: 'v-roof', name: 'Roofers', campaign_ids: [] })
+    h.projectForVertical.mockImplementation(async (v: string) => (v === 'v-roof' ? { id: PID, name: 'Roofers Austin' } : null))
+    h.getProject.mockResolvedValue(roofers)
+    fakeRunner([{ text: 'ok' }])
+    await events(await post('What needs me?'))
+    expect(h.createConversation).toHaveBeenCalledWith('What needs me?', { vertical_id: 'v-roof', operator_id: 'op-1' }, PID)
+  })
+
+  it('a vertical with no linked project stays Unfiled', async () => {
+    h.getVertical.mockResolvedValue({ id: VID, name: 'Roofers', campaign_ids: [] })
+    fakeRunner([{ text: 'ok' }])
+    await events(await post('hi', { vertical_id: VID }))
+    expect(h.createConversation).toHaveBeenCalledWith('hi', { vertical_id: VID, operator_id: null })
+    expect(typeof system()).toBe('string')
+  })
+
+  it('a project that fails to load never blocks the run (no block, logged)', async () => {
+    h.getConversation.mockResolvedValue({ id: CONV, title: 'Old', created_at: '', updated_at: '', project_id: PID })
+    h.getProject.mockResolvedValue(roofers)
+    h.itemsForBlock.mockRejectedValue(new Error('db down'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    fakeRunner([{ text: 'ok' }])
+    await events(await post('next', { conversation_id: CONV }))
+    expect(typeof system()).toBe('string')
   })
 })

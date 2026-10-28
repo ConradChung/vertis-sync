@@ -63,6 +63,12 @@ export interface ToolDeps {
   /** The conversation this run belongs to (recorded as a saved skill's source). */
   conversationId?: string
   /**
+   * The project this run's conversation is filed in (server-set from the
+   * conversation row). read_project_file reads only from it; the model never
+   * names a project.
+   */
+  projectId?: string | null
+  /**
    * The Grok Bot running this chat, if any. A vertical (non-master) bot does
    * not get the vertical-management tools (MASTER_ONLY_TOOLS); list_verticals stays.
    */
@@ -407,6 +413,20 @@ const SPECS: Built[] = [
         'Search earlier Agent conversations (message text and titles, case-insensitive) for context: a client, an ICP agreed before, an actor used, a decision. Returns snippets with conversation ids and titles.',
       inputSchema: z.object({ query: z.string().min(2).max(200) }),
       run: async ({ query }, { call }) => call(`/api/agent/past-chats?q=${encodeURIComponent(query)}`) as Promise<ToolResult>,
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'read_project_file',
+      description:
+        "Read the extracted text of a file or note in this chat's project, by the id shown in the Project block's index. " +
+        'Returns up to 20k characters from offset (default 0) and next_offset when there is more. Use it for items the block did not show in full.',
+      inputSchema: z.object({ id: uuid, offset: z.number().int().min(0).max(1_000_000).optional() }).strict(),
+      run: async ({ id, offset }, { call, deps }) => {
+        if (!deps.projectId) throw new Error('This chat is not filed in a project, so there are no project files to read.')
+        return call(`/api/agent/projects/${deps.projectId}/files/${id}?offset=${offset ?? 0}`) as Promise<ToolResult>
+      },
     },
     'read'
   ),

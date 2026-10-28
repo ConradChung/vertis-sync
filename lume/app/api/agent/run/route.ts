@@ -18,6 +18,8 @@ import { loadKnowledge } from '@/lib/agent/memory'
 import { withKnowledge } from '@/lib/agent/memoryModel'
 import { skillContext } from '@/lib/agent/skillModel'
 import { createSkill, findSkillByName, getSkill, listSkills, markSkillRun } from '@/lib/agent/skills'
+import { getProject, itemsForBlock, projectForVertical } from '@/lib/agent/projects'
+import { projectBlock, resolveNewChatProject } from '@/lib/agent/projectModel'
 import { toRunnableTools, type ToolHooks } from '@/lib/agent/runnable'
 import { failStaleRuns, insertAgentRun, updateAgentRun, type AgentRunPatch } from '@/lib/agent/runs'
 import { buildTools, type ToolDeps } from '@/lib/agent/tools'
@@ -71,7 +73,16 @@ import type { Operator } from '@/lib/operators/types'
  * prompt opens with a line naming the bot, its vertical's campaigns and its
  * full owner authority (`operatorPromptLine`).
  *
- * SSE events (`data: <json>\n\n`): run (`{ id, conversation_id }`), text,
+ * Projects: `project_id` (new conversations only, "New chat in project")
+ * files the new chat there (404 `project_not_found` when missing); without
+ * it, a chat tagged with a vertical (its Grok Bot's, or the owner's from
+ * /operator) is filed in that vertical's linked project, if any. A run in a
+ * filed conversation gets a "Project" block (name, instructions, file index,
+ * small items inline; `projectBlock`) as a second, cached system block after
+ * the stable prompt, and read_project_file reads only that project's files.
+ * A project that fails to load is logged and the run goes on without it.
+ *
+ * SSE events (`data: <json>\n\n`): run (`{ id, conversation_id, project_id? }`), text,
  * tool_start, tool_end, approval, done, error.
  *
  * 503 `agent_not_configured` when `ANTHROPIC_API_KEY` is unset.
@@ -92,6 +103,8 @@ const Body = z.object({
   auto: z.boolean().optional(),
   /** Owner only, new conversations only: tag the chat with this vertical (from /operator). */
   vertical_id: z.string().regex(UUID_RE).optional(),
+  /** New conversations only: file the chat in this project ("New chat in project"). */
+  project_id: z.string().regex(UUID_RE).optional(),
 })
 
 type SseEvent = Record<string, unknown> & { type: string }
@@ -124,6 +137,7 @@ export async function POST(req: Request) {
 
   let runId: string
   let conversationId: string
+  let projectId: string | null = null
   let prompt = message
   let ownerVertical: Awaited<ReturnType<typeof getVertical>> = null
   const skillMode = body.data.skill_mode ?? 'reference'
@@ -139,14 +153,26 @@ export async function POST(req: Request) {
       const conversation = await getConversation(id)
       if (!conversation) return NextResponse.json({ error: 'conversation_not_found' }, { status: 404 })
       conversationId = conversation.id
+      projectId = conversation.project_id ?? null
       prompt = buildPrompt(contextFromMessages(await getMessages(conversationId)), message)
     } else {
       const title = titleFromPrompt(message)
       if (!operator && body.data.vertical_id) ownerVertical = await getVertical(body.data.vertical_id.toLowerCase())
-      const created = operator
-        ? await createConversation(title, { vertical_id: operator.vertical_id, operator_id: operator.id })
+      const origin = operator
+        ? { vertical_id: operator.vertical_id, operator_id: operator.id }
         : ownerVertical
-          ? await createConversation(title, { vertical_id: ownerVertical.id, operator_id: null })
+          ? { vertical_id: ownerVertical.id, operator_id: null }
+          : undefined
+      const filed = await resolveNewChatProject(
+        { requestedProjectId: body.data.project_id?.toLowerCase() ?? null, verticalId: origin?.vertical_id ?? null },
+        { getProject, projectForVertical }
+      )
+      if (!filed.ok) return NextResponse.json({ error: 'project_not_found' }, { status: 404 })
+      projectId = filed.projectId
+      const created = projectId
+        ? await createConversation(title, origin, projectId)
+        : origin
+          ? await createConversation(title, origin)
           : await createConversation(title)
       conversationId = created.id
     }
@@ -182,12 +208,14 @@ export async function POST(req: Request) {
           closed = true
         }
       }
-      send({ type: 'run', id: runId, conversation_id: conversationId })
+      send({ type: 'run', id: runId, conversation_id: conversationId, ...(projectId ? { project_id: projectId } : {}) })
       // Saved memories + recent chat titles ride in the user turn, so the system prompt stays cached.
       const knowledge = await loadKnowledge(conversationId).catch((err) => {
         console.error('[api/agent/run] memory load failed:', err instanceof Error ? err.message : err)
         return ''
       })
+      // This conversation's project only: its row and its own items, never another's.
+      const project = projectId ? await loadProjectBlock(projectId) : null
       const reply = await executeRun({
         runId,
         prompt: withKnowledge(knowledge, prompt),
@@ -196,6 +224,7 @@ export async function POST(req: Request) {
         publicOrigin: requestOrigin(req),
         operator,
         conversationId,
+        project,
         skipPermissions: body.data.skip_permissions === true,
         send,
       })
@@ -226,6 +255,18 @@ export async function POST(req: Request) {
 }
 
 const errText = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
+/** The Project block for one project, or null when it is gone or fails to load (logged; the run goes on). */
+async function loadProjectBlock(projectId: string): Promise<{ id: string; block: string } | null> {
+  try {
+    const p = await getProject(projectId)
+    if (!p) return null
+    return { id: p.id, block: projectBlock(p, await itemsForBlock(p.id)) }
+  } catch (err) {
+    console.error('[api/agent/run] project load failed:', errText(err))
+    return null
+  }
+}
 
 /** Someone else claimed or ran it first: report where it stands. */
 async function handledElsewhere(id: string, status?: string): Promise<Awaited<ReturnType<NonNullable<ToolDeps['autoApprove']>>>> {
@@ -325,6 +366,7 @@ async function executeRun({
   publicOrigin,
   operator,
   conversationId,
+  project,
   skipPermissions,
   send: emit,
 }: {
@@ -337,6 +379,8 @@ async function executeRun({
   publicOrigin: string
   operator: Operator | null
   conversationId: string
+  /** The conversation's project and its block (null: Unfiled). */
+  project: { id: string; block: string } | null
   skipPermissions: boolean
   send: (e: SseEvent) => void
 }): Promise<RunReply> {
@@ -411,6 +455,7 @@ async function executeRun({
       agentRunId: runId,
       baseUrl: origin,
       conversationId,
+      projectId: project?.id ?? null,
       skipPermissions,
       autoApprove: makeAutoApprove({ operator, publicOrigin }),
       operator,
@@ -442,7 +487,14 @@ async function executeRun({
       output_config: { effort: 'low' },
       // Caches the stable system prompt + tool list across the run's turns and across runs.
       cache_control: { type: 'ephemeral' },
-      system: SYSTEM_PROMPT,
+      // A filed chat: the stable prompt keeps its own breakpoint (shared by every
+      // chat), then the project's block is cached per project.
+      system: project
+        ? [
+            { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+            { type: 'text', text: project.block, cache_control: { type: 'ephemeral' } },
+          ]
+        : SYSTEM_PROMPT,
       // Anthropic-hosted, read-only web research (no approval needed: nothing leaves Lume but a query/URL).
       tools: [...tools, ...WEB_TOOLS],
       messages: [{ role: 'user', content: prompt }],
