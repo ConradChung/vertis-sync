@@ -252,6 +252,31 @@ describe('executeRemoveLeads', () => {
     expect(dropped).toHaveLength(100 - (r.removed as number))
   })
 
+  it('a non-2xx delete (not 404) stops the run: no new deletes start, uncertain, rest reported untouched', async () => {
+    const many = Array.from({ length: 40 }, (_, i) => lead(`id${i}`))
+    il.getLeadsByIds.mockResolvedValue(many.map(fetched))
+    iw.deleteLead.mockImplementation(async (id: string) => {
+      if (id === 'id7') throw Object.assign(new Error('Instantly DELETE /leads/id7 failed (401)'), { name: 'InstantlyError', status: 401 })
+      return 'deleted'
+    })
+    const err = await executeRemoveLeads({ ...p, lead_ids: many.map((l) => l.id), count: 40 }, action).catch((e) => e)
+    expect(err).toBeInstanceOf(RemovalFailure)
+    expect(err.message).toMatch(/id7 failed/)
+    expect(err.result).toMatchObject({ uncertain: true, failed_lead_ids: ['id7'] })
+    const attempted = iw.deleteLead.mock.calls.length
+    expect(attempted).toBeLessThan(40)
+    expect(err.result.removed + err.result.remaining + 1).toBe(40)
+    expect(err.result.remaining_lead_ids).not.toContain('id7')
+  })
+
+  it('a 429 that outlasts the retries also stops the run as uncertain', async () => {
+    il.getLeadsByIds.mockResolvedValue([fetched(lead('a')), fetched(lead('b'))])
+    iw.deleteLead.mockRejectedValue(Object.assign(new Error('429'), { name: 'InstantlyError', status: 429 }))
+    const err = await executeRemoveLeads({ ...p, lead_ids: ['a', 'b'] }, action).catch((e) => e)
+    expect(err).toBeInstanceOf(RemovalFailure)
+    expect(err.result).toMatchObject({ uncertain: true, removed: 0 })
+  })
+
   it('refuses a malformed payload', async () => {
     await expect(executeRemoveLeads({ campaign_id: CID }, action)).rejects.toBeInstanceOf(RemovalFailure)
     expect(il.getLeadsByIds).not.toHaveBeenCalled()

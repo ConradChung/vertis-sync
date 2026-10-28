@@ -37,6 +37,15 @@ describe('deleteLead (DELETE /api/v2/leads/{id})', () => {
     expect(await write.deleteLead('L1')).toBe('deleted')
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
+  it('a 429 that outlasts the retries throws (status 429)', async () => {
+    fetchMock.mockImplementation(async () => json({}, 429))
+    await expect(write.deleteLead('L1')).rejects.toMatchObject({ name: 'InstantlyError', status: 429 })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+  it.each([400, 401, 402, 500])('%i throws InstantlyError (checked, never treated as deleted)', async (status) => {
+    fetchMock.mockResolvedValueOnce(json({ message: 'x' }, status))
+    await expect(write.deleteLead('L1')).rejects.toMatchObject({ name: 'InstantlyError', status })
+  })
   it('any other non-2xx throws InstantlyError', async () => {
     fetchMock.mockResolvedValueOnce(json({ message: 'nope' }, 500))
     await expect(write.deleteLead('L1')).rejects.toMatchObject({ name: 'InstantlyError', status: 500 })
