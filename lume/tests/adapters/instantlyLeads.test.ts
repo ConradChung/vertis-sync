@@ -93,6 +93,16 @@ describe('getLeadsByIds', () => {
   })
 })
 
+describe('getLeadsByIds: campaign must match exactly', () => {
+  it('a lead with a missing or different campaign counts as not found', async () => {
+    fetchMock.mockResolvedValueOnce(
+      json({ items: [raw(1), raw(2, { campaign: undefined }), raw(3, { campaign: null }), raw(4, { campaign: 'other' })] })
+    )
+    const out = await getLeadsByIds('c1', ['l1', 'l2', 'l3', 'l4'])
+    expect(out.map((f) => f.lead.id)).toEqual(['l1'])
+  })
+})
+
 describe('getContactUsage / getCampaignLeadCount', () => {
   it('reads plan details', async () => {
     fetchMock.mockResolvedValueOnce(json({ subscriptions: { outreach: { current_lead_count: 10, total_lead_limit: 1000 } } }))

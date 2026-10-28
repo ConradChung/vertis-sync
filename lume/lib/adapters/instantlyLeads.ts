@@ -149,9 +149,10 @@ export async function getLeadsByIds(campaignId: string, ids: string[]): Promise<
     const { items } = pageOf(await instantlyCall('POST', '/leads/list', { campaign: campaignId, ids: chunk, limit: PAGE_SIZE }))
     for (const raw of items) {
       const lead = mapLead(raw)
-      // Defensive: only leads of this campaign, only ids we asked for.
+      // Only ids we asked for, and only leads Instantly says are in THIS
+      // campaign: a missing or different campaign counts as not found.
       const r = raw as Record<string, unknown>
-      if (lead && chunk.includes(lead.id) && (r.campaign === undefined || r.campaign === null || r.campaign === campaignId)) {
+      if (lead && chunk.includes(lead.id) && r.campaign === campaignId) {
         out.push({ lead, raw: r })
       }
     }
