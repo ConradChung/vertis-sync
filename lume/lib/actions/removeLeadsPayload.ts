@@ -15,4 +15,3 @@ export function removeLeadsPayloadError(p: Record<string, Json>): string | null 
   if (typeof p.count !== 'number') return 'payload.count is required'
   return null
 }
-

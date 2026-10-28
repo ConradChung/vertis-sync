@@ -277,6 +277,16 @@ describe('executeRemoveLeads', () => {
     expect(err.result).toMatchObject({ uncertain: true, removed: 0 })
   })
 
+  it('an email over 320 characters is stored as null (the raw snapshot keeps it) and skipped for lead_bank', async () => {
+    const long = `${'x'.repeat(320)}@x.com`
+    il.getLeadsByIds.mockResolvedValue([{ lead: lead('a', { email: long }), raw: { id: 'a', email: long } }])
+    await executeRemoveLeads({ ...p, lead_ids: ['a'] }, action)
+    const row = cs.insertCycledLeads.mock.calls[0][0][0]
+    expect(row.email).toBeNull()
+    expect(row.snapshot.email).toBe(long)
+    expect(cs.archiveLeadBankRows).toHaveBeenCalledWith(CID, [], expect.any(String))
+  })
+
   it('refuses a malformed payload', async () => {
     await expect(executeRemoveLeads({ campaign_id: CID }, action)).rejects.toBeInstanceOf(RemovalFailure)
     expect(il.getLeadsByIds).not.toHaveBeenCalled()

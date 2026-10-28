@@ -9,7 +9,7 @@ import { instantlyErrorResponse, notConfigured } from '@/lib/http/instantly'
 /**
  * One Instantly campaign's leads in a state (read-only, uncached):
  * `?state=finished_no_reply|replied|bounced|contacted|interested|no_reply_after_days:N`
- * and `?limit=` (default 100, max 1000). Scans at most 2,000 leads;
+ * and `?limit=` (default 100, max 1000). Scans at most 2,000 leads (removals scan 5,000);
  * `truncated` says when there may be more. The agent's `list_campaign_leads`.
  */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {

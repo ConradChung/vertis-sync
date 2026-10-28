@@ -131,10 +131,10 @@ function contactedBefore(l: CampaignLead, days: number, now: Date): boolean {
  * reply and not bounced; `days` bounds the last contact.
  */
 export function leadMatches(l: CampaignLead, q: LeadQuery, now: Date): boolean {
-  if (q.state === 'finished_no_reply' && (l.status !== 3 || protectedReason(l))) return false
-  if (q.state === 'no_reply_after_days' && (l.status === -1 || protectedReason(l) === 'replied' || l.reply_count > 0)) return false
-  if (q.days !== undefined && !contactedBefore(l, q.days, now)) return false
-  return true
+  const replied = l.reply_count > 0 || !!l.last_reply_at
+  if (q.state === 'finished_no_reply' && (l.status !== 3 || protectedReason(l) !== null)) return false
+  if (q.state === 'no_reply_after_days' && (l.status === -1 || replied)) return false
+  return q.days === undefined || contactedBefore(l, q.days, now)
 }
 
 export interface LeadSummary {

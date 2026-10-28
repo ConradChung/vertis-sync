@@ -362,7 +362,7 @@ const SPECS: Built[] = [
       description:
         "Leads in one Instantly campaign by state: finished_no_reply (sequence completed, never replied), replied, bounced, contacted, interested, " +
         "or no_reply_after_days:N (contacted, no reply, last email at least N days ago). Returns each lead's id, email, name, status, last contact, " +
-        'last reply, reply count and interest, plus matched (total in that state), a summary by status, and truncated when the scan hit its cap (2,000 leads). Read-only.',
+        'last reply, reply count and interest, plus matched (total in that state), a summary by status, and truncated when the scan hit its cap (2,000 leads; removals scan 5,000). Read-only.',
       inputSchema: z.object({
         campaign_id: campaignId,
         state: z

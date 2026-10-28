@@ -36,7 +36,6 @@ export { MAX_REMOVE, removeLeadsPayloadError }
  * refill as an assign_leads action. CRM deals and their history are untouched.
  */
 
-
 export const removeLeadsBody = z
   .strictObject({
     campaign_id: z.string().trim().regex(CAMPAIGN_ID_RE),
@@ -144,6 +143,8 @@ export class RemovalFailure extends Error {
 
 const CHUNK = 100
 const SKIPPED_SHOWN = 50
+/** lume_cycled_leads / lead_bank cap emails at 320 chars; a longer one is stored as null (the raw snapshot keeps it). */
+const storableEmail = (e: string | null) => (e && e.length <= 320 ? e : null)
 /** Per-lead deletes in flight (Instantly: 100 rps / 6,000 per min workspace-wide). */
 export const DELETE_CONCURRENCY = 5
 /** Time for the delete phase; the execute route's maxDuration is 300 s (reads + refill need the rest). */
@@ -258,7 +259,7 @@ export async function executeRemoveLeads(
         chunk.map((f) => ({
           campaign_id: campaignId,
           instantly_lead_id: f.lead.id,
-          email: f.lead.email,
+          email: storableEmail(f.lead.email),
           snapshot: f.raw as Record<string, Json>,
           reason,
           action_id: action.id,
@@ -309,7 +310,10 @@ export async function executeRemoveLeads(
     try {
       result.lead_bank_archived = await archiveLeadBankRows(
         campaignId,
-        deletedLeads.filter((f) => f.lead.email).map((f) => ({ email: f.lead.email!, status: f.lead.status })),
+        deletedLeads.flatMap((f) => {
+          const email = storableEmail(f.lead.email)
+          return email ? [{ email, status: f.lead.status }] : []
+        }),
         now.toISOString()
       )
     } catch (e) {

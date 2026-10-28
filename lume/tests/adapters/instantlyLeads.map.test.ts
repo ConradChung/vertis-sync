@@ -121,6 +121,12 @@ describe('leadMatches', () => {
     expect(leadMatches(lead({ status: 1, reply_count: 1 }), q, NOW)).toBe(false)
     expect(leadMatches(lead({ status: -1 }), q, NOW)).toBe(false)
   })
+  it('no_reply_after_days excludes a lead with only a reply timestamp', () => {
+    expect(leadMatches(lead({ status: 1, last_contact_at: daysAgo(8), last_reply_at: daysAgo(8) }), { state: 'no_reply_after_days', days: 7 }, NOW)).toBe(false)
+  })
+  it('interested-but-unreplied leads are not "finished no reply"', () => {
+    expect(leadMatches(lead({ interest: 1 }), { state: 'finished_no_reply' }, NOW)).toBe(false)
+  })
   it('trusts the upstream filter for the other states', () => {
     expect(leadMatches(lead({ reply_count: 2 }), { state: 'replied' }, NOW)).toBe(true)
     expect(leadMatches(lead({ status: -1 }), { state: 'bounced' }, NOW)).toBe(true)

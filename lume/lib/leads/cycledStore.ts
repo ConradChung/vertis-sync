@@ -12,7 +12,14 @@ import type { Json } from '@/lib/db/types'
 export interface CycledLeadInsert {
   campaign_id: string
   instantly_lead_id: string
+  /** Lowercased, ≤ 320 chars (null otherwise; the snapshot still has it). */
   email: string | null
+  /**
+   * The FULL raw Instantly lead object as `POST /leads/list` returned it just
+   * before deletion (status, timestamps, counts, interest, payload / custom
+   * variables, personalization…), so a removed lead can be inspected or
+   * re-uploaded later. Not a Lume-shaped subset.
+   */
   snapshot: Record<string, Json>
   reason: string | null
   action_id: string | null
@@ -27,7 +34,6 @@ export async function insertCycledLeads(rows: CycledLeadInsert[]): Promise<void>
   const res = await sb.from('lume_cycled_leads').upsert(rows, { onConflict: 'action_id,instantly_lead_id', ignoreDuplicates: true })
   if (res.error) throw new DbError('insertCycledLeads', res.error)
 }
-
 
 /** Drop snapshots of leads that were never deleted (gone already, or not attempted before the run stopped). */
 export async function deleteCycledLeads(actionId: string, leadIds: string[]): Promise<void> {

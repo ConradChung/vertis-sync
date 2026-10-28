@@ -122,6 +122,8 @@ describe('POST /api/rules', () => {
     ['cycle_out with an unknown param', { kind: 'cycle_out', params: { after_days: 14, x: 1 } }],
     ['a rotate rule with params', { params: { after_days: 14 } }],
     ['an unknown kind', { kind: 'purge' }],
+    ['cycle_out removing more than 1000 per run', { kind: 'cycle_out', params: { after_days: 14 }, daily_cap: 1001 }],
+    ['a rotate rule assigning more than 1000 per run', { daily_cap: 1001 }],
   ])('400 for %s', async (_, patch) => {
     expect((await rulesPOST(req('/api/rules', { ...valid, ...patch }))).status).toBe(400)
     expect(svc.insertRule).not.toHaveBeenCalled()
