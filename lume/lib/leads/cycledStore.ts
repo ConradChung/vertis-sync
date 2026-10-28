@@ -2,6 +2,7 @@ import 'server-only'
 import { createServiceClient } from '@/lib/supabase/service'
 import { DbError } from '@/lib/db/service'
 import type { Json } from '@/lib/db/types'
+import { summarizeArchived, type ArchivedRow, type ArchivedSummary } from '@/lib/leads/history'
 
 /**
  * `lume_cycled_leads` (a snapshot of every lead `remove_leads` deleted from
@@ -92,4 +93,32 @@ export async function countQueuedForCampaign(campaignId: string): Promise<number
   const res = await sb.from('lead_bank').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('state', 'queued')
   if (res.error) throw new DbError('countQueuedForCampaign', res.error)
   return res.count ?? 0
+}
+
+const PAGE = 1000
+const MAX_HISTORY_ROWS = 20_000
+
+/**
+ * The campaign's lead_bank rows that left Instantly (any state but queued /
+ * active), summarised, plus how many leads remove_leads snapshotted. Read-only.
+ */
+export async function archivedLeadHistory(campaignId: string): Promise<ArchivedSummary & { removed_by_lume: number }> {
+  const sb = createServiceClient()
+  const rows: ArchivedRow[] = []
+  for (let from = 0; from < MAX_HISTORY_ROWS; from += PAGE) {
+    const res = await sb
+      .from('lead_bank')
+      .select('state,final_status,email_reply_count')
+      .eq('campaign_id', campaignId)
+      .not('state', 'in', '(queued,active)')
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1)
+    if (res.error) throw new DbError('archivedLeadHistory', res.error)
+    const page = (res.data ?? []) as ArchivedRow[]
+    rows.push(...page)
+    if (page.length < PAGE) break
+  }
+  const cycled = await sb.from('lume_cycled_leads').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId)
+  if (cycled.error) throw new DbError('archivedLeadHistory', cycled.error)
+  return { ...summarizeArchived(rows), removed_by_lume: cycled.count ?? 0 }
 }

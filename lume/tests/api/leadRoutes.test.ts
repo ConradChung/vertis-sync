@@ -5,6 +5,9 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({ auth: { getClaims: async () => ({ data: user ? { claims: { sub: 'owner-id', ...user } } : null }) } }),
 }))
 
+const hist = vi.hoisted(() => ({ archivedLeadHistory: vi.fn() }))
+vi.mock('@/lib/leads/cycledStore', () => hist)
+
 import { GET as leadsGET } from '@/app/api/campaigns/[id]/leads/route'
 import { GET as usageGET } from '@/app/api/instantly/usage/route'
 
@@ -20,6 +23,8 @@ beforeEach(() => {
   process.env.INSTANTLY_API_KEY = 'k'
   fetchMock = vi.fn()
   vi.stubGlobal('fetch', fetchMock)
+  hist.archivedLeadHistory.mockReset()
+  hist.archivedLeadHistory.mockResolvedValue({ total: 0, replied: 0, bounced: 0, finished_no_reply: 0, removed_by_lume: 0 })
 })
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -60,5 +65,24 @@ describe('GET /api/instantly/usage', () => {
   it('{configured:false} without a key', async () => {
     delete process.env.INSTANTLY_API_KEY
     expect(await (await usageGET(req('/api/instantly/usage'))).json()).toEqual({ configured: false })
+  })
+})
+
+describe('GET /api/campaigns/[id]/leads: history of leads no longer in Instantly', () => {
+  it('adds lead_bank history and a note, so 0 in Instantly is not read as "never replied"', async () => {
+    hist.archivedLeadHistory.mockResolvedValue({ total: 225, replied: 18, bounced: 26, finished_no_reply: 69, removed_by_lume: 0 })
+    fetchMock.mockResolvedValueOnce(json({ items: [] }))
+    const body = await (await leadsGET(req(`/api/campaigns/${CID}/leads?state=replied`), ctx())).json()
+    expect(body).toMatchObject({ matched: 0, scope: 'in_instantly_now' })
+    expect(body.history).toEqual({ source: 'lead_bank', no_longer_in_instantly: { total: 225, replied: 18, bounced: 26, finished_no_reply: 69 }, removed_by_lume: 0 })
+    expect(body.note).toMatch(/18 replied lead.* no longer in Instantly/)
+    expect(hist.archivedLeadHistory).toHaveBeenCalledWith(CID)
+  })
+  it('a history failure never fails the route', async () => {
+    hist.archivedLeadHistory.mockRejectedValue(new Error('db down'))
+    fetchMock.mockResolvedValueOnce(json({ items: [] }))
+    const res = await leadsGET(req(`/api/campaigns/${CID}/leads?state=bounced`), ctx())
+    expect(res.status).toBe(200)
+    expect((await res.json()).history_error).toBeTruthy()
   })
 })
