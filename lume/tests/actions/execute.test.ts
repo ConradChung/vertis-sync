@@ -55,6 +55,9 @@ vi.mock('@/lib/adapters/telegram', () => tg)
 const ops = vi.hoisted(() => ({ getOperator: vi.fn(), getVertical: vi.fn(), createOperatorKey: vi.fn() }))
 vi.mock('@/lib/operators/store', () => ops)
 
+const rl = vi.hoisted(() => ({ executeRemoveLeads: vi.fn() }))
+vi.mock('@/lib/actions/removeLeads', () => ({ ...rl, RemovalFailure: class RemovalFailure extends Error {} }))
+
 vi.mock('@/lib/supabase/service', async () => (await import('../stubs/feed')).serviceModule)
 import { feed } from '../stubs/feed'
 
@@ -235,12 +238,17 @@ describe('executeAction dispatch table', () => {
     vi.unstubAllGlobals()
   })
 
-  it('assign_leads: a contact-cap error becomes "cap not yet freed, retry in 10 min"', async () => {
-    store.claimExecution.mockResolvedValue(row('assign_leads', { campaign_id: 'camp-1', filter: {}, count: 5 }))
-    store.resolveLeadsByFilter.mockResolvedValue([{ campaign_id: 'camp-1', email: 'a@x.com' }])
-    store.insertQueuedLeads.mockRejectedValue(new Error('Instantly: lead limit reached for this workspace (upload limit)'))
+  it('remove_leads stopped on the time budget: the outcome says how many remain and what to do', async () => {
+    store.claimExecution.mockResolvedValue(row('remove_leads', { campaign_id: 'camp-1', lead_ids: ['a', 'b'], count: 2 }))
+    rl.executeRemoveLeads.mockResolvedValue({ removed: 1, stopped: 'time_budget', uncertain: false, remaining: 1, remaining_lead_ids: ['b'] })
     const out = await executeAction(ID)
-    expect(out).toMatchObject({ status: 'failed', error: expect.stringMatching(/cap not yet freed, retry in 10 min/), result: { cap_not_freed: true } })
+    expect(out).toMatchObject({ status: 'executed', result: { stopped: 'time_budget', remaining: 1 } })
+    expect(tg.sendMessage.mock.calls[0][0]).toContain('1 lead remains; ask the agent to remove them again')
+
+    tg.sendMessage.mockClear()
+    rl.executeRemoveLeads.mockResolvedValue({ removed: 1, stopped: 'time_budget', uncertain: false, remaining: 40 })
+    await executeAction(ID)
+    expect(tg.sendMessage.mock.calls[0][0]).toContain('40 leads remain; ask the agent to remove them again')
   })
 
   it('assign_leads (filter from a drag): defaults to newest first', async () => {

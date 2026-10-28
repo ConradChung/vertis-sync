@@ -109,12 +109,6 @@ async function runDecide(callbackData: string): Promise<Record<string, Json>> {
   throw new ActionFailure(`pipeline: ${r.error}`, { callback_data: callbackData, http_status: r.status })
 }
 
-/** An Instantly "uploaded contacts / lead limit reached" style error. */
-export function isCapError(err: unknown): boolean {
-  const m = err instanceof Error ? err.message : String(err)
-  return /(lead|contact|upload)s?[ _-]?(limit|cap|quota)|limit (reached|exceeded)|over (the )?(plan )?limit/i.test(m)
-}
-
 type Handler = (p: Record<string, Json>, action: PendingActionRow, opts: ExecuteOptions) => Promise<Record<string, Json>>
 
 const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
@@ -191,22 +185,7 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
     if (!rows.length) {
       return { campaign_id: campaignId, mode, requested: 0, inserted: 0, skipped: 0, note: 'nothing left to assign' }
     }
-    let inserted: number
-    try {
-      inserted = await insertQueuedLeads(rows)
-    } catch (err) {
-      // assign_leads only queues lead_bank rows (Instantly is pushed later, by
-      // the rotator). Should a contact-cap error ever surface here (e.g. a
-      // refill right after a remove_leads, before Instantly frees the slots),
-      // say so plainly instead of failing opaquely.
-      if (isCapError(err)) {
-        throw new ActionFailure('Instantly contact cap not yet freed, retry in 10 min (deleted leads free their slots 5–10 min after removal).', {
-          campaign_id: campaignId,
-          cap_not_freed: true,
-        })
-      }
-      throw err
-    }
+    const inserted = await insertQueuedLeads(rows)
     return { campaign_id: campaignId, mode, requested: rows.length, inserted, skipped: rows.length - inserted }
   },
 
@@ -380,6 +359,10 @@ async function report(a: PendingActionRow, status: 'executed' | 'failed', result
   const link = actionLink(a.id)
   const lines = [`${head} — ${a.kind}`, summaryOf(a)]
   if (error) lines.push(error)
+  if (result.stopped === 'time_budget' && typeof result.remaining === 'number' && result.remaining > 0) {
+    const n = result.remaining
+    lines.push(`Stopped on the time budget: ${n} lead${n === 1 ? ' remains' : 's remain'}; ask the agent to remove them again.`)
+  }
   if (link) lines.push(link)
   const text = lines.join('\n')
   const route = routeItemForAction(a)

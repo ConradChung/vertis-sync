@@ -287,6 +287,26 @@ describe('executeRemoveLeads', () => {
     expect(cs.archiveLeadBankRows).toHaveBeenCalledWith(CID, [], expect.any(String))
   })
 
+  it('the time budget runs from executor entry (the re-read counts)', async () => {
+    let t = 0
+    il.getLeadsByIds.mockImplementation(async (_c: string, ids: string[]) => {
+      t += 500 // the re-read alone uses the whole budget
+      return ids.map((id) => fetched(lead(id)))
+    })
+    const r = await executeRemoveLeads({ ...p, lead_ids: ['a', 'b'] }, action, { budgetMs: 400, clock: () => t })
+    expect(iw.deleteLead).not.toHaveBeenCalled()
+    expect(cs.insertCycledLeads).not.toHaveBeenCalled()
+    expect(r).toMatchObject({ removed: 0, stopped: 'time_budget', uncertain: false, remaining: 2 })
+  })
+
+  it('a failed snapshot cleanup is reported as snapshot_cleanup_error', async () => {
+    il.getLeadsByIds.mockResolvedValue([fetched(lead('a')), fetched(lead('b'))])
+    iw.deleteLead.mockImplementation(async (id: string) => (id === 'b' ? 'not_found' : 'deleted'))
+    cs.deleteCycledLeads.mockRejectedValue(new Error('db down'))
+    const r = await executeRemoveLeads({ ...p, lead_ids: ['a', 'b'] }, action)
+    expect(r).toMatchObject({ removed: 1, snapshot_cleanup_error: expect.stringContaining('db down') })
+  })
+
   it('refuses a malformed payload', async () => {
     await expect(executeRemoveLeads({ campaign_id: CID }, action)).rejects.toBeInstanceOf(RemovalFailure)
     expect(il.getLeadsByIds).not.toHaveBeenCalled()

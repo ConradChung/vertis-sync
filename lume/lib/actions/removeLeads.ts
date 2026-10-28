@@ -190,6 +190,9 @@ export async function executeRemoveLeads(
   opts: { now?: Date; budgetMs?: number; clock?: () => number } = {}
 ): Promise<Record<string, Json>> {
   const now = opts.now ?? new Date()
+  // The budget runs from entry: the re-read and lead count count against the route's 300 s too.
+  const clock = opts.clock ?? Date.now
+  const deadline = clock() + (opts.budgetMs ?? DELETE_BUDGET_MS)
   const err = removeLeadsPayloadError(p)
   if (err) throw new RemovalFailure(err, {})
   const campaignId = p.campaign_id as string
@@ -232,13 +235,22 @@ export async function executeRemoveLeads(
     removed,
     skipped: skippedCounts,
     skipped_leads: skipped.slice(0, SKIPPED_SHOWN),
+    ...(cleanupError ? { snapshot_cleanup_error: cleanupError } : {}),
   })
   const goneAtDelete = (f: FetchedLead) => {
     skipped.push({ id: f.lead.id, email: f.lead.email, why: 'not_found' })
     skippedCounts.not_found = (skippedCounts.not_found ?? 0) + 1
   }
-  const dropSnapshots = (leads: FetchedLead[]) =>
-    leads.length ? deleteCycledLeads(action.id, leads.map((f) => f.lead.id)).catch((e) => console.error('[remove_leads] snapshot cleanup failed:', msg(e))) : undefined
+  let cleanupError: string | null = null
+  const dropSnapshots = async (leads: FetchedLead[]) => {
+    if (!leads.length) return
+    try {
+      await deleteCycledLeads(action.id, leads.map((f) => f.lead.id))
+    } catch (e) {
+      cleanupError = msg(e)
+      console.error('[remove_leads] snapshot cleanup failed:', cleanupError)
+    }
+  }
 
   // 2. Snapshot a chunk of 100, then delete that chunk's leads ONE BY ONE
   // (DELETE /leads/{id}, 5 in flight), inside a time budget well under the
@@ -246,8 +258,6 @@ export async function executeRemoveLeads(
   // (budget out, or after a failure) keep nothing: their snapshots are
   // dropped. A failed delete keeps its own snapshot (it may have gone through)
   // and stops the run as uncertain.
-  const clock = opts.clock ?? Date.now
-  const deadline = clock() + (opts.budgetMs ?? DELETE_BUDGET_MS)
   for (let i = 0; i < removable.length; i += CHUNK) {
     const chunk = removable.slice(i, i + CHUNK)
     if (clock() >= deadline) {
