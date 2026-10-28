@@ -25,7 +25,7 @@ high-tier tools keep creating `pending_actions` rows, so Telegram and `/actions/
 |---|---|---|
 | `list_campaign_leads` | read | Leads in a campaign by state: sequence finished, replied, bounced, no reply after N days. |
 | `contact_usage` | read | Instantly uploaded contacts vs plan limit, headroom. |
-| `remove_leads` | high | Deletes leads from Instantly (only delete frees the cap). Lume snapshots each lead first and marks it `cycled_out`; CRM deal + history stay. Replied / interested leads are always skipped. |
+| `remove_leads` | high | Deletes leads from Instantly (only delete frees the cap). Lume snapshots each lead into `lume_cycled_leads` first (the snapshot is the record of the removal; there is no `cycled_out` mark) and archives its `lead_bank` row the way the rotator does (state by Instantly status: completed / bounced / unsubscribed / skipped); CRM deal + history stay. Replied / interested leads are always skipped. |
 | Cycle-out rule | new rule kind | Daily: remove leads whose sequence finished > N days ago with no reply, then refill up to a target count from the lead bank. Created inactive; activation goes through approval like rotation rules. |
 
 Replied and bounced leads are never auto-removed by the rule.
