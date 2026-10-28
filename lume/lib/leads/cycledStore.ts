@@ -29,6 +29,16 @@ export async function insertCycledLeads(rows: CycledLeadInsert[]): Promise<void>
 }
 
 
+/** Drop snapshots of leads that were never deleted (gone already, or not attempted before the run stopped). */
+export async function deleteCycledLeads(actionId: string, leadIds: string[]): Promise<void> {
+  if (!leadIds.length) return
+  const sb = createServiceClient()
+  for (let i = 0; i < leadIds.length; i += CHUNK) {
+    const res = await sb.from('lume_cycled_leads').delete().eq('action_id', actionId).in('instantly_lead_id', leadIds.slice(i, i + CHUNK))
+    if (res.error) throw new DbError('deleteCycledLeads', res.error)
+  }
+}
+
 /** Instantly lead status → the lead_bank archive state the rotator uses for deleted leads. */
 export function archiveState(status: number | null): 'completed' | 'bounced' | 'unsubscribed' | 'skipped' {
   if (status === 3) return 'completed'

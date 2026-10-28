@@ -2,12 +2,12 @@ import 'server-only'
 import { z } from 'zod'
 import { createAction, DuplicateActionError } from '@/lib/actions/create'
 import { InstantlyError, isInstantlyConfigured } from '@/lib/adapters/instantly'
-import { getCampaignLeadCount, getLeadsByIds, listCampaignLeads, MAX_SCAN_PAGES } from '@/lib/adapters/instantlyLeads'
+import { getCampaignLeadCount, getLeadsByIds, listCampaignLeads, MAX_SCAN_PAGES, type FetchedLead } from '@/lib/adapters/instantlyLeads'
 import { MAX_DAYS, protectedReason, type CampaignLead } from '@/lib/adapters/instantlyLeads.map'
-import { deleteLeads } from '@/lib/adapters/instantlyWrite'
+import { deleteLead } from '@/lib/adapters/instantlyWrite'
 import { countCandidates, getCampaignByExternalId, getRule } from '@/lib/db/service'
 import type { Json, PendingActionRow } from '@/lib/db/types'
-import { archiveLeadBankRows, countQueuedForCampaign, insertCycledLeads } from '@/lib/leads/cycledStore'
+import { archiveLeadBankRows, countQueuedForCampaign, deleteCycledLeads, insertCycledLeads } from '@/lib/leads/cycledStore'
 import { parseCycleParams, refillCount } from '@/lib/rules/cycle'
 import { parseRuleFilter, summarizeFilter } from '@/lib/rules/filter'
 import { CAMPAIGN_ID_RE } from '@/lib/rules/schema'
@@ -144,10 +144,51 @@ export class RemovalFailure extends Error {
 
 const CHUNK = 100
 const SKIPPED_SHOWN = 50
+/** Per-lead deletes in flight (Instantly: 100 rps / 6,000 per min workspace-wide). */
+export const DELETE_CONCURRENCY = 5
+/** Time for the delete phase; the execute route's maxDuration is 300 s (reads + refill need the rest). */
+export const DELETE_BUDGET_MS = 200_000
+
+interface DeleteOutcome {
+  deleted: FetchedLead[]
+  gone: FetchedLead[]
+  untouched: FetchedLead[]
+  /** Attempted and failed: Instantly may or may not have deleted these (their snapshots stay). */
+  failed: { lead: FetchedLead; error: unknown }[]
+}
+
+/** Delete each lead by id, DELETE_CONCURRENCY at a time; stop starting new ones on a failure or when `outOfTime()`. */
+async function deleteEach(leads: FetchedLead[], outOfTime: () => boolean): Promise<DeleteOutcome> {
+  const out: DeleteOutcome = { deleted: [], gone: [], untouched: [], failed: [] }
+  let next = 0
+  const worker = async () => {
+    while (!out.failed.length && next < leads.length) {
+      const f = leads[next++]
+      if (outOfTime()) {
+        out.untouched.push(f)
+        continue
+      }
+      try {
+        if ((await deleteLead(f.lead.id)) === 'deleted') out.deleted.push(f)
+        else out.gone.push(f)
+      } catch (error) {
+        out.failed.push({ lead: f, error })
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(DELETE_CONCURRENCY, leads.length) }, worker))
+  if (out.failed.length) out.untouched.push(...leads.slice(next))
+  return out
+}
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300)
 
 /** Execute a confirmed remove_leads row. Throws RemovalFailure (with a partial result) on failure. */
-export async function executeRemoveLeads(p: Record<string, Json>, action: Pick<PendingActionRow, 'id' | 'rule_id'>, now = new Date()): Promise<Record<string, Json>> {
+export async function executeRemoveLeads(
+  p: Record<string, Json>,
+  action: Pick<PendingActionRow, 'id' | 'rule_id'>,
+  opts: { now?: Date; budgetMs?: number; clock?: () => number } = {}
+): Promise<Record<string, Json>> {
+  const now = opts.now ?? new Date()
   const err = removeLeadsPayloadError(p)
   if (err) throw new RemovalFailure(err, {})
   const campaignId = p.campaign_id as string
@@ -182,21 +223,36 @@ export async function executeRemoveLeads(p: Record<string, Json>, action: Pick<P
   const leadsBefore = cycle?.refill_to && removable.length ? await getCampaignLeadCount(campaignId).catch(() => null) : null
 
   let removed = 0
-  let deleted = 0
+  const deletedLeads: FetchedLead[] = []
+  let remainingIds: string[] = []
   const base = (): Record<string, Json> => ({
     campaign_id: campaignId,
     requested: ids.length,
     removed,
-    instantly_deleted: deleted,
     skipped: skippedCounts,
     skipped_leads: skipped.slice(0, SKIPPED_SHOWN),
   })
+  const goneAtDelete = (f: FetchedLead) => {
+    skipped.push({ id: f.lead.id, email: f.lead.email, why: 'not_found' })
+    skippedCounts.not_found = (skippedCounts.not_found ?? 0) + 1
+  }
+  const dropSnapshots = (leads: FetchedLead[]) =>
+    leads.length ? deleteCycledLeads(action.id, leads.map((f) => f.lead.id)).catch((e) => console.error('[remove_leads] snapshot cleanup failed:', msg(e))) : undefined
 
-  // 2. Snapshot, then delete, 100 at a time. A failed delete keeps its
-  // snapshots (a snapshot of a lead that survived is harmless; a deleted lead
-  // without one is not) and reports the run as uncertain.
+  // 2. Snapshot a chunk of 100, then delete that chunk's leads ONE BY ONE
+  // (DELETE /leads/{id}, 5 in flight), inside a time budget well under the
+  // route's 300 s. A 404 is "already gone" (not_found). Leads never attempted
+  // (budget out, or after a failure) keep nothing: their snapshots are
+  // dropped. A failed delete keeps its own snapshot (it may have gone through)
+  // and stops the run as uncertain.
+  const clock = opts.clock ?? Date.now
+  const deadline = clock() + (opts.budgetMs ?? DELETE_BUDGET_MS)
   for (let i = 0; i < removable.length; i += CHUNK) {
     const chunk = removable.slice(i, i + CHUNK)
+    if (clock() >= deadline) {
+      remainingIds = removable.slice(i).map((f) => f.lead.id)
+      break
+    }
     try {
       await insertCycledLeads(
         chunk.map((f) => ({
@@ -211,24 +267,49 @@ export async function executeRemoveLeads(p: Record<string, Json>, action: Pick<P
     } catch (e) {
       // This chunk is never deleted without its snapshot. Earlier chunks were:
       // the run partly happened, so it is uncertain.
-      throw new RemovalFailure(`Lead snapshot failed after ${removed} removed: ${msg(e)}`, { ...base(), ...(removed ? { uncertain: true } : {}) })
+      throw new RemovalFailure(`Lead snapshot failed after ${removed} removed: ${msg(e)}`, {
+        ...base(),
+        ...(removed ? { uncertain: true } : {}),
+        remaining: removable.length - i,
+      })
     }
-    try {
-      deleted += await deleteLeads(campaignId, chunk.map((f) => f.lead.id))
-    } catch (e) {
-      throw new RemovalFailure(`Instantly delete failed after ${removed} removed: ${msg(e)}`, { ...base(), uncertain: true })
+    const out = await deleteEach(chunk, () => clock() >= deadline)
+    deletedLeads.push(...out.deleted)
+    removed += out.deleted.length
+    out.gone.forEach(goneAtDelete)
+    await dropSnapshots([...out.gone, ...out.untouched])
+    if (out.failed.length) {
+      const untouched = [...out.untouched, ...removable.slice(i + CHUNK)]
+      const first = out.failed[0]
+      throw new RemovalFailure(`Instantly delete of lead ${first.lead.lead.id} failed after ${removed} removed: ${msg(first.error)}`, {
+        ...base(),
+        uncertain: true,
+        failed_lead_ids: out.failed.map((x) => x.lead.lead.id),
+        remaining: untouched.length,
+        remaining_lead_ids: untouched.map((f) => f.lead.id),
+      })
     }
-    removed += chunk.length
+    if (out.untouched.length) {
+      remainingIds = [...out.untouched, ...removable.slice(i + CHUNK)].map((f) => f.lead.id)
+      break
+    }
   }
 
   const result = base()
+  if (remainingIds.length) {
+    // Cleanly stopped on the time budget: nothing half-done, the rest untouched.
+    result.stopped = 'time_budget'
+    result.uncertain = false
+    result.remaining = remainingIds.length
+    result.remaining_lead_ids = remainingIds
+  }
 
   // 3. lead_bank bookkeeping (never fails the removal).
   if (removed) {
     try {
       result.lead_bank_archived = await archiveLeadBankRows(
         campaignId,
-        removable.filter((f) => f.lead.email).map((f) => ({ email: f.lead.email!, status: f.lead.status })),
+        deletedLeads.filter((f) => f.lead.email).map((f) => ({ email: f.lead.email!, status: f.lead.status })),
         now.toISOString()
       )
     } catch (e) {

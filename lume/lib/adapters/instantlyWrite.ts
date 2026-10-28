@@ -86,21 +86,20 @@ export async function createCampaignFrom(sourceId: string, name: string): Promis
   return { id: created.id, name }
 }
 
-export const DELETE_CHUNK = 100
-
 /**
- * Delete leads from a campaign by id (`DELETE /leads` with `campaign_id` +
- * `ids`), 100 ids per call; deleting frees the uploaded-contacts quota after
- * 5–10 minutes. Returns how many Instantly reports deleted. Only the
- * `remove_leads` executor calls this, after snapshotting each lead.
+ * Delete ONE lead by id (`DELETE /api/v2/leads/{id}`; responses 200 / 404 /
+ * 429 per the OpenAPI spec). 429s wait and retry (instantlyCall); a 404 means
+ * it is already gone. Any other failure throws InstantlyError. Deliberately
+ * per lead: no bulk delete, so every removal is exactly the id that was
+ * snapshotted. Only the remove_leads executor calls this. Instantly frees the
+ * contact slot 5–10 minutes later.
  */
-export async function deleteLeads(campaignId: string, ids: string[]): Promise<number> {
-  const unique = [...new Set(ids)]
-  let count = 0
-  for (let i = 0; i < unique.length; i += DELETE_CHUNK) {
-    const chunk = unique.slice(i, i + DELETE_CHUNK)
-    const res = (await instantlyCall('DELETE', '/leads', { campaign_id: campaignId, ids: chunk, limit: chunk.length })) as { count?: unknown }
-    count += typeof res?.count === 'number' ? res.count : 0
+export async function deleteLead(id: string): Promise<'deleted' | 'not_found'> {
+  try {
+    await instantlyCall('DELETE', `/leads/${encodeURIComponent(id)}`)
+    return 'deleted'
+  } catch (err) {
+    if (err instanceof InstantlyError && err.status === 404) return 'not_found'
+    throw err
   }
-  return count
 }

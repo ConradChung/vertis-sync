@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const il = vi.hoisted(() => ({ getLeadsByIds: vi.fn(), listCampaignLeads: vi.fn(), getCampaignLeadCount: vi.fn(), MAX_SCAN_PAGES: 50 }))
 vi.mock('@/lib/adapters/instantlyLeads', () => il)
-const iw = vi.hoisted(() => ({ deleteLeads: vi.fn() }))
+const iw = vi.hoisted(() => ({ deleteLead: vi.fn() }))
 vi.mock('@/lib/adapters/instantlyWrite', () => iw)
 const ia = vi.hoisted(() => ({ isInstantlyConfigured: vi.fn(() => true) }))
 vi.mock('@/lib/adapters/instantly', () => ({
@@ -17,7 +17,7 @@ vi.mock('@/lib/adapters/instantly', () => ({
 }))
 const svc = vi.hoisted(() => ({ countCandidates: vi.fn(), getCampaignByExternalId: vi.fn(), getRule: vi.fn() }))
 vi.mock('@/lib/db/service', () => svc)
-const cs = vi.hoisted(() => ({ insertCycledLeads: vi.fn(), archiveLeadBankRows: vi.fn(), countQueuedForCampaign: vi.fn() }))
+const cs = vi.hoisted(() => ({ insertCycledLeads: vi.fn(), deleteCycledLeads: vi.fn(), archiveLeadBankRows: vi.fn(), countQueuedForCampaign: vi.fn() }))
 vi.mock('@/lib/leads/cycledStore', () => cs)
 const cr = vi.hoisted(() => {
   class DuplicateActionError extends Error {
@@ -59,7 +59,10 @@ beforeEach(() => {
   ia.isInstantlyConfigured.mockReturnValue(true)
   cs.insertCycledLeads.mockResolvedValue(undefined)
   cs.archiveLeadBankRows.mockResolvedValue(0)
+  cs.deleteCycledLeads.mockResolvedValue(undefined)
+  iw.deleteLead.mockResolvedValue('deleted')
 })
+const deletedIds = () => iw.deleteLead.mock.calls.map((c) => c[0]).sort()
 
 describe('buildRemoveLeads', () => {
   it('by ids: freezes the removable ids, keeps replied/interested out, counts missing', async () => {
@@ -108,20 +111,18 @@ describe('executeRemoveLeads', () => {
 
   it('re-reads, always skips replied/interested/missing, snapshots then deletes the rest', async () => {
     il.getLeadsByIds.mockResolvedValue([fetched(lead('a')), fetched(lead('b', { last_reply_at: '2026-10-26T00:00:00Z' })), fetched(lead('c', { interest: 2 }))])
-    iw.deleteLeads.mockResolvedValue(1)
     cs.archiveLeadBankRows.mockResolvedValue(1)
-    const r = await executeRemoveLeads(p, action, new Date('2026-10-27T00:00:00Z'))
+    const r = await executeRemoveLeads(p, action, { now: new Date('2026-10-27T00:00:00Z') })
     expect(cs.insertCycledLeads).toHaveBeenCalledWith([
       { campaign_id: CID, instantly_lead_id: 'a', email: 'a@x.com', snapshot: { id: 'a', email: 'a@x.com', status: 3 }, reason: 'cap', action_id: 'act-1' },
     ])
-    expect(iw.deleteLeads).toHaveBeenCalledWith(CID, ['a'])
-    expect(cs.insertCycledLeads.mock.invocationCallOrder[0]).toBeLessThan(iw.deleteLeads.mock.invocationCallOrder[0])
+    expect(deletedIds()).toEqual(['a'])
+    expect(cs.insertCycledLeads.mock.invocationCallOrder[0]).toBeLessThan(iw.deleteLead.mock.invocationCallOrder[0])
     expect(cs.archiveLeadBankRows).toHaveBeenCalledWith(CID, [{ email: 'a@x.com', status: 3 }], '2026-10-27T00:00:00.000Z')
     expect(r).toMatchObject({
       campaign_id: CID,
       requested: 4,
       removed: 1,
-      instantly_deleted: 1,
       skipped: { replied: 1, interested: 1, not_found: 1 },
       lead_bank_archived: 1,
     })
@@ -139,10 +140,9 @@ describe('executeRemoveLeads', () => {
       fetched(lead('b', { status: -1, status_label: 'bounced' })),
       fetched(lead('c', { status: 1, status_label: 'active' })),
     ])
-    iw.deleteLeads.mockResolvedValue(1)
     const fp = { ...p, lead_ids: ['a', 'b', 'c'], filter: { state: 'finished_no_reply', older_than_days: 14 } }
     const r = await executeRemoveLeads(fp, action)
-    expect(iw.deleteLeads).toHaveBeenCalledWith(CID, ['a'])
+    expect(deletedIds()).toEqual(['a'])
     expect(r).toMatchObject({ removed: 1, skipped: { bounced: 1, no_longer_finished: 1 } })
     expect(r.skipped_leads).toEqual([
       { id: 'b', email: 'b@x.com', why: 'bounced' },
@@ -150,16 +150,15 @@ describe('executeRemoveLeads', () => {
     ])
 
     // A rule-filed removal gets the same check even without a filter in the payload.
-    iw.deleteLeads.mockClear()
+    iw.deleteLead.mockClear()
     svc.getRule.mockResolvedValue(null)
     const r2 = await executeRemoveLeads({ ...p, lead_ids: ['a', 'b', 'c'] }, { id: 'act-r', rule_id: RULE })
-    expect(iw.deleteLeads).toHaveBeenCalledWith(CID, ['a'])
+    expect(deletedIds()).toEqual(['a'])
     expect(r2).toMatchObject({ removed: 1, skipped: { bounced: 1, no_longer_finished: 1 } })
   })
 
   it('explicit ids from the agent may still remove a bounced lead (frees the cap)', async () => {
     il.getLeadsByIds.mockResolvedValue([fetched(lead('b', { status: -1, status_label: 'bounced' }))])
-    iw.deleteLeads.mockResolvedValue(1)
     const r = await executeRemoveLeads({ ...p, lead_ids: ['b'] }, action)
     expect(r).toMatchObject({ removed: 1 })
   })
@@ -167,30 +166,30 @@ describe('executeRemoveLeads', () => {
   it('nothing left to remove: deletes nothing', async () => {
     il.getLeadsByIds.mockResolvedValue([fetched(lead('a', { reply_count: 1 }))])
     const r = await executeRemoveLeads({ ...p, lead_ids: ['a'] }, action)
-    expect(iw.deleteLeads).not.toHaveBeenCalled()
+    expect(iw.deleteLead).not.toHaveBeenCalled()
     expect(cs.insertCycledLeads).not.toHaveBeenCalled()
     expect(r).toMatchObject({ removed: 0, skipped: { replied: 1 } })
   })
 
   it('a failed Instantly delete is uncertain and keeps the snapshots', async () => {
     il.getLeadsByIds.mockResolvedValue([fetched(lead('a'))])
-    iw.deleteLeads.mockRejectedValue(new Error('500'))
+    iw.deleteLead.mockRejectedValue(new Error('500'))
     const err = await executeRemoveLeads(p, action).catch((e) => e)
     expect(err).toBeInstanceOf(RemovalFailure)
-    expect(err.result).toMatchObject({ uncertain: true, removed: 0 })
+    expect(err.result).toMatchObject({ uncertain: true, removed: 0, failed_lead_ids: ['a'] })
     expect(cs.insertCycledLeads).toHaveBeenCalled()
+    expect(cs.deleteCycledLeads).not.toHaveBeenCalledWith('act-1', ['a'])
   })
 
   it('a snapshot failure on a later chunk is uncertain and reports what was already removed', async () => {
     const many = Array.from({ length: 150 }, (_, i) => lead(`id${i}`))
     il.getLeadsByIds.mockResolvedValue(many.map(fetched))
-    iw.deleteLeads.mockResolvedValue(100)
     cs.insertCycledLeads.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('db down'))
     const err = await executeRemoveLeads({ ...p, lead_ids: many.map((l) => l.id), count: 150 }, action).catch((e) => e)
     expect(err).toBeInstanceOf(RemovalFailure)
     expect(err.message).toMatch(/snapshot failed after 100 removed/)
-    expect(err.result).toMatchObject({ uncertain: true, removed: 100, instantly_deleted: 100 })
-    expect(iw.deleteLeads).toHaveBeenCalledTimes(1) // the unsnapshotted chunk is never deleted
+    expect(err.result).toMatchObject({ uncertain: true, removed: 100, remaining: 50 })
+    expect(iw.deleteLead).toHaveBeenCalledTimes(100) // the unsnapshotted chunk is never deleted
   })
 
   it('a snapshot failure before anything was removed is a plain failure', async () => {
@@ -200,7 +199,57 @@ describe('executeRemoveLeads', () => {
     expect(err).toBeInstanceOf(RemovalFailure)
     expect(err.result).toMatchObject({ removed: 0 })
     expect(err.result.uncertain).toBeUndefined()
-    expect(iw.deleteLeads).not.toHaveBeenCalled()
+    expect(iw.deleteLead).not.toHaveBeenCalled()
+  })
+
+  it('deletes one lead at a time by id, at most 5 in flight', async () => {
+    const many = Array.from({ length: 23 }, (_, i) => lead(`id${i}`))
+    il.getLeadsByIds.mockResolvedValue(many.map(fetched))
+    let inFlight = 0
+    let peak = 0
+    iw.deleteLead.mockImplementation(async () => {
+      inFlight++
+      peak = Math.max(peak, inFlight)
+      await new Promise((r) => setTimeout(r, 1))
+      inFlight--
+      return 'deleted'
+    })
+    const r = await executeRemoveLeads({ ...p, lead_ids: many.map((l) => l.id), count: 23 }, action)
+    expect(iw.deleteLead).toHaveBeenCalledTimes(23)
+    expect(peak).toBe(5)
+    expect(r).toMatchObject({ removed: 23 })
+    expect(r.stopped).toBeUndefined()
+  })
+
+  it('a 404 at delete time is already gone: not_found, snapshot dropped', async () => {
+    il.getLeadsByIds.mockResolvedValue([fetched(lead('a')), fetched(lead('b'))])
+    iw.deleteLead.mockImplementation(async (id: string) => (id === 'b' ? 'not_found' : 'deleted'))
+    const r = await executeRemoveLeads({ ...p, lead_ids: ['a', 'b'] }, action)
+    expect(r).toMatchObject({ removed: 1, skipped: { not_found: 1 } })
+    expect(r.skipped_leads).toEqual([{ id: 'b', email: 'b@x.com', why: 'not_found' }])
+    expect(cs.deleteCycledLeads).toHaveBeenCalledWith('act-1', ['b'])
+    expect(cs.archiveLeadBankRows).toHaveBeenCalledWith(CID, [{ email: 'a@x.com', status: 3 }], expect.any(String))
+  })
+
+  it('stops cleanly on the time budget: partial result, the rest untouched (snapshots dropped)', async () => {
+    const many = Array.from({ length: 150 }, (_, i) => lead(`id${i}`))
+    il.getLeadsByIds.mockResolvedValue(many.map(fetched))
+    let t = 0
+    const clock = () => t
+    iw.deleteLead.mockImplementation(async () => {
+      t += 10 // each delete "takes" 10 ms; the budget allows ~12 deletes
+      return 'deleted'
+    })
+    const r = await executeRemoveLeads({ ...p, lead_ids: many.map((l) => l.id), count: 150 }, action, { budgetMs: 120, clock })
+    expect(r.stopped).toBe('time_budget')
+    expect(r.uncertain).toBe(false)
+    expect(r.removed).toBe(iw.deleteLead.mock.calls.length)
+    expect((r.removed as number) + (r.remaining as number)).toBe(150)
+    expect(r.remaining_lead_ids as string[]).toHaveLength(r.remaining as number)
+    // chunk 2 was never snapshotted; chunk 1's unattempted leads had their snapshots dropped
+    expect(cs.insertCycledLeads).toHaveBeenCalledTimes(1)
+    const dropped = cs.deleteCycledLeads.mock.calls.flatMap((c) => c[1] as string[])
+    expect(dropped).toHaveLength(100 - (r.removed as number))
   })
 
   it('refuses a malformed payload', async () => {
@@ -214,7 +263,6 @@ describe('executeRemoveLeads', () => {
     })
     il.getLeadsByIds.mockResolvedValue([fetched(lead('a')), fetched(lead('b'))])
     il.getCampaignLeadCount.mockResolvedValue(900)
-    iw.deleteLeads.mockResolvedValue(2)
     cs.countQueuedForCampaign.mockResolvedValue(50)
     svc.countCandidates.mockResolvedValue(5000)
     svc.getCampaignByExternalId.mockResolvedValue({ name: 'Kaspen PM' })
@@ -234,7 +282,6 @@ describe('executeRemoveLeads', () => {
     svc.getRule.mockResolvedValue({ id: RULE, name: 'C', campaign_id: CID, filter: {}, order_by: 'oldest', daily_cap: 1, kind: 'cycle_out', params: { after_days: 14, refill_to: 10 } })
     il.getLeadsByIds.mockResolvedValue([fetched(lead('a'))])
     il.getCampaignLeadCount.mockResolvedValue(5)
-    iw.deleteLeads.mockResolvedValue(1)
     cs.countQueuedForCampaign.mockResolvedValue(0)
     svc.countCandidates.mockResolvedValue(100)
     svc.getCampaignByExternalId.mockResolvedValue(null)
