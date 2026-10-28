@@ -155,6 +155,10 @@ export async function executeRemoveLeads(p: Record<string, Json>, action: Pick<P
   const reason = typeof p.reason === 'string' ? p.reason.slice(0, 300) : null
 
   // 1. Re-read: anything that replied, turned interested or vanished since approval is skipped.
+  // A cycle-out (rule) or finished_no_reply removal also needs the sequence still
+  // completed: a lead that bounced or went back into sequence since filing stays.
+  const filter = p.filter && typeof p.filter === 'object' && !Array.isArray(p.filter) ? (p.filter as Record<string, Json>) : null
+  const needsFinished = !!action.rule_id || filter?.state === 'finished_no_reply'
   const fetched = await getLeadsByIds(campaignId, ids)
   const byId = new Map(fetched.map((f) => [f.lead.id, f]))
   const skipped: { id: string; email: string | null; why: string }[] = []
@@ -165,7 +169,7 @@ export async function executeRemoveLeads(p: Record<string, Json>, action: Pick<P
       skipped.push({ id, email: null, why: 'not_found' })
       continue
     }
-    const why = protectedReason(f.lead)
+    const why = protectedReason(f.lead) ?? (needsFinished && f.lead.status !== 3 ? (f.lead.status === -1 ? 'bounced' : 'no_longer_finished') : null)
     if (why) skipped.push({ id, email: f.lead.email, why })
     else removable.push(f)
   }

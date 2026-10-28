@@ -133,6 +133,37 @@ describe('executeRemoveLeads', () => {
     expect(r.refill).toBeUndefined()
   })
 
+  it('finished_no_reply / rule removals skip leads no longer completed (bounced or back in sequence)', async () => {
+    il.getLeadsByIds.mockResolvedValue([
+      fetched(lead('a')),
+      fetched(lead('b', { status: -1, status_label: 'bounced' })),
+      fetched(lead('c', { status: 1, status_label: 'active' })),
+    ])
+    iw.deleteLeads.mockResolvedValue(1)
+    const fp = { ...p, lead_ids: ['a', 'b', 'c'], filter: { state: 'finished_no_reply', older_than_days: 14 } }
+    const r = await executeRemoveLeads(fp, action)
+    expect(iw.deleteLeads).toHaveBeenCalledWith(CID, ['a'])
+    expect(r).toMatchObject({ removed: 1, skipped: { bounced: 1, no_longer_finished: 1 } })
+    expect(r.skipped_leads).toEqual([
+      { id: 'b', email: 'b@x.com', why: 'bounced' },
+      { id: 'c', email: 'c@x.com', why: 'no_longer_finished' },
+    ])
+
+    // A rule-filed removal gets the same check even without a filter in the payload.
+    iw.deleteLeads.mockClear()
+    svc.getRule.mockResolvedValue(null)
+    const r2 = await executeRemoveLeads({ ...p, lead_ids: ['a', 'b', 'c'] }, { id: 'act-r', rule_id: RULE })
+    expect(iw.deleteLeads).toHaveBeenCalledWith(CID, ['a'])
+    expect(r2).toMatchObject({ removed: 1, skipped: { bounced: 1, no_longer_finished: 1 } })
+  })
+
+  it('explicit ids from the agent may still remove a bounced lead (frees the cap)', async () => {
+    il.getLeadsByIds.mockResolvedValue([fetched(lead('b', { status: -1, status_label: 'bounced' }))])
+    iw.deleteLeads.mockResolvedValue(1)
+    const r = await executeRemoveLeads({ ...p, lead_ids: ['b'] }, action)
+    expect(r).toMatchObject({ removed: 1 })
+  })
+
   it('nothing left to remove: deletes nothing', async () => {
     il.getLeadsByIds.mockResolvedValue([fetched(lead('a', { reply_count: 1 }))])
     const r = await executeRemoveLeads({ ...p, lead_ids: ['a'] }, action)
