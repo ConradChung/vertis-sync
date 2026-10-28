@@ -10,7 +10,7 @@ const AGENT_TEXT = { bare: true } as const
 
 /** `agent_conversations` / `agent_messages` (service role, after the owner guard). */
 
-const COLS = 'id, title, created_at, updated_at'
+const COLS = 'id, title, created_at, updated_at, project_id'
 
 /**
  * A Grok Bot's chats carry its vertical (null for the master bot) and
@@ -22,12 +22,14 @@ export interface ConversationOrigin {
   operator_id: string | null
 }
 
-export async function createConversation(title: string, origin?: ConversationOrigin): Promise<ConversationSummary> {
+/** `projectId` files the new chat in a project (null / absent: Unfiled). */
+export async function createConversation(title: string, origin?: ConversationOrigin, projectId?: string | null): Promise<ConversationSummary> {
   const sb = createServiceClient()
   const safeTitle = maskOperatorKeys(title, AGENT_TEXT)
   const row: Record<string, string | null> = origin
     ? { title: safeTitle, vertical_id: origin.vertical_id, operator_id: origin.operator_id }
     : { title: safeTitle }
+  if (projectId) row.project_id = projectId
   const res = await sb.from('agent_conversations').insert(row).select(COLS).single()
   if (res.error || !res.data) throw new DbError('createConversation', res.error ?? new Error('no data'))
   return res.data as ConversationSummary

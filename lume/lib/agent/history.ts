@@ -9,6 +9,8 @@ export interface ConversationSummary {
   title: string
   created_at: string
   updated_at: string
+  /** The project it is filed in; null (or absent) = Unfiled. */
+  project_id?: string | null
 }
 
 export interface StoredToolEntry {

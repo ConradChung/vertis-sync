@@ -2,7 +2,7 @@
 -- Agent projects: folders of conversations + knowledge (instructions, files, notes),
 -- optionally linked to one vertical.
 begin;
-select plan(30);
+select plan(31);
 
 -- structure
 select has_table('public', 'agent_projects', 'agent_projects exists');
@@ -52,6 +52,7 @@ select throws_ok($$insert into agent_project_files (project_id, kind, name, size
 
 insert into agent_project_files (id, project_id, kind, name, text_content) values
   ('00000000-0000-0000-0000-0000000a9031', '00000000-0000-0000-0000-0000000a9022', 'note', 'tone', 'casual');
+select is((select text_chars from agent_project_files where id = '00000000-0000-0000-0000-0000000a9031'), 6, 'text_chars is the extracted text length');
 insert into agent_conversations (id, title, project_id) values
   ('00000000-0000-0000-0000-0000000a9041', 'pgtap filed chat', '00000000-0000-0000-0000-0000000a9022');
 

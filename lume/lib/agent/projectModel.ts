@@ -86,6 +86,8 @@ export interface ProjectItem {
   size_bytes: number
   readable: boolean
   truncated: boolean
+  /** Length of the extracted text (0 when none). */
+  text_chars?: number
   created_at: string
 }
 
@@ -118,10 +120,7 @@ const neutralise = (s: string) => s.replace(/<\/(project(?:_item)?)/gi, '<\\/$1'
 const attr = (s: string) => s.replace(/["<>\n\r]/g, ' ').slice(0, 120)
 const short = (s: string) => (s.length > NAME_MAX ? `${s.slice(0, NAME_MAX - 1)}…` : s)
 
-function sizeLabel(i: ProjectItemText): string {
-  if (i.kind === 'note') return `${(i.text_content ?? '').length.toLocaleString('en-US')} chars`
-  return formatBytes(i.size_bytes)
-}
+const sizeLabel = (i: ProjectItemText) => formatBytes(i.size_bytes)
 
 const wrap = (i: ProjectItemText) => `<project_item id="${i.id}" name="${attr(i.name)}">\n${neutralise(i.text_content ?? '')}\n</project_item>`
 
