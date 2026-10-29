@@ -193,20 +193,34 @@ curl -sS -b bot.jar -X POST -H 'Content-Type: application/json' "$LUME/api/inbox
   -d '{"reply_to_uuid":"01a15496-…","body":"Hi Ada, …","verdict":"GOOD","proposed_times":["Tue 10:00 PT"]}'
 ```
 
-**What happens at send time.** Right before sending, the executor re-reads the email and the live thread, uncached:
+**What happens at send time.** Within one 120 s deadline, the executor re-reads the email and the live thread
+uncached. It sends nothing unless every check passes:
 
-- If anyone wrote after the email being answered, it aborts with `newer_inbound`. Nothing is sent; read the thread and
-  draft again.
-- It replies only from the receiving inbox (otherwise `eaccount_mismatch`), through Instantly `/emails/reply`, so the
-  reply stays in the thread.
-- If the check cannot be made, nothing is sent.
+| Refusal | Why |
+|---|---|
+| `thread_unverifiable` | The answered email is not in the re-read thread (an empty or partial read), or it has no usable time |
+| `newer_inbound` | Anyone wrote in the thread at or after the answered email's time, or a message's time cannot be read. Read the thread and draft again |
+| `already_replied` | An email went out in the thread after it (another Lume reply, or a manual Unibox reply) |
+| `no_eaccount` / `eaccount_mismatch` | Lume cannot confirm the reply would come from the inbox that received the email |
+| `reply_labeled` / `deal_lost` / `lead_blocked` | A label closed the reply, the CRM deal is Lost, or the address or its domain is on the Instantly blocklist |
+| `deadline_exceeded` | The checks took too long to send safely |
 
-On success, the reply leaves New replies and its alert is acknowledged.
+Times are compared as real timestamps, using Instantly's `timestamp_created` first. Lume records `send_attempted` right
+before it calls `/emails/reply`. From then on, that row blocks any further reply to the same email, even if the call
+fails or is cut off, because the email may already have gone out. On success, the reply leaves New replies and its alert
+is acknowledged.
 
 ### Approving, with Edit
 
-`send_reply` always asks: scoped send grants are step 3e, later. The approver (the owner, or a Grok Bot with its
-owner-rights session) decides with `POST /api/actions/<id>/decide`:
+`send_reply` always asks: scoped send grants are step 3e, later. The approver decides with `POST /api/actions/<id>/decide`.
+
+- **A bot never approves a reply it drafted** (owner decision, fixed policy). That covers drafts filed through
+  `/api/inbox/draft`, through `/api/actions` with its cookie, and by Lume's agent in a chat the bot started or ran (the
+  draft records `drafted_by_operator`). Such an approval is refused with `403 self_drafted`, but the bot may still deny
+  its own draft. The owner, the master bot (for another bot's draft), and later the client approve.
+- **A vertical bot decides only its own vertical's items**, of every kind. Anything else is `403 campaign_out_of_scope`.
+
+Decisions:
 
 - **Approve:** `{ "decision": "approve" }`
 - **Approve with an edit:** `{ "decision": "approve", "body": "<new text>" }`. Lume keeps the first draft as
@@ -245,6 +259,13 @@ own (a bad fit). `block: true` adds BAD leads to the blocklist.
 | `booked` | 2 meeting booked | → Meeting booked + meeting activity | | yes |
 | verdict `BAD` (no category) | -3 lost | Lost close filed for approval | only with `block: true` | yes |
 
+- A label given as `lead_email` + `campaign_id` (no `reply_to_uuid`) first checks in Instantly that the lead is in that
+  campaign. Otherwise it answers `400 lead_not_in_campaign` and writes nothing.
+- `block: true` is accepted only with verdict `BAD`, and never with `interested` or `booked`.
+- A label that blocks, closes the deal, or means no reply is owed **denies every awaiting `send_reply`** for that reply
+  and lead (`denied_drafts` in the answer).
+- When Lume's agent asks for a blocking label (unsubscribe, hostile, BAD + block), it becomes an approval (kind
+  `label_reply`) instead of being applied directly.
 - The Instantly write happens first. If it fails, the CRM is not touched.
 - Moving a deal to Lost is always an approval (`crm_close_deal`, one per deal), as everywhere in Lume. A deal that is
   already Won or Lost is never moved.
