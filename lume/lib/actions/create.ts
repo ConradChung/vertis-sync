@@ -13,6 +13,7 @@ import { tryGrantSend } from '@/lib/actions/grant'
 import { pushForItem } from '@/lib/webhooks/deliver'
 import { pushSummary } from '@/lib/webhooks/push'
 import { sendActionPrompt, sendMessage } from '@/lib/adapters/telegram'
+import { slackOnAction } from '@/lib/slack/hooks'
 
 /**
  * Create a high-risk `pending_actions` row and ask for confirmation in
@@ -199,6 +200,8 @@ export async function createAction(
   // 'grant', lib/actions/grant.ts) and the executor runs after the response
   // with every live re-check. No approval prompt then: a one-line notice.
   if (kind === 'send_reply') {
+    // 3g: put the draft on the reply's client-channel posts (after the response; reads the row fresh).
+    slackOnAction(row)
     const grant = await tryGrantSend(row)
     if (grant.granted) {
       const route = routeItemForAction(row)

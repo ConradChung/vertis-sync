@@ -65,6 +65,8 @@ vi.mock('@/lib/inbox/label', () => inboxLabel)
 vi.mock('@/lib/adapters/instantlyLabels', () => labels)
 const grantMod = vi.hoisted(() => ({ grantStillHolds: vi.fn() }))
 vi.mock('@/lib/actions/grant', () => ({ ...grantMod, tryGrantSend: vi.fn().mockResolvedValue({ granted: false, reason: 'mode_owner' }) }))
+const clientMod = vi.hoisted(() => ({ clientApprovalBlocker: vi.fn() }))
+vi.mock('@/lib/slack/clientCheck', () => ({ ...clientMod, CLIENT_BLOCKER_TEXT: { client_mode_revoked: 'the campaign is no longer in Client approval mode' } }))
 const push = vi.hoisted(() => ({ pushForItem: vi.fn() }))
 vi.mock('@/lib/webhooks/deliver', () => push)
 
@@ -390,6 +392,23 @@ describe('executeAction dispatch table', () => {
       grantMod.grantStillHolds.mockReset().mockRejectedValue(new Error('db down'))
       store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi', campaign_id: 'camp-1' }, { decided_via: 'grant' }))
       await refusedWith(/^grant_unverifiable/)
+    })
+
+    it("a client's Slack approval (decided_via client) is re-checked right before the send", async () => {
+      clientMod.clientApprovalBlocker.mockReset().mockResolvedValue(null)
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi', campaign_id: 'camp-1' }, { decided_via: 'client' }))
+      expect(await executeAction(ID)).toMatchObject({ status: 'executed' })
+      expect(clientMod.clientApprovalBlocker.mock.calls[0][1]).toMatchObject({ id: 'u-1', campaign_id: 'camp-1' })
+      expect(clientMod.clientApprovalBlocker.mock.invocationCallOrder[0]).toBeLessThan(store.markSendAttempted.mock.invocationCallOrder[0])
+    })
+
+    it("a client approval that no longer holds (mode switched to Owner) is refused, nothing sent", async () => {
+      clientMod.clientApprovalBlocker.mockReset().mockResolvedValue('client_mode_revoked')
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi', campaign_id: 'camp-1' }, { decided_via: 'client' }))
+      const out = await refusedWith(/^client_mode_revoked/)
+      expect(out).toMatchObject({ result: { client_mode_revoked: true, client_blocker: 'client_mode_revoked' } })
+      clientMod.clientApprovalBlocker.mockReset().mockRejectedValue(new Error('db down'))
+      await refusedWith(/^client_unverifiable/)
     })
 
     it('an owner-approved reply does not consult the grant', async () => {

@@ -78,12 +78,63 @@ export async function claimDecision(
 export async function saveAwaitingPayload(id: string, payload: Record<string, Json>): Promise<PendingActionRow | null> {
   const res = await createServiceClient()
     .from('pending_actions')
-    .update({ payload })
+    // The body is no longer a client's edit (3g): that client may approve it again.
+    .update({ payload, edited_by_slack_user: null })
     .eq('id', id)
     .eq('status', 'awaiting')
     .eq('claim_status', 'awaiting')
     .select()
   if (res.error) throw new DbError('saveAwaitingPayload', res.error)
+  return ((res.data ?? []) as PendingActionRow[])[0] ?? null
+}
+
+const SLACK_USER = /^[UW][A-Z0-9]{2,30}$/
+const SLACK_TEAM = /^[TE][A-Z0-9]{2,30}$/
+
+/**
+ * A client's decision in Slack (3g): the same conditional claim, with
+ * decided_via 'client' and the Slack user + team (the DB requires both). An
+ * approval also requires that this user is not the one whose Edit is the
+ * current body (`edited_by_slack_user`), in the same PATCH, so an edit that
+ * lands between the check and the claim cannot be self-approved.
+ */
+export async function claimClientDecision(id: string, approve: boolean, slack: { team: string; user: string }): Promise<PendingActionRow | null> {
+  if (!SLACK_USER.test(slack.user) || !SLACK_TEAM.test(slack.team)) throw new Error('claimClientDecision: malformed Slack ids')
+  let q = createServiceClient()
+    .from('pending_actions')
+    .update({
+      claim_status: 'claimed',
+      status: approve ? 'approved' : 'rejected',
+      decided_via: 'client',
+      decided_at: new Date().toISOString(),
+      decided_by_slack_user: slack.user,
+      decided_by_slack_team: slack.team,
+    })
+    .eq('id', id)
+    .eq('kind', 'send_reply')
+    .eq('claim_status', 'awaiting')
+    .eq('status', 'awaiting')
+  if (approve) q = q.or(`edited_by_slack_user.is.null,edited_by_slack_user.neq.${slack.user}`)
+  const res = await q.select()
+  if (res.error) throw new DbError('claimClientDecision', res.error)
+  return ((res.data ?? []) as PendingActionRow[])[0] ?? null
+}
+
+/**
+ * A client's Edit (3g) is drafting: save the body and record the editor,
+ * while the row is still awaiting; it stays awaiting for someone else.
+ */
+export async function saveClientEdit(id: string, payload: Record<string, Json>, slackUser: string): Promise<PendingActionRow | null> {
+  if (!SLACK_USER.test(slackUser)) throw new Error('saveClientEdit: malformed Slack user')
+  const res = await createServiceClient()
+    .from('pending_actions')
+    .update({ payload, edited_by_slack_user: slackUser })
+    .eq('id', id)
+    .eq('kind', 'send_reply')
+    .eq('status', 'awaiting')
+    .eq('claim_status', 'awaiting')
+    .select()
+  if (res.error) throw new DbError('saveClientEdit', res.error)
   return ((res.data ?? []) as PendingActionRow[])[0] ?? null
 }
 

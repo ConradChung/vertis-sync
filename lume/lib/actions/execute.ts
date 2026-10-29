@@ -16,6 +16,8 @@ import { LabelBody } from '@/lib/inbox/schemas'
 import { isBlocked } from '@/lib/adapters/instantlyLabels'
 import { closeReply } from '@/lib/inbox/replies'
 import { grantStillHolds } from '@/lib/actions/grant'
+import { slackOnAction } from '@/lib/slack/hooks'
+import { clientApprovalBlocker, CLIENT_BLOCKER_TEXT } from '@/lib/slack/clientCheck'
 import { GRANT_BLOCKER_TEXT } from '@/lib/inbox/replyMode'
 import { alert, alertLink, titleFrom } from '@/lib/alerts'
 import { routeItemForAction } from '@/lib/operators/route'
@@ -242,6 +244,9 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
    *  4b. approved by an Auto-mode grant (decided_via 'grant'): the grant is
    *     re-evaluated (still Auto, still GOOD, no closing label since), else
    *     `grant_revoked` / `grant_unverifiable`;
+   *  4c. approved by a client in Slack (decided_via 'client', 3g): still
+   *     Client mode, the workspace still bound, not the editor's own edit, no
+   *     opt-out in the fresh text (lib/slack/clientCheck.ts), else the code;
    *  5. `send_attempted` is recorded, then /emails/reply on that email (so the
    *     reply stays in its thread) with the time left as its timeout. From
    *     here the row blocks another reply to this email even if it fails
@@ -318,6 +323,17 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
         return refuse('grant_unverifiable', `the Auto-mode grant could not be re-checked (${err instanceof Error ? err.message : String(err)})`)
       }
       if (held) return refuse('grant_revoked', `the Auto-mode grant no longer holds: ${GRANT_BLOCKER_TEXT[held]}`, { grant_blocker: held })
+    }
+    // 4c. A client's approval in Slack (decided_via 'client', 3g) is re-checked
+    // the same way: still Client mode, still bound, not self-edited, no opt-out.
+    if (action.decided_via === 'client') {
+      let blocked
+      try {
+        blocked = await clientApprovalBlocker(action, answered)
+      } catch (err) {
+        return refuse('client_unverifiable', `the client's approval could not be re-checked (${err instanceof Error ? err.message : String(err)})`)
+      }
+      if (blocked) return refuse(blocked, `the client's approval no longer holds: ${CLIENT_BLOCKER_TEXT[blocked]}`, { client_blocker: blocked })
     }
     if (deadline - Date.now() < SEND_MIN_TIME_MS) return refuse('deadline_exceeded', 'the re-check took too long to send safely now')
 
@@ -546,6 +562,8 @@ export async function executeAction(id: string, opts: ExecuteOptions = {}): Prom
 
   await finishAction(id, status, result, error)
   await report(action, status, result, error)
+  // 3g: show the outcome on the reply's client-channel posts.
+  slackOnAction(action)
   return { ran: true, status, result, error, ...(reveal ? { reveal } : {}) }
 }
 

@@ -3,6 +3,7 @@ import { createAction, DuplicateActionError } from '@/lib/actions/create'
 import { getEmail } from '@/lib/adapters/instantlyEmails'
 import { addToBlocklist, leadInCampaign, setInterestStatus } from '@/lib/adapters/instantlyLabels'
 import { claimDecision, listAwaitingReplyActions } from '@/lib/actions/store'
+import { slackOnAction } from '@/lib/slack/hooks'
 import { addActivity, ensureDeal, setStage } from '@/lib/crm/service'
 import type { ActivitySource } from '@/lib/crm/types'
 import { logEvent } from '@/lib/db/service'
@@ -89,7 +90,10 @@ async function apply(
     const via = meta.actor === 'owner' ? 'lume' : meta.actor === 'agent' ? 'agent' : 'operator'
     const opId = meta.actor.startsWith('operator:') ? meta.actor.slice(9) : undefined
     for (const a of await listAwaitingReplyActions(campaign, lead, target.reply_to_uuid ?? null)) {
-      if (await claimDecision(a.id, false, via, opId)) denied.push(a.id)
+      if (await claimDecision(a.id, false, via, opId)) {
+        denied.push(a.id)
+        slackOnAction({ id: a.id, kind: 'send_reply' })
+      }
     }
   }
 

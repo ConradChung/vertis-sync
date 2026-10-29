@@ -9,6 +9,7 @@ import { markReplyHandled, recordReply, type ReplyInsert } from '@/lib/inbox/sto
 import { instantlyCampaignIds } from '@/lib/operators/checkin'
 import { pushForItem } from '@/lib/webhooks/deliver'
 import { pushSummary } from '@/lib/webhooks/push'
+import { slackOnPositiveReply } from '@/lib/slack/hooks'
 
 /**
  * The inbox manager's read side (Phase 3a) and the positive-reply alert.
@@ -172,6 +173,8 @@ export async function notePositiveReply(input: ReplyInsert): Promise<boolean> {
     { campaign_id: input.campaign_id ?? null, scope: 'replies' },
     { type: 'positive_reply', item_id: input.reply_to_uuid, summary: pushSummary('positive_reply', { name, company }), link: alertLink('/operator#new-replies') }
   )
+  // 3g: post the lead card to the client channels bound to the campaign (never blocks).
+  slackOnPositiveReply(input.reply_to_uuid)
   return true
 }
 

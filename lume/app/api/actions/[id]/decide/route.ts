@@ -18,6 +18,7 @@ import { parseCampaignPayload } from '@/lib/actions/payloads'
 import type { Json, PendingActionRow } from '@/lib/db/types'
 import { pushForItem } from '@/lib/webhooks/deliver'
 import { pushSummary } from '@/lib/webhooks/push'
+import { slackOnAction } from '@/lib/slack/hooks'
 
 /**
  * Confirm / Cancel a pending action from Lume. Runs the same claim as
@@ -156,6 +157,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
           return dbErrorResponse(err, 'api/actions/decide')
         }
         if (!saved) return deny(409, 'already_handled')
+        slackOnAction(saved)
         // 3f: the edited reply now awaits another approver.
         const sp = saved.payload ?? {}
         pushForItem(routeItemForAction(saved), {
@@ -184,6 +186,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     if (form) return formRedirect(req, form.returnTo, { error: 'db_error' })
     return dbErrorResponse(err, 'api/actions/decide')
   }
+
+  // 3g: the reply's client-channel posts show the decision.
+  slackOnAction(claimed)
 
   // Tell the Telegram thread: strip the prompt's buttons, then the usual note.
   const verdict = approve ? '✅ Approved' : '❌ Rejected'

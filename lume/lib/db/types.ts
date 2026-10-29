@@ -204,6 +204,11 @@ export interface PendingActionRow {
   decided_via: 'lume' | 'telegram' | 'agent' | 'operator' | 'grant' | 'client' | null
   /** The Grok Bot operator that decided (decided_via 'operator'). */
   decided_by_operator?: string | null
+  /** decided_via 'client' (3g): the Slack user and workspace that decided. */
+  decided_by_slack_user?: string | null
+  decided_by_slack_team?: string | null
+  /** 3g: the Slack user whose Edit is the current send_reply body (may not approve it). */
+  edited_by_slack_user?: string | null
   decided_at: string | null
   executed_at: string | null
   result: Record<string, Json> | null
