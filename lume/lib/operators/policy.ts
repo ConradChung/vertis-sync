@@ -9,6 +9,11 @@ import type { Json } from '@/lib/db/types'
  * approves: the owner, the master bot (for another bot's draft), later the
  * client (3g). Sending without anyone approving happens only through a
  * campaign's Auto mode (3e). Other kinds are not governed here.
+ *
+ * The Auto-mode grant (lib/actions/grant.ts) calls this with operator null:
+ * the grant is not an operator, so the self-draft rule has nobody to apply
+ * to and a bot's draft on an Auto campaign is sent by the grant, never
+ * approved by that bot.
  */
 
 export const SELF_APPROVAL_ERROR = 'a Grok Bot cannot approve a reply it drafted; the owner or another approver must'

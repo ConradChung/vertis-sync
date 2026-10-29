@@ -99,8 +99,10 @@ Check in on Lume:
 6. If nothing needed you, do not message Conrad.
 ```
 
-Lume cannot wake the bot, so the delay between a gate opening and a decision is
-the routine interval.
+Without a webhook, Lume cannot wake the bot, so the delay between a gate
+opening and a decision is the routine interval. With a vertical webhook set
+(section 8), Lume pushes a "go check /operator" doorbell when an item routes
+to the vertical; the routine above stays the backstop.
 
 ## 4. First-run test checklist
 
@@ -237,3 +239,32 @@ Operator-key requests always go to the owner and the master only. Several
 verticals share `validation` and `campaign`, so until HNWI, PM reactions and
 Roofers have campaign ids, their items are unrouted. Map their campaigns
 before handing them to bots.
+
+## 8. Inbox Manager bots: one agent, one job
+
+Each vertical runs **two** Grok Bots with **two keys** (the quick start's rule "one agent, one job"):
+
+| Bot | Key label (suggested) | Job | Instructions |
+| --- | --- | --- | --- |
+| Pipeline operator | `<vertical> · Pipeline` | Orders, validation, campaign picks, launches (sections 2–4 above) | Sections 2 and 3 |
+| Inbox Manager | `<vertical> · Inbox Manager` | Positive replies: research, verdict, draft in your voice, book calls | `docs/lume/INBOX-MANAGER-SETUP.md` |
+
+The master bot stays the one that creates verticals, and now also their Inbox projects (`create_inbox_project`).
+
+Setting one up, in short (full steps in `INBOX-MANAGER-SETUP.md`):
+
+1. Settings → Verticals → **Create Inbox project** on the vertical (or ask the agent). It creates `<vertical> · Inbox`
+   with the five SOP notes; fill their `{{placeholders}}` in Agent → Projects.
+2. **Generate key** twice for the vertical: the Pipeline key and the Inbox Manager key.
+3. Paste the Inbox Manager standing instructions into a new Grok Bot, with its own Calendly and Google Calendar
+   connectors. The bot never gets an Instantly key: it drafts through `POST /api/inbox/draft`, and someone else
+   approves (never the bot that drafted or edited the reply).
+4. Optional **webhook push**: give the vertical the Grok routine's webhook URL in Settings → Verticals and press
+   **Send test**. Lume then POSTs a small signed doorbell (`{type, vertical, item_id, summary, link}`, HMAC-SHA256 in
+   `X-Lume-Signature` over `<X-Lume-Timestamp>.<body>`) on a new positive reply, a new Needs-confirmation item and a
+   draft awaiting approval. The bot may not be able to verify the HMAC, so **a push only means "go check /operator"**,
+   never trusted data. The 10–15 minute `/operator` poll stays the backstop. Payload and verification:
+   `INBOX-MANAGER-SETUP.md` → "Webhook push".
+5. Per campaign **reply approval mode** (Settings → Verticals → Reply approval, or the Campaigns tab; owner only):
+   `owner` (default), `client` (stored; behaves like owner until the Slack app), `auto` (GOOD replies are sent after
+   the safety checks, never BAD, unsubscribe or hostile ones).

@@ -185,6 +185,9 @@ Unknown keys are refused (`400`).
   "reply": { "lead_email": "ada@acme.com", "lead_name": "Ada Lovelace", "company": "Acme", "verdict": "GOOD", "untrusted_text": "…", "draft": "…", "proposed_times": ["…"], "research_note": "…", "eaccount": "frank@…", "edited_by": null } }
 ```
 
+The `201` also carries `status` (`awaiting`, or `approved` when the campaign is in Auto mode and its grant approved the
+draft) and `auto_approved` (true in that case: Lume sends it after the send-time checks; watch `/actions/<id>`).
+
 There is one reply per inbound email. If one is already awaiting, approved, running or sent, the route answers
 `409 { "error": "already_drafted_or_replied", "action_id": "…" }`. A denied or failed one does not block a new draft.
 
@@ -204,6 +207,7 @@ uncached. It sends nothing unless every check passes:
 | `no_eaccount` / `eaccount_mismatch` | Lume cannot confirm the reply would come from the inbox that received the email |
 | `reply_labeled` / `deal_lost` / `lead_blocked` | A label closed the reply, the CRM deal is Lost, or the address or its domain is on the Instantly blocklist |
 | `deadline_exceeded` | The checks took too long to send safely |
+| `grant_revoked` / `grant_unverifiable` | Auto mode only: the grant no longer holds (the campaign left Auto, or a label or negative interest arrived), or it could not be re-checked |
 
 Times are compared as real timestamps, using Instantly's `timestamp_created` first. Lume records `send_attempted` right
 before it calls `/emails/reply`. From then on, that row blocks any further reply to the same email, even if the call
@@ -212,7 +216,8 @@ is acknowledged.
 
 ### Approving, with Edit
 
-`send_reply` always asks: scoped send grants are step 3e, later. The approver decides with `POST /api/actions/<id>/decide`.
+`send_reply` always asks, except on a campaign in **Auto** reply mode (3e, below). The approver decides with
+`POST /api/actions/<id>/decide`.
 
 - **A bot never approves a reply it drafted** (owner decision, fixed policy). That covers drafts filed through
   `/api/inbox/draft`, through `/api/actions` with its cookie, and by Lume's agent in a chat the bot started or ran (the
@@ -239,6 +244,15 @@ On `/operator` the reply card does the same as a plain form: a `body` textarea p
 await fetch(`/api/actions/${id}/decide`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ decision: 'approve', body: editedText }) })
 ```
+
+### Reply approval modes (3e)
+
+Each Instantly campaign has a mode, `owner` (default), `client` or `auto`, stored in `lume_campaign_reply_modes`
+(`GET /api/campaigns/reply-mode`; `PUT { campaign_id, mode }` is owner-session only). In `auto`, a new `send_reply` is
+approved at creation with `decided_via='grant'` when the verdict is GOOD and nothing holds it (BAD, an unsubscribe or
+hostile message, a labelled reply, a negative interest, a lead labelled BAD / unsubscribe / hostile / not interested
+before, an unverified recipient). The executor then runs every check above and re-evaluates the grant last. `client`
+behaves like `owner` until the Slack app (3g). Details: `docs/lume/INBOX-MANAGER-SETUP.md` → "Reply approval modes".
 
 ## POST `/api/inbox/label`
 
@@ -370,4 +384,7 @@ curl -sS -b bot.jar -X POST -H 'Content-Type: application/json' "$LUME/api/inbox
 | Positive replies + alert, New replies | `lume/lib/inbox/replies.ts`, `lume/lib/inbox/webhook.ts`, `lume_replies` table |
 | Send safety | `send_reply` in `lume/lib/actions/execute.ts`; `pending_actions_one_reply_per_inbound_idx` |
 | Edit | `lume/app/api/actions/[id]/decide/route.ts` |
-| Migration / pgTAP | `supabase/migrations/20261029015954_lume_inbox_replies.sql`, `supabase/tests/lume_inbox_replies_test.sql` |
+| Inbox project template (3d) | `lume/lib/inbox/templates.ts`, `lume/lib/inbox/seedProject.ts`, `lume/app/api/verticals/[id]/inbox-project/route.ts`, agent `create_inbox_project` |
+| Reply modes + grant (3e) | `lume/lib/inbox/replyMode.ts`, `lume/lib/inbox/replyModeStore.ts`, `lume/lib/actions/grant.ts`, `lume/app/api/campaigns/reply-mode/route.ts` |
+| Webhook push (3f) | `lume/lib/webhooks/{push,deliver,store}.ts`, `lume/app/api/verticals/[id]/webhook/{route,test/route}.ts` |
+| Migration / pgTAP | `supabase/migrations/20261029015954_lume_inbox_replies.sql`, `supabase/tests/lume_inbox_replies_test.sql`; 3e/3f: `supabase/migrations/20261029025503_lume_reply_modes_webhooks.sql`, `supabase/tests/lume_reply_modes_webhooks_test.sql` |
