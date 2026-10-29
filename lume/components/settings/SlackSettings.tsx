@@ -55,6 +55,7 @@ const ERRORS: Record<string, string> = {
   vertical_not_found: 'That vertical no longer exists.',
   campaign_not_in_vertical: 'A chosen campaign is not in that vertical any more.',
   slack_error: 'Slack refused the request.',
+  lume_url_unset: 'Set LUME_URL on Vercel (the public Lume URL) before generating install links.',
 }
 const errorText = (status: number, body: unknown) => {
   const b = body as { error?: string; code?: string } | null

@@ -55,6 +55,26 @@ describe('POST /api/slack/install-link', () => {
   })
 })
 
+describe('install-link host', () => {
+  it('uses LUME_URL, never the request host', async () => {
+    const res = await installLink(req('https://evil.example/api/slack/install-link', 'POST', {}, { 'x-forwarded-host': 'evil.example' }))
+    expect((await res.json()).url.startsWith('https://lume.example/api/slack/install?t=')).toBe(true)
+  })
+  it('in production without LUME_URL: a clear 503, no link', async () => {
+    vi.stubEnv('LUME_URL', '')
+    vi.stubEnv('NODE_ENV', 'production')
+    const res = await installLink(req('https://lume.example/api/slack/install-link', 'POST', {}))
+    expect(res.status).toBe(503)
+    expect(await res.json()).toMatchObject({ error: 'lume_url_unset' })
+  })
+  it('in development without LUME_URL: the request origin', async () => {
+    vi.stubEnv('LUME_URL', '')
+    vi.stubEnv('NODE_ENV', 'development')
+    const res = await installLink(req('http://localhost:3461/api/slack/install-link', 'POST', {}))
+    expect((await res.json()).url.startsWith('http://localhost:3461/api/slack/install?t=')).toBe(true)
+  })
+})
+
 describe('GET /api/slack/installs', () => {
   it('reports not configured (with the missing names) but still lists', async () => {
     vi.stubEnv('SLACK_CLIENT_ID', '')
