@@ -296,3 +296,27 @@ export async function deletePendingUploads(paths: string[]): Promise<void> {
   const res = await createServiceClient().from('agent_project_uploads').delete().in('storage_path', paths)
   if (res.error) throw new DbError('deletePendingUploads', res.error)
 }
+
+/**
+ * Append one line to the newest note named `name` in the project (name match
+ * ignores case), creating the note when missing — atomic in the database
+ * (`lume_project_append_line`, advisory lock per project + name). Throws
+ * ProjectGoneError for a missing project and `NotANoteError` when that name
+ * is an uploaded file (never rewritten).
+ */
+export class NotANoteError extends Error {
+  constructor() {
+    super('not_a_note')
+    this.name = 'NotANoteError'
+  }
+}
+
+export async function appendProjectLine(projectId: string, name: string, line: string): Promise<{ id: string; name: string; created: boolean; chars: number }> {
+  const res = await createServiceClient().rpc('lume_project_append_line', { p_project: projectId, p_name: name, p_line: line })
+  if (res.error) {
+    if (/project_not_found/.test(res.error.message)) throw new ProjectGoneError()
+    if (/not_a_note/.test(res.error.message)) throw new NotANoteError()
+    throw new DbError('appendProjectLine', res.error)
+  }
+  return res.data as { id: string; name: string; created: boolean; chars: number }
+}

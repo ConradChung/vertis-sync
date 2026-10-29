@@ -37,6 +37,17 @@ describe('formSameOrigin', () => {
     expect(formSameOrigin(r('same-origin'))).toBe(true)
     expect(formSameOrigin(r('cross-site'))).toBe(false)
   })
+  it("a Grok Bot's fetch() from its signed-in Lume tab (inbox API): same Origin + Sec-Fetch-Site same-origin passes", () => {
+    const bot = (headers: Record<string, string>, url = 'https://lume.test/api/inbox/label') =>
+      new Request(url, { method: 'POST', headers: { 'content-type': 'application/json', 'sec-fetch-mode': 'cors', ...headers } })
+    expect(formSameOrigin(bot({ origin: 'https://lume.test', 'sec-fetch-site': 'same-origin' }))).toBe(true)
+    // behind Vercel's proxy the public host arrives as x-forwarded-host
+    expect(formSameOrigin(bot({ origin: 'https://lume-amber-alpha.vercel.app', 'x-forwarded-host': 'lume-amber-alpha.vercel.app' }, 'http://internal:3000/api/inbox/label'))).toBe(true)
+    // a page on another site making the same fetch with the cookie
+    expect(formSameOrigin(bot({ origin: 'https://evil.test', 'sec-fetch-site': 'cross-site' }))).toBe(false)
+    // a sibling subdomain is not same-origin
+    expect(formSameOrigin(bot({ origin: 'https://x.lume.test', 'sec-fetch-site': 'same-site' }))).toBe(false)
+  })
 })
 
 describe('readJsonOrForm', () => {
