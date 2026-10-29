@@ -22,6 +22,13 @@ export const READ_CHUNK = 20_000
 export const NAME_MAX = 80
 export const INSTRUCTIONS_MAX = 8000
 export const NOTE_MAX = 20_000
+/**
+ * A pending upload older than this is an orphan the hourly sweep deletes.
+ * Signed upload URLs stay valid for 2 h (storage-js createSignedUploadUrl),
+ * so a younger row may still get its object. lume_project_upload_sweep()
+ * uses the same 3 h.
+ */
+export const STALE_UPLOAD_MS = 3 * 60 * 60 * 1000
 
 export type FileType = 'csv' | 'pdf' | 'text' | 'json' | 'image'
 

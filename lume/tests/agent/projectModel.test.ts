@@ -207,3 +207,10 @@ describe('project scope', () => {
     expect(canLinkVertical(null, 'v2')).toBe(true)
   })
 })
+
+describe('STALE_UPLOAD_MS', () => {
+  it('is longer than a signed upload URL lives (2 h)', async () => {
+    const { STALE_UPLOAD_MS } = await import('@/lib/agent/projectModel')
+    expect(STALE_UPLOAD_MS).toBeGreaterThan(2 * 60 * 60 * 1000)
+  })
+})

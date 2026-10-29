@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireSecret } from '@/lib/auth/guards'
 import { deletePendingUploads, pathsInUse, stalePendingUploads } from '@/lib/agent/projects'
+import { STALE_UPLOAD_MS } from '@/lib/agent/projectModel'
 import { removeProjectObjects } from '@/lib/agent/projectStorage'
 import { dbErrorResponse } from '@/lib/http/errors'
 
@@ -16,12 +17,7 @@ import { dbErrorResponse } from '@/lib/http/errors'
  */
 export const maxDuration = 60
 
-/**
- * Signed upload URLs stay valid for 2 h (storage-js createSignedUploadUrl), so
- * a younger row may still get its object: only rows past 3 h are orphans.
- * lume_project_upload_sweep() uses the same 3 h.
- */
-export const STALE_UPLOAD_MS = 3 * 60 * 60 * 1000
+
 
 export async function POST(req: Request) {
   const auth = requireSecret(req, 'X-Lume-Hook-Secret', 'LUME_HOOK_SECRET')
