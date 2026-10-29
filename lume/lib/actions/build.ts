@@ -288,7 +288,8 @@ async function replyRecipient(replyToUuid: string): Promise<{ lead: string; camp
  * `lead_name` / `company` (CRM deal, else lead bank). An outbound email is
  * refused (`not_an_inbound_email`), and so is one with no receiving inbox
  * (`no_eaccount`). The email's `campaign_id` replaces the caller's.
- * `reply_to_uuid` is lowercased. The caller's judgment fields (verdict,
+ * It sets `campaign_verified: true` only then (server-only; the Auto-mode
+ * grant requires it). `reply_to_uuid` is lowercased. The caller's judgment fields (verdict,
  * proposed_times, research_note) pass through. Edit fields are dropped (only
  * the decide route's Edit writes them), and so is `drafted_by_operator`
  * (the caller of the builder sets it from who is asking). Shape errors are left for
@@ -301,6 +302,7 @@ async function withServerExtras(kind: CampaignActionKind, raw: Record<string, un
   delete p.campaign_name
   delete p.source_name
   delete p.recipient_verified
+  delete p.campaign_verified
   if (kind === 'send_reply') {
     for (const k of CARD_FACTS) delete p[k]
     const claimed = text(p.lead_email) ?? text(p.to)
@@ -316,7 +318,11 @@ async function withServerExtras(kind: CampaignActionKind, raw: Record<string, un
       p.recipient_verified = true
       p.eaccount = email.eaccount
       // The email's own campaign, never the caller's: routing and scope follow it.
-      if (email.campaign_id) p.campaign_id = email.campaign_id
+      // campaign_verified (server-only): the campaign came from the email itself; the Auto grant requires it.
+      if (email.campaign_id) {
+        p.campaign_id = email.campaign_id
+        p.campaign_verified = true
+      }
       p.thread_id = email.thread_id
       const said = trimQuotes(email.text)
       if (said) p.their_message = said.length > 2000 ? `${said.slice(0, 1999)}…` : said

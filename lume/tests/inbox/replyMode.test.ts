@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { grantBlocker, looksLikeOptOut, parseReplyMode, REPLY_MODES } from '@/lib/inbox/replyMode'
 
-const good = { campaign_id: 'c-1', verdict: 'GOOD', their_message: 'Sounds good, Tuesday works.', recipient_verified: true }
+const good = { campaign_id: 'c-1', campaign_verified: true, verdict: 'GOOD', their_message: 'Sounds good, Tuesday works.', recipient_verified: true }
 const ctx = (extra: Partial<Parameters<typeof grantBlocker>[0]> = {}) => ({ mode: 'auto' as const, payload: good, reply: null, leadReplies: [], ...extra })
 
 describe('reply modes', () => {
@@ -28,6 +28,11 @@ describe('grantBlocker (Auto mode is the only path that approves a reply with no
     expect(grantBlocker(ctx({ payload: { ...good, verdict: 'BAD' } }))).toBe('verdict_bad')
     expect(grantBlocker(ctx({ payload: { ...good, verdict: 'UNSURE' } }))).toBe('verdict_not_good')
     expect(grantBlocker(ctx({ payload: { ...good, verdict: undefined } }))).toBe('verdict_not_good')
+  })
+
+  it('needs a server-verified campaign (the email named it)', () => {
+    expect(grantBlocker(ctx({ payload: { ...good, campaign_verified: undefined } }))).toBe('campaign_unverified')
+    expect(grantBlocker(ctx({ payload: { ...good, campaign_verified: false } }))).toBe('campaign_unverified')
   })
 
   it('an unverified recipient or a missing lead message is held', () => {

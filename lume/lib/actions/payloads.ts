@@ -51,6 +51,8 @@ export const CAMPAIGN_PAYLOADS = {
     campaign_name: LABEL,
     /** Set by the server builder: false when the recipient could not be looked up. */
     recipient_verified: z.boolean().optional(),
+    /** Set by the server builder only when Instantly's email named the campaign (the Auto grant requires it). */
+    campaign_verified: z.boolean().optional(),
     thread_id: LABEL,
     // The reply card (inbox manager): server facts + the drafter's judgment.
     lead_name: LABEL,

@@ -16,7 +16,7 @@ vi.mock('@/lib/actions/execute', () => exec)
 
 import { evaluateGrant, tryGrantSend } from '@/lib/actions/grant'
 
-const payload = { summary: 's', campaign_id: 'c-1', reply_to_uuid: 'u-1', lead_email: 'ada@acme.com', eaccount: 'me@x.com', body: 'hi', verdict: 'GOOD', their_message: 'Tuesday works', recipient_verified: true }
+const payload = { summary: 's', campaign_id: 'c-1', campaign_verified: true, reply_to_uuid: 'u-1', lead_email: 'ada@acme.com', eaccount: 'me@x.com', body: 'hi', verdict: 'GOOD', their_message: 'Tuesday works', recipient_verified: true }
 const row = (p: Record<string, unknown> = payload, kind = 'send_reply') => ({ id: 'a-1', kind, payload: p, status: 'awaiting' }) as unknown as PendingActionRow
 
 beforeEach(() => {

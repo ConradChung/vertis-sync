@@ -49,6 +49,17 @@ describe('send_reply snapshot', () => {
     expect(b.payload.summary).toContain('Send reply to ada@acme.com from frank@ours.com (Scaleport)')
   })
 
+  it('campaign_verified is set only when the email itself names its campaign; a caller cannot claim it', async () => {
+    const b = await build({ reply_to_uuid: 'e1', body: 'x', campaign_verified: true })
+    expect(b.ok && b.payload.campaign_verified).toBe(true)
+    em.getEmail.mockResolvedValue(inbound({ campaign_id: null }))
+    const c = await build({ reply_to_uuid: 'e1', body: 'x', campaign_id: CID, campaign_verified: true })
+    expect(c.ok && c.payload.campaign_verified).toBeUndefined()
+    em.getEmail.mockResolvedValue(null)
+    const d = await build({ reply_to_uuid: 'e1', body: 'x', eaccount: 'frank@ours.com', campaign_id: CID, campaign_verified: true })
+    expect(d.ok && d.payload.campaign_verified).toBeUndefined()
+  })
+
   it('a different eaccount from the caller is replaced by the one that received the reply', async () => {
     const b = await build({ reply_to_uuid: 'e1', body: 'x', eaccount: 'someone-else@ours.com' })
     expect(b.ok && b.payload.eaccount).toBe('frank@ours.com')

@@ -307,6 +307,10 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
     // Auto mode (decided_via 'grant'): nobody approved it, so the grant itself
     // is re-checked last: still Auto, and nothing since holds it for a person.
     if (action.decided_via === 'grant') {
+      // The grant belongs to one campaign: the answered email must be in it.
+      if (!answered.campaign_id || answered.campaign_id !== str(p.campaign_id)) {
+        return refuse('campaign_mismatch', "the Auto-mode grant is for another campaign than the answered email's", { answered_campaign_id: answered.campaign_id ?? null })
+      }
       let held
       try {
         held = await grantStillHolds(action)

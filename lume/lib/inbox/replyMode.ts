@@ -40,6 +40,8 @@ export type GrantBlocker =
   | 'mode_owner'
   | 'mode_client'
   | 'no_campaign'
+  | 'campaign_unverified'
+  | 'campaign_mismatch'
   | 'verdict_bad'
   | 'verdict_not_good'
   | 'recipient_unverified'
@@ -70,6 +72,7 @@ export function grantBlocker(c: GrantContext): GrantBlocker | null {
   if (c.mode !== 'auto') return c.mode === 'client' ? 'mode_client' : 'mode_owner'
   const p = c.payload
   if (typeof p.campaign_id !== 'string' || !p.campaign_id) return 'no_campaign'
+  if (p.campaign_verified !== true) return 'campaign_unverified'
   if (p.verdict === 'BAD') return 'verdict_bad'
   if (p.verdict !== 'GOOD') return 'verdict_not_good'
   if (p.recipient_verified === false) return 'recipient_unverified'
@@ -87,6 +90,8 @@ export const GRANT_BLOCKER_TEXT: Record<GrantBlocker, string> = {
   mode_owner: 'the campaign is in Owner mode',
   mode_client: 'the campaign is in Client mode (client approval arrives with the Slack app; the owner approves until then)',
   no_campaign: 'the reply has no campaign',
+  campaign_unverified: "the campaign was not confirmed from the lead's email",
+  campaign_mismatch: "the reply's campaign is not the answered email's campaign",
   verdict_bad: 'the verdict is BAD',
   verdict_not_good: 'Auto mode sends only replies with a verdict of GOOD',
   recipient_unverified: 'the recipient could not be verified',

@@ -362,23 +362,31 @@ describe('executeAction dispatch table', () => {
 
     it('an Auto-mode grant (decided_via grant) is re-checked right before the send, after every live check', async () => {
       grantMod.grantStillHolds.mockReset().mockResolvedValue(null)
-      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi' }, { decided_via: 'grant' }))
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi', campaign_id: 'camp-1' }, { decided_via: 'grant' }))
       expect(await executeAction(ID)).toMatchObject({ status: 'executed' })
       expect(grantMod.grantStillHolds).toHaveBeenCalledTimes(1)
       expect(em.getThreadEmails.mock.invocationCallOrder[0]).toBeLessThan(grantMod.grantStillHolds.mock.invocationCallOrder[0])
       expect(grantMod.grantStillHolds.mock.invocationCallOrder[0]).toBeLessThan(store.markSendAttempted.mock.invocationCallOrder[0])
     })
 
+    it("a grant whose campaign is not the answered email's campaign is refused (campaign_mismatch)", async () => {
+      grantMod.grantStillHolds.mockReset().mockResolvedValue(null)
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi', campaign_id: 'other-camp' }, { decided_via: 'grant' }))
+      await refusedWith(/^campaign_mismatch/)
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi' }, { decided_via: 'grant' }))
+      await refusedWith(/^campaign_mismatch/)
+    })
+
     it('a grant that no longer holds (mode changed, a label since): grant_revoked, nothing sent', async () => {
       grantMod.grantStillHolds.mockReset().mockResolvedValue('mode_owner')
-      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi' }, { decided_via: 'grant' }))
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi', campaign_id: 'camp-1' }, { decided_via: 'grant' }))
       const out = await refusedWith(/^grant_revoked/)
       expect(out).toMatchObject({ result: { grant_revoked: true, grant_blocker: 'mode_owner' } })
     })
 
     it('a grant that cannot be re-checked is refused', async () => {
       grantMod.grantStillHolds.mockReset().mockRejectedValue(new Error('db down'))
-      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi' }, { decided_via: 'grant' }))
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi', campaign_id: 'camp-1' }, { decided_via: 'grant' }))
       await refusedWith(/^grant_unverifiable/)
     })
 
