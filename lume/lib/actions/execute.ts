@@ -15,6 +15,8 @@ import { applyLabel } from '@/lib/inbox/label'
 import { LabelBody } from '@/lib/inbox/schemas'
 import { isBlocked } from '@/lib/adapters/instantlyLabels'
 import { closeReply } from '@/lib/inbox/replies'
+import { grantStillHolds } from '@/lib/actions/grant'
+import { GRANT_BLOCKER_TEXT } from '@/lib/inbox/replyMode'
 import { alert, alertLink, titleFrom } from '@/lib/alerts'
 import { routeItemForAction } from '@/lib/operators/route'
 import { createOperatorKey, getVertical } from '@/lib/operators/store'
@@ -237,6 +239,9 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
    *  4. the lead must still be replyable: the reply not closed by a label
    *     (`reply_labeled`), the deal not Lost (`deal_lost`), the address and
    *     domain not on the Instantly blocklist (`lead_blocked`);
+   *  4b. approved by an Auto-mode grant (decided_via 'grant'): the grant is
+   *     re-evaluated (still Auto, still GOOD, no closing label since), else
+   *     `grant_revoked` / `grant_unverifiable`;
    *  5. `send_attempted` is recorded, then /emails/reply on that email (so the
    *     reply stays in its thread) with the time left as its timeout. From
    *     here the row blocks another reply to this email even if it fails
@@ -299,6 +304,17 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
     if (replyRow?.handled_how?.startsWith('label:')) return refuse('reply_labeled', `the reply was labeled ${replyRow.handled_how.slice(6)}`)
     if (deal?.stage === 'Lost') return refuse('deal_lost', 'the CRM deal is Lost')
     if (blocked) return refuse('lead_blocked', 'the address or its domain is on the Instantly blocklist')
+    // Auto mode (decided_via 'grant'): nobody approved it, so the grant itself
+    // is re-checked last: still Auto, and nothing since holds it for a person.
+    if (action.decided_via === 'grant') {
+      let held
+      try {
+        held = await grantStillHolds(action)
+      } catch (err) {
+        return refuse('grant_unverifiable', `the Auto-mode grant could not be re-checked (${err instanceof Error ? err.message : String(err)})`)
+      }
+      if (held) return refuse('grant_revoked', `the Auto-mode grant no longer holds: ${GRANT_BLOCKER_TEXT[held]}`, { grant_blocker: held })
+    }
     if (deadline - Date.now() < SEND_MIN_TIME_MS) return refuse('deadline_exceeded', 'the re-check took too long to send safely now')
 
     try {

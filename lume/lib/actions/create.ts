@@ -1,6 +1,5 @@
 import 'server-only'
 import { findAwaitingAction, findAwaitingRuleAction, insertPendingAction, isDbError, setActionMessageId } from '@/lib/db/service'
-import { sendActionPrompt } from '@/lib/adapters/telegram'
 import { buildActionPrompt } from '@/lib/adapters/telegram.messages'
 import { alert, alertLink, gateKey, telegramSkipped, titleFrom } from '@/lib/alerts'
 import { routeItemForAction } from '@/lib/operators/route'
@@ -10,6 +9,8 @@ import type { Json, PendingActionKind, PendingActionRow } from '@/lib/db/types'
 import { CRM_CLOSE_KIND, parseCrmClosePayload } from '@/lib/crm/actions'
 import { updateSequencePayloadError } from '@/lib/campaigns/sequenceAction'
 import { removeLeadsPayloadError } from '@/lib/actions/removeLeadsPayload'
+import { tryGrantSend } from '@/lib/actions/grant'
+import { sendActionPrompt, sendMessage } from '@/lib/adapters/telegram'
 
 /**
  * Create a high-risk `pending_actions` row and ask for confirmation in
@@ -190,6 +191,28 @@ export async function createAction(
       throw new DuplicateActionError(winner?.id ?? '')
     }
     throw err
+  }
+
+  // A campaign in Auto reply mode approves its own reply here (decided_via
+  // 'grant', lib/actions/grant.ts) and the executor runs after the response
+  // with every live re-check. No approval prompt then: a one-line notice.
+  if (kind === 'send_reply') {
+    const grant = await tryGrantSend(row)
+    if (grant.granted) {
+      const route = routeItemForAction(row)
+      const text = `🤖 Auto-approved (campaign in Auto reply mode) — send_reply\n${String(payload.summary)}\nSending after the live thread re-check.`
+      try {
+        await alert({
+          source: 'lume.actions', severity: 'info', title: titleFrom(text), body: text,
+          link: alertLink(`/actions/${row.id}`), campaign_id: route.campaign_id, scope: route.scope, owner_only: route.owner_only,
+          dedupe_key: gateKey(row.id, 'lume_action'),
+          telegram: () => sendMessage(text, { disablePreview: true }),
+        })
+      } catch (err) {
+        console.error('[actions] auto-approval notice failed:', err instanceof Error ? err.message : err)
+      }
+      return grant.row
+    }
   }
 
   // The approval ping: always in the feed (one row per action), and the same

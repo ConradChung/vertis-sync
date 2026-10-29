@@ -40,14 +40,15 @@ export async function getActionStatuses(ids: string[]): Promise<Map<string, stri
  * Same claim telegram-inbox's lume_ok/lume_no runs, with decided_via='lume'
  * (the owner's tap), 'agent' (skip-permissions mode approving for them) or
  * 'operator' (a Grok Bot signed in with its operator key; `operatorId` is
- * stored as `decided_by_operator`). `payload` (an approver's Edit of a
+ * stored as `decided_by_operator`) or 'grant' (a campaign in Auto reply mode,
+ * lib/actions/grant.ts). `payload` (an approver's Edit of a
  * send_reply, already validated) is written in the same conditional PATCH,
  * so the edit lands only if this claim wins.
  */
 export async function claimDecision(
   id: string,
   approve: boolean,
-  via: 'lume' | 'agent' | 'operator' = 'lume',
+  via: 'lume' | 'agent' | 'operator' | 'grant' = 'lume',
   operatorId?: string | null,
   payload?: Record<string, Json>
 ): Promise<PendingActionRow | null> {

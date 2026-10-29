@@ -63,6 +63,8 @@ const labels = vi.hoisted(() => ({ isBlocked: vi.fn() }))
 const inboxLabel = vi.hoisted(() => ({ applyLabel: vi.fn() }))
 vi.mock('@/lib/inbox/label', () => inboxLabel)
 vi.mock('@/lib/adapters/instantlyLabels', () => labels)
+const grantMod = vi.hoisted(() => ({ grantStillHolds: vi.fn() }))
+vi.mock('@/lib/actions/grant', () => ({ ...grantMod, tryGrantSend: vi.fn().mockResolvedValue({ granted: false, reason: 'mode_owner' }) }))
 
 const tg = vi.hoisted(() => ({ sendMessage: vi.fn(), editMessage: vi.fn(), sendDecisionNote: vi.fn(), sendActionPrompt: vi.fn() }))
 vi.mock('@/lib/adapters/telegram', () => tg)
@@ -354,6 +356,35 @@ describe('executeAction dispatch table', () => {
       expect(inboxReplies.closeReply).toHaveBeenCalledWith('u-1', 'replied', { actionId: ID })
       // the live checks happen before the send
       expect(em.getThreadEmails.mock.invocationCallOrder[0]).toBeLessThan(ins.sendReply.mock.invocationCallOrder[0])
+    })
+
+    it('an Auto-mode grant (decided_via grant) is re-checked right before the send, after every live check', async () => {
+      grantMod.grantStillHolds.mockReset().mockResolvedValue(null)
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi' }, { decided_via: 'grant' }))
+      expect(await executeAction(ID)).toMatchObject({ status: 'executed' })
+      expect(grantMod.grantStillHolds).toHaveBeenCalledTimes(1)
+      expect(em.getThreadEmails.mock.invocationCallOrder[0]).toBeLessThan(grantMod.grantStillHolds.mock.invocationCallOrder[0])
+      expect(grantMod.grantStillHolds.mock.invocationCallOrder[0]).toBeLessThan(store.markSendAttempted.mock.invocationCallOrder[0])
+    })
+
+    it('a grant that no longer holds (mode changed, a label since): grant_revoked, nothing sent', async () => {
+      grantMod.grantStillHolds.mockReset().mockResolvedValue('mode_owner')
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi' }, { decided_via: 'grant' }))
+      const out = await refusedWith(/^grant_revoked/)
+      expect(out).toMatchObject({ result: { grant_revoked: true, grant_blocker: 'mode_owner' } })
+    })
+
+    it('a grant that cannot be re-checked is refused', async () => {
+      grantMod.grantStillHolds.mockReset().mockRejectedValue(new Error('db down'))
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi' }, { decided_via: 'grant' }))
+      await refusedWith(/^grant_unverifiable/)
+    })
+
+    it('an owner-approved reply does not consult the grant', async () => {
+      grantMod.grantStillHolds.mockReset()
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi' }))
+      await executeAction(ID)
+      expect(grantMod.grantStillHolds).not.toHaveBeenCalled()
     })
 
     it('no subject: Re: the original subject', async () => {
