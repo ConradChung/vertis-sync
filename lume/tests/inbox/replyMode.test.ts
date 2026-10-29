@@ -38,6 +38,7 @@ describe('grantBlocker (Auto mode is the only path that approves a reply with no
 
   it('an unverified recipient or a missing lead message is held', () => {
     expect(grantBlocker(ctx({ payload: { ...good, recipient_verified: false } }))).toBe('recipient_unverified')
+    expect(grantBlocker(ctx({ payload: { ...good, recipient_verified: undefined } }))).toBe('recipient_unverified')
     expect(grantBlocker(ctx({ email: { ...EMAIL, message: '' } }))).toBe('no_lead_message')
   })
 

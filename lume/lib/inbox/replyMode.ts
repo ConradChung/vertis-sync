@@ -103,7 +103,7 @@ export function grantBlocker(c: GrantContext): GrantBlocker | null {
   if (p.campaign_verified !== true) return 'campaign_unverified'
   if (p.verdict === 'BAD') return 'verdict_bad'
   if (p.verdict !== 'GOOD') return 'verdict_not_good'
-  if (p.recipient_verified === false) return 'recipient_unverified'
+  if (p.recipient_verified !== true) return 'recipient_unverified'
   const card = typeof p.their_message === 'string' ? p.their_message.trim() : ''
   const full = c.email?.message.trim() ?? ''
   if (!c.email || !full) return 'no_lead_message'
