@@ -8,6 +8,7 @@ import { fetchJson } from '@/hooks/fetcher'
 import { sendJson } from '@/lib/validate/client'
 import type { LumeCampaignRow } from '@/lib/db/types'
 import type { InstantlyCampaign } from '@/lib/adapters/instantly.map'
+import { WebhookPanel } from '@/components/settings/WebhookPanel'
 import { VERTICAL_SCOPES, type Operator, type Vertical, type VerticalScope } from '@/lib/operators/types'
 
 /**
@@ -147,18 +148,23 @@ export function VerticalsSettings({ canManageKeys }: { canManageKeys: boolean })
         {verticals.error && <p className="text-sm text-destructive">Could not load verticals.</p>}
         <div className="flex flex-col gap-4">
           {live.map((v) => (
-            <VerticalEditor
-              key={`${v.id}:${v.name}:${v.campaign_ids.join(',')}:${v.scopes.join(',')}:${v.is_default}`}
-              vertical={v}
-              options={options}
-              canManageKeys={canManageKeys}
-              onSave={(patch) => call(`/api/verticals/${v.id}`, patch, 'PATCH')}
-              onArchive={() => {
-                if (confirm(`Archive “${v.name}”? Its bots keep their keys until you revoke them.`)) void call(`/api/verticals/${v.id}`, { archived: true }, 'PATCH')
-              }}
-              onMint={(label) => mint({ vertical_id: v.id }, label)}
-              onInboxProject={() => void inboxProject(v)}
-            />
+            <div key={v.id} className="flex flex-col">
+              <VerticalEditor
+                key={`${v.id}:${v.name}:${v.campaign_ids.join(',')}:${v.scopes.join(',')}:${v.is_default}`}
+                vertical={v}
+                options={options}
+                canManageKeys={canManageKeys}
+                onSave={(patch) => call(`/api/verticals/${v.id}`, patch, 'PATCH')}
+                onArchive={() => {
+                  if (confirm(`Archive “${v.name}”? Its bots keep their keys until you revoke them.`)) void call(`/api/verticals/${v.id}`, { archived: true }, 'PATCH')
+                }}
+                onMint={(label) => mint({ vertical_id: v.id }, label)}
+                onInboxProject={() => void inboxProject(v)}
+              />
+              <div className="rounded-b-lg border border-t-0 border-border px-4 pb-3">
+                <WebhookPanel verticalId={v.id} verticalName={v.name} canManage={canManageKeys} />
+              </div>
+            </div>
           ))}
           <VerticalEditor key="new" vertical={null} options={options} canManageKeys={false} onSave={(v) => call('/api/verticals', v)} />
         </div>
