@@ -15,7 +15,7 @@ const grant = vi.hoisted(() => ({ scheduleExecution: vi.fn() }))
 vi.mock('@/lib/actions/grant', () => grant)
 const campaigns = vi.hoisted(() => ({ findAwaitingActionBy: vi.fn() }))
 vi.mock('@/lib/campaigns/service', () => campaigns)
-const inbox = vi.hoisted(() => ({ getReply: vi.fn() }))
+const inbox = vi.hoisted(() => ({ getReply: vi.fn(), listLeadReplies: vi.fn() }))
 vi.mock('@/lib/inbox/store', () => inbox)
 const modes = vi.hoisted(() => ({ getReplyMode: vi.fn() }))
 vi.mock('@/lib/inbox/replyModeStore', () => modes)
@@ -61,6 +61,7 @@ beforeEach(() => {
   store.getPost.mockResolvedValue(post)
   ops.listVerticals.mockResolvedValue([vertical])
   inbox.getReply.mockResolvedValue(reply)
+  inbox.listLeadReplies.mockResolvedValue([])
   facts.gatherFacts.mockResolvedValue(leadFacts)
   modes.getReplyMode.mockResolvedValue('client')
   campaigns.findAwaitingActionBy.mockResolvedValue(null)
@@ -235,7 +236,7 @@ describe('clientSaveEdit', () => {
 })
 
 describe('clientApprovalBlocker (executor re-check)', () => {
-  const approved = { payload: action().payload, decided_by_slack_team: 'T0AAA', decided_by_slack_user: 'U0CLIENT', edited_by_slack_user: null }
+  const approved = { payload: { ...action().payload, lead_email: 'ada@acme.com' }, decided_by_slack_team: 'T0AAA', decided_by_slack_user: 'U0CLIENT', edited_by_slack_user: null }
   const answered = { campaign_id: CAMPAIGN, text: 'Tuesday works' }
   it('holds while everything still holds', async () => expect(await clientApprovalBlocker(approved, answered)).toBeNull())
   it('the owner switched the campaign out of Client mode', async () => {
@@ -248,6 +249,15 @@ describe('clientApprovalBlocker (executor re-check)', () => {
     store.getInstall.mockResolvedValue({ team_id: 'T0AAA', revoked_at: null })
     store.listBindings.mockResolvedValue([])
     expect(await clientApprovalBlocker(approved, answered)).toBe('client_unbound')
+  })
+  it('another reply from the same lead labeled unsubscribe or hostile (any campaign) refuses it', async () => {
+    inbox.listLeadReplies.mockResolvedValue([{ reply_to_uuid: 'r-0', handled_how: 'label:unsubscribe', interest: null }])
+    expect(await clientApprovalBlocker(approved, answered)).toBe('lead_labeled_negative')
+    expect(inbox.listLeadReplies).toHaveBeenCalledWith('ada@acme.com')
+    inbox.listLeadReplies.mockResolvedValue([{ reply_to_uuid: 'r-0', handled_how: 'label:hostile', interest: null }])
+    expect(await clientApprovalBlocker(approved, answered)).toBe('lead_labeled_negative')
+    inbox.listLeadReplies.mockResolvedValue([{ reply_to_uuid: 'r-0', handled_how: 'replied', interest: 1 }])
+    expect(await clientApprovalBlocker(approved, answered)).toBeNull()
   })
   it('a fresh opt-out in the email, another campaign, or a self-edit', async () => {
     expect(await clientApprovalBlocker(approved, { ...answered, text: 'Actually, stop emailing me' })).toBe('opt_out_or_hostile')

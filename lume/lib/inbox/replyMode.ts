@@ -54,6 +54,11 @@ export function looksLikeOptOut(text: string | null | undefined): boolean {
 /** Labels (lume_replies.handled_how) that close a lead for good: never auto-send to them again. */
 export const NEGATIVE_LABELS: ReadonlySet<string> = new Set(['label:bad_fit', 'label:unsubscribe', 'label:hostile', 'label:not_interested'])
 
+/** An earlier label closed this lead (any campaign): the Auto grant and a client's Slack approval both refuse. */
+export function leadLabeledNegative(leadReplies: readonly { handled_how: string | null }[]): boolean {
+  return leadReplies.some((r) => r.handled_how !== null && NEGATIVE_LABELS.has(r.handled_how))
+}
+
 export type GrantBlocker =
   | 'mode_owner'
   | 'mode_client'
@@ -115,7 +120,7 @@ export function grantBlocker(c: GrantContext): GrantBlocker | null {
   if (interest === null && !c.reply) return 'reply_unrecorded'
   if (interest === 0) return 'out_of_office'
   if (typeof interest === 'number' && interest < 0) return 'negative_interest'
-  if (c.leadReplies.some((r) => r.handled_how !== null && NEGATIVE_LABELS.has(r.handled_how))) return 'lead_labeled_negative'
+  if (leadLabeledNegative(c.leadReplies)) return 'lead_labeled_negative'
   return null
 }
 
