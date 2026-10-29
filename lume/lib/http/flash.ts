@@ -17,6 +17,7 @@ export const FLASH_OK = {
   campaign_set: 'Campaign set.',
   acked: 'Alerts acknowledged.',
   apollo_received: 'Apollo link received; choose the count under Needs confirmation.',
+  edit_saved: 'Edit saved. The reply is now your draft and awaits another approver (the owner or another bot); it was not sent.',
 } as const
 
 export const FLASH_ERROR = {
@@ -34,6 +35,8 @@ export const FLASH_ERROR = {
   approved_unknown: 'Approved, but its run could not be confirmed. Check Recent outcomes before doing anything else.',
   key_on_action_page: 'Decide this on its action page: its sign-in link is shown once there.',
   master_only: 'Only the master bot or the owner can issue keys or manage verticals.',
+  campaign_out_of_scope: 'That belongs to another vertical; nothing happened.',
+  self_drafted: 'You drafted this reply, so you cannot approve it; another approver must.',
   several_matches: 'Several campaigns match; pick one from the list.',
   no_campaign_match: 'No campaign matched that name.',
   unknown_campaign: 'That campaign does not exist in Instantly.',

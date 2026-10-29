@@ -223,7 +223,11 @@ is acknowledged.
 Decisions:
 
 - **Approve:** `{ "decision": "approve" }`
-- **Approve with an edit:** `{ "decision": "approve", "body": "<new text>" }`. Lume keeps the first draft as
+- **Edit as a bot:** `{ "decision": "approve", "body": "<new text>" }` from a Grok Bot does **not** approve. Editing is
+  drafting, so the edit is saved, the reply becomes that bot's draft (`drafted_by_operator`), and it stays awaiting:
+  `200 { "ok": true, "status": "awaiting", "edited": true }` (on `/operator` the page says "Edit saved"). Another approver
+  must then approve it: the owner, the master bot, or another bot of the vertical.
+- **Approve with an edit (owner):** `{ "decision": "approve", "body": "<new text>" }`. Lume keeps the first draft as
   `original_body` and records `edited_by` (`owner` or `operator:<id>`) and `edited_at`. The edit is written in the same
   claim as the approval, so it applies only if this decision wins.
 - **Deny:** `{ "decision": "reject" }`

@@ -16,6 +16,7 @@ const store = vi.hoisted(() => ({
   deleteRule: vi.fn(),
   claimDecision: vi.fn(),
   markSendAttempted: vi.fn(),
+  saveAwaitingPayload: vi.fn(),
 }))
 vi.mock('@/lib/actions/store', () => store)
 
@@ -802,15 +803,74 @@ describe('POST /api/actions/[id]/decide', () => {
       expect(store.claimDecision.mock.calls[0][4]).toMatchObject({ original_body: 'First draft', body: 'Third' })
     })
 
-    it('a Grok Bot edit is attributed to the operator', async () => {
+    describe('a Grok Bot edit makes the reply its draft: saved, still awaiting, never approved in the same call', () => {
       const OP = '9b2f4c1e-0d3a-4e5b-8c7d-6e5f4a3b2c1d'
-      vi.stubEnv('LUME_INTERNAL_SECRET', 'internal-secret')
-      ops.getOperator.mockResolvedValue({ id: OP, vertical_id: 'v1', is_master: false, label: 'Inbox bot', revoked_at: null })
-      store.getAction.mockResolvedValue(row('send_reply', { ...REPLY, campaign_id: 'camp-1' }, { status: 'awaiting', claim_status: 'awaiting' }))
-      store.claimDecision.mockResolvedValue(null)
-      await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve', body: 'Bot edit' }, { cookie: `lume_op=${signOperatorCookie(OP, 'internal-secret')}` }), params(ID))
-      vi.unstubAllEnvs()
-      expect(store.claimDecision.mock.calls[0]).toEqual([ID, true, 'operator', OP, expect.objectContaining({ edited_by: `operator:${OP}` })])
+      const OP2 = '1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f'
+      const asBot = (id: string, master = false) => {
+        ops.getOperator.mockResolvedValue({ id, vertical_id: master ? null : 'v1', is_master: master, label: 'Inbox bot', revoked_at: null })
+        return { cookie: `lume_op=${signOperatorCookie(id, 'internal-secret')}` }
+      }
+      beforeEach(() => {
+        vi.stubEnv('LUME_INTERNAL_SECRET', 'internal-secret')
+        ops.listVerticals.mockResolvedValue([{ id: 'v1', name: 'R', campaign_ids: ['camp-1'], scopes: [], is_default: false, created_at: '', archived_at: null }])
+        ops.listOperators.mockResolvedValue([])
+        store.saveAwaitingPayload.mockReset().mockImplementation(async (_id: string, payload: Record<string, unknown>) => row('send_reply', payload as PendingActionRow['payload'], { status: 'awaiting' }))
+      })
+      afterEach(() => vi.unstubAllEnvs())
+
+      it("an operator editing the owner's draft: saved as its draft, awaiting, no claim, no send", async () => {
+        store.getAction.mockResolvedValue(row('send_reply', { ...REPLY, campaign_id: 'camp-1' }, { status: 'awaiting', claim_status: 'awaiting' }))
+        const res = await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve', body: 'Bot edit' }, asBot(OP)), params(ID))
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ ok: true, status: 'awaiting', edited: true, message: expect.stringContaining('another approver') })
+        expect(store.saveAwaitingPayload).toHaveBeenCalledWith(ID, expect.objectContaining({
+          body: 'Bot edit', original_body: 'Draft body', edited_by: `operator:${OP}`, drafted_by_operator: OP,
+        }))
+        expect(store.claimDecision).not.toHaveBeenCalled()
+        expect(ins.sendReply).not.toHaveBeenCalled()
+      })
+
+      it("an operator editing the agent's draft: the same — it becomes that operator's draft", async () => {
+        store.getAction.mockResolvedValue(row('send_reply', { ...REPLY, campaign_id: 'camp-1', drafted_by: 'agent' }, { status: 'awaiting', claim_status: 'awaiting', requested_by: 'agent' }))
+        await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve', body: 'Bot edit' }, asBot(OP)), params(ID))
+        expect(store.saveAwaitingPayload).toHaveBeenCalledWith(ID, expect.objectContaining({ drafted_by_operator: OP }))
+        expect(store.claimDecision).not.toHaveBeenCalled()
+      })
+
+      it('after the edit the same bot cannot approve, but the owner, the master, or another bot of the vertical can', async () => {
+        const edited = row('send_reply', { ...REPLY, campaign_id: 'camp-1', body: 'Bot edit', drafted_by_operator: OP }, { status: 'awaiting', claim_status: 'awaiting' })
+        store.getAction.mockResolvedValue(edited)
+        expect((await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve' }, asBot(OP)), params(ID))).status).toBe(403)
+        store.claimDecision.mockResolvedValue(null)
+        await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve' }, asBot(OP2)), params(ID))
+        expect(store.claimDecision).toHaveBeenLastCalledWith(ID, true, 'operator', OP2)
+        await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve' }, asBot(OP2, true)), params(ID))
+        expect(store.claimDecision).toHaveBeenCalledTimes(2)
+        await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve' }), params(ID))
+        expect(store.claimDecision).toHaveBeenLastCalledWith(ID, true, 'lume', undefined)
+      })
+
+      it('the edit lost a race (no longer awaiting): 409, nothing saved', async () => {
+        store.getAction.mockResolvedValue(row('send_reply', { ...REPLY, campaign_id: 'camp-1' }, { status: 'awaiting', claim_status: 'awaiting' }))
+        store.saveAwaitingPayload.mockResolvedValue(null)
+        const res = await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve', body: 'Bot edit' }, asBot(OP)), params(ID))
+        expect(res.status).toBe(409)
+        expect(store.claimDecision).not.toHaveBeenCalled()
+      })
+
+      it('the /operator form: the edit is saved and the page says it awaits another approver', async () => {
+        store.getAction.mockResolvedValue(row('send_reply', { ...REPLY, campaign_id: 'camp-1' }, { status: 'awaiting', claim_status: 'awaiting' }))
+        const res = await decidePOST(
+          new Request(`http://localhost/api/actions/${ID}/decide`, {
+            method: 'POST', body: 'decision=approve&body=Form+edit&return_to=%2Foperator',
+            headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'http://localhost', ...asBot(OP) },
+          }),
+          params(ID)
+        )
+        expect(res.status).toBe(303)
+        expect(res.headers.get('location')).toContain('flash=edit_saved')
+        expect(store.claimDecision).not.toHaveBeenCalled()
+      })
     })
 
     it('editing another kind is refused; deny ignores a body', async () => {

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireOwnerSession } from '@/lib/auth/guards'
 import { dispatchExecuteNow, executeAction } from '@/lib/actions/execute'
-import { claimDecision, getAction } from '@/lib/actions/store'
+import { claimDecision, getAction, saveAwaitingPayload } from '@/lib/actions/store'
 import { editMessage, sendDecisionNote } from '@/lib/adapters/telegram'
 import { alert, alertLink, titleFrom } from '@/lib/alerts'
 import { hasLiveMaster, routeItemForAction, verticalFor } from '@/lib/operators/route'
@@ -50,6 +50,13 @@ import type { Json, PendingActionRow } from '@/lib/db/types'
  * to the current one is not an edit. Another kind with a body: 400
  * edit_not_supported; a deny ignores the body.
  *
+ * A Grok Bot's Edit is drafting, not approving: the edited payload is saved
+ * with `drafted_by_operator` = that bot and the action stays awaiting
+ * (200 `{ status: 'awaiting', edited: true }`, form flash edit_saved). By
+ * canApproveSend the bot cannot approve it afterwards; the owner, the master
+ * bot or another bot of the vertical can. The owner's Edit approves in the
+ * same call, as before.
+ *
  * Grok Bots, every kind, JSON and form alike:
  *  - a vertical bot may decide only what routes to its own vertical
  *    (`routeItemForAction` → `verticalFor`, as /operator lists it), else 403
@@ -61,6 +68,8 @@ import type { Json, PendingActionRow } from '@/lib/db/types'
 
 // executeAction may wait on pipeline.decide() (170 s); outlive it.
 export const maxDuration = 300
+
+const EDIT_SAVED_MESSAGE = 'Edit saved as your draft; it was not approved or sent and awaits another approver (the owner, the master bot or another bot of the vertical).'
 
 const Body = z.object({ decision: z.enum(['approve', 'reject']), body: z.string().trim().min(1).max(20_000).optional() })
 
@@ -134,6 +143,19 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
           return dbErrorResponse(err, 'api/actions/decide')
         }
         if (!mine) return deny(403, 'campaign_out_of_scope')
+      }
+      // A bot's Edit makes the reply its own draft: save it and leave it for another approver.
+      if (edited) {
+        let saved
+        try {
+          saved = await saveAwaitingPayload(id, { ...edited, drafted_by_operator: op.id })
+        } catch (err) {
+          if (form) return formRedirect(req, form.returnTo, { error: 'db_error' })
+          return dbErrorResponse(err, 'api/actions/decide')
+        }
+        if (!saved) return deny(409, 'already_handled')
+        if (form) return formRedirect(req, form.returnTo, { ok: 'edit_saved' })
+        return NextResponse.json({ ok: true, status: 'awaiting', edited: true, message: EDIT_SAVED_MESSAGE })
       }
       if (approve && !canApproveSend(op, current)) return deny(403, 'self_drafted', SELF_APPROVAL_ERROR)
     }

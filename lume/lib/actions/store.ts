@@ -70,6 +70,22 @@ export async function claimDecision(
   return ((res.data ?? []) as PendingActionRow[])[0] ?? null
 }
 
+/**
+ * A Grok Bot's Edit of an awaiting send_reply: replace the payload while the
+ * row is still awaiting and unclaimed (a decision in between wins, null).
+ */
+export async function saveAwaitingPayload(id: string, payload: Record<string, Json>): Promise<PendingActionRow | null> {
+  const res = await createServiceClient()
+    .from('pending_actions')
+    .update({ payload })
+    .eq('id', id)
+    .eq('status', 'awaiting')
+    .eq('claim_status', 'awaiting')
+    .select()
+  if (res.error) throw new DbError('saveAwaitingPayload', res.error)
+  return ((res.data ?? []) as PendingActionRow[])[0] ?? null
+}
+
 /** approved + claimed + never executed → executing. Null when someone else got it. */
 export async function claimExecution(id: string): Promise<PendingActionRow | null> {
   const sb = createServiceClient()
