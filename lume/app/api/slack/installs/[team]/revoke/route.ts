@@ -8,9 +8,11 @@ import { getBotToken, revokeInstall } from '@/lib/slack/store'
 
 /**
  * POST → revoke a workspace: Slack is asked to revoke the bot token
- * (auth.revoke, best effort) and the row is marked revoked, so nothing is
- * posted or decided from there again. Works while the env is incomplete too
- * (a revoke must never be blocked). A reinstall from a new link restores it.
+ * (auth.revoke, best effort), the row is marked revoked and every binding of
+ * the workspace is paused, so nothing is posted or decided from there again.
+ * Works while the env is incomplete too (a revoke must never be blocked). A
+ * reinstall (from any unexpired link) does NOT restore it: the bindings stay
+ * paused until the owner re-enables them in Settings → Slack.
  */
 export async function POST(req: Request, ctx: { params: Promise<{ team: string }> }) {
   const auth = await requireOwnerSession(req)

@@ -51,8 +51,11 @@ Settings → Slack → **Generate link** (valid 1–30 days, default 7) → **Co
 - The link is signed and expires; anyone holding it can install until then, so send it directly. A workspace that
   installs sees **nothing** until you bind one of its channels.
 - You get a feed item ("Lume was installed in …") on every install.
-- **Revoke** in Settings → Slack revokes the workspace's token and stops all posting and approvals from it.
-  If the client removes the app, Lume marks it revoked by itself (`app_uninstalled` / `tokens_revoked`).
+- **Revoke** in Settings → Slack revokes the workspace's token, pauses all its channel bindings, and stops all
+  posting and approvals from it. If the client removes the app, Lume does the same by itself (`app_uninstalled` /
+  `tokens_revoked`).
+- A **reinstall** does not undo that, even from a link that has not expired yet: the workspace's bindings stay
+  paused until you **Resume** them in Settings → Slack (you get a "reinstalled" feed item saying so).
 
 ## 5. Bind channels
 

@@ -26,8 +26,22 @@ export interface InstallRow {
 
 const INSTALL_COLS = 'team_id, team_name, bot_user_id, scopes, installed_by, created_at, updated_at, revoked_at'
 
-export async function saveInstall(i: { team_id: string; team_name: string | null; bot_user_id: string; access_token: string; scope: string | null; installed_by: string | null }): Promise<void> {
-  const res = await createServiceClient()
+/**
+ * Store a workspace's install (encrypted token, revoked_at cleared). A
+ * REINSTALL onto an existing row (a revoked client reopening an unexpired
+ * link, or a re-authorisation) never brings its channels back: every binding
+ * of the workspace is paused (active=false) and the owner re-enables them in
+ * Settings → Slack. Returns whether the row existed and how many bindings
+ * were paused.
+ */
+export async function saveInstall(i: { team_id: string; team_name: string | null; bot_user_id: string; access_token: string; scope: string | null; installed_by: string | null }): Promise<{ reinstalled: boolean; paused: number }> {
+  const sb = createServiceClient()
+  const prior = await sb.from('lume_slack_installs').select('team_id').eq('team_id', i.team_id).maybeSingle()
+  if (prior.error) throw new DbError('saveInstall', prior.error)
+  const reinstalled = !!prior.data
+  // Pause first: if the upsert then fails, nothing was re-enabled.
+  const paused = reinstalled ? await pauseBindings(i.team_id) : 0
+  const res = await sb
     .from('lume_slack_installs')
     .upsert(
       {
@@ -43,6 +57,19 @@ export async function saveInstall(i: { team_id: string; team_name: string | null
       { onConflict: 'team_id' }
     )
   if (res.error) throw new DbError('saveInstall', res.error)
+  return { reinstalled, paused }
+}
+
+/** Pause every active binding of a workspace; returns how many were paused. */
+export async function pauseBindings(teamId: string): Promise<number> {
+  const res = await createServiceClient()
+    .from('lume_slack_channels')
+    .update({ active: false, updated_at: new Date().toISOString() })
+    .eq('team_id', teamId)
+    .eq('active', true)
+    .select('id')
+  if (res.error) throw new DbError('pauseBindings', res.error)
+  return (res.data ?? []).length
 }
 
 export async function listInstalls(): Promise<InstallRow[]> {
@@ -66,8 +93,13 @@ export async function getBotToken(teamId: string): Promise<{ token: string; bot_
   return { token: decryptToken(row.bot_token_enc, teamId), bot_user_id: row.bot_user_id }
 }
 
-/** Mark a workspace revoked (uninstall, token revoked, or the owner's Revoke). True when this call revoked it. */
+/**
+ * Mark a workspace revoked (uninstall, token revoked, or the owner's Revoke)
+ * and pause all its bindings, so even a later reinstall posts nothing until
+ * the owner re-enables a channel. True when this call revoked it.
+ */
 export async function revokeInstall(teamId: string): Promise<boolean> {
+  await pauseBindings(teamId)
   const res = await createServiceClient()
     .from('lume_slack_installs')
     .update({ revoked_at: new Date().toISOString(), updated_at: new Date().toISOString() })

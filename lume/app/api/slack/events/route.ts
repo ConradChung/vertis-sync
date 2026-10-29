@@ -10,8 +10,9 @@ import { readSlackRequest } from '@/lib/slack/request'
  *  - url_verification: echo the challenge.
  *  - app_mention: the read-only lead lookup, answered in the thread
  *    (lib/slack/mention.ts).
- *  - app_uninstalled / tokens_revoked: the workspace is marked revoked;
- *    nothing is posted there again until it reinstalls.
+ *  - app_uninstalled / tokens_revoked: the workspace is marked revoked and
+ *    its bindings paused; a reinstall leaves them paused until the owner
+ *    re-enables them in Settings → Slack.
  * A Slack retry (X-Slack-Retry-Num) is acknowledged and dropped: the first
  * delivery already did the work, and a mention must not be answered twice.
  */
@@ -34,7 +35,7 @@ export async function POST(req: Request) {
         const { revokeInstall } = await import('@/lib/slack/store')
         if (await revokeInstall(ev.team)) {
           const title = `Slack workspace ${ev.team} removed Lume (${ev.reason.replace('_', ' ')})`
-          await alert({ source: 'lume.slack', severity: 'warn', title, body: `${title}\nNothing is posted there any more. A reinstall from a new install link restores it.`, link: alertLink('/settings/slack'), owner_only: true })
+          await alert({ source: 'lume.slack', severity: 'warn', title, body: `${title}\nIts channel bindings are paused. A reinstall does not re-enable them; you do, in Settings → Slack.`, link: alertLink('/settings/slack'), owner_only: true })
         }
       }
     } catch (err) {

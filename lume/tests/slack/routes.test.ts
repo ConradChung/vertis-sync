@@ -158,12 +158,22 @@ describe('/api/slack/install and the OAuth callback', () => {
     expect(api.oauthAccess).not.toHaveBeenCalled()
 
     api.oauthAccess.mockResolvedValue({ team_id: 'T0AAA', team_name: 'Acme', bot_user_id: 'U0BOT', access_token: 'xoxb-1', scope: 'chat:write', installed_by: 'U0ADMIN' })
+    store.saveInstall.mockResolvedValue({ reinstalled: false, paused: 0 })
     const ok = await callback(new Request(`https://lume.example/api/slack/oauth/callback?code=c&state=${encodeURIComponent(state)}`, { headers: { cookie: `lume_slack_state=${state}` } }))
     expect(ok.status).toBe(200)
     expect(api.oauthAccess).toHaveBeenCalledWith('c', 'https://lume.example/api/slack/oauth/callback', 'cid', 'csecret')
     expect(store.saveInstall).toHaveBeenCalledWith(expect.objectContaining({ team_id: 'T0AAA', access_token: 'xoxb-1' }))
     expect(alerts.alert).toHaveBeenCalledWith(expect.objectContaining({ owner_only: true }))
     expect(await ok.text()).not.toContain('xoxb')
+  })
+  it('a reinstall tells the owner the bindings were paused and need re-enabling', async () => {
+    const state = signState(KEY, { expiresAt: Date.now() + 60_000, nonce: 's2', link: 'n1' })
+    api.oauthAccess.mockResolvedValue({ team_id: 'T0AAA', team_name: 'Acme', bot_user_id: 'U0BOT', access_token: 'xoxb-2', scope: 'chat:write', installed_by: 'U0ADMIN' })
+    store.saveInstall.mockResolvedValue({ reinstalled: true, paused: 2 })
+    await callback(new Request(`https://lume.example/api/slack/oauth/callback?code=c&state=${encodeURIComponent(state)}`, { headers: { cookie: `lume_slack_state=${state}` } }))
+    const a = alerts.alert.mock.calls[0][0]
+    expect(a.title).toContain('reinstalled')
+    expect(a.body).toMatch(/bindings were paused \(2\).*re-enable them in Settings → Slack/)
   })
   it('a Slack "access_denied" is a cancelled page, nothing stored', async () => {
     const res = await callback(new Request('https://lume.example/api/slack/oauth/callback?error=access_denied'))
