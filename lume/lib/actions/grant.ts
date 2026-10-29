@@ -46,7 +46,7 @@ export async function evaluateGrant(payload: Record<string, Json> | null, fresh?
   const [email, reply, leadReplies] = await Promise.all([
     fresh !== undefined ? Promise.resolve(fresh) : replyTo ? getEmail(replyTo) : Promise.resolve(null),
     replyTo ? getReply(replyTo) : Promise.resolve(null),
-    listLeadReplies(campaign, lead),
+    listLeadReplies(lead),
   ])
   const view = email ? { message: trimQuotes(email.text ?? ''), interest: email.interest ?? null, campaign_id: email.campaign_id ?? null } : null
   return grantBlocker({ mode, payload: p, email: view, reply, leadReplies })

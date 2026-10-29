@@ -101,14 +101,17 @@ export async function markLeadRepliesHandled(campaignId: string, email: string, 
   return ((res.data ?? []) as { reply_to_uuid: string }[]).map((r) => r.reply_to_uuid)
 }
 
-/** Every recorded reply of a lead in a campaign (what the reply grant checks for earlier closing labels). */
-export async function listLeadReplies(campaignId: string, email: string): Promise<Pick<ReplyRow, 'reply_to_uuid' | 'handled_how' | 'interest'>[]> {
+/**
+ * Every recorded reply of a lead, in ANY campaign (lowercased address): what
+ * the Auto grant checks for an earlier closing label. Stricter than one
+ * campaign on purpose: a lead closed anywhere is never auto-sent to.
+ */
+export async function listLeadReplies(email: string): Promise<Pick<ReplyRow, 'reply_to_uuid' | 'handled_how' | 'interest'>[]> {
   const res = await createServiceClient()
     .from('lume_replies')
     .select('reply_to_uuid, handled_how, interest')
-    .eq('campaign_id', campaignId)
     .eq('lead_email', email.toLowerCase())
-    .limit(200)
+    .limit(500)
   if (res.error) throw new DbError('listLeadReplies', res.error)
   return (res.data ?? []) as Pick<ReplyRow, 'reply_to_uuid' | 'handled_how' | 'interest'>[]
 }

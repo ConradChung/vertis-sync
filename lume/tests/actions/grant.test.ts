@@ -70,7 +70,8 @@ describe('the reply grant', () => {
     expect(await tryGrantSend(row())).toEqual({ granted: false, reason: 'opt_out_or_hostile' })
     inbox.listLeadReplies.mockResolvedValue([{ handled_how: 'label:bad_fit' }])
     expect(await tryGrantSend(row())).toEqual({ granted: false, reason: 'lead_labeled_negative' })
-    expect(inbox.listLeadReplies).toHaveBeenCalledWith('c-1', 'ada@acme.com')
+    // any campaign: an earlier closing label elsewhere also holds Auto
+    expect(inbox.listLeadReplies).toHaveBeenCalledWith('ada@acme.com')
     expect(store.claimDecision).not.toHaveBeenCalled()
   })
 
