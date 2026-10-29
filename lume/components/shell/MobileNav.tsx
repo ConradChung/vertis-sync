@@ -8,6 +8,7 @@ import { OperatorChip } from '@/components/shell/OperatorChip'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { TABS, isActiveTab } from '@/components/shell/tabs'
 import { cn } from '@/lib/utils'
+import { LumeMark } from './LumeMark'
 
 const openPalette = () => window.dispatchEvent(new Event('lume:open-palette'))
 
@@ -64,7 +65,7 @@ export function MobileNav({
     <>
       <header className="mobile-top glass fixed inset-x-3 z-30 flex h-12 items-center gap-1 rounded-full bg-(--bar-fill) pr-1.5 pl-4 shadow-(--bar-shadow) backdrop-blur-xl sm:hidden">
         <Link href="/overview" className="brand shrink-0" aria-label="Lume home">
-          <span className="inline-block size-3 rounded-[3px] bg-primary dark:shadow-(--primary-glow) light:ring-1 light:ring-(--lime-edge)" aria-hidden />
+          <LumeMark className="h-3.5 w-auto shrink-0 text-fg" />
           <span>lume</span>
         </Link>
         {current && <span className="ml-2 truncate border-l border-border pl-2.5 text-[14px] text-fg-70">{current.label}</span>}

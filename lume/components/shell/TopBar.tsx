@@ -11,6 +11,7 @@ import { OperatorChip } from '@/components/shell/OperatorChip'
 import { cn } from '@/lib/utils'
 import { prefetchTab, TAB_KEYS } from '@/lib/prefetch/tabs'
 import { TABS, isActiveTab } from '@/components/shell/tabs'
+import { LumeMark } from './LumeMark'
 
 export { TABS, isActiveTab } from '@/components/shell/tabs'
 
@@ -54,7 +55,7 @@ export function TopBar({ operator = null }: { operator?: string | null } = {}) {
     <MobileNav pathname={pathname} warm={warm} operator={operator} />
     <header className="glass fixed inset-x-3 top-4 max-sm:hidden z-30 mx-auto flex h-14 items-center gap-1 rounded-full bg-(--bar-fill) py-2 pr-2 pl-4 shadow-(--bar-shadow) backdrop-blur-xl sm:inset-x-0 sm:w-fit sm:max-w-[calc(100%-2rem)]">
       <Link href="/overview" className="brand mr-2 shrink-0" aria-label="Lume home">
-        <span className="inline-block size-3 rounded-[3px] bg-primary dark:shadow-(--primary-glow) light:ring-1 light:ring-(--lime-edge)" aria-hidden />
+        <LumeMark className="h-3.5 w-auto shrink-0 text-fg" />
         <span className="max-sm:sr-only">lume</span>
       </Link>
 
