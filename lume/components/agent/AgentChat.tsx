@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ArrowUp, BookMarked, Brain, PanelRight, ChevronRight, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, ShieldCheck, ShieldOff, ShieldX, SquarePen, Wrench } from 'lucide-react'
-import { AgentHistory, useConversationList } from '@/components/agent/AgentHistory'
+import { AgentHistory, useConversationList, useMoveChat } from '@/components/agent/AgentHistory'
+import { ProjectChip } from '@/components/agent/ProjectChip'
+import { useProjectList } from '@/hooks/useProjectList'
 import { ApprovalCard, type ApprovalDecision } from '@/components/agent/ApprovalCard'
 import { ManageSkills, SkillCard, SkillMenu, useSkillList } from '@/components/agent/AgentSkills'
 import { Markdown } from '@/components/agent/Markdown'
@@ -73,6 +75,9 @@ export function AgentChat() {
   const phone = useMediaQuery('(max-width: 639.98px)')
   const bump = useCallback(() => setRefreshKey((k) => k + 1), [])
   const list = useConversationList(refreshKey)
+  const projects = useProjectList(refreshKey)
+  const moveChat = useMoveChat(list)
+  const newProjectId = params.get('project')
   const skills = useSkillList(refreshKey)
   const [picked, setPicked] = useState<Skill | null>(null)
   const [attach, setAttach] = useState<SkillMode | null>(null)
@@ -80,6 +85,7 @@ export function AgentChat() {
   const chat = useAgentChat({
     conversationId: urlId,
     verticalId: params.get('vertical'),
+    projectId: newProjectId,
     onConversation: (id) => {
       router.replace(`${pathname}?c=${id}`, { scroll: false })
       bump()
@@ -159,9 +165,34 @@ export function AgentChat() {
     if (busy) return
     chat.reset()
     setSheetOpen(false)
-    if (urlId) router.push(pathname, { scroll: false })
+    if (urlId || newProjectId) router.push(pathname, { scroll: false })
     requestAnimationFrame(() => inputRef.current?.focus())
-  }, [busy, chat, urlId, router, pathname])
+  }, [busy, chat, urlId, newProjectId, router, pathname])
+
+  const newChatInProject = useCallback(
+    (projectId: string) => {
+      if (busy) return
+      chat.reset()
+      setSheetOpen(false)
+      router.push(`${pathname}?project=${projectId}`, { scroll: false })
+      requestAnimationFrame(() => inputRef.current?.focus())
+    },
+    [busy, chat, router, pathname]
+  )
+  const openProject = useCallback((projectId: string) => router.push(`/agent/projects/${projectId}`), [router])
+
+  // The open chat's project (from the list), or the one a new chat will start in.
+  const known = new Set((projects.items ?? []).map((p) => p.id))
+  const listed = list.items?.find((c) => c.id === chat.conversationId)
+  const rawProject = chat.conversationId ? (listed?.project_id ?? null) : newProjectId
+  const currentProject = rawProject && known.has(rawProject) ? rawProject : null
+  const pickProject = useCallback(
+    (projectId: string | null) => {
+      if (chat.conversationId) void moveChat(chat.conversationId, projectId)
+      else router.replace(projectId ? `${pathname}?project=${projectId}` : pathname, { scroll: false })
+    },
+    [chat.conversationId, moveChat, router, pathname]
+  )
 
   const openConversation = useCallback(
     (id: string) => {
@@ -241,10 +272,13 @@ export function AgentChat() {
   const history = (
     <AgentHistory
       list={list}
+      projects={projects}
       activeId={chat.conversationId}
       busy={busy}
       onSelect={openConversation}
       onNew={newChat}
+      onNewInProject={newChatInProject}
+      onOpenProject={openProject}
       onDeletedActive={() => {
         chat.reset()
         router.replace(pathname, { scroll: false })
@@ -287,6 +321,9 @@ export function AgentChat() {
           <Button variant="ghost" size="icon-sm" className={cn('max-sm:size-10', !collapsed && 'lg:hidden')} onClick={newChat} disabled={busy} aria-label="New chat">
             <SquarePen className="size-4" />
           </Button>
+          {(projects.items?.length ?? 0) > 0 && (
+            <ProjectChip projects={projects.items ?? []} current={currentProject} disabled={busy} onPick={pickProject} onOpen={openProject} />
+          )}
           <Button variant="ghost" size="icon-sm" className="max-sm:size-10" onClick={() => setMemoryOpen(true)} aria-label="Memory" title="What Lume remembers">
             <Brain className="size-4" />
           </Button>

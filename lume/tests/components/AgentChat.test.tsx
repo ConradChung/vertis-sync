@@ -267,6 +267,44 @@ describe('AgentChat history', () => {
   })
 })
 
+describe('AgentChat projects', () => {
+  const PID = '7a1c2b3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d'
+  const projectsBody = () =>
+    Response.json({ projects: [{ id: PID, name: 'Roofers', instructions: '', vertical_id: null, position: 0, created_at: today, updated_at: today, item_count: 1, total_bytes: 10 }] })
+  const withProjects = (handlers: Parameters<typeof router>[0]) =>
+    router({ ...handlers, other: (url, init) => (url === '/api/agent/projects' ? projectsBody() : handlers.other?.(url, init) ?? Response.json({ ok: true })) })
+
+  it('?project= starts a new chat in that project: the chip names it and the run sends project_id', async () => {
+    nav.params = new URLSearchParams({ project: PID })
+    const fetchMock = withProjects({ run: () => sseResponse([{ type: 'run', id: 'r1', conversation_id: CONV, project_id: PID }, { type: 'done' }]) })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<AgentChat />)
+    expect(await screen.findByRole('button', { name: /^Project: Roofers/ })).toBeTruthy()
+    const box = screen.getByLabelText('Message Lume')
+    fireEvent.change(box, { target: { value: 'hi' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(fetchMock.mock.calls.some((c) => c[0] === '/api/agent/run')).toBe(true))
+    const runCall = fetchMock.mock.calls.find((c) => c[0] === '/api/agent/run')!
+    expect(JSON.parse(runCall[1]!.body as string)).toEqual({ prompt: 'hi', project_id: PID })
+  })
+
+  it('the header chip moves the open chat (the mobile / keyboard picker)', async () => {
+    nav.params = new URLSearchParams({ c: CONV })
+    const fetchMock = withProjects({
+      list: () => Response.json({ conversations: [{ id: CONV, title: 'Gates today', created_at: today, updated_at: today, project_id: null }] }),
+      conversation: () => Response.json({ conversation: { id: CONV, title: 'Gates today' }, messages: [] }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<AgentChat />)
+    fireEvent.click(await screen.findByRole('button', { name: /^No project/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Roofers/ }))
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.find((c) => c[0] === `/api/agent/conversations/${CONV}/project`)?.[1]?.body).toBe(JSON.stringify({ project_id: PID }))
+    )
+    expect(await screen.findByRole('button', { name: /^Project: Roofers/ })).toBeTruthy()
+  })
+})
+
 describe('Markdown', () => {
   it('renders code fences and drops unsafe links', () => {
     const { container } = render(<Markdown text={'See [x](javascript:alert(1)) and [y](/actions/1)\n\n```\nconst a = 1\n```'} />)
