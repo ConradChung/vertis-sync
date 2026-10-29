@@ -14,6 +14,10 @@ import { describe, expect, it } from 'vitest'
  */
 const ALLOWLIST: Record<string, string> = {
   'app/api/auth/magic-link/route.ts': 'owner-gated by shouldSendMagicLink(); it is the login step itself',
+  'app/api/slack/events/route.ts': 'Slack-signed: readSlackRequest() verifies the v0 signature over the raw body (lib/slack/verify.ts)',
+  'app/api/slack/interactions/route.ts': 'Slack-signed: readSlackRequest() verifies the v0 signature over the raw body (lib/slack/verify.ts)',
+  'app/api/slack/install/route.ts': 'a client without a session: needs a signed, unexpired install link the owner generated (verifyInstallLink)',
+  'app/api/slack/oauth/callback/route.ts': "Slack's redirect: needs the signed OAuth state, equal to this browser's httpOnly state cookie (verifyState)",
 }
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url))

@@ -5,7 +5,8 @@ import { dbErrorResponse } from '@/lib/http/errors'
 import { parseJsonBody } from '@/lib/http/json'
 import { getVertical } from '@/lib/operators/store'
 import { CARD_FIELDS } from '@/lib/slack/card'
-import { slackOwnerGuard } from '@/lib/slack/ownerRoute'
+import { requireOwnerSession } from '@/lib/auth/guards'
+import { slackOwnerChecks } from '@/lib/slack/ownerRoute'
 import { getInstall, upsertBinding } from '@/lib/slack/store'
 
 /**
@@ -26,7 +27,9 @@ const Body = z.strictObject({
 })
 
 export async function PUT(req: Request) {
-  const denied = await slackOwnerGuard(req)
+  const auth = await requireOwnerSession(req)
+  if (!auth.ok) return auth.response
+  const denied = slackOwnerChecks(req)
   if (denied) return denied
   const body = await parseJsonBody(req, Body, 16 * 1024)
   if (!body.ok) return body.response

@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import { alert, alertLink } from '@/lib/alerts'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { slackApi } from '@/lib/slack/api'
-import { slackOwnerGuard } from '@/lib/slack/ownerRoute'
+import { requireOwnerSession } from '@/lib/auth/guards'
+import { slackOwnerChecks } from '@/lib/slack/ownerRoute'
 import { getBotToken, revokeInstall } from '@/lib/slack/store'
 
 /**
@@ -12,7 +13,9 @@ import { getBotToken, revokeInstall } from '@/lib/slack/store'
  * (a revoke must never be blocked). A reinstall from a new link restores it.
  */
 export async function POST(req: Request, ctx: { params: Promise<{ team: string }> }) {
-  const denied = await slackOwnerGuard(req, false)
+  const auth = await requireOwnerSession(req)
+  if (!auth.ok) return auth.response
+  const denied = slackOwnerChecks(req, false)
   if (denied) return denied
   const team = (await ctx.params).team
   if (!/^[TE][A-Z0-9]{2,30}$/.test(team)) return NextResponse.json({ error: 'bad_team' }, { status: 400 })

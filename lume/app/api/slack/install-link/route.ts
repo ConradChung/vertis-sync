@@ -4,7 +4,8 @@ import { z } from 'zod'
 import { parseJsonBody } from '@/lib/http/json'
 import { requestOrigin } from '@/lib/http/origin'
 import { INSTALL_LINK_DAYS_DEFAULT, INSTALL_LINK_DAYS_MAX, signInstallLink } from '@/lib/slack/installLink'
-import { slackOwnerGuard } from '@/lib/slack/ownerRoute'
+import { requireOwnerSession } from '@/lib/auth/guards'
+import { slackOwnerChecks } from '@/lib/slack/ownerRoute'
 
 /**
  * POST `{ days? }` → `{ url, expires_at }`: a signed, expiring install link
@@ -17,7 +18,9 @@ import { slackOwnerGuard } from '@/lib/slack/ownerRoute'
 const Body = z.strictObject({ days: z.number().int().min(1).max(INSTALL_LINK_DAYS_MAX).optional() })
 
 export async function POST(req: Request) {
-  const denied = await slackOwnerGuard(req)
+  const auth = await requireOwnerSession(req)
+  if (!auth.ok) return auth.response
+  const denied = slackOwnerChecks(req)
   if (denied) return denied
   const body = await parseJsonBody(req, Body, 512)
   if (!body.ok) return body.response

@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { listChannels, SlackApiError } from '@/lib/slack/api'
-import { slackOwnerGuard } from '@/lib/slack/ownerRoute'
+import { requireOwnerSession } from '@/lib/auth/guards'
+import { slackOwnerChecks } from '@/lib/slack/ownerRoute'
 import { getBotToken } from '@/lib/slack/store'
 
 /**
@@ -10,7 +11,9 @@ import { getBotToken } from '@/lib/slack/store'
  * once @Lume was invited). For the binding picker.
  */
 export async function GET(req: Request, ctx: { params: Promise<{ team: string }> }) {
-  const denied = await slackOwnerGuard(req)
+  const auth = await requireOwnerSession(req)
+  if (!auth.ok) return auth.response
+  const denied = slackOwnerChecks(req)
   if (denied) return denied
   const team = (await ctx.params).team
   if (!/^[TE][A-Z0-9]{2,30}$/.test(team)) return NextResponse.json({ error: 'bad_team' }, { status: 400 })
