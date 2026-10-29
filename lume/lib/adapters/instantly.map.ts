@@ -346,7 +346,7 @@ export interface InboxThread {
 
 const MAX_TEXT = 4000
 
-function htmlToText(html: string): string {
+export function htmlToText(html: string): string {
   return html
     .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
     .replace(/<br\s*\/?>/gi, '\n')
