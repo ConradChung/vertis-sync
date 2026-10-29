@@ -421,6 +421,16 @@ describe('vertical tools (G9)', () => {
     expect(() => t.inputSchema.parse({ vertical_id: VID })).toThrow()
   })
 
+  it('create_inbox_project is low and posts to the vertical\'s inbox-project route', async () => {
+    const { fetch, createAction, tool } = setup()
+    const t = tool('create_inbox_project')
+    expect(t.tier).toBe('low')
+    await t.run(t.inputSchema.parse({ vertical_id: VID.toUpperCase() }))
+    expect(fetch.mock.calls[0][0]).toBe(`https://lume.test/api/verticals/${VID}/inbox-project`)
+    expect(fetch.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+    expect(createAction).not.toHaveBeenCalled()
+  })
+
   it('issue_operator_key is high, skippable, and only files a request for one vertical', async () => {
     const { createAction, tool } = setup()
     const t = tool('issue_operator_key')
@@ -438,7 +448,7 @@ describe('master-only vertical tools', () => {
     const names = (operator: { is_master: boolean } | null) => setup(undefined, { operator }).tools.map((t) => t.name)
     const vert = names({ is_master: false })
     expect(vert).toContain('list_verticals')
-    for (const n of ['create_vertical', 'update_vertical', 'issue_operator_key']) {
+    for (const n of ['create_vertical', 'update_vertical', 'issue_operator_key', 'create_inbox_project']) {
       expect(vert).not.toContain(n)
       expect(names({ is_master: true })).toContain(n)
       expect(names(null)).toContain(n)

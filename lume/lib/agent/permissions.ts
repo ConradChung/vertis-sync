@@ -21,7 +21,7 @@ export const TOOL_TIERS = {
   get_campaign_sequence: 'read', list_skills: 'read', get_skill: 'read', list_verticals: 'read',
   list_campaign_leads: 'read', contact_usage: 'read', read_project_file: 'read', list_replies: 'read', get_thread: 'read',
   create_order: 'low', draft_reply: 'low', create_rotation_rule: 'low', notify: 'low', import_actor_run: 'low', save_skill: 'low',
-  remember: 'low', forget: 'low', create_vertical: 'low', update_vertical: 'low', create_cycle_out_rule: 'low',
+  remember: 'low', forget: 'low', create_vertical: 'low', update_vertical: 'low', create_inbox_project: 'low', create_cycle_out_rule: 'low',
   load_actor_results: 'low', filter_leads: 'low', restore_leads: 'low', export_for_apollo: 'low', label_reply: 'low',
   decide_validation: 'high', assign_leads: 'high', activate_rule: 'high', send_reply: 'high',
   pause_campaign: 'high', resume_campaign: 'high', activate_campaign: 'high', duplicate_campaign: 'high', delete_rule: 'high',

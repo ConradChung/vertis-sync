@@ -1116,6 +1116,16 @@ const SPECS: Built[] = [
   ),
   tiered(
     {
+      name: 'create_inbox_project',
+      description:
+        "Create the Inbox project for a vertical: a project named '<vertical> · Inbox', linked to the vertical, with the five Inbox Manager notes from the SOP (qualify-rules.md, voice-samples.md, voice-rules.md, reply-templates.md, settings.md) holding {{placeholders}} for the owner to fill. Safe to re-run: it adds only missing notes and never overwrites one. If the vertical already has another linked project it changes nothing and returns error vertical_has_project with that project.",
+      inputSchema: z.object({ vertical_id: uuid }),
+      run: async ({ vertical_id }, { call }) => (await call(`/api/verticals/${vertical_id.toLowerCase()}/inbox-project`, { method: 'POST', body: {} })) as ToolResult,
+    },
+    'low'
+  ),
+  tiered(
+    {
       name: 'issue_operator_key',
       description:
         "Issue a Grok Bot operator key for one vertical (never a master key: only the owner mints those in Settings). The key is a sign-in link with the owner's full rights. Once approved, the sign-in link appears ONCE (on the approval card, or in this tool's result in skip mode); Lume stores only a masked copy, so pass it on immediately and never repeat it later.",
@@ -1192,7 +1202,7 @@ function skillStore(deps: ToolDeps): SkillStore {
 }
 
 /** Only the owner or the master Grok Bot may create / change verticals or issue keys. */
-export const MASTER_ONLY_TOOLS: ReadonlySet<string> = new Set(['create_vertical', 'update_vertical', 'issue_operator_key'])
+export const MASTER_ONLY_TOOLS: ReadonlySet<string> = new Set(['create_vertical', 'update_vertical', 'issue_operator_key', 'create_inbox_project'])
 
 export function buildTools(deps: ToolDeps): AgentTool[] {
   const call = routeCaller(deps)

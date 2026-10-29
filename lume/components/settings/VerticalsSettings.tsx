@@ -30,6 +30,8 @@ const ERRORS: Record<string, string> = {
   operator_forbidden: 'A Grok Bot session cannot mint or revoke keys.',
   session_required: 'Only your own browser session can do that.',
   vertical_not_found: 'That vertical no longer exists.',
+  name_taken: 'A project with the Inbox name already exists but is not linked to this vertical; link it in Agent → Projects.',
+  vertical_out_of_scope: 'A vertical Grok Bot can only do that for its own vertical.',
 }
 const errorText = (status: number, body: unknown) => {
   const code = (body as { error?: string } | null)?.error
@@ -52,6 +54,7 @@ export function VerticalsSettings({ canManageKeys }: { canManageKeys: boolean })
   const instantly = useSWR<{ configured: boolean; campaigns?: InstantlyCampaign[] }>('/api/instantly/campaigns', fetchJson)
   const [error, setError] = useState<string | null>(null)
   const [minted, setMinted] = useState<{ label: string; url: string } | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const options = useMemo<CampaignOption[]>(() => {
     const out = new Map<string, CampaignOption>()
@@ -76,6 +79,27 @@ export function VerticalsSettings({ canManageKeys }: { canManageKeys: boolean })
     return null
   }
 
+  async function inboxProject(v: Vertical) {
+    setError(null)
+    setNotice(null)
+    const r = await sendJson(`/api/verticals/${v.id}/inbox-project`, {})
+    const b = r.body as { project?: { name: string }; created_project?: boolean; seeded?: string[]; error?: string } | null
+    if (r.status === 200 || r.status === 201) {
+      const seeded = b?.seeded ?? []
+      setNotice(
+        `${b?.created_project ? 'Created' : 'Already there:'} “${b?.project?.name}”. ` +
+          (seeded.length ? `Added ${seeded.join(', ')}.` : 'All five notes were already there; nothing was overwritten.') +
+          ' Fill the {{placeholders}} in Agent → Projects.'
+      )
+      return
+    }
+    if (b?.error === 'vertical_has_project') {
+      setError(`“${v.name}” is already linked to the project “${b.project?.name}”. Unlink it in Agent → Projects first, or add the notes there by hand.`)
+      return
+    }
+    setError(errorText(r.status, r.body))
+  }
+
   async function mint(target: { vertical_id: string } | { master: true }, label: string) {
     const body = (await call('/api/operators', { ...target, label })) as { sign_in_url?: string } | null
     if (body?.sign_in_url) setMinted({ label, url: body.sign_in_url })
@@ -91,6 +115,11 @@ export function VerticalsSettings({ canManageKeys }: { canManageKeys: boolean })
       {error && (
         <p role="alert" className="rounded-lg border border-destructive/50 px-3 py-2 text-sm text-destructive">
           {error}
+        </p>
+      )}
+      {notice && (
+        <p role="status" className="rounded-lg border border-primary/50 px-3 py-2 text-sm">
+          {notice}
         </p>
       )}
       {minted && (
@@ -128,6 +157,7 @@ export function VerticalsSettings({ canManageKeys }: { canManageKeys: boolean })
                 if (confirm(`Archive “${v.name}”? Its bots keep their keys until you revoke them.`)) void call(`/api/verticals/${v.id}`, { archived: true }, 'PATCH')
               }}
               onMint={(label) => mint({ vertical_id: v.id }, label)}
+              onInboxProject={() => void inboxProject(v)}
             />
           ))}
           <VerticalEditor key="new" vertical={null} options={options} canManageKeys={false} onSave={(v) => call('/api/verticals', v)} />
@@ -236,6 +266,7 @@ function VerticalEditor({
   onSave,
   onArchive,
   onMint,
+  onInboxProject,
 }: {
   vertical: Vertical | null
   options: CampaignOption[]
@@ -243,6 +274,7 @@ function VerticalEditor({
   onSave: (v: { name: string; scopes: VerticalScope[]; campaign_ids: string[]; is_default: boolean }) => Promise<unknown>
   onArchive?: () => void
   onMint?: (label: string) => void
+  onInboxProject?: () => void
 }) {
   const [name, setName] = useState(vertical?.name ?? '')
   const [scopes, setScopes] = useState<VerticalScope[]>(vertical?.scopes ?? [])
@@ -276,6 +308,11 @@ function VerticalEditor({
           <Button type="submit" size="sm" disabled={!name.trim()}>
             {vertical ? 'Save' : 'Create vertical'}
           </Button>
+          {vertical && onInboxProject && (
+            <Button type="button" size="sm" variant="outline" onClick={onInboxProject} title="Creates “<vertical> · Inbox” with the five Inbox Manager notes; never overwrites a note">
+              Create Inbox project
+            </Button>
+          )}
           {vertical && canManageKeys && onMint && <MintButton label="Generate key" defaultLabel={`${vertical.name} bot`} onMint={onMint} />}
           {vertical && onArchive && (
             <Button type="button" size="sm" variant="ghost" onClick={onArchive}>

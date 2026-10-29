@@ -72,4 +72,22 @@ describe('Settings → Verticals', () => {
       expect(sendJson).toHaveBeenCalledWith('/api/verticals', { name: 'Dentists', scopes: [], campaign_ids: [], is_default: false }, { method: 'POST' })
     )
   })
+
+  it('Create Inbox project posts to the vertical and reports what was added', async () => {
+    sendJson.mockResolvedValue({ status: 201, body: { ok: true, project: { id: 'p', name: 'Roofers · Inbox' }, created_project: true, seeded: ['qualify-rules.md', 'settings.md'], kept: [] } })
+    ui(true)
+    await screen.findByDisplayValue('Roofers')
+    fireEvent.click(screen.getByRole('button', { name: 'Create Inbox project' }))
+    await screen.findByText(/Created “Roofers · Inbox”/)
+    expect(sendJson).toHaveBeenCalledWith(`/api/verticals/${VID}/inbox-project`, {})
+    expect(screen.getByText(/qualify-rules.md, settings.md/)).toBeTruthy()
+  })
+
+  it('Create Inbox project reports a vertical already linked to another project', async () => {
+    sendJson.mockResolvedValue({ status: 409, body: { error: 'vertical_has_project', project: { id: 'p9', name: 'Roof research' } } })
+    ui(true)
+    await screen.findByDisplayValue('Roofers')
+    fireEvent.click(screen.getByRole('button', { name: 'Create Inbox project' }))
+    await screen.findByText(/already linked to the project “Roof research”/)
+  })
 })
