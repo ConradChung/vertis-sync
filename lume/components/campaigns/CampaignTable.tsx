@@ -6,6 +6,8 @@ import { NotConnected, SectionTitle, ShimmerBar } from '@/components/overview/pa
 import { campaignStatusText, isProblemStatus } from '@/lib/adapters/instantly.map'
 import type { CampaignTableRow, InstantlyState } from '@/lib/campaigns/types'
 import { cn } from '@/lib/utils'
+import { ReplyModeSelect } from '@/components/campaigns/ReplyModeSelect'
+import type { ReplyMode } from '@/lib/inbox/replyMode'
 
 const n = (v: number | null) => (v === null ? '—' : <AnimatedNumber value={v} />)
 const rate = (r: number | null) => (r === null ? '—' : <AnimatedNumber value={r < 10 ? r : Math.round(r)} decimals={r < 10 ? 1 : 0} suffix="%" />)
@@ -39,11 +41,14 @@ export function CampaignTable({
   instantly,
   selectedKey,
   onSelect,
+  replyMode,
 }: {
   rows: CampaignTableRow[] | undefined
   instantly: InstantlyState | undefined
   selectedKey: string | null
   onSelect: (row: CampaignTableRow) => void
+  /** The per-campaign reply approval mode column (Instantly campaigns only). */
+  replyMode?: { modeOf: (id: string) => ReplyMode; canChange: boolean; onChange: (id: string, mode: ReplyMode) => Promise<boolean> | void }
 }) {
   return (
     <GlassCard className="gap-0 py-0" aria-label="Campaigns">
@@ -70,7 +75,8 @@ export function CampaignTable({
                 <th className="px-2 py-2 text-right font-medium">Replies</th>
                 <th className="px-2 py-2 text-right font-medium">Reply rate</th>
                 <th className="px-2 py-2 text-right font-medium">Interested</th>
-                <th className="px-[18px] py-2 text-right font-medium">Last activity</th>
+                <th className="px-2 py-2 text-right font-medium">Last activity</th>
+                {replyMode && <th className="px-[18px] py-2 font-medium">Reply approval</th>}
               </tr>
             </thead>
             <tbody>
@@ -122,7 +128,22 @@ export function CampaignTable({
                   <td className="px-2 py-[10px] text-right font-mono tabular-nums">{n(r.replies)}</td>
                   <td className="px-2 py-[10px] text-right font-mono tabular-nums">{rate(r.reply_rate)}</td>
                   <td className="px-2 py-[10px] text-right font-mono tabular-nums">{n(r.opportunities)}</td>
-                  <td className="px-[18px] py-[10px] text-right text-[12px] text-fg-46">{relTime(r.last_activity)}</td>
+                  <td className="px-2 py-[10px] text-right text-[12px] text-fg-46">{relTime(r.last_activity)}</td>
+                  {replyMode && (
+                    <td className="px-[18px] py-[10px]">
+                      {r.instantly_id ? (
+                        <ReplyModeSelect
+                          campaignId={r.instantly_id}
+                          campaignName={r.name}
+                          mode={replyMode.modeOf(r.instantly_id)}
+                          canChange={replyMode.canChange}
+                          onChange={replyMode.onChange}
+                        />
+                      ) : (
+                        <span className="text-[12px] text-fg-24">—</span>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

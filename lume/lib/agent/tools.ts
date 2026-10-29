@@ -36,6 +36,9 @@ export type ToolResult = Record<string, unknown>
 
 export interface CreatedAction {
   id: string
+  /** 'approved' with decided_via 'grant': a campaign in Auto reply mode approved this send_reply at creation. */
+  status?: string
+  decided_via?: string | null
 }
 
 /** Server-side snapshot builder (`buildActionRequest`), injected so this module stays pure. */
@@ -201,6 +204,16 @@ async function requestApproval(
         outcome: done.status,
         result: done.result,
         ...(done.error ? { error: done.error } : {}),
+        ...card,
+      }
+    }
+    if (built.kind === 'send_reply' && action.decided_via === 'grant') {
+      return {
+        status: 'auto_approved_by_campaign',
+        action_id: action.id,
+        deep_link: `/actions/${action.id}`,
+        summary: built.payload.summary,
+        note: 'The campaign is in Auto reply mode: the reply was approved by its grant and is sent after the live thread re-check (it may still be refused, e.g. newer_inbound). Check /actions for the outcome.',
         ...card,
       }
     }

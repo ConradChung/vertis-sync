@@ -443,6 +443,16 @@ describe('vertical tools (G9)', () => {
   })
 })
 
+describe('send_reply on an Auto-mode campaign', () => {
+  it('reports auto_approved_by_campaign when the grant approved it at creation', async () => {
+    const { createAction, tool } = setup()
+    createAction.mockResolvedValue({ id: 'a9', status: 'approved', decided_via: 'grant' })
+    const t = tool('send_reply')
+    const out = await t.run(t.inputSchema.parse({ eaccount: 'me@send.com', reply_to_uuid: 'e1', body: 'hi' }))
+    expect(out).toMatchObject({ status: 'auto_approved_by_campaign', action_id: 'a9' })
+  })
+})
+
 describe('master-only vertical tools', () => {
   it('a vertical Grok Bot run gets list_verticals but not create/update_vertical or issue_operator_key', () => {
     const names = (operator: { is_master: boolean } | null) => setup(undefined, { operator }).tools.map((t) => t.name)

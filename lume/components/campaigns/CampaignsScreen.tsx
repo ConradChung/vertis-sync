@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ActionNotice, noticeFrom, type NoticeState } from '@/components/campaigns/ActionNotice'
 import { AnalyticsChart } from '@/components/campaigns/AnalyticsChart'
 import { CampaignTable } from '@/components/campaigns/CampaignTable'
+import { useReplyModes } from '@/components/campaigns/ReplyModeSelect'
 import { FlowView } from '@/components/campaigns/FlowView'
 import { InboxPane } from '@/components/campaigns/InboxPane'
 import { SequenceEditor } from '@/components/campaigns/SequenceEditor'
@@ -25,8 +26,9 @@ import type { CampaignTableRow } from '@/lib/campaigns/types'
 
 type Tab = 'analytics' | 'flow' | 'sequence' | 'inbox' | 'crm'
 
-export function CampaignsScreen() {
+export function CampaignsScreen({ canChangeReplyMode = false }: { canChangeReplyMode?: boolean } = {}) {
   const table = useCampaignTable()
+  const replyModes = useReplyModes()
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const rows = table.data?.campaigns
   const selected = rows?.find((r) => r.key === selectedKey) ?? null
@@ -43,7 +45,18 @@ export function CampaignsScreen() {
           </div>
         </GlassCard>
       ) : (
-        <CampaignTable rows={rows} instantly={table.data?.instantly} selectedKey={selectedKey} onSelect={(r) => setSelectedKey(r.key)} />
+        <CampaignTable
+          rows={rows}
+          instantly={table.data?.instantly}
+          selectedKey={selectedKey}
+          onSelect={(r) => setSelectedKey(r.key)}
+          replyMode={{ modeOf: replyModes.modeOf, canChange: canChangeReplyMode, onChange: replyModes.setMode }}
+        />
+      )}
+      {replyModes.error && (
+        <p role="alert" className="text-[13px] text-red">
+          {replyModes.error}
+        </p>
       )}
       {selected && <CampaignDetail key={selected.key} row={selected} />}
     </div>

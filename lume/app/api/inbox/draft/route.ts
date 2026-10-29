@@ -17,7 +17,8 @@ import { inboxFailure, NO_STORE, readInboxJson } from '@/lib/inbox/http'
  * agent's (lib/actions/build.ts: the receiving inbox, the thread, the lead's
  * message, name and company come from Instantly + the CRM). It appears under
  * Needs confirmation on /operator and in Lume; nothing is sent until someone
- * approves (send_reply always asks). One reply per inbound email: 409
+ * approves (send_reply always asks), unless the campaign is in Auto reply
+ * mode and its grant approves it (status 'approved', auto_approved: true). One reply per inbound email: 409
  * `already_drafted_or_replied` with the existing action. 201 `{ action_id,
  * deep_link, summary, reply }`. docs/lume/INBOX-MANAGER-API.md.
  */
@@ -52,7 +53,16 @@ export async function POST(req: Request) {
     try {
       const action = await createAction(built.kind, built.payload, auth.via === 'internal' ? 'agent' : 'user')
       return NextResponse.json(
-        { ok: true, action_id: action.id, deep_link: `/actions/${action.id}`, summary: built.payload.summary, reply: replyCardOf(built.payload) },
+        {
+          ok: true,
+          action_id: action.id,
+          deep_link: `/actions/${action.id}`,
+          summary: built.payload.summary,
+          // 'approved' + auto_approved: the campaign is in Auto reply mode and its grant approved it (it sends after the live re-check).
+          status: action.status,
+          auto_approved: action.decided_via === 'grant',
+          reply: replyCardOf(built.payload),
+        },
         { status: 201, headers: NO_STORE }
       )
     } catch (err) {
