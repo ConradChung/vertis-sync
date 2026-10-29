@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 /** A chainable stand-in for the service client: records each query's calls and answers from `answer`. */
 const db = vi.hoisted(() => ({
   queries: [] as { table: string; calls: [string, unknown[]][] }[],
-  answer: (_q: { table: string; calls: [string, unknown[]][] }): { data: unknown; error: unknown } => ({ data: [], error: null }),
+  answer: ((): { data: unknown; error: unknown } => ({ data: [], error: null })) as (q: { table: string; calls: [string, unknown[]][] }) => { data: unknown; error: unknown },
 }))
 vi.mock('@/lib/supabase/service', () => ({
   createServiceClient: () => ({
