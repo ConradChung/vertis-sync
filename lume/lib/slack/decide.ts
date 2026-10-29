@@ -172,7 +172,10 @@ export async function clientSaveEdit(actor: Omit<SlackActor, 'channel'>, postId:
     return 'refused'
   }
   const p = c.action.payload ?? {}
-  if (body.trim() === String(p.body ?? '').trim()) return 'unchanged'
+  if (body.trim() === String(p.body ?? '').trim()) {
+    await tell(c.token, withChannel, 'No changes: the reply is the same as before, so nothing was saved.')
+    return 'unchanged'
+  }
   const next = parseCampaignPayload(
     'send_reply',
     {

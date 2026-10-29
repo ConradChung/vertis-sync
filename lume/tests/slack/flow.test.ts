@@ -228,6 +228,7 @@ describe('clientSaveEdit', () => {
   it('an unchanged body is not an edit', async () => {
     expect(await clientSaveEdit({ team: 'T0AAA', user: 'U0CLIENT' }, 7, 'Great, Tuesday?')).toBe('unchanged')
     expect(actions.saveClientEdit).not.toHaveBeenCalled()
+    expect(lastCall('chat.postEphemeral')![2]).toMatchObject({ channel: 'C0AAA', user: 'U0CLIENT', text: expect.stringMatching(/no changes/i) })
   })
   it('a modal from another workspace is refused', async () => {
     expect(await clientSaveEdit({ team: 'T0EVIL', user: 'U0CLIENT' }, 7, 'x')).toBe('refused')
