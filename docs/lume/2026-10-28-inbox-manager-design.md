@@ -67,3 +67,40 @@ trail and one supervised card. Approval works the same whether it comes from Lum
 2. **Autonomy.** The SOP's "autonomous by written scoped permission" conflicts with the earlier rule "emails always ask".
    - Allow a scoped send grant per vertical (owner-only, revocable), or keep every email on approval.
 3. **Push.** The quick start says Grok routines can fire "when something happens" (webhook). If Grok gives a webhook URL, Lume can push positive replies and confirmations to it instead of the bot polling every 10–15 minutes.
+
+## Client Slack agent (owner decisions 2026-10-29)
+
+Clients use **their own Slack workspace**. Lume is a distributable Slack app. Each client installs it with OAuth ("Add to Slack"), and Lume stores one bot token per workspace, encrypted.
+
+**Channel binding.** Each installed channel is bound to one vertical and, optionally, specific campaigns. A client can only ever see leads from the campaigns its channel is bound to.
+
+**Posting replies.** Every positive reply on a bound campaign is posted to the client's channel. The post has three parts:
+- A **lead card**: name, title, company, website, phone, LinkedIn, location, the reply, and the CRM stage. Fields come from the lead bank, CRM and the original order. Missing fields are shown as missing and never invented. The owner chooses which fields each client sees.
+- The **drafted reply**, written by the Inbox Manager: Grok Bot, or Lume's agent as a fallback.
+- Buttons: **Approve**, **Edit** (opens a Slack modal), and **Skip**.
+
+**Client Q&A.** In the thread, `@Lume <question>` runs a read-only lead lookup, scoped to the channel's campaigns. Enrichment that costs money is never triggered by a client; it goes to the owner for approval.
+
+**Per-campaign reply approval mode.** This setting lives on the campaign.
+
+| Mode | Who can approve a send |
+|---|---|
+| `owner` | Owner, `/operator` or a Grok Bot only |
+| `client` | The client in Slack, or the owner |
+| `auto` | Nobody needs to. Lume sends after the safety checks (this is the scoped send grant) |
+
+The default is `owner`. Changing the mode is owner-only, and every change is logged.
+
+**Safety in every mode:**
+- Re-read the live thread right before sending, and abort if a newer inbound message exists.
+- Send at most one reply per inbound message.
+- Never send on silence.
+- Every send is a `pending_actions` row with `decided_via` set to `client`, `grant` or `owner`, plus the Slack user id of whoever approved it.
+- Unsubscribe or hostile replies are never auto-sent.
+
+**Build position:** slot **3g**, after 3b (the send path) and 3c (the bot API). It reuses the positive-reply alerts, the lead lookup, and the approval and grant plumbing. The existing `slack-inbox` function (CSV intake) stays separate.
+
+Owner setup:
+1. Create the Slack app from the manifest Lume provides. It needs distribution, OAuth redirect, interactivity and event subscriptions pointing at Lume.
+2. Send each client the install link.
+3. Bind each channel in Settings.
