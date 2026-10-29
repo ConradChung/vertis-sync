@@ -80,7 +80,8 @@ describe('threadView / recheckThread', () => {
   it('oldest → newest, quotes trimmed, latest inbound to reply to', () => {
     const t = threadView([c, a, b])
     expect(t.messages.map((m) => m.id)).toEqual(['o1', 'i1', 'i2'])
-    expect(t.messages[1].text).toBe('Yes')
+    expect(t.messages[1].untrusted_text).toBe('Yes')
+    expect(t.messages[0].text).toBe('Hi Ada')
     expect(t.latest_inbound).toEqual({ reply_to_uuid: 'i2', eaccount: 'frank@ours.com', subject: 'Re: hello', at: '2026-10-28T11:00:00.000Z' })
     expect(t.lead_email).toBe('lead@acme.com')
   })

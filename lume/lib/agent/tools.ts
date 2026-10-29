@@ -5,7 +5,7 @@ import { FilterCriteria } from '@/lib/review/model'
 import { APOLLO_STEPS } from '@/lib/apollo/records'
 import { parseLeadQuery } from '@/lib/adapters/instantlyLeads.map'
 import { EmailId, INTEREST_NAMES, LabelBody } from '@/lib/inbox/schemas'
-import { replyCardOf } from '@/lib/inbox/model'
+import { labelPlan, replyCardOf } from '@/lib/inbox/model'
 import { describeStep, newSkillSchema, placeholdersIn, skillStepSchema, skillVariableSchema, type NewSkill, type Skill } from '@/lib/agent/skillModel'
 
 /**
@@ -764,9 +764,14 @@ const SPECS: Built[] = [
       description:
         'Label a reply: sets the lead\'s Instantly interest status and moves its CRM deal. category: interested, not_now, wrong_person, not_interested, ooo, ' +
         'unsubscribe, hostile, booked; or verdict BAD (bad fit) without one. unsubscribe and hostile also add the address to the Instantly blocklist; ' +
-        'BAD blocks only with block: true. Not interested / unsubscribe / hostile / BAD file a CRM Lost close for approval. Sends nothing.',
+        'BAD blocks only with block: true. Not interested / unsubscribe / hostile / BAD file a CRM Lost close for approval. Sends nothing. ' +
+        'A label that blocklists (unsubscribe, hostile, BAD + block) is not applied by you: it returns awaiting_approval and Conrad decides.',
       inputSchema: LabelBody,
-      run: async (input, { call }) => ({ labeled: await call('/api/inbox/label', { method: 'POST', body: input }) }),
+      run: async (input, { call, deps }) => {
+        // Blocking is irreversible for this lead: the agent only asks (an always-ask label_reply action).
+        if (labelPlan(input).block) return requestApproval(deps, 'label_reply', input as unknown as Record<string, Json>)
+        return { labeled: await call('/api/inbox/label', { method: 'POST', body: input }) }
+      },
     },
     'low'
   ),

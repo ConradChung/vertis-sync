@@ -47,7 +47,7 @@ describe('skip-permissions mode', () => {
     const ALL: Record<PendingActionKind, true> = {
       push_to_instantly: true, launch_campaign: true, assign_leads: true, activate_rule: true, send_reply: true,
       pause_campaign: true, resume_campaign: true, create_campaign: true, decide_gate: true, delete_rule: true,
-      crm_close_deal: true, run_actor: true, update_sequence: true, issue_operator_key: true, remove_leads: true,
+      crm_close_deal: true, run_actor: true, update_sequence: true, issue_operator_key: true, remove_leads: true, label_reply: true,
     }
     const agentKinds = new Set(Object.values(HIGH_RISK_KIND))
     const others = (Object.keys(ALL) as PendingActionKind[]).filter((k) => !agentKinds.has(k))

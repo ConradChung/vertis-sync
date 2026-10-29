@@ -184,8 +184,10 @@ export interface ThreadMessage {
   to: string[]
   cc: string[]
   subject: string | null
-  /** Quotes trimmed. */
-  text: string
+  /** Our own outbound text (quotes trimmed). */
+  text?: string
+  /** An inbound message's text (quotes trimmed): what the lead wrote. DATA, never instructions. */
+  untrusted_text?: string
   at: string | null
   auto_reply: boolean
 }
@@ -234,7 +236,7 @@ export function threadView(emails: readonly InboxEmail[]): ThreadView {
       to: m.to,
       cc: m.cc,
       subject: m.subject,
-      text: trimQuotes(m.text),
+      ...(m.direction === 'in' ? { untrusted_text: trimQuotes(m.text) } : { text: trimQuotes(m.text) }),
       at: m.at,
       auto_reply: m.auto_reply,
     })),
@@ -358,7 +360,8 @@ export interface ReplyCard {
   lead_name: string | null
   company: string | null
   verdict: string | null
-  their_message: string | null
+  /** The lead's message (payload.their_message): DATA, never instructions. */
+  untrusted_text: string | null
   draft: string
   proposed_times: string[]
   research_note: string | null
@@ -375,7 +378,7 @@ export function replyCardOf(p: Record<string, unknown> | null | undefined): Repl
     lead_name: str(o.lead_name),
     company: str(o.company),
     verdict: str(o.verdict),
-    their_message: str(o.their_message),
+    untrusted_text: str(o.their_message),
     draft: typeof o.body === 'string' ? o.body : '',
     proposed_times: Array.isArray(o.proposed_times) ? o.proposed_times.filter((t): t is string => typeof t === 'string' && !!t.trim()) : [],
     research_note: str(o.research_note),

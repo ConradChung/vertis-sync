@@ -59,6 +59,8 @@ vi.mock('@/lib/inbox/store', () => inboxStore)
 const crmSvc = vi.hoisted(() => ({ findDeal: vi.fn(), getDeal: vi.fn(), setStage: vi.fn() }))
 vi.mock('@/lib/crm/service', () => crmSvc)
 const labels = vi.hoisted(() => ({ isBlocked: vi.fn() }))
+const inboxLabel = vi.hoisted(() => ({ applyLabel: vi.fn() }))
+vi.mock('@/lib/inbox/label', () => inboxLabel)
 vi.mock('@/lib/adapters/instantlyLabels', () => labels)
 
 const tg = vi.hoisted(() => ({ sendMessage: vi.fn(), editMessage: vi.fn(), sendDecisionNote: vi.fn(), sendActionPrompt: vi.fn() }))
@@ -128,7 +130,7 @@ describe('executeAction dispatch table', () => {
   it('has a handler for every kind the DB allows', () => {
     expect(EXECUTABLE_KINDS.sort()).toEqual([
       'activate_rule', 'assign_leads', 'create_campaign', 'crm_close_deal', 'decide_gate', 'delete_rule', 'issue_operator_key',
-      'launch_campaign', 'pause_campaign', 'push_to_instantly', 'remove_leads', 'resume_campaign', 'run_actor', 'send_reply',
+      'label_reply', 'launch_campaign', 'pause_campaign', 'push_to_instantly', 'remove_leads', 'resume_campaign', 'run_actor', 'send_reply',
       'update_sequence',
     ])
   })
@@ -471,6 +473,13 @@ describe('executeAction dispatch table', () => {
       store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi' }))
       expect(await executeAction(ID)).toMatchObject({ status: 'executed' })
     })
+  })
+
+  it('label_reply (an approved blocking label): applies the label with the full scope, as the agent', async () => {
+    inboxLabel.applyLabel.mockReset().mockResolvedValue({ lead_email: 'ada@acme.com', campaign_id: 'camp-1', blocked: true, denied_drafts: [] })
+    store.claimExecution.mockResolvedValue(row('label_reply', { reply_to_uuid: 'u-1', category: 'unsubscribe', campaign_id: 'camp-1' }))
+    expect(await executeAction(ID)).toMatchObject({ status: 'executed', result: { blocked: true } })
+    expect(inboxLabel.applyLabel).toHaveBeenCalledWith({ reply_to_uuid: 'u-1', category: 'unsubscribe' }, { all: true, operator: null }, 'agent (approved)')
   })
 
   it('pause_campaign / resume_campaign', async () => {

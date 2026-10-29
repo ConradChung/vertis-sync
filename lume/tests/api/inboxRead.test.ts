@@ -68,7 +68,9 @@ describe('GET /api/inbox/replies', () => {
     expect(res.status).toBe(200)
     expect(h.listEmails).toHaveBeenCalledWith({ campaign_id: undefined, email_type: 'received', is_unread: true, i_status: 1, limit: 10, starting_after: undefined })
     const body = await res.json()
-    expect(body.replies[0]).toMatchObject({ reply_to_uuid: 'e1', eaccount: 'frank@ours.com', lead_email: 'ada@acme.com', excerpt: 'Yes please.' })
+    expect(body.replies[0]).toMatchObject({ reply_to_uuid: 'e1', eaccount: 'frank@ours.com', lead_email: 'ada@acme.com', untrusted_text: 'Yes please.' })
+    // The lead's words are marked as untrusted data, never a plain text field.
+    expect(body.replies[0].excerpt).toBeUndefined()
     expect(res.headers.get('cache-control')).toContain('no-store')
   })
 
@@ -152,7 +154,11 @@ describe('GET /api/inbox/thread', () => {
     expect(h.getThreadEmails).toHaveBeenCalledWith('t1')
     const { thread } = await res.json()
     expect(thread.messages.map((m: { id: string }) => m.id)).toEqual(['o1', 'e1'])
-    expect(thread.messages[1].text).toBe('Yes please.')
+    // inbound text is untrusted_text; our own outbound text stays text
+    expect(thread.messages[1]).toMatchObject({ direction: 'in', untrusted_text: 'Yes please.' })
+    expect(thread.messages[1].text).toBeUndefined()
+    expect(thread.messages[0]).toMatchObject({ direction: 'out', text: 'Hi Ada' })
+    expect(thread.messages[0].untrusted_text).toBeUndefined()
     expect(thread.latest_inbound).toMatchObject({ reply_to_uuid: 'e1', eaccount: 'frank@ours.com' })
   })
 

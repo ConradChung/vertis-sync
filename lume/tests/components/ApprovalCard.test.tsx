@@ -179,7 +179,7 @@ describe('ApprovalCard: send_reply (inbox manager)', () => {
   const R: ChatApproval = {
     action_id: 'r1', deep_link: '/actions/r1', summary: 'Send reply to ada@acme.com', tool: 'send_reply',
     reply: {
-      lead_email: 'ada@acme.com', lead_name: 'Ada Lovelace', company: 'Acme', verdict: 'GOOD', their_message: 'Tuesday works for me.',
+      lead_email: 'ada@acme.com', lead_name: 'Ada Lovelace', company: 'Acme', verdict: 'GOOD', untrusted_text: 'Tuesday works for me.',
       draft: 'Great, Tuesday 10am PT?', proposed_times: ['Tue 10:00 PT', 'Wed 14:00 PT'], research_note: '40 staff', eaccount: 'frank@ours.com', edited_by: null,
     },
   }

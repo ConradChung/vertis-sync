@@ -93,3 +93,16 @@ describe('send_reply snapshot', () => {
     expect((await build({ reply_to_uuid: 'e1', body: 'x', verdict: 'MAYBE' })).ok).toBe(false)
   })
 })
+
+describe('label_reply snapshot (a blocking label the agent asked for)', () => {
+  it('names the lead and campaign from the email and says it blocklists', async () => {
+    const b = await buildActionRequest({ kind: 'label_reply', payload: { reply_to_uuid: 'E1', category: 'unsubscribe' } })
+    expect(b.ok).toBe(true)
+    if (!b.ok) return
+    expect(b.payload).toMatchObject({ reply_to_uuid: 'e1', category: 'unsubscribe', campaign_id: CID, lead_email: 'ada@acme.com' })
+    expect(b.payload.summary).toMatch(/ada@acme\.com.*unsubscribe.*blocklist/i)
+  })
+  it('an invalid label is refused', async () => {
+    expect((await buildActionRequest({ kind: 'label_reply', payload: { reply_to_uuid: 'e1' } })).ok).toBe(false)
+  })
+})

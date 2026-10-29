@@ -101,6 +101,13 @@ describe('same-origin rules for the bot\'s fetch()', () => {
     expect((await labelPOST(post('/api/inbox/label', { reply_to_uuid: 'e1', category: 'ooo' }, { authorization: 'Bearer s' }))).status).toBe(200)
     expect(h.applyLabel).toHaveBeenCalledWith(expect.anything(), { all: true, operator: null }, 'agent')
   })
+  it('the agent bearer cannot apply a blocking label directly (it needs approval)', async () => {
+    h.requireOwner.mockResolvedValue({ ok: true, via: 'internal', user: null })
+    const res = await labelPOST(post('/api/inbox/label', { reply_to_uuid: 'e1', category: 'unsubscribe' }, { authorization: 'Bearer s' }))
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: 'approval_required' })
+    expect(h.applyLabel).not.toHaveBeenCalled()
+  })
   it('forms are not accepted by the JSON routes', async () => {
     const res = await labelPOST(
       new Request('http://localhost/api/inbox/label', { method: 'POST', body: 'category=ooo', headers: { 'content-type': 'application/x-www-form-urlencoded', ...sameOrigin } })

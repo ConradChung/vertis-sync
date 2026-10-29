@@ -251,7 +251,7 @@ function ReplyDetails({ reply }: { reply: ReplyCard }) {
       {row('Lead', who)}
       {row('Company', reply.company)}
       {row('Verdict', reply.verdict)}
-      {row('Their message', reply.their_message, true)}
+      {row('Their message', reply.untrusted_text, true)}
       {row('Draft', reply.draft, true)}
       {row('Times', reply.proposed_times.length ? reply.proposed_times.join(' · ') : null)}
       {row('Research', reply.research_note, true)}

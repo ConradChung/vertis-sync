@@ -169,6 +169,7 @@ export type PendingActionKind =
   | 'assign_leads'
   | 'activate_rule'
   | 'send_reply'
+  | 'label_reply'
   | 'pause_campaign'
   | 'resume_campaign'
   | 'create_campaign'

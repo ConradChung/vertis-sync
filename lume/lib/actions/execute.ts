@@ -11,6 +11,8 @@ import { sendMessage } from '@/lib/adapters/telegram'
 import { getEmail, getThreadEmails } from '@/lib/adapters/instantlyEmails'
 import { recheckThread } from '@/lib/inbox/model'
 import { getReply } from '@/lib/inbox/store'
+import { applyLabel } from '@/lib/inbox/label'
+import { LabelBody } from '@/lib/inbox/schemas'
 import { isBlocked } from '@/lib/adapters/instantlyLabels'
 import { closeReply } from '@/lib/inbox/replies'
 import { alert, alertLink, titleFrom } from '@/lib/alerts'
@@ -307,6 +309,20 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
       console.error('[actions] closing the reply failed:', err instanceof Error ? err.message : err)
     }
     return { reply_to_uuid: replyTo, email_id: sent.id ?? null, thread_id: answered.thread_id, eaccount }
+  },
+
+  /** An approved blocking label (the agent asked; the owner or a bot approved). */
+  async label_reply(p) {
+    const pick: Record<string, Json> = {}
+    for (const k of ['reply_to_uuid', 'category', 'verdict', 'block', 'note'] as const) if (p[k] !== undefined && p[k] !== null) pick[k] = p[k]
+    if (!pick.reply_to_uuid) {
+      if (p.lead_email !== undefined) pick.lead_email = p.lead_email
+      if (p.campaign_id !== undefined) pick.campaign_id = p.campaign_id
+    }
+    const parsed = LabelBody.safeParse(pick)
+    if (!parsed.success) throw new ActionFailure('payload is not a valid label')
+    const out = await applyLabel(parsed.data, { all: true, operator: null }, 'agent (approved)')
+    return out as unknown as Record<string, Json>
   },
 
   async pause_campaign(p) {

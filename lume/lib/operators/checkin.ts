@@ -105,6 +105,7 @@ const ACTION_LABEL: Record<string, string> = {
   decide_gate: 'Pipeline gate decision',
   issue_operator_key: 'Issue a Grok Bot operator key',
   remove_leads: 'Remove leads from a campaign',
+  label_reply: 'Label a reply (blocklists the lead)',
 }
 
 function priorityOf(gate: GateRow): Priority {

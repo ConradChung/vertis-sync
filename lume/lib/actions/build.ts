@@ -16,7 +16,8 @@ import { getVertical } from '@/lib/operators/store'
 import { buildRemoveLeads, removeLeadsBody } from '@/lib/actions/removeLeads'
 import { getEmail } from '@/lib/adapters/instantlyEmails'
 import { findDeal, findLeadByEmail } from '@/lib/crm/service'
-import { trimQuotes, type InboxEmail } from '@/lib/inbox/model'
+import { labelPlan, trimQuotes, type InboxEmail } from '@/lib/inbox/model'
+import { LabelBody } from '@/lib/inbox/schemas'
 
 /**
  * Turn a requested action `{ kind, payload }` into the snapshot the owner
@@ -84,9 +85,10 @@ const RunActorBody = z.object({
 
 const UpdateSequenceBody = z.object({ kind: z.literal('update_sequence'), payload: z.record(z.string(), z.unknown()) })
 const RemoveLeadsBody = z.object({ kind: z.literal('remove_leads'), payload: z.record(z.string(), z.unknown()) })
+const LabelReplyBody = z.object({ kind: z.literal('label_reply'), payload: z.record(z.string(), z.unknown()) })
 
 /** Shape check for `POST /api/actions`; `buildActionRequest` validates each payload fully. */
-export const ActionRequestBody = z.union([JobBody, rotateActionBody, OtherBody, RunActorBody, UpdateSequenceBody, RemoveLeadsBody, CampaignBody])
+export const ActionRequestBody = z.union([JobBody, rotateActionBody, OtherBody, RunActorBody, UpdateSequenceBody, RemoveLeadsBody, LabelReplyBody, CampaignBody])
 export type ActionRequest = z.infer<typeof ActionRequestBody>
 
 export type ActionBuild =
@@ -170,6 +172,8 @@ export async function buildActionRequest(input: unknown): Promise<ActionBuild> {
       const b = await buildRemoveLeads(r.data, { campaignName })
       return b.ok ? { ok: true, kind: req.kind, payload: b.payload } : b
     }
+    case 'label_reply':
+      return buildLabelReply(req.payload)
     case 'push_to_instantly':
     case 'launch_campaign':
       return buildJobAction(req.kind, (req.payload as { job_id: string }).job_id.toLowerCase())
@@ -358,4 +362,28 @@ async function leadCard(campaignId: string, email: string): Promise<{ lead_name?
     console.error('[actions/build] lead card lookup failed:', err instanceof Error ? err.message : err)
     return {}
   }
+}
+
+/**
+ * label_reply (a blocking label the agent asked for: unsubscribe, hostile,
+ * BAD + block): the label as validated by the inbox schema, plus the lead
+ * and campaign from the email for the card and routing. The executor applies
+ * it with lib/inbox/label.ts after approval.
+ */
+async function buildLabelReply(raw: Record<string, unknown>): Promise<ActionBuild> {
+  const parsed = LabelBody.safeParse({ ...raw, ...(typeof raw.reply_to_uuid === 'string' ? { reply_to_uuid: raw.reply_to_uuid.toLowerCase() } : {}) })
+  if (!parsed.success) return fail(400, 'invalid_payload')
+  const input = parsed.data
+  const payload: Record<string, Json> = {}
+  for (const [k, v] of Object.entries(input)) if (v !== undefined) payload[k] = v as Json
+  if (input.reply_to_uuid) {
+    const email = await liveEmail(input.reply_to_uuid)
+    if (email?.lead) payload.lead_email = email.lead
+    if (email?.campaign_id) payload.campaign_id = email.campaign_id
+  }
+  const plan = labelPlan(input)
+  const label = input.category ?? 'bad fit (BAD)'
+  const who = typeof payload.lead_email === 'string' ? payload.lead_email : (input.reply_to_uuid ?? 'lead')
+  const summary = `Label ${who} as ${label.replace(/_/g, ' ')}${plan.block ? ' and add the address to the Instantly blocklist' : ''}${input.note ? `: ${input.note}` : ''}`
+  return { ok: true, kind: 'label_reply', payload: { ...payload, summary } }
 }

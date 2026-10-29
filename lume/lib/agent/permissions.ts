@@ -35,6 +35,8 @@ export const HIGH_RISK_KIND: Record<string, PendingKind> = {
   pause_campaign: 'pause_campaign', resume_campaign: 'resume_campaign', activate_campaign: 'launch_campaign',
   duplicate_campaign: 'create_campaign', delete_rule: 'delete_rule', run_apify_actor: 'run_actor',
   update_campaign_sequence: 'update_sequence', issue_operator_key: 'issue_operator_key', remove_leads: 'remove_leads',
+  // A low-tier tool that files an approval only for a blocking label (unsubscribe, hostile, BAD + block).
+  label_reply: 'label_reply',
 }
 
 /**
@@ -60,6 +62,6 @@ export const SKIPPABLE_KINDS: ReadonlySet<PendingKind> = new Set<PendingKind>([
  * buy Leadsfriday / finder / validator work) or email leads (a reply;
  * launching or resuming a campaign starts sends).
  */
-export const ALWAYS_ASK_KINDS: ReadonlySet<PendingKind> = new Set<PendingKind>(['run_actor', 'send_reply', 'decide_gate', 'launch_campaign', 'resume_campaign'])
+export const ALWAYS_ASK_KINDS: ReadonlySet<PendingKind> = new Set<PendingKind>(['run_actor', 'send_reply', 'decide_gate', 'launch_campaign', 'resume_campaign', 'label_reply'])
 
 export const skippable = (kind: PendingKind): boolean => SKIPPABLE_KINDS.has(kind)

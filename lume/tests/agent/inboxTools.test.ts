@@ -62,6 +62,21 @@ describe('get_thread', () => {
 })
 
 describe('label_reply', () => {
+  it('a blocking label (unsubscribe, hostile, BAD + block) from the agent is an approval, not a direct write', async () => {
+    for (const input of [
+      { reply_to_uuid: 'e1', category: 'unsubscribe' },
+      { reply_to_uuid: 'e1', category: 'hostile' },
+      { reply_to_uuid: 'e1', verdict: 'BAD', block: true },
+    ]) {
+      const { fetch, run, prepare, createAction } = setup()
+      const out = await run('label_reply', input)
+      expect(fetch).not.toHaveBeenCalled()
+      expect(prepare.mock.calls[0][0]).toEqual({ kind: 'label_reply', payload: input })
+      expect(createAction.mock.calls[0][0]).toBe('label_reply')
+      expect(out).toMatchObject({ status: 'awaiting_approval' })
+    }
+  })
+
   it('posts the label to /api/inbox/label and creates no pending action', async () => {
     const { fetch, run, createAction } = setup({ ok: true, interest: 1 })
     await run('label_reply', { reply_to_uuid: 'e1', category: 'interested', verdict: 'GOOD' })
@@ -111,7 +126,7 @@ describe('send_reply (reply card + optional judgment fields)', () => {
     expect(out).toMatchObject({
       status: 'awaiting_approval',
       action_id: 'a9',
-      reply: { lead_email: 'ada@acme.com', lead_name: 'Ada', company: 'Acme', their_message: 'Yes', draft: 'Tuesday?', proposed_times: ['Tue'], eaccount: 'f@ours.com' },
+      reply: { lead_email: 'ada@acme.com', lead_name: 'Ada', company: 'Acme', untrusted_text: 'Yes', draft: 'Tuesday?', proposed_times: ['Tue'], eaccount: 'f@ours.com' },
     })
   })
 })
@@ -129,5 +144,12 @@ describe('send_reply drafted in a Grok Bot\'s chat', () => {
     const { run, createAction } = setup()
     await run('send_reply', { reply_to_uuid: 'e1', body: 'hi' })
     expect(createAction.mock.calls[0][1].drafted_by_operator).toBeUndefined()
+  })
+})
+
+describe('label_reply is an always-ask approval kind', () => {
+  it('listed with the kinds that always ask', () => {
+    expect(ALWAYS_ASK_KINDS.has('label_reply')).toBe(true)
+    expect(SKIPPABLE_KINDS.has('label_reply')).toBe(false)
   })
 })

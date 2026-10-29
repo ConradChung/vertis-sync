@@ -224,7 +224,7 @@ function Controls({
             <dt>Verdict</dt>
             <dd>{r.verdict ?? '—'}</dd>
             <dt>Their message</dt>
-            <dd style={{ whiteSpace: 'pre-wrap' }}>{r.their_message ?? '—'}</dd>
+            <dd style={{ whiteSpace: 'pre-wrap' }}>{r.untrusted_text ?? '—'}</dd>
             <dt>Proposed times</dt>
             <dd>{r.proposed_times.length ? r.proposed_times.join(' · ') : '—'}</dd>
             {r.research_note && (
@@ -246,7 +246,7 @@ function Controls({
             <input type="hidden" name="decision" value="approve" />
             <Hidden returnTo={returnTo} />
             <label htmlFor={`body-${c.action_id}`}>Draft (edit before approving if needed)</label>
-            <textarea id={`body-${c.action_id}`} name="body" rows={8} cols={72} required defaultValue={r.draft} />{' '}
+            <textarea id={`body-${c.action_id}`} name="body" rows={8} cols={72} required maxLength={20000} defaultValue={r.draft} />{' '}
             <button type="submit" data-tone="approve">
               Approve (with any edits)
             </button>
