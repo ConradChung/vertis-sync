@@ -65,6 +65,8 @@ vi.mock('@/lib/inbox/label', () => inboxLabel)
 vi.mock('@/lib/adapters/instantlyLabels', () => labels)
 const grantMod = vi.hoisted(() => ({ grantStillHolds: vi.fn() }))
 vi.mock('@/lib/actions/grant', () => ({ ...grantMod, tryGrantSend: vi.fn().mockResolvedValue({ granted: false, reason: 'mode_owner' }) }))
+const push = vi.hoisted(() => ({ pushForItem: vi.fn() }))
+vi.mock('@/lib/webhooks/deliver', () => push)
 
 const tg = vi.hoisted(() => ({ sendMessage: vi.fn(), editMessage: vi.fn(), sendDecisionNote: vi.fn(), sendActionPrompt: vi.fn() }))
 vi.mock('@/lib/adapters/telegram', () => tg)
@@ -865,6 +867,11 @@ describe('POST /api/actions/[id]/decide', () => {
         }))
         expect(store.claimDecision).not.toHaveBeenCalled()
         expect(ins.sendReply).not.toHaveBeenCalled()
+        // 3f: the edited reply awaits another approver → a draft_awaiting push
+        expect(push.pushForItem).toHaveBeenLastCalledWith(
+          expect.objectContaining({ campaign_id: 'camp-1', scope: 'replies' }),
+          expect.objectContaining({ type: 'draft_awaiting', item_id: ID, link: `/actions/${ID}` })
+        )
       })
 
       it("an operator editing the agent's draft: the same — it becomes that operator's draft", async () => {

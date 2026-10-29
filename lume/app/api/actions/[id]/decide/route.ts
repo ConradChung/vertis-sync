@@ -16,6 +16,8 @@ import { currentOperator } from '@/lib/operators/session'
 import { MASTER_ONLY_ERROR } from '@/lib/operators/guard'
 import { parseCampaignPayload } from '@/lib/actions/payloads'
 import type { Json, PendingActionRow } from '@/lib/db/types'
+import { pushForItem } from '@/lib/webhooks/deliver'
+import { pushSummary } from '@/lib/webhooks/push'
 
 /**
  * Confirm / Cancel a pending action from Lume. Runs the same claim as
@@ -154,6 +156,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
           return dbErrorResponse(err, 'api/actions/decide')
         }
         if (!saved) return deny(409, 'already_handled')
+        // 3f: the edited reply now awaits another approver.
+        const sp = saved.payload ?? {}
+        pushForItem(routeItemForAction(saved), {
+          type: 'draft_awaiting', item_id: id, link: alertLink(`/actions/${id}`),
+          summary: pushSummary('draft_awaiting', { name: typeof sp.lead_name === 'string' ? sp.lead_name : null, company: typeof sp.company === 'string' ? sp.company : null }),
+        })
         if (form) return formRedirect(req, form.returnTo, { ok: 'edit_saved' })
         return NextResponse.json({ ok: true, status: 'awaiting', edited: true, message: EDIT_SAVED_MESSAGE })
       }

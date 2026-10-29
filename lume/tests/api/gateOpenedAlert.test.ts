@@ -4,6 +4,8 @@ const h = vi.hoisted(() => ({ getGate: vi.fn(), logEvent: vi.fn(), sendGatePing:
 vi.mock('@/lib/db/service', () => ({ getGate: h.getGate, logEvent: h.logEvent }))
 vi.mock('@/lib/adapters/telegram', () => ({ sendGatePing: h.sendGatePing }))
 vi.mock('@/lib/supabase/service', async () => (await import('../stubs/feed')).serviceModule)
+const push = vi.hoisted(() => ({ pushForItem: vi.fn() }))
+vi.mock('@/lib/webhooks/deliver', () => push)
 import { feed } from '../stubs/feed'
 
 import { POST } from '@/app/api/hooks/gate-opened/route'
@@ -57,4 +59,16 @@ describe('gate-opened shares the pipelines\' keys (G4 fix)', () => {
       await hook({ kind, target_table: 'validation_jobs', target_id: ID })
       expect(feed.rows.at(-1)).toMatchObject({ dedupe_key: `${ID}:${kind}`, mode: 'touch' })
     })
+})
+
+describe('gate-opened webhook push (3f)', () => {
+  it('a new gate is a needs_confirmation push routed like the gate, with no title or PII', async () => {
+    push.pushForItem.mockReset()
+    h.getGate.mockResolvedValue({ kind: 'push_review', title: 'leads.csv', counts: { campaign_id: 'c-9' } })
+    await hook({ kind: 'push_review', target_table: 'validation_jobs', target_id: ID })
+    expect(push.pushForItem).toHaveBeenCalledWith(
+      { campaign_id: 'c-9', scope: 'validation' },
+      { type: 'needs_confirmation', item_id: ID, summary: 'New item needs confirmation: push review. Check /operator.', link: '/operator' }
+    )
+  })
 })

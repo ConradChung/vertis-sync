@@ -13,6 +13,8 @@ vi.mock('@/lib/adapters/telegram', () => tg)
 const grant = vi.hoisted(() => ({ tryGrantSend: vi.fn() }))
 vi.mock('@/lib/actions/grant', () => grant)
 vi.mock('@/lib/supabase/service', async () => (await import('../stubs/feed')).serviceModule)
+const push = vi.hoisted(() => ({ pushForItem: vi.fn() }))
+vi.mock('@/lib/webhooks/deliver', () => push)
 import { feed } from '../stubs/feed'
 
 import { createAction } from '@/lib/actions/create'
@@ -59,5 +61,26 @@ describe('createAction: send_reply and the Auto-mode grant', () => {
     await createAction('send_reply', payload, 'user')
     expect(tg.sendMessage).not.toHaveBeenCalled()
     expect(feed.rows).toHaveLength(1)
+  })
+})
+
+describe('createAction: webhook push (3f)', () => {
+  it('a held reply pushes draft_awaiting with name and company only', async () => {
+    grant.tryGrantSend.mockResolvedValue({ granted: false, reason: 'mode_owner' })
+    await createAction('send_reply', { ...payload, lead_name: 'Ada Lovelace', company: 'Acme' }, 'user')
+    expect(push.pushForItem).toHaveBeenCalledWith(
+      { campaign_id: 'c-1', scope: 'replies' },
+      { type: 'draft_awaiting', item_id: 'a-1', summary: 'A reply draft awaits approval for Ada Lovelace (Acme). Check /operator.', link: '/actions/a-1' }
+    )
+    expect(JSON.stringify(push.pushForItem.mock.calls)).not.toContain('ada@acme.com')
+  })
+
+  it('another kind pushes needs_confirmation; an auto-approved reply pushes nothing', async () => {
+    await createAction('pause_campaign', { campaign_id: 'c-1', summary: 'Pause' }, 'user')
+    expect(push.pushForItem.mock.calls[0][1]).toMatchObject({ type: 'needs_confirmation', summary: 'New item needs confirmation: pause campaign. Check /operator.' })
+    push.pushForItem.mockReset()
+    grant.tryGrantSend.mockResolvedValue({ granted: true, row: { id: 'a-1', kind: 'send_reply', status: 'approved', payload } })
+    await createAction('send_reply', payload, 'user')
+    expect(push.pushForItem).not.toHaveBeenCalled()
   })
 })

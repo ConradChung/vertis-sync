@@ -7,6 +7,8 @@ import { excerptOf, INTEREST, interestLabel, threadView, type InboxEmail, type T
 import { campaignAllowed, InboxError, outOfScope, type InboxScope } from '@/lib/inbox/scope'
 import { markReplyHandled, recordReply, type ReplyInsert } from '@/lib/inbox/store'
 import { instantlyCampaignIds } from '@/lib/operators/checkin'
+import { pushForItem } from '@/lib/webhooks/deliver'
+import { pushSummary } from '@/lib/webhooks/push'
 
 /**
  * The inbox manager's read side (Phase 3a) and the positive-reply alert.
@@ -127,6 +129,7 @@ export async function getThread(by: { reply_to_uuid?: string; thread_id?: string
  * sighting raise the feed alert: scope `replies`, urgent, routed by
  * campaign, deduped `<reply_to_uuid>:reply`, linked to /operator's New
  * replies. Feed only: no Telegram send, so Telegram behaviour is unchanged.
+ * Then a webhook push to the vertical's Grok routine, if one is set (3f).
  * Returns whether this was the first sighting.
  */
 export async function notePositiveReply(input: ReplyInsert): Promise<boolean> {
@@ -164,6 +167,11 @@ export async function notePositiveReply(input: ReplyInsert): Promise<boolean> {
     scope: 'replies',
     dedupe_key: gateKey(input.reply_to_uuid, 'reply'),
   })
+  // 3f: wake the vertical's Grok routine (name and company only; never blocks).
+  pushForItem(
+    { campaign_id: input.campaign_id ?? null, scope: 'replies' },
+    { type: 'positive_reply', item_id: input.reply_to_uuid, summary: pushSummary('positive_reply', { name, company }), link: alertLink('/operator#new-replies') }
+  )
   return true
 }
 

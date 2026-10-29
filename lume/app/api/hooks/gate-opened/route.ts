@@ -5,7 +5,9 @@ import { getGate, logEvent } from '@/lib/db/service'
 import { sendGatePing } from '@/lib/adapters/telegram'
 import { buildGatePing } from '@/lib/adapters/telegram.messages'
 import { alert, alertLink, gateKey, telegramSkipped, titleFrom } from '@/lib/alerts'
-import { scopeForGateKind } from '@/lib/operators/route'
+import { scopeForGate, scopeForGateKind } from '@/lib/operators/route'
+import { pushForItem } from '@/lib/webhooks/deliver'
+import { pushSummary } from '@/lib/webhooks/push'
 
 /**
  * Target of the `lume_gate_opened()` DB trigger (pg_net POST, fire-and-forget):
@@ -37,8 +39,10 @@ export async function POST(req: Request) {
   // The view gives the human title; the trigger body does not carry it. A
   // miss (already handled, or a DB hiccup) still pings with the kind.
   let title: string | null = null
+  let gate: Awaited<ReturnType<typeof getGate>> = null
   try {
-    title = (await getGate(kind, target_id))?.title ?? null
+    gate = await getGate(kind, target_id)
+    title = gate?.title ?? null
   } catch (err) {
     console.error('[hooks/gate-opened] getGate failed:', err instanceof Error ? err.message : err)
   }
@@ -56,6 +60,11 @@ export async function POST(req: Request) {
     telegram: () => sendGatePing(kind, target_id, title),
   })) ?? telegramSkipped
   const pinged = ping.ok
+
+  // 3f: a new Needs-confirmation item; wake the vertical's Grok routine (never blocks).
+  pushForItem(gate ? scopeForGate(gate) : { scope: scopeForGateKind(kind) }, {
+    type: 'needs_confirmation', item_id: target_id, summary: pushSummary('needs_confirmation', { kind }), link: alertLink('/operator'),
+  })
 
   try {
     await logEvent({

@@ -10,6 +10,8 @@ import { CRM_CLOSE_KIND, parseCrmClosePayload } from '@/lib/crm/actions'
 import { updateSequencePayloadError } from '@/lib/campaigns/sequenceAction'
 import { removeLeadsPayloadError } from '@/lib/actions/removeLeadsPayload'
 import { tryGrantSend } from '@/lib/actions/grant'
+import { pushForItem } from '@/lib/webhooks/deliver'
+import { pushSummary } from '@/lib/webhooks/push'
 import { sendActionPrompt, sendMessage } from '@/lib/adapters/telegram'
 
 /**
@@ -225,6 +227,11 @@ export async function createAction(
     dedupe_key: gateKey(row.id, 'lume_action'),
     telegram: () => sendActionPrompt(row),
   })) ?? telegramSkipped
+  // 3f: wake the vertical's Grok routine. A reply is "a draft awaits approval";
+  // anything else "needs confirmation". Name and company only; never blocks.
+  const pushType = kind === 'send_reply' ? 'draft_awaiting' : 'needs_confirmation'
+  const lead = kind === 'send_reply' ? { name: typeof payload.lead_name === 'string' ? payload.lead_name : null, company: typeof payload.company === 'string' ? payload.company : null } : {}
+  pushForItem(route, { type: pushType, item_id: row.id, summary: pushSummary(pushType, { ...lead, kind }), link: alertLink(`/actions/${row.id}`) })
   if (sent.ok && sent.messageId !== null) {
     try {
       await setActionMessageId(row.id, sent.messageId)
