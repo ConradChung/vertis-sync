@@ -64,7 +64,7 @@ vi.mock('@/lib/adapters/instantlyLabels', () => labels)
 const tg = vi.hoisted(() => ({ sendMessage: vi.fn(), editMessage: vi.fn(), sendDecisionNote: vi.fn(), sendActionPrompt: vi.fn() }))
 vi.mock('@/lib/adapters/telegram', () => tg)
 
-const ops = vi.hoisted(() => ({ getOperator: vi.fn(), getVertical: vi.fn(), createOperatorKey: vi.fn() }))
+const ops = vi.hoisted(() => ({ getOperator: vi.fn(), getVertical: vi.fn(), createOperatorKey: vi.fn(), listVerticals: vi.fn(), listOperators: vi.fn() }))
 vi.mock('@/lib/operators/store', () => ops)
 
 const rl = vi.hoisted(() => ({ executeRemoveLeads: vi.fn() }))
@@ -609,7 +609,77 @@ const req = (url: string, body: unknown, headers: Record<string, string> = {}) =
 const params = (id: string) => ({ params: Promise.resolve({ id }) })
 
 describe('POST /api/actions/[id]/decide', () => {
+  beforeEach(() => {
+    // v1 holds camp-1 (the vertical bots in these tests); v2 holds camp-2.
+    ops.listVerticals.mockReset().mockResolvedValue([
+      { id: 'v1', name: 'Roofers', campaign_ids: ['camp-1'], scopes: ['campaign'], is_default: false, created_at: '', archived_at: null },
+      { id: 'v2', name: 'Solar', campaign_ids: ['camp-2'], scopes: ['campaign'], is_default: false, created_at: '', archived_at: null },
+    ])
+    ops.listOperators.mockReset().mockResolvedValue([])
+  })
+
   it('declares maxDuration 300', () => expect(maxDuration).toBe(300))
+
+  describe('vertical scope and self-approval (review fixes)', () => {
+    const OP = '9b2f4c1e-0d3a-4e5b-8c7d-6e5f4a3b2c1d'
+    const cookie = () => ({ cookie: `lume_op=${signOperatorCookie(OP, 'internal-secret')}` })
+    beforeEach(() => {
+      vi.stubEnv('LUME_INTERNAL_SECRET', 'internal-secret')
+      ops.getOperator.mockResolvedValue({ id: OP, vertical_id: 'v1', is_master: false, label: 'Roofers bot', revoked_at: null })
+    })
+    afterEach(() => vi.unstubAllEnvs())
+
+    it("a vertical bot cannot decide another vertical's action (any kind), JSON or form", async () => {
+      store.getAction.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-2' }, { status: 'awaiting', claim_status: 'awaiting' }))
+      const res = await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'reject' }, cookie()), params(ID))
+      expect(res.status).toBe(403)
+      expect(await res.json()).toEqual({ error: 'campaign_out_of_scope' })
+      const f = await decidePOST(
+        new Request(`http://localhost/api/actions/${ID}/decide`, {
+          method: 'POST', body: 'decision=approve',
+          headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'http://localhost', ...cookie() },
+        }),
+        params(ID)
+      )
+      expect(f.status).toBe(303)
+      expect(f.headers.get('location')).toContain('flash_error=campaign_out_of_scope')
+      expect(store.claimDecision).not.toHaveBeenCalled()
+    })
+
+    it('its own vertical\'s action is fine', async () => {
+      store.getAction.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }, { status: 'awaiting', claim_status: 'awaiting' }))
+      store.claimDecision.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }, { status: 'rejected' }))
+      expect((await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'reject' }, cookie()), params(ID))).status).toBe(200)
+    })
+
+    it('a bot cannot approve a reply it drafted (403 self_drafted); it may still deny it', async () => {
+      const own = row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi', campaign_id: 'camp-1', drafted_by_operator: OP }, { status: 'awaiting', claim_status: 'awaiting' })
+      store.getAction.mockResolvedValue(own)
+      const res = await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve' }, cookie()), params(ID))
+      expect(res.status).toBe(403)
+      expect((await res.json()).error).toBe('self_drafted')
+      expect(store.claimDecision).not.toHaveBeenCalled()
+      store.claimDecision.mockResolvedValue({ ...own, status: 'rejected' })
+      expect((await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'reject' }, cookie()), params(ID))).status).toBe(200)
+    })
+
+    it('the master bot cannot approve its own draft either, but may approve another bot\'s', async () => {
+      ops.getOperator.mockResolvedValue({ id: OP, vertical_id: null, is_master: true, label: 'Master', revoked_at: null })
+      store.getAction.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi', campaign_id: 'camp-2', drafted_by_operator: OP }, { status: 'awaiting', claim_status: 'awaiting' }))
+      expect((await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve' }, cookie()), params(ID))).status).toBe(403)
+      store.getAction.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi', campaign_id: 'camp-2', drafted_by_operator: 'someone-else' }, { status: 'awaiting', claim_status: 'awaiting' }))
+      store.claimDecision.mockResolvedValue(null)
+      await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve' }, cookie()), params(ID))
+      expect(store.claimDecision).toHaveBeenCalled()
+    })
+
+    it('the owner may approve a bot\'s draft', async () => {
+      store.getAction.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi', drafted_by_operator: OP }, { status: 'awaiting', claim_status: 'awaiting' }))
+      store.claimDecision.mockResolvedValue(null)
+      await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve' }), params(ID))
+      expect(store.claimDecision).toHaveBeenCalledWith(ID, true, 'lume', undefined)
+    })
+  })
 
   it('approve: claims, notes Telegram, executes', async () => {
     store.claimDecision.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }, { status: 'approved', telegram_message_id: 42 }))
@@ -705,6 +775,17 @@ describe('POST /api/actions/[id]/decide', () => {
       expect(store.claimDecision).toHaveBeenCalledWith(ID, true, 'lume', undefined)
     })
 
+    it('an edit that loses the claim (someone decided first): 409, the edit is not applied', async () => {
+      store.getAction
+        .mockResolvedValueOnce(row('send_reply', REPLY, { status: 'awaiting', claim_status: 'awaiting' }))
+        .mockResolvedValueOnce(row('send_reply', REPLY, { status: 'rejected' }))
+      store.claimDecision.mockResolvedValue(null)
+      const res = await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve', body: 'Late edit' }), params(ID))
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({ error: 'already_handled', status: 'rejected' })
+      expect(ins.sendReply).not.toHaveBeenCalled()
+    })
+
     it('a second edit keeps the first original body', async () => {
       store.getAction.mockResolvedValue(row('send_reply', { ...REPLY, original_body: 'First draft' }, { status: 'awaiting', claim_status: 'awaiting' }))
       store.claimDecision.mockResolvedValue(null)
@@ -716,7 +797,7 @@ describe('POST /api/actions/[id]/decide', () => {
       const OP = '9b2f4c1e-0d3a-4e5b-8c7d-6e5f4a3b2c1d'
       vi.stubEnv('LUME_INTERNAL_SECRET', 'internal-secret')
       ops.getOperator.mockResolvedValue({ id: OP, vertical_id: 'v1', is_master: false, label: 'Inbox bot', revoked_at: null })
-      store.getAction.mockResolvedValue(row('send_reply', REPLY, { status: 'awaiting', claim_status: 'awaiting' }))
+      store.getAction.mockResolvedValue(row('send_reply', { ...REPLY, campaign_id: 'camp-1' }, { status: 'awaiting', claim_status: 'awaiting' }))
       store.claimDecision.mockResolvedValue(null)
       await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve', body: 'Bot edit' }, { cookie: `lume_op=${signOperatorCookie(OP, 'internal-secret')}` }), params(ID))
       vi.unstubAllEnvs()
@@ -1138,8 +1219,10 @@ describe('issue_operator_key: only the master bot or the owner may decide it', (
     expect(store.claimDecision).not.toHaveBeenCalled()
   })
 
-  it('a vertical bot may still decide other kinds', async () => {
-    store.getAction.mockResolvedValue(row('pause_campaign', {}, { status: 'awaiting' }))
+  it('a vertical bot may still decide other kinds (in its vertical)', async () => {
+    ops.listVerticals.mockResolvedValue([{ id: 'v1', name: 'R', campaign_ids: ['c'], scopes: [], is_default: false, created_at: '', archived_at: null }])
+    ops.listOperators.mockResolvedValue([])
+    store.getAction.mockResolvedValue(row('pause_campaign', { campaign_id: 'c' }, { status: 'awaiting' }))
     store.claimDecision.mockResolvedValue(row('pause_campaign', { campaign_id: 'c' }, { status: 'rejected' }))
     const res = await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'reject' }, asBot(false)), params(ID))
     expect(res.status).toBe(200)

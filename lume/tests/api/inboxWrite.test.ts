@@ -154,9 +154,13 @@ describe('POST /api/inbox/draft', () => {
       kind: 'send_reply',
       payload: { reply_to_uuid: 'e1', body: 'Tuesday 10am PT?', verdict: 'GOOD', proposed_times: ['Tue 10:00 PT'], research_note: 'fits', drafted_by: 'operator:op-1' },
     })
-    expect(h.createAction).toHaveBeenCalledWith('send_reply', expect.objectContaining({ reply_to_uuid: 'e1' }), 'user')
+    expect(h.createAction).toHaveBeenCalledWith('send_reply', expect.objectContaining({ reply_to_uuid: 'e1', drafted_by_operator: 'op-1' }), 'user')
     const body = await res.json()
     expect(body).toMatchObject({ ok: true, action_id: 'act-1', deep_link: '/actions/act-1', reply: { company: 'Acme', draft: 'Tuesday 10am PT?' } })
+  })
+  it('the owner\'s draft carries no drafted_by_operator', async () => {
+    await draftPOST(post('/api/inbox/draft', { reply_to_uuid: 'e1', body: 'x' }))
+    expect(h.createAction.mock.calls[0][1].drafted_by_operator).toBeUndefined()
   })
   it('another vertical\'s email: 403, nothing filed', async () => {
     h.currentOperator.mockResolvedValue(BOT)

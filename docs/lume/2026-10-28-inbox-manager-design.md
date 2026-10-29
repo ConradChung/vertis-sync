@@ -62,6 +62,10 @@ Status: 3a–3c built 2026-10-28 on branch `lume` (not deployed). Routes and the
 - Send path: through Lume.
 - Autonomy: scoped send grant allowed (off by default, owner-only, revocable).
 - Push: yes, push to a Grok webhook routine plus /operator poll backstop.
+- Approving replies (2026-10-29, fixed policy): a Grok Bot never approves a reply it drafted itself. That includes a
+  reply Lume's agent drafted in a chat the same bot started or ran. Someone else approves: the owner, the master bot
+  (for another bot's draft), or later the client (3g). Sending with no approver happens only through a campaign's Auto
+  mode (3e). Code: `lume/lib/operators/policy.ts` `canApproveSend`, with `drafted_by_operator` recorded on the draft.
 
 ## Original questions
 

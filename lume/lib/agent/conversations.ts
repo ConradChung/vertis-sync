@@ -35,6 +35,13 @@ export async function createConversation(title: string, origin?: ConversationOri
   return res.data as ConversationSummary
 }
 
+/** The Grok Bot that started a conversation (null: the owner's, or unknown). */
+export async function getConversationOperator(id: string): Promise<string | null> {
+  const res = await createServiceClient().from('agent_conversations').select('operator_id').eq('id', id).maybeSingle()
+  if (res.error) throw new DbError('getConversationOperator', res.error)
+  return ((res.data as { operator_id: string | null } | null)?.operator_id ?? null) || null
+}
+
 /** A live (not archived) conversation, or null. */
 export async function getConversation(id: string): Promise<ConversationSummary | null> {
   const sb = createServiceClient()

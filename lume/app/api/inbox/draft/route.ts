@@ -47,6 +47,8 @@ export async function POST(req: Request) {
       },
     })
     if (!built.ok) return NextResponse.json({ error: built.error }, { status: built.status })
+    // The drafting bot may not approve its own reply (lib/operators/policy.ts).
+    if (scope.operator) built.payload.drafted_by_operator = scope.operator.id
     try {
       const action = await createAction(built.kind, built.payload, auth.via === 'internal' ? 'agent' : 'user')
       return NextResponse.json(

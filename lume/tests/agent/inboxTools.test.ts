@@ -115,3 +115,19 @@ describe('send_reply (reply card + optional judgment fields)', () => {
     })
   })
 })
+
+describe('send_reply drafted in a Grok Bot\'s chat', () => {
+  it('records drafted_by_operator from the chat (so that bot cannot approve it)', async () => {
+    const createAction = vi.fn().mockResolvedValue({ id: 'a1' })
+    const prepare = vi.fn(async ({ payload }: { payload: Record<string, unknown> }) => ({ ok: true as const, kind: 'send_reply' as const, payload: { ...payload, summary: 's' } }))
+    const tools = buildTools({ fetch: vi.fn(), createAction, prepare: prepare as never, agentRunId: 'r', baseUrl: 'https://lume.test', secret: 's', draftedByOperator: 'op-7' })
+    const t = tools.find((x) => x.name === 'send_reply')!
+    await t.run(t.inputSchema.parse({ reply_to_uuid: 'e1', body: 'hi' }))
+    expect(createAction.mock.calls[0][1]).toMatchObject({ drafted_by_operator: 'op-7' })
+  })
+  it('an owner chat records none', async () => {
+    const { run, createAction } = setup()
+    await run('send_reply', { reply_to_uuid: 'e1', body: 'hi' })
+    expect(createAction.mock.calls[0][1].drafted_by_operator).toBeUndefined()
+  })
+})

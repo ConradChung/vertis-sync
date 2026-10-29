@@ -60,6 +60,8 @@ export const CAMPAIGN_PAYLOADS = {
     proposed_times: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
     research_note: z.string().trim().max(2000).optional(),
     drafted_by: LABEL,
+    /** The Grok Bot that drafted it (bot API, its cookie, or the agent in its chat): it may not approve it (lib/operators/policy.ts). Server-set. */
+    drafted_by_operator: LABEL,
     // Edit before approval (decide route): the draft as filed, and who changed it.
     original_body: z.string().trim().max(20_000).optional(),
     edited_by: LABEL,

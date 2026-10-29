@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
  */
 
 const h = vi.hoisted(() => ({
+  getConversationOperator: vi.fn(),
   requireOwner: vi.fn(),
   insertAgentRun: vi.fn(),
   updateAgentRun: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock('@/lib/agent/runs', () => ({ insertAgentRun: h.insertAgentRun, updateAge
 vi.mock('@/lib/agent/conversations', () => ({
   createConversation: h.createConversation,
   getConversation: h.getConversation,
+  getConversationOperator: h.getConversationOperator,
   getMessages: h.getMessages,
   insertMessage: h.insertMessage,
 }))
@@ -561,6 +563,17 @@ describe('POST /api/agent/run in skip-permissions mode', () => {
     const ev = await events(await post('reply', { skip_permissions: true }))
     expect(h.claimDecision).not.toHaveBeenCalled()
     expect(ev.at(-1)).toMatchObject({ type: 'done', status: 'needs_approval' })
+  })
+
+  it('a reply drafted in a chat a Grok Bot started is marked drafted_by_operator (that bot cannot approve it)', async () => {
+    h.getConversationOperator.mockResolvedValue('op-9')
+    fakeRunner([
+      { text: '', call: { name: 'send_reply', input: { eaccount: 'me@send.com', campaign_id: 'c', reply_to_uuid: 'e', body: 'hi' } } },
+      { text: 'Waiting.' },
+    ])
+    await events(await post('reply', { conversation_id: CONV }))
+    expect(h.getConversationOperator).toHaveBeenCalledWith(CONV)
+    expect(h.createAction).toHaveBeenCalledWith('send_reply', expect.objectContaining({ drafted_by_operator: 'op-9' }), 'agent', expect.anything())
   })
 
   it('stores auto: true on an automatic follow-up turn', async () => {

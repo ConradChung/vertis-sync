@@ -11,7 +11,7 @@ import { editMessage, sendMessage } from '@/lib/adapters/telegram'
 import { alert, alertLink, titleFrom } from '@/lib/alerts'
 import { routeItemForAction } from '@/lib/operators/route'
 import { buildPrompt } from '@/lib/agent/chat'
-import { createConversation, getConversation, getMessages, insertMessage } from '@/lib/agent/conversations'
+import { createConversation, getConversation, getConversationOperator, getMessages, insertMessage } from '@/lib/agent/conversations'
 import { contextFromMessages, titleFromPrompt, type StoredApproval, type StoredToolEntry } from '@/lib/agent/history'
 import { SYSTEM_PROMPT } from '@/lib/agent/prompt'
 import { loadKnowledge } from '@/lib/agent/memory'
@@ -144,6 +144,7 @@ export async function POST(req: Request) {
 
   let runId: string
   let conversationId: string
+  let chatOperatorId: string | null = null
   let projectId: string | null = null
   let prompt = message
   let ownerVertical: Awaited<ReturnType<typeof getVertical>> = null
@@ -161,6 +162,7 @@ export async function POST(req: Request) {
       if (!conversation) return NextResponse.json({ error: 'conversation_not_found' }, { status: 404 })
       conversationId = conversation.id
       projectId = conversation.project_id ?? null
+      chatOperatorId = await getConversationOperator(conversation.id)
       prompt = buildPrompt(contextFromMessages(await getMessages(conversationId)), message)
     } else {
       const title = titleFromPrompt(message)
@@ -189,6 +191,7 @@ export async function POST(req: Request) {
           ? await createConversation(title, origin)
           : await createConversation(title)
       conversationId = created.id
+      chatOperatorId = origin?.operator_id ?? null
     }
     if (skill) {
       prompt = `${skillContext(skill, skillMode)}\n\n${prompt}`
@@ -237,6 +240,7 @@ export async function POST(req: Request) {
         origin,
         publicOrigin: requestOrigin(req),
         operator,
+        draftedByOperator: operator?.id ?? chatOperatorId,
         conversationId,
         project,
         skipPermissions: body.data.skip_permissions === true,
@@ -376,6 +380,7 @@ interface RunReply {
 }
 
 async function executeRun({
+  draftedByOperator,
   runId,
   prompt,
   title,
@@ -395,6 +400,8 @@ async function executeRun({
   /** The public origin (LUME_URL or the request's) for links shown to the user. */
   publicOrigin: string
   operator: Operator | null
+  /** The bot whose draft a send_reply from this run is (it runs it, or started the chat). */
+  draftedByOperator: string | null
   conversationId: string
   /** The conversation's project and its block (null: Unfiled). */
   project: { id: string; block: string } | null
@@ -477,6 +484,7 @@ async function executeRun({
       skipPermissions,
       autoApprove: makeAutoApprove({ operator, publicOrigin }),
       operator,
+      draftedByOperator,
       skills: { list: () => listSkills(), get: getSkill, findByName: findSkillByName, create: createSkill },
       notify: async (raw) => {
         // Telegram and the feed both get the masked text: a sign-in link is never sent or stored in plaintext.

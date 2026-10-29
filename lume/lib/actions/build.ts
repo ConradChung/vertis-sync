@@ -284,10 +284,11 @@ async function replyRecipient(replyToUuid: string): Promise<{ lead: string; camp
  * `lead_name` / `company` (CRM deal, else lead bank). An outbound email is
  * refused (`not_an_inbound_email`). The caller's judgment fields (verdict,
  * proposed_times, research_note) pass through. Edit fields are dropped (only
- * the decide route's Edit writes them). Shape errors are left for
+ * the decide route's Edit writes them), and so is `drafted_by_operator`
+ * (the caller of the builder sets it from who is asking). Shape errors are left for
  * `parseCampaignPayload`.
  */
-const CARD_FACTS = ['their_message', 'lead_name', 'company', 'thread_id', 'original_body', 'edited_by', 'edited_at'] as const
+const CARD_FACTS = ['their_message', 'lead_name', 'company', 'thread_id', 'original_body', 'edited_by', 'edited_at', 'drafted_by_operator'] as const
 
 async function withServerExtras(kind: CampaignActionKind, raw: Record<string, unknown>): Promise<{ payload: Record<string, unknown> } | { error: string }> {
   const p: Record<string, unknown> = { ...raw }

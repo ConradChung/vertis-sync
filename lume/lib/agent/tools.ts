@@ -75,6 +75,12 @@ export interface ToolDeps {
    * not get the vertical-management tools (MASTER_ONLY_TOOLS); list_verticals stays.
    */
   operator?: { is_master: boolean } | null
+  /**
+   * The Grok Bot this chat belongs to (the one running it, else the one that
+   * started it). A send_reply drafted here is recorded as that bot's draft,
+   * so it cannot approve it (lib/operators/policy.ts).
+   */
+  draftedByOperator?: string | null
   /** Skip-permissions mode for this run: skippable kinds are approved + executed at once. */
   skipPermissions?: boolean
   /** Claims (decided_via 'agent') and executes a pending action. Server-side only. */
@@ -167,6 +173,7 @@ async function requestApproval(
 ): Promise<ToolResult> {
   const built = await deps.prepare({ kind, payload: request })
   if (!built.ok) throw new Error(`${kind} refused: ${built.error} (HTTP ${built.status})`)
+  if (built.kind === 'send_reply' && deps.draftedByOperator) built.payload.drafted_by_operator = deps.draftedByOperator
   // A reply shows the owner its card in the chat (components/agent/ApprovalCard.tsx).
   const card = built.kind === 'send_reply' ? { reply: replyCardOf(built.payload) } : {}
   try {

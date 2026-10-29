@@ -5,7 +5,9 @@ import { dispatchExecuteNow, executeAction } from '@/lib/actions/execute'
 import { claimDecision, getAction } from '@/lib/actions/store'
 import { editMessage, sendDecisionNote } from '@/lib/adapters/telegram'
 import { alert, alertLink, titleFrom } from '@/lib/alerts'
-import { routeItemForAction } from '@/lib/operators/route'
+import { hasLiveMaster, routeItemForAction, verticalFor } from '@/lib/operators/route'
+import { listOperators, listVerticals } from '@/lib/operators/store'
+import { canApproveSend, SELF_APPROVAL_ERROR } from '@/lib/operators/policy'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { formRedirect, readJsonOrForm } from '@/lib/http/form'
 import { uuidParam } from '@/lib/http/json'
@@ -47,6 +49,14 @@ import type { Json, PendingActionRow } from '@/lib/db/types'
  * conditional claim, so it applies only if this decision wins. A body equal
  * to the current one is not an edit. Another kind with a body: 400
  * edit_not_supported; a deny ignores the body.
+ *
+ * Grok Bots, every kind, JSON and form alike:
+ *  - a vertical bot may decide only what routes to its own vertical
+ *    (`routeItemForAction` → `verticalFor`, as /operator lists it), else 403
+ *    campaign_out_of_scope;
+ *  - no bot (master included) may APPROVE a send_reply it drafted itself
+ *    (lib/operators/policy.ts canApproveSend, owner decision): 403
+ *    self_drafted. It may still deny it.
  */
 
 // executeAction may wait on pipeline.decide() (170 s); outlive it.
@@ -72,7 +82,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   // Kinds with their own rules (and an Edit) are checked before any claim.
   let edited: Record<string, Json> | undefined
-  if (form || (op && !op.is_master) || editBody !== null) {
+  if (form || op || editBody !== null) {
     let current: PendingActionRow | null = null
     try {
       current = await getAction(id)
@@ -110,6 +120,22 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         return NextResponse.json({ error: 'master_only', message: MASTER_ONLY_ERROR }, { status: 403 })
       }
       if (form) return formRedirect(req, form.returnTo, { error: 'key_on_action_page' })
+    }
+    if (op && current) {
+      const deny = (status: number, error: string, message?: string) =>
+        form ? formRedirect(req, form.returnTo, { error }) : NextResponse.json({ error, ...(message ? { message } : {}) }, { status })
+      if (!op.is_master) {
+        let mine = false
+        try {
+          const [verticals, operators] = await Promise.all([listVerticals(), listOperators({ includeRevoked: false })])
+          mine = verticalFor(routeItemForAction(current), verticals, { masterLive: hasLiveMaster(operators) })?.id === op.vertical_id
+        } catch (err) {
+          if (form) return formRedirect(req, form.returnTo, { error: 'db_error' })
+          return dbErrorResponse(err, 'api/actions/decide')
+        }
+        if (!mine) return deny(403, 'campaign_out_of_scope')
+      }
+      if (approve && !canApproveSend(op, current)) return deny(403, 'self_drafted', SELF_APPROVAL_ERROR)
     }
   }
 

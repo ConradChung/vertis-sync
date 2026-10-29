@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireOwner } from '@/lib/auth/guards'
 import { ActionRequestBody, buildActionRequest } from '@/lib/actions/build'
+import { currentOperator } from '@/lib/operators/session'
 import { createAction, DuplicateActionError, InvalidActionPayloadError } from '@/lib/actions/create'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { formAnswer, readJsonOrForm } from '@/lib/http/form'
@@ -43,6 +44,11 @@ export async function POST(req: Request) {
     const built = await buildActionRequest(body.data)
     if (!built.ok) {
       return answer(NextResponse.json({ error: built.error, ...(built.problems ? { problems: built.problems } : {}) }, { status: built.status }))
+    }
+    if (built.kind === 'send_reply' && auth.via === 'session') {
+      // A reply a Grok Bot files with its own cookie is its draft: it may not approve it (lib/operators/policy.ts).
+      const op = await currentOperator(req)
+      if (op) built.payload.drafted_by_operator = op.id
     }
     const action = await createAction(built.kind, built.payload, requestedBy, { ruleId: built.ruleId ?? null })
     return answer(
