@@ -365,6 +365,8 @@ describe('executeAction dispatch table', () => {
       store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi', campaign_id: 'camp-1' }, { decided_via: 'grant' }))
       expect(await executeAction(ID)).toMatchObject({ status: 'executed' })
       expect(grantMod.grantStillHolds).toHaveBeenCalledTimes(1)
+      // the executor's fresh read of the answered email is what the grant is re-checked against
+      expect(grantMod.grantStillHolds.mock.calls[0][1]).toMatchObject({ id: 'u-1', campaign_id: 'camp-1' })
       expect(em.getThreadEmails.mock.invocationCallOrder[0]).toBeLessThan(grantMod.grantStillHolds.mock.invocationCallOrder[0])
       expect(grantMod.grantStillHolds.mock.invocationCallOrder[0]).toBeLessThan(store.markSendAttempted.mock.invocationCallOrder[0])
     })

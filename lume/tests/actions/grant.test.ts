@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PendingActionRow } from '@/lib/db/types'
 
+const em = vi.hoisted(() => ({ getEmail: vi.fn() }))
+vi.mock('@/lib/adapters/instantlyEmails', () => em)
 const modes = vi.hoisted(() => ({ getReplyMode: vi.fn() }))
 vi.mock('@/lib/inbox/replyModeStore', () => modes)
 const inbox = vi.hoisted(() => ({ getReply: vi.fn(), listLeadReplies: vi.fn() }))
@@ -14,7 +16,7 @@ vi.mock('next/server', () => next)
 const exec = vi.hoisted(() => ({ executeAction: vi.fn() }))
 vi.mock('@/lib/actions/execute', () => exec)
 
-import { evaluateGrant, tryGrantSend } from '@/lib/actions/grant'
+import { evaluateGrant, grantStillHolds, tryGrantSend } from '@/lib/actions/grant'
 
 const payload = { summary: 's', campaign_id: 'c-1', campaign_verified: true, reply_to_uuid: 'u-1', lead_email: 'ada@acme.com', eaccount: 'me@x.com', body: 'hi', verdict: 'GOOD', their_message: 'Tuesday works', recipient_verified: true }
 const row = (p: Record<string, unknown> = payload, kind = 'send_reply') => ({ id: 'a-1', kind, payload: p, status: 'awaiting' }) as unknown as PendingActionRow
@@ -22,6 +24,7 @@ const row = (p: Record<string, unknown> = payload, kind = 'send_reply') => ({ id
 beforeEach(() => {
   vi.resetAllMocks()
   modes.getReplyMode.mockResolvedValue('auto')
+  em.getEmail.mockResolvedValue({ id: 'u-1', direction: 'in', campaign_id: 'c-1', interest: 1, text: 'Tuesday works\n\nOn Mon Frank wrote:\n> hi', lead: 'ada@acme.com' })
   inbox.getReply.mockResolvedValue({ handled_how: null, interest: 1 })
   inbox.listLeadReplies.mockResolvedValue([])
   store.claimDecision.mockImplementation(async (id: string) => ({ ...row(), id, status: 'approved', decided_via: 'grant' }))
@@ -63,6 +66,8 @@ describe('the reply grant', () => {
   it('holds BAD, unsubscribe and hostile replies, and leads labelled BAD before', async () => {
     expect(await tryGrantSend(row({ ...payload, verdict: 'BAD' }))).toEqual({ granted: false, reason: 'verdict_bad' })
     expect(await tryGrantSend(row({ ...payload, their_message: 'unsubscribe' }))).toEqual({ granted: false, reason: 'opt_out_or_hostile' })
+    em.getEmail.mockResolvedValueOnce({ id: 'u-1', direction: 'in', campaign_id: 'c-1', interest: 1, text: `${'ok '.repeat(900)} please unsubscribe me` })
+    expect(await tryGrantSend(row())).toEqual({ granted: false, reason: 'opt_out_or_hostile' })
     inbox.listLeadReplies.mockResolvedValue([{ handled_how: 'label:bad_fit' }])
     expect(await tryGrantSend(row())).toEqual({ granted: false, reason: 'lead_labeled_negative' })
     expect(inbox.listLeadReplies).toHaveBeenCalledWith('c-1', 'ada@acme.com')
@@ -79,6 +84,17 @@ describe('the reply grant', () => {
     store.claimDecision.mockResolvedValue(null)
     expect(await tryGrantSend(row())).toEqual({ granted: false, reason: 'already_decided' })
     expect(next.after).not.toHaveBeenCalled()
+  })
+
+  it('the executor passes its fresh read of the answered email; the cached read is skipped', async () => {
+    em.getEmail.mockReset()
+    expect(await grantStillHolds({ payload } as never, { id: 'u-1', direction: 'in', campaign_id: 'c-1', interest: 0, text: 'Out of office' } as never)).toBe('out_of_office')
+    expect(em.getEmail).not.toHaveBeenCalled()
+  })
+
+  it('an unreadable email holds', async () => {
+    em.getEmail.mockResolvedValue(null)
+    expect(await tryGrantSend(row())).toEqual({ granted: false, reason: 'no_lead_message' })
   })
 
   it('only send_reply; no lead address is unverified', async () => {

@@ -23,14 +23,31 @@ export type ReplyMode = (typeof REPLY_MODES)[number]
 export const parseReplyMode = (v: unknown): ReplyMode => ((REPLY_MODES as readonly unknown[]).includes(v) ? (v as ReplyMode) : 'owner')
 
 /**
- * The lead asked to stop, or was hostile. Deliberately broad: a false
- * positive only means a person approves the reply, as in owner mode.
+ * The lead asked to stop, or was hostile, or does not want this. Deliberately
+ * broad: a false positive only means a person approves the reply, as in owner
+ * mode. Covers English plus common German, French and Spanish opt-outs.
  */
-const OPT_OUT =
-  /\b(unsubscribe|remove me|take me off|stop (e-?mailing|contacting|sending|messaging)|(do not|don'?t|never) (contact|e-?mail|message|write)|opt(ed)?[- ]?out|not interested|leave me alone|spam(ming)?|scam|report(ing)? (you|this)|harass\w*|lawyer|legal action|fu+ck\w*|shit|bullshit|piss off|go away)\b|\bf\*{2,}/i
+const OPT_OUT = new RegExp(
+  [
+    String.raw`\b(unsubscribe|unsub|remove|take me off|stop (e-?mailing|contacting|sending|messaging)|(do not|don'?t|never) (contact|e-?mail|message|write)|opt(ed)?[- ]?out|not interested|no,? thanks|no,? thank you|not for us|wrong person|leave me alone)\b`,
+    String.raw`\b(spam(ming)?|scam|report(ing)? (you|this)|harass\w*|lawyer|legal action|fu+ck\w*|shit|bullshit|piss off|go away)\b`,
+    String.raw`\bf\*{2,}`,
+    // German, French, Spanish / Portuguese
+    String.raw`\b(abmelden|abbestellen|austragen)\b`,
+    String.raw`(d[ée]sabonner|d[ée]sinscri(re|vez|s)|d[ée]sabonnement)`,
+    String.raw`\b(darme de baja|dar de baja|de baja|baja|cancelar|cancele|descadastrar)\b`,
+  ].join('|'),
+  'i'
+)
+
+/** A short message that says "stop" anywhere is an opt-out (a bare "STOP" included). */
+const SHORT_STOP_CHARS = 280
+const STOP = /\bstop\b/i
 
 export function looksLikeOptOut(text: string | null | undefined): boolean {
-  return !!text && OPT_OUT.test(text)
+  if (!text) return false
+  const t = text.trim()
+  return OPT_OUT.test(t) || (t.length <= SHORT_STOP_CHARS && STOP.test(t))
 }
 
 /** Labels (lume_replies.handled_how) that close a lead for good: never auto-send to them again. */
@@ -49,15 +66,23 @@ export type GrantBlocker =
   | 'opt_out_or_hostile'
   | 'reply_labeled'
   | 'negative_interest'
+  | 'out_of_office'
+  | 'reply_unrecorded'
   | 'lead_labeled_negative'
 
 export interface GrantContext {
   mode: ReplyMode
   /** The send_reply payload (as filed, server-built). */
   payload: Record<string, Json | undefined>
+  /**
+   * The answered email as Instantly has it: its FULL quote-trimmed text (not
+   * the card's 2000-character cut), interest and campaign. Null when it could
+   * not be read.
+   */
+  email: { message: string; interest: number | null; campaign_id: string | null } | null
   /** lume_replies row for the email being answered, if recorded. */
   reply: { handled_how: string | null; interest: number | null } | null
-  /** Every lume_replies row of this lead in the campaign. */
+  /** Every lume_replies row of this lead, in ANY campaign. */
   leadReplies: readonly { handled_how: string | null }[]
 }
 
@@ -65,8 +90,11 @@ export interface GrantContext {
  * Why an Auto-mode campaign's reply must still wait for a person, or null
  * when the grant may approve it. Auto approves only a verdict of GOOD
  * (UNSURE follows the SOP's UNSURE rule, which a person applies; a missing
- * verdict is unscored), never for BAD, an unsubscribe or hostile message,
- * a negative Instantly interest, or a lead an earlier label closed.
+ * verdict is unscored) on a campaign the email itself named, to a verified
+ * recipient. Never for BAD; an unsubscribe, stop, hostile or "no thanks"
+ * message (full text); an out-of-office or negative interest; an unknown
+ * interest with no recorded reply; or a lead an earlier label closed in any
+ * campaign.
  */
 export function grantBlocker(c: GrantContext): GrantBlocker | null {
   if (c.mode !== 'auto') return c.mode === 'client' ? 'mode_client' : 'mode_owner'
@@ -76,11 +104,16 @@ export function grantBlocker(c: GrantContext): GrantBlocker | null {
   if (p.verdict === 'BAD') return 'verdict_bad'
   if (p.verdict !== 'GOOD') return 'verdict_not_good'
   if (p.recipient_verified === false) return 'recipient_unverified'
-  const message = typeof p.their_message === 'string' ? p.their_message.trim() : ''
-  if (!message) return 'no_lead_message'
-  if (looksLikeOptOut(message)) return 'opt_out_or_hostile'
+  const card = typeof p.their_message === 'string' ? p.their_message.trim() : ''
+  const full = c.email?.message.trim() ?? ''
+  if (!c.email || !full) return 'no_lead_message'
+  if (looksLikeOptOut(full) || looksLikeOptOut(card)) return 'opt_out_or_hostile'
+  if (c.email.campaign_id !== p.campaign_id) return 'campaign_mismatch'
   if (c.reply?.handled_how?.startsWith('label:')) return 'reply_labeled'
-  if (typeof c.reply?.interest === 'number' && c.reply.interest < 0) return 'negative_interest'
+  const interest = c.email.interest ?? c.reply?.interest ?? null
+  if (interest === null && !c.reply) return 'reply_unrecorded'
+  if (interest === 0) return 'out_of_office'
+  if (typeof interest === 'number' && interest < 0) return 'negative_interest'
   if (c.leadReplies.some((r) => r.handled_how !== null && NEGATIVE_LABELS.has(r.handled_how))) return 'lead_labeled_negative'
   return null
 }
@@ -96,8 +129,10 @@ export const GRANT_BLOCKER_TEXT: Record<GrantBlocker, string> = {
   verdict_not_good: 'Auto mode sends only replies with a verdict of GOOD',
   recipient_unverified: 'the recipient could not be verified',
   no_lead_message: "the lead's message could not be read",
-  opt_out_or_hostile: 'the lead may have asked to stop or was hostile',
+  opt_out_or_hostile: 'the lead may have asked to stop, said no thanks, or was hostile',
   reply_labeled: 'the reply was already labeled',
   negative_interest: 'Instantly marks the reply as not interested',
-  lead_labeled_negative: 'the lead was labeled BAD, unsubscribe, hostile or not interested before',
+  out_of_office: 'Instantly marks the reply as out of office',
+  reply_unrecorded: 'the reply has no interest status and was never recorded as positive',
+  lead_labeled_negative: 'the lead was labeled BAD, unsubscribe, hostile or not interested before (any campaign)',
 }

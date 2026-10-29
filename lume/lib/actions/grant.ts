@@ -4,6 +4,8 @@ import { claimDecision } from '@/lib/actions/store'
 import { logEvent } from '@/lib/db/service'
 import type { Json, PendingActionRow } from '@/lib/db/types'
 import { getReply, listLeadReplies } from '@/lib/inbox/store'
+import { getEmail } from '@/lib/adapters/instantlyEmails'
+import { trimQuotes, type InboxEmail } from '@/lib/inbox/model'
 import { grantBlocker, type GrantBlocker } from '@/lib/inbox/replyMode'
 import { getReplyMode } from '@/lib/inbox/replyModeStore'
 import { canApproveSend } from '@/lib/operators/policy'
@@ -26,18 +28,28 @@ import { canApproveSend } from '@/lib/operators/policy'
 
 const str = (v: Json | undefined) => (typeof v === 'string' && v.trim() ? v.trim() : null)
 
-/** Why this send_reply payload must wait for a person, or null when the grant may approve it. */
-export async function evaluateGrant(payload: Record<string, Json> | null): Promise<GrantBlocker | null> {
+/**
+ * Why this send_reply payload must wait for a person, or null when the grant
+ * may approve it. `fresh` is the executor's uncached read of the answered
+ * email; at creation the (cached) read is used. The opt-out check runs over
+ * the email's full quote-trimmed text, not the card's 2000-character cut.
+ */
+export async function evaluateGrant(payload: Record<string, Json> | null, fresh?: InboxEmail | null): Promise<GrantBlocker | null> {
   const p = payload ?? {}
   const campaign = str(p.campaign_id)
   if (!campaign) return 'no_campaign'
   const mode = await getReplyMode(campaign)
-  if (mode !== 'auto') return grantBlocker({ mode, payload: p, reply: null, leadReplies: [] })
+  if (mode !== 'auto') return grantBlocker({ mode, payload: p, email: null, reply: null, leadReplies: [] })
   const lead = str(p.lead_email)
   if (!lead) return 'recipient_unverified'
   const replyTo = str(p.reply_to_uuid)
-  const [reply, leadReplies] = await Promise.all([replyTo ? getReply(replyTo) : Promise.resolve(null), listLeadReplies(campaign, lead)])
-  return grantBlocker({ mode, payload: p, reply, leadReplies })
+  const [email, reply, leadReplies] = await Promise.all([
+    fresh !== undefined ? Promise.resolve(fresh) : replyTo ? getEmail(replyTo) : Promise.resolve(null),
+    replyTo ? getReply(replyTo) : Promise.resolve(null),
+    listLeadReplies(campaign, lead),
+  ])
+  const view = email ? { message: trimQuotes(email.text ?? ''), interest: email.interest ?? null, campaign_id: email.campaign_id ?? null } : null
+  return grantBlocker({ mode, payload: p, email: view, reply, leadReplies })
 }
 
 export type GrantOutcome = { granted: true; row: PendingActionRow } | { granted: false; reason: GrantBlocker | 'policy' | 'already_decided' | 'error' }
@@ -99,9 +111,10 @@ export function scheduleExecution(id: string): void {
 
 /**
  * The executor's last look at a grant (decided_via 'grant'), right before the
- * send: the campaign must still be in Auto mode and nothing since must hold
- * it (a label, a negative interest). Null when it still holds.
+ * send, against its fresh read of the answered email: the campaign must still
+ * be in Auto mode and nothing since may hold it (a label, an out-of-office or
+ * negative interest, an opt-out in the text). Null when it still holds.
  */
-export async function grantStillHolds(action: Pick<PendingActionRow, 'payload'>): Promise<GrantBlocker | null> {
-  return evaluateGrant(action.payload)
+export async function grantStillHolds(action: Pick<PendingActionRow, 'payload'>, answered?: InboxEmail | null): Promise<GrantBlocker | null> {
+  return evaluateGrant(action.payload, answered)
 }

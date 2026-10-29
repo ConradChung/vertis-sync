@@ -313,7 +313,7 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
       }
       let held
       try {
-        held = await grantStillHolds(action)
+        held = await grantStillHolds(action, answered)
       } catch (err) {
         return refuse('grant_unverifiable', `the Auto-mode grant could not be re-checked (${err instanceof Error ? err.message : String(err)})`)
       }
