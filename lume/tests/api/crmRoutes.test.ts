@@ -35,7 +35,11 @@ const findAwaitingActionBy = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/campaigns/service', () => ({ findAwaitingActionBy }))
 const sendActionPrompt = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/adapters/telegram', () => ({ sendActionPrompt }))
-vi.mock('@/lib/adapters/instantly', () => ({ isInstantlyConfigured: () => false, listCampaigns: vi.fn() }))
+vi.mock('@/lib/adapters/instantly', async () => ({
+  ...(await vi.importActual<object>('@/lib/adapters/instantly')),
+  isInstantlyConfigured: () => false,
+  listCampaigns: vi.fn(),
+}))
 
 import { GET as boardGET } from '@/app/api/crm/board/route'
 import { GET as dealGET, PATCH as dealPATCH } from '@/app/api/crm/deals/[id]/route'
