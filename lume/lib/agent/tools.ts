@@ -212,7 +212,10 @@ async function requestApproval(
         status: 'awaiting_approval',
         action_id: existingId,
         deep_link: existingId ? `/actions/${existingId}` : null,
-        note: 'An identical action was already awaiting approval; no new one was created.',
+        note:
+          kind === 'send_reply'
+            ? 'A reply to this email is already awaiting approval, running or sent (one reply per inbound email); no new one was created.'
+            : 'An identical action was already awaiting approval; no new one was created.',
       }
     }
     throw err
