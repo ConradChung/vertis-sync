@@ -52,6 +52,8 @@ Linking a project to a vertical has two effects:
 
 Each vertical can be linked to at most one live project.
 
+A vertical (non-master) Grok Bot can use only its own vertical's project and unlinked projects, never another vertical's: the project APIs return 403 for the rest, and a run accepts `project_id` only for the bot's own vertical's project. The owner, the master bot and the agent's internal bearer have full access.
+
 ## UI (Agent tab sidebar, AgentHistory)
 
 **Sidebar**
@@ -78,7 +80,10 @@ Each vertical can be linked to at most one live project.
 
 - Upload limit is 20 MB per file, with a per-project total of 200 MB.
 - Unsupported types are rejected with a message.
-- Deleting a project moves its chats to Unfiled; there is no cascade delete of chats.
+- Deleting a project is a **hard delete**: the project row, its files and notes (rows and their Storage objects) are removed. Its chats are never deleted; they move to Unfiled (`on delete set null`).
+- A PDF whose text takes over about 40 seconds to extract, or yields none, is stored as "not readable". Extraction reads at most 500 pages and stops at the 200k-character cap.
+- An upload that is signed but never finalized is recorded in `agent_project_uploads` and its object is deleted by an hourly sweep (`lume-project-upload-sweep` → `/api/cron/project-uploads`) once it is an hour old. A failed finalize deletes its object at once.
+- The `agent-projects` bucket accepts only the supported types (CSV, PDF, plain text, Markdown, JSON, PNG, JPEG, GIF, WebP).
 
 ## Testing
 

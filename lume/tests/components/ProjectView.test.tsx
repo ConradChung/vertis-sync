@@ -69,6 +69,23 @@ describe('ProjectView', () => {
     expect(await screen.findByText('Saved')).toBeTruthy()
   })
 
+  it('leaving the page with a save pending flushes it (keepalive)', async () => {
+    const { unmount } = render(<ProjectView id={PID} />)
+    const box = await screen.findByLabelText('Project instructions')
+    fireEvent.change(box, { target: { value: 'Half-typed rule' } })
+    unmount()
+    const patch = fetchMock.mock.calls.find(([u, i]) => u === `/api/agent/projects/${PID}` && i?.method === 'PATCH')
+    expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ instructions: 'Half-typed rule' })
+    expect(patch?.[1]?.keepalive).toBe(true)
+  })
+
+  it('nothing pending: unmounting sends nothing', async () => {
+    const { unmount } = render(<ProjectView id={PID} />)
+    await screen.findByLabelText('Project instructions')
+    unmount()
+    expect(calls('PATCH', `/api/agent/projects/${PID}`)).toHaveLength(0)
+  })
+
   it('dropping files on the drop zone uploads them and lists them', async () => {
     render(<ProjectView id={PID} />)
     const zone = await screen.findByTestId('project-drop-zone')

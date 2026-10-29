@@ -6,6 +6,7 @@ import { ArrowUp, BookMarked, Brain, PanelRight, ChevronRight, KeyRound, Message
 import { AgentHistory, useConversationList, useMoveChat } from '@/components/agent/AgentHistory'
 import { ProjectChip } from '@/components/agent/ProjectChip'
 import { useProjectList } from '@/hooks/useProjectList'
+import { useFileDropGuard } from '@/hooks/useFileDropGuard'
 import { ApprovalCard, type ApprovalDecision } from '@/components/agent/ApprovalCard'
 import { ManageSkills, SkillCard, SkillMenu, useSkillList } from '@/components/agent/AgentSkills'
 import { Markdown } from '@/components/agent/Markdown'
@@ -76,6 +77,8 @@ export function AgentChat() {
   const bump = useCallback(() => setRefreshKey((k) => k + 1), [])
   const list = useConversationList(refreshKey)
   const projects = useProjectList(refreshKey)
+  // A file dropped beside a project row must not navigate away from the chat.
+  useFileDropGuard()
   const moveChat = useMoveChat(list)
   const newProjectId = params.get('project')
   const skills = useSkillList(refreshKey)

@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useFileDropGuard } from '@/hooks/useFileDropGuard'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, FileText, FolderOpen, Image as ImageIcon, Loader2, MessageSquare, NotebookPen, SquarePen, Trash2, Upload } from 'lucide-react'
@@ -52,6 +53,9 @@ export function ProjectView({ id }: { id: string }) {
   const [confirm, setConfirm] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSaved = useRef('')
+  // The latest text, for the unmount flush (state is stale in a cleanup).
+  const latest = useRef('')
+  useFileDropGuard()
   const fileRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
@@ -72,6 +76,7 @@ export function ProjectView({ id }: { id: string }) {
       if (!b) return
       setInstructions(b.project.instructions)
       lastSaved.current = b.project.instructions
+      latest.current = b.project.instructions
     })
   }, [load])
 
@@ -101,15 +106,23 @@ export function ProjectView({ id }: { id: string }) {
   // Autosave: a pause in typing saves; leaving the page flushes.
   const onInstructions = (text: string) => {
     setInstructions(text)
+    latest.current = text
     setSave('idle')
     if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => void persist(text), AUTOSAVE_MS)
+    timer.current = setTimeout(() => {
+      timer.current = null
+      void persist(text)
+    }, AUTOSAVE_MS)
   }
+  // Leaving with a save still pending (navigating away mid-typing) sends it now.
   useEffect(
     () => () => {
-      if (timer.current) clearTimeout(timer.current)
+      if (!timer.current) return
+      clearTimeout(timer.current)
+      timer.current = null
+      if (latest.current !== lastSaved.current) void patchProject(id, { instructions: latest.current }, { keepalive: true })
     },
-    []
+    [id]
   )
 
   const rename = async (name: string) => {

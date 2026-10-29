@@ -4,7 +4,7 @@
  * fit to show.
  */
 import { createClient } from '@/lib/supabase/client'
-import { fileTypeOf, MAX_FILE_BYTES, type Project, type ProjectItem } from '@/lib/agent/projectModel'
+import { fileTypeOf, MAX_FILE_BYTES, mimeFor, type Project, type ProjectItem } from '@/lib/agent/projectModel'
 
 /** dataTransfer types for in-app drags (OS files arrive as 'Files'). */
 export const CHAT_DRAG = 'application/x-lume-chat'
@@ -59,11 +59,12 @@ const MESSAGES: Record<string, string> = {
 export const errorMessage = (code: string | undefined, status: number) =>
   (code && MESSAGES[code]) || (status === 0 ? 'Network error — try again.' : `Request failed (${status}).`)
 
-async function call<T>(url: string, method: string, body?: unknown): Promise<Result<T>> {
+async function call<T>(url: string, method: string, body?: unknown, opts: { keepalive?: boolean } = {}): Promise<Result<T>> {
   try {
     const res = await fetch(url, {
       method,
       credentials: 'same-origin',
+      ...(opts.keepalive ? { keepalive: true } : {}),
       headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
@@ -76,8 +77,9 @@ async function call<T>(url: string, method: string, body?: unknown): Promise<Res
 }
 
 export const createProject = (name: string) => call<{ project: Project }>('/api/agent/projects', 'POST', { name })
-export const patchProject = (id: string, patch: { name?: string; instructions?: string; vertical_id?: string | null }) =>
-  call<{ project: Project }>(`/api/agent/projects/${id}`, 'PATCH', patch)
+/** `keepalive` lets a save sent while leaving the page still complete. */
+export const patchProject = (id: string, patch: { name?: string; instructions?: string; vertical_id?: string | null }, opts: { keepalive?: boolean } = {}) =>
+  call<{ project: Project }>(`/api/agent/projects/${id}`, 'PATCH', patch, opts)
 export const deleteProject = (id: string) => call(`/api/agent/projects/${id}`, 'DELETE')
 export const saveProjectOrder = (ids: string[]) => call('/api/agent/projects/order', 'PUT', { ids })
 export const moveChat = (conversationId: string, projectId: string | null) =>
@@ -90,7 +92,8 @@ export const deleteItem = (projectId: string, itemId: string) => call(`/api/agen
  * never passes through a function body. Type and size are checked here first.
  */
 export async function uploadProjectFile(projectId: string, file: File): Promise<Result<{ item: ProjectItem }>> {
-  if (!fileTypeOf(file.name)) return { ok: false, error: `${file.name}: ${MESSAGES.unsupported_media_type}` }
+  const type = fileTypeOf(file.name)
+  if (!type) return { ok: false, error: `${file.name}: ${MESSAGES.unsupported_media_type}` }
   if (file.size > MAX_FILE_BYTES) return { ok: false, error: `${file.name}: ${MESSAGES.too_large}` }
   const sign = await call<{ path: string; token: string; upload_ticket: string }>(`/api/agent/projects/${projectId}/files/sign`, 'POST', {
     filename: file.name,
@@ -100,7 +103,8 @@ export async function uploadProjectFile(projectId: string, file: File): Promise<
   try {
     const { error } = await createClient()
       .storage.from('agent-projects')
-      .uploadToSignedUrl(sign.path, sign.token, file, { contentType: file.type || 'application/octet-stream' })
+      // The bucket only accepts the supported types: send ours, not the browser's guess (often '' or a vendor type).
+      .uploadToSignedUrl(sign.path, sign.token, file, { contentType: mimeFor(type, file.name, file.type) })
     if (error) return { ok: false, error: `${file.name}: ${MESSAGES.storage}` }
   } catch {
     return { ok: false, error: `${file.name}: ${MESSAGES.storage}` }

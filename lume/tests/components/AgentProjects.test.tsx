@@ -140,6 +140,19 @@ describe('AgentHistory with projects', () => {
     expect(calls('POST', `/api/agent/projects/${P2}/files`)[0]).toMatchObject({ storage_path: `${P2}/abc.csv`, filename: 'leads.csv', upload_ticket: 't' })
   })
 
+  it('uploads with our content type, not the browser guess (the bucket allows only supported types)', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/files/sign')) return Response.json({ path: `${P2}/abc.md`, token: 'tok', upload_ticket: 't' })
+      if (url.endsWith('/files')) return Response.json({ item: { id: 'f1', name: 'notes.md' } }, { status: 201 })
+      return Response.json({ ok: true })
+    })
+    render(<Harness />)
+    const file = new File(['# hi'], 'notes.md', { type: '' })
+    fireEvent.drop(screen.getByLabelText('Project Roofers'), { dataTransfer: dt({}, [file]) })
+    await waitFor(() => expect(storage.uploadToSignedUrl).toHaveBeenCalled())
+    expect(storage.uploadToSignedUrl.mock.calls[0][3]).toEqual({ contentType: 'text/markdown' })
+  })
+
   it('an unsupported file is refused before any upload', async () => {
     render(<Harness />)
     const file = new File(['x'], 'tool.exe')
