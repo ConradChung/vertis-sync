@@ -30,7 +30,7 @@ const push = vi.hoisted(() => ({ pushForItem: vi.fn() }))
 vi.mock('@/lib/webhooks/deliver', () => push)
 
 import { postReplyToChannels, syncAction } from '@/lib/slack/post'
-import { clientButton, clientSaveEdit } from '@/lib/slack/decide'
+import { clientButton, clientOpenEdit, clientSaveEdit } from '@/lib/slack/decide'
 import { clientApprovalBlocker } from '@/lib/slack/clientCheck'
 
 const CAMPAIGN = '11111111-2222-3333-4444-555555555555'
@@ -188,6 +188,28 @@ describe('clientButton', () => {
     actions.claimClientDecision.mockResolvedValue(null)
     expect(await clientButton(actor, '1.2', 'a-1', 'approve')).toBe('refused')
     expect(grant.scheduleExecution).not.toHaveBeenCalled()
+  })
+})
+
+describe('clientOpenEdit', () => {
+  it('reads the post, the token and the action in parallel, then opens the modal', async () => {
+    let release!: (v: unknown) => void
+    store.getPostByTs.mockReturnValue(new Promise((r) => (release = r)))
+    const opened = clientOpenEdit(actor, '1.2', 'a-1', 'trig')
+    await Promise.resolve()
+    expect(store.getBotToken).toHaveBeenCalled()
+    expect(actions.getAction).toHaveBeenCalledWith('a-1')
+    release(post)
+    expect(await opened).toBe(true)
+    expect(lastCall('views.open')![2]).toMatchObject({ trigger_id: 'trig', view: { callback_id: 'lume_edit_submit', private_metadata: '7' } })
+  })
+  it('an expired trigger tells the user to try again', async () => {
+    api.slackApi.mockImplementation(async (method: string) => {
+      if (method === 'views.open') throw Object.assign(new Error('slack views.open: expired_trigger_id'), { code: 'expired_trigger_id' })
+      return { ok: true }
+    })
+    expect(await clientOpenEdit(actor, '1.2', 'a-1', 'trig')).toBe(false)
+    expect(lastCall('chat.postEphemeral')![2]).toMatchObject({ user: 'U0CLIENT', text: expect.stringMatching(/try again/i) })
   })
 })
 

@@ -41,12 +41,18 @@ export interface SlackActor {
 
 type Checked = { ok: true; post: PostRow; action: PendingActionRow; token: string } | { ok: false; refusal: ClientRefusal | 'stale_post'; post: PostRow | null; action: PendingActionRow | null; token: string | null }
 
-async function check(actor: SlackActor, post: PostRow | null, actionId: string | null, decision: ClientDecision): Promise<Checked> {
-  const bot = await getBotToken(actor.team)
+/** Values the caller already read (in parallel); anything absent is read here. */
+interface Prefetched {
+  bot?: { token: string } | null
+  action?: PendingActionRow | null
+}
+
+async function check(actor: SlackActor, post: PostRow | null, actionId: string | null, decision: ClientDecision, pre: Prefetched = {}): Promise<Checked> {
+  const bot = pre.bot !== undefined ? pre.bot : await getBotToken(actor.team)
   if (!post || post.team_id !== actor.team || post.channel_id !== actor.channel || !actionId || post.action_id !== actionId) {
     return { ok: false, refusal: 'stale_post', post, action: null, token: bot?.token ?? null }
   }
-  const action = await getAction(actionId)
+  const action = pre.action !== undefined ? pre.action : await getAction(actionId)
   if (!action || !bot) return { ok: false, refusal: 'already_decided', post, action, token: bot?.token ?? null }
   const campaign = typeof action.payload?.campaign_id === 'string' ? action.payload.campaign_id : null
   const sameReply = action.payload?.reply_to_uuid === post.reply_to_uuid
@@ -124,17 +130,31 @@ export async function clientButton(actor: SlackActor, messageTs: string, actionI
   return approve ? 'approved' : 'skipped'
 }
 
-/** Edit from a button: open the modal (the trigger id expires in 3 s, so this runs first). */
+export const EDIT_RETRY_TEXT = 'Slack took too long to open the editor. Please try again: press Edit once more.'
+
+/**
+ * Edit from a button: open the modal. The trigger id expires 3 s after the
+ * click, so the post, the token and the action are read in parallel first;
+ * if Slack still says the trigger expired, the user is told to try again.
+ */
 export async function clientOpenEdit(actor: SlackActor, messageTs: string, actionId: string, triggerId: string): Promise<boolean> {
-  const post = await getPostByTs(actor.team, actor.channel, messageTs)
-  const c = await check(actor, post, actionId, 'edit')
+  const [post, bot, action] = await Promise.all([getPostByTs(actor.team, actor.channel, messageTs), getBotToken(actor.team), getAction(actionId)])
+  const c = await check(actor, post, actionId, 'edit', { bot, action })
   if (!c.ok) {
     await tell(c.token, actor, refusalText(c.refusal))
     await refresh(c.post, c.post?.action_id ?? null)
     return false
   }
   const body = typeof c.action.payload?.body === 'string' ? c.action.payload.body : ''
-  await slackApi('views.open', c.token, { trigger_id: triggerId, view: buildEditModal(c.post.id, body) })
+  try {
+    await slackApi('views.open', c.token, { trigger_id: triggerId, view: buildEditModal(c.post.id, body) })
+  } catch (err) {
+    if ((err as { code?: string } | null)?.code === 'expired_trigger_id') {
+      await tell(c.token, actor, EDIT_RETRY_TEXT)
+      return false
+    }
+    throw err
+  }
   return true
 }
 
