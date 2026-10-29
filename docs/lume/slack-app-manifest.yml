@@ -1,0 +1,39 @@
+# Lume — client Slack app (inbox manager 3g).
+# Create it at https://api.slack.com/apps → Create New App → From an app manifest,
+# paste this, then follow docs/lume/SLACK-CLIENT-SETUP.md.
+# Distribution: Slack does not take public distribution in a manifest. After creating the
+# app, open Manage Distribution → Activate Public Distribution (step 3 of the setup doc).
+# Production host: https://lume-amber-alpha.vercel.app (change all four URLs for another deployment).
+display_information:
+  name: Lume
+  description: Your positive replies, with a drafted answer to approve, edit or skip.
+  background_color: "#141414"
+features:
+  bot_user:
+    display_name: Lume
+    always_online: false
+oauth_config:
+  redirect_urls:
+    - https://lume-amber-alpha.vercel.app/api/slack/oauth/callback
+  scopes:
+    # Minimal: post and update the lead cards, read @Lume mentions, list channels
+    # (public + private the bot was invited to) for binding. No users:read: Lume
+    # records Slack user ids and never looks people up.
+    bot:
+      - chat:write
+      - app_mentions:read
+      - channels:read
+      - groups:read
+settings:
+  event_subscriptions:
+    request_url: https://lume-amber-alpha.vercel.app/api/slack/events
+    bot_events:
+      - app_mention
+      - app_uninstalled
+      - tokens_revoked
+  interactivity:
+    is_enabled: true
+    request_url: https://lume-amber-alpha.vercel.app/api/slack/interactions
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

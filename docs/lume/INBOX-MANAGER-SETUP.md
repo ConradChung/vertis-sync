@@ -12,7 +12,7 @@ Lume production: `https://lume-amber-alpha.vercel.app` (below: `<LUME>`).
 |---|---|
 | Sequencer (Instantly) API key | **None.** The bot never holds an Instantly key. It reads, drafts, labels and logs bookings through Lume's `/api/inbox/*` routes, signed in with its operator key |
 | Trigger | Lume **pushes** to the bot's Grok webhook routine (below). The `/operator` poll every 10–15 minutes is the backstop, and it is the source of truth |
-| Supervised card: Approve / Skip / Edit | The bot **files a draft** (`POST /api/inbox/draft`). **Someone else approves it**: you, the master bot, or (later) the client. A bot never approves a reply it drafted or edited |
+| Supervised card: Approve / Skip / Edit | The bot **files a draft** (`POST /api/inbox/draft`). **Someone else approves it**: you, the master bot, or the client in Slack (Client mode). A bot never approves a reply it drafted or edited |
 | Autonomous by written, scoped permission | The campaign's **reply mode** (Settings → Verticals → Reply approval, or the Campaigns tab). `auto` sends GOOD replies after the safety checks. Only you can change it |
 | Memory files | Notes in the vertical's **Inbox project** (`<vertical> · Inbox`). Read with `GET /api/inbox/files`, add rules with `POST /api/inbox/files/rule` |
 | held-slots, reminders | Stay in Grok's own memory (the calendar logic lives there) |
@@ -245,7 +245,7 @@ own browser session; a Grok Bot or Lume's agent cannot), and every change is log
 | Mode | Who approves a `send_reply` |
 |---|---|
 | `owner` (default) | You, `/operator`, the master bot, or another bot of the vertical. Never the bot that drafted or edited it |
-| `client` | Stored for the Slack app (3g). Until then it behaves exactly like `owner`; the UI says "client approval arrives with the Slack app" |
+| `client` | The client approves, edits or skips each reply in their bound Slack channel (3g), or the owner approves. A client's edit needs a second approver. Setup: `docs/lume/SLACK-CLIENT-SETUP.md` |
 | `auto` | Lume's **grant** approves it at creation (`decided_via = 'grant'`), then the executor runs every send-time check |
 
 Auto approves a reply only when all of these hold. Otherwise the reply waits for a person, as in Owner mode:

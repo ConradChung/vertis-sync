@@ -223,7 +223,7 @@ is acknowledged.
 - **A bot never approves a reply it drafted** (owner decision, fixed policy). That covers drafts filed through
   `/api/inbox/draft`, through `/api/actions` with its cookie, and by Lume's agent in a chat the bot started or ran (the
   draft records `drafted_by_operator`). Such an approval is refused with `403 self_drafted`, but the bot may still deny
-  its own draft. The owner, the master bot (for another bot's draft), and later the client approve.
+  its own draft. The owner, the master bot (for another bot's draft), and the client in Slack (Client mode, 3g) approve.
 - **A vertical bot decides only its own vertical's items**, of every kind. Anything else is `403 campaign_out_of_scope`.
 
 Decisions:
@@ -255,7 +255,9 @@ recipient `recipient_verified`, and nothing holds it. It is held by: BAD; an opt
 anywhere in the email's full text; a labelled reply; an out-of-office or negative interest; an unknown interest with no
 recorded reply; or a lead labelled BAD / unsubscribe / hostile / not interested before, in any campaign. A mode change
 and its audit event are one transaction (RPC `lume_set_reply_mode`). Follow-ups always ask. The executor then runs every check above and re-evaluates the grant last. `client`
-behaves like `owner` until the Slack app (3g). Details: `docs/lume/INBOX-MANAGER-SETUP.md` → "Reply approval modes".
+lets the client approve, edit or skip in their own Slack channel (3g; the owner can still approve; a client never approves
+their own edit), recorded as `decided_via='client'` with the Slack user and team, and re-checked by the executor (still
+Client mode, workspace still bound, no opt-out). Setup: `docs/lume/SLACK-CLIENT-SETUP.md`. Details: `docs/lume/INBOX-MANAGER-SETUP.md` → "Reply approval modes".
 
 ## POST `/api/inbox/label`
 

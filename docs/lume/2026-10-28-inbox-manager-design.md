@@ -58,7 +58,8 @@ trail and one supervised card. Approval works the same whether it comes from Lum
 Status: 3a–3c built 2026-10-28 on branch `lume`. 3d–3f built 2026-10-29 (not deployed): the Inbox project template
 and `docs/lume/INBOX-MANAGER-SETUP.md` (3d), per-campaign reply modes with the Auto grant (3e; `owner` / `client` /
 `auto` on `lume_campaign_reply_modes`, replacing the per-vertical grant sketched above), and the per-vertical webhook
-push (3f). Routes and the bot flow: `docs/lume/INBOX-MANAGER-API.md`.
+push (3f). 3g (the client Slack app) built 2026-10-29 (not deployed): `lume/lib/slack/*`, `app/api/slack/*`, Settings →
+Slack; owner steps in `docs/lume/SLACK-CLIENT-SETUP.md`. Routes and the bot flow: `docs/lume/INBOX-MANAGER-API.md`.
 
 ## Decisions (owner, 2026-10-28)
 
