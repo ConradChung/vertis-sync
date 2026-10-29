@@ -4,6 +4,7 @@ import { Suspense, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { LumeMark } from '@/components/shell/LumeMark'
 
 type Status = 'idle' | 'sending' | 'sent' | 'error'
 
@@ -19,7 +20,7 @@ export default function LoginPage() {
     <main className="grid min-h-dvh place-items-center p-6">
       <section className="glass w-full max-w-sm rounded-2xl p-7">
         <div className="brand text-[26px]">
-          <span className="inline-block size-4 rounded-sm bg-primary dark:shadow-(--primary-glow) light:ring-1 light:ring-(--lime-edge)" aria-hidden />
+          <LumeMark className="h-5 w-auto shrink-0 text-fg" />
           lume
         </div>
         <h1 className="mt-5 text-xl font-semibold tracking-[-0.5px]">Sign in</h1>
