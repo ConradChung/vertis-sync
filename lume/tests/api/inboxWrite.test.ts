@@ -56,7 +56,7 @@ const PROJECT = { id: '7db3d841-252c-4572-95ec-bc110727df8d', name: 'Scaleport i
 
 const email = (o: Partial<InboxEmail> = {}): InboxEmail => ({
   id: 'e1', thread_id: 't1', direction: 'in', eaccount: 'f@ours.com', from: 'ada@acme.com', to: [], cc: [], lead: 'ada@acme.com',
-  subject: 's', text: 't', at: null, campaign_id: C1, interest: 1, unread: false, auto_reply: false, ...o,
+  subject: 's', text: 't', at: null, campaign_id: C1, interest: 1, unread: false, auto_reply: false, created_at: null, ...o,
 })
 
 /** A Grok Bot's fetch() from its signed-in Lume tab: same Origin, Sec-Fetch-Site same-origin, a cookie session. */

@@ -57,6 +57,13 @@ export async function recordReply(row: ReplyInsert): Promise<boolean> {
   return (res.data ?? []).length > 0
 }
 
+/** One recorded reply, or null. */
+export async function getReply(replyToUuid: string): Promise<ReplyRow | null> {
+  const res = await createServiceClient().from('lume_replies').select(COLS).eq('reply_to_uuid', replyToUuid).maybeSingle()
+  if (res.error) throw new DbError('getReply', res.error)
+  return (res.data as ReplyRow | null) ?? null
+}
+
 /** Unhandled positive replies, newest first. */
 export async function listOpenReplies(limit = 200): Promise<ReplyRow[]> {
   const res = await createServiceClient()

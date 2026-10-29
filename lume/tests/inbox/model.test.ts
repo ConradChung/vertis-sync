@@ -6,7 +6,7 @@ import {
   isPositiveWebhook,
   labelPlan,
   mapInboxEmail,
-  newerInbound,
+  recheckThread,
   threadView,
   trimQuotes,
 } from '@/lib/inbox/model'
@@ -72,7 +72,7 @@ describe('mapInboxEmail', () => {
   })
 })
 
-describe('threadView / newerInbound', () => {
+describe('threadView / recheckThread', () => {
   const a = mapInboxEmail(raw({ id: 'o1', ue_type: 1, from_address_email: 'frank@ours.com', timestamp_email: '2026-10-27T09:00:00.000Z', body: { text: 'Hi Ada' } }))!
   const b = mapInboxEmail(raw({ id: 'i1', timestamp_email: '2026-10-28T10:00:00.000Z', body: { text: 'Yes\n\nOn Mon Frank wrote:\n> Hi Ada' } }))!
   const c = mapInboxEmail(raw({ id: 'i2', timestamp_email: '2026-10-28T11:00:00.000Z', body: { text: 'Also, Tuesday?' } }))!
@@ -84,20 +84,39 @@ describe('threadView / newerInbound', () => {
     expect(t.latest_inbound).toEqual({ reply_to_uuid: 'i2', eaccount: 'frank@ours.com', subject: 'Re: hello', at: '2026-10-28T11:00:00.000Z' })
     expect(t.lead_email).toBe('lead@acme.com')
   })
-  it('newerInbound: a later inbound than the one answered', () => {
-    expect(newerInbound([a, b, c], 'i1')?.id).toBe('i2')
-    expect(newerInbound([a, b, c], 'i2')).toBeNull()
+  const at = (m: typeof a, iso: string | null, created: string | null = null) => ({ ...m, at: iso, created_at: created })
+
+  it('recheckThread: safe when nothing came after the answered message', () => {
+    expect(recheckThread([a, b], 'i1')).toEqual({ ok: true })
   })
-  it('newerInbound: our own later sends do not count', () => {
-    const d = mapInboxEmail(raw({ id: 'o2', ue_type: 1, from_address_email: 'frank@ours.com', timestamp_email: '2026-10-29T09:00:00.000Z' }))!
-    expect(newerInbound([a, b, d], 'i1')).toBeNull()
+  it('recheckThread: a later inbound → newer_inbound, regardless of list order', () => {
+    expect(recheckThread([c, b, a], 'i1')).toMatchObject({ ok: false, code: 'newer_inbound', email: { id: 'i2' } })
   })
-  it('newerInbound: another inbound with no timestamp cannot be ordered, so it counts as newer', () => {
-    const undated = { ...c, id: 'i3', at: null }
-    expect(newerInbound([a, b, undated], 'i1')?.id).toBe('i3')
+  it('recheckThread: an inbound in the same second counts as newer', () => {
+    const same = at(c, '2026-10-28T10:00:00.000Z')
+    expect(recheckThread([a, b, same], 'i1')).toMatchObject({ ok: false, code: 'newer_inbound', email: { id: 'i2' } })
   })
-  it('newerInbound: an answered message missing from the thread is treated as unsafe', () => {
-    expect(newerInbound([a, c], 'gone')?.id).toBe('i2')
+  it('recheckThread: an inbound with an unparseable time counts as newer, even sorted first', () => {
+    expect(recheckThread([at(c, 'not a date'), a, b], 'i1')).toMatchObject({ ok: false, code: 'newer_inbound' })
+    expect(recheckThread([at(c, null), a, b], 'i1')).toMatchObject({ ok: false, code: 'newer_inbound' })
+  })
+  it('recheckThread: timestamp_created wins over timestamp_email', () => {
+    // the server's email time says earlier, but Instantly received it after the answered one
+    const late = at(c, '2026-10-27T00:00:00.000Z', '2026-10-28T12:00:00.000Z')
+    expect(recheckThread([a, b, late], 'i1')).toMatchObject({ ok: false, code: 'newer_inbound' })
+    const early = at(c, '2026-10-29T00:00:00.000Z', '2026-10-27T12:00:00.000Z')
+    expect(recheckThread([a, b, early], 'i1')).toEqual({ ok: true })
+  })
+  it('recheckThread: an outbound after the answered message (our reply, a manual Unibox reply) → already_replied', () => {
+    const ours = mapInboxEmail(raw({ id: 'o2', ue_type: 1, from_address_email: 'frank@ours.com', timestamp_email: '2026-10-28T12:00:00.000Z' }))!
+    expect(recheckThread([a, b, ours], 'i1')).toMatchObject({ ok: false, code: 'already_replied', email: { id: 'o2' } })
+  })
+  it('recheckThread: the answered message missing from the thread (or an empty thread) → thread_unverifiable', () => {
+    expect(recheckThread([a, c], 'i1')).toEqual({ ok: false, code: 'thread_unverifiable', email: null })
+    expect(recheckThread([], 'i1')).toEqual({ ok: false, code: 'thread_unverifiable', email: null })
+  })
+  it('recheckThread: the answered message has no usable time → thread_unverifiable', () => {
+    expect(recheckThread([a, at(b, null)], 'i1')).toMatchObject({ ok: false, code: 'thread_unverifiable' })
   })
 })
 

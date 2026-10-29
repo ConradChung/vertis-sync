@@ -78,11 +78,11 @@ function retryAfter(header: string | null): number {
 
 const NOT_FOUND = Symbol('not_found')
 
-async function upstream(href: string, path: string, key: string): Promise<unknown> {
+async function upstream(href: string, path: string, key: string, timeoutMs = 20_000): Promise<unknown> {
   emailsLimiter.stamps.push(emailsLimiter.now())
   let res: Response
   try {
-    res = await fetch(href, { headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' }, cache: 'no-store', signal: AbortSignal.timeout(20_000) })
+    res = await fetch(href, { headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' }, cache: 'no-store', signal: AbortSignal.timeout(Math.max(1_000, timeoutMs)) })
   } catch (err) {
     throw new InstantlyError(0, `Instantly ${path} unreachable: ${err instanceof Error ? err.message : String(err)}`)
   }
@@ -104,7 +104,7 @@ interface Got {
   stale: boolean
 }
 
-async function get(path: string, params: Record<string, string | undefined>, ttl: number, fresh: boolean): Promise<Got> {
+async function get(path: string, params: Record<string, string | undefined>, ttl: number, fresh: boolean, deadline?: number): Promise<Got> {
   const key = process.env.INSTANTLY_API_KEY?.trim()
   if (!key) throw new InstantlyError(0, 'INSTANTLY_API_KEY is not configured')
   const url = new URL(`${INSTANTLY_BASE_URL}${path}`)
@@ -126,12 +126,15 @@ async function get(path: string, params: Record<string, string | undefined>, ttl
       if (hit && age < STALE_MAX_MS) return { body: hit.body, stale: true }
       throw new RateLimitedError(wait)
     }
-    if (waited + wait > MAX_FRESH_WAIT_MS) throw new RateLimitedError(wait)
+    const budget = deadline === undefined ? MAX_FRESH_WAIT_MS : Math.min(MAX_FRESH_WAIT_MS, deadline - emailsLimiter.now())
+    if (waited + wait > budget) throw new RateLimitedError(wait)
     await emailsLimiter.sleep(wait)
     waited += wait
   }
 
-  const p = upstream(href, path, key)
+  const left = deadline === undefined ? 20_000 : Math.min(20_000, deadline - emailsLimiter.now())
+  if (left <= 0) throw new InstantlyError(0, `Instantly ${path}: deadline passed`)
+  const p = upstream(href, path, key, left)
   if (!fresh) inflight.set(href, p)
   try {
     const body = await p
@@ -189,13 +192,14 @@ export async function listEmails(q: EmailQuery): Promise<{ emails: InboxEmail[];
 }
 
 /** One email by id (`reply_to_uuid`), or null when Instantly has none. */
-export async function getEmail(id: string, opts: { fresh?: boolean } = {}): Promise<InboxEmail | null> {
-  const got = await get(`/emails/${encodeURIComponent(id)}`, {}, TTL.email, opts.fresh === true)
+/** `deadline` (ms epoch, fresh reads): never wait or fetch past it. */
+export async function getEmail(id: string, opts: { fresh?: boolean; deadline?: number } = {}): Promise<InboxEmail | null> {
+  const got = await get(`/emails/${encodeURIComponent(id)}`, {}, TTL.email, opts.fresh === true, opts.deadline)
   return got.body === NOT_FOUND ? null : mapInboxEmail(got.body)
 }
 
 /** Every email of a thread (`search=thread:<id>`, oldest first), up to 500. */
-export async function getThreadEmails(threadId: string, opts: { fresh?: boolean } = {}): Promise<InboxEmail[]> {
+export async function getThreadEmails(threadId: string, opts: { fresh?: boolean; deadline?: number } = {}): Promise<InboxEmail[]> {
   const out: InboxEmail[] = []
   let cursor: string | undefined
   for (let page = 0; page < MAX_THREAD_PAGES; page++) {
@@ -203,7 +207,8 @@ export async function getThreadEmails(threadId: string, opts: { fresh?: boolean 
       '/emails',
       { search: `thread:${threadId}`, sort_order: 'asc', limit: String(PAGE), starting_after: cursor },
       TTL.thread,
-      opts.fresh === true
+      opts.fresh === true,
+      opts.deadline
     )
     if (got.body === NOT_FOUND) break
     const items = itemsOf(got.body)

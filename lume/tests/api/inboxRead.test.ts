@@ -44,7 +44,7 @@ const BOT = { id: 'op-1', vertical_id: V, is_master: false, label: 'Scaleport in
 const email = (o: Partial<InboxEmail> = {}): InboxEmail => ({
   id: 'e1', thread_id: 't1', direction: 'in', eaccount: 'frank@ours.com', from: 'ada@acme.com', to: ['frank@ours.com'], cc: [],
   lead: 'ada@acme.com', subject: 'Re: hi', text: 'Yes please.\n\nOn Mon Frank wrote:\n> hi', at: '2026-10-28T10:00:00.000Z',
-  campaign_id: C1, interest: null, unread: true, auto_reply: false, ...o,
+  campaign_id: C1, interest: null, unread: true, auto_reply: false, created_at: null, ...o,
 })
 
 const get = (path: string) => new Request(`http://localhost${path}`)

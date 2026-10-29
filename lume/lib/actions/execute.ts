@@ -9,7 +9,9 @@ import {
 } from '@/lib/adapters/instantlyWrite'
 import { sendMessage } from '@/lib/adapters/telegram'
 import { getEmail, getThreadEmails } from '@/lib/adapters/instantlyEmails'
-import { newerInbound } from '@/lib/inbox/model'
+import { recheckThread } from '@/lib/inbox/model'
+import { getReply } from '@/lib/inbox/store'
+import { isBlocked } from '@/lib/adapters/instantlyLabels'
 import { closeReply } from '@/lib/inbox/replies'
 import { alert, alertLink, titleFrom } from '@/lib/alerts'
 import { routeItemForAction } from '@/lib/operators/route'
@@ -20,7 +22,7 @@ import { configuredBaseUrl } from '@/lib/http/origin'
 import { actionLink } from '@/lib/adapters/telegram.messages'
 import { getPushJob, logEvent } from '@/lib/db/service'
 import { executeRemoveLeads, RemovalFailure } from '@/lib/actions/removeLeads'
-import { getDeal, setStage } from '@/lib/crm/service'
+import { findDeal, getDeal, setStage } from '@/lib/crm/service'
 import { startRun } from '@/lib/adapters/apify'
 import { getSequenceFresh, patchSequence } from '@/lib/adapters/instantlySequences'
 import type { InstantlyStep } from '@/lib/campaigns/sequence'
@@ -39,6 +41,7 @@ import {
   getRule,
   getStaleApprovedIds,
   insertQueuedLeads,
+  markSendAttempted,
   resolveLeadsByFilter,
   resolveLeadsByRefs,
   type LeadBankInsert,
@@ -81,6 +84,11 @@ export interface ExecuteOptions {
   /** Origin for links shown once (the request's); else LUME_URL. */
   origin?: string
 }
+
+/** One deadline for a send_reply's live re-check and its send. */
+export const SEND_DEADLINE_MS = 120_000
+/** Do not start a send with less than this left (the send call itself gets up to 30 s). */
+export const SEND_MIN_TIME_MS = 30_000
 
 /** Key in a handler's result that executeAction strips before anything is stored. */
 const REVEAL = '__reveal_once'
@@ -212,51 +220,87 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
   },
 
   /**
-   * Reply to one inbound email, safely (inbox manager 3b):
-   *  1. re-read the email being answered and its whole thread FRESH from
-   *     Instantly (no cache; waits for a /emails slot rather than guessing);
-   *  2. abort `newer_inbound` if the lead (or anyone) wrote again after it:
-   *     the draft answers an old message;
-   *  3. reply only from the inbox that received it (`eaccount_mismatch`
-   *     otherwise), through /emails/reply on that email, so it lands in the
-   *     same thread;
-   *  4. then mark the reply handled and ack its alert (never fails the send).
-   * One reply per inbound message is DB-enforced
-   * (pending_actions_one_reply_per_inbound_idx). If the re-check cannot be
-   * made, nothing is sent.
+   * Reply to one inbound email, safely (inbox manager 3b). One deadline
+   * (SEND_DEADLINE_MS) covers the whole re-check and the send. Nothing is
+   * sent unless every check passes:
+   *  1. re-read the answered email and its whole thread FRESH from Instantly
+   *     (no cache; waits for a /emails slot within the deadline);
+   *  2. the answered email must be inbound, have an `eaccount`, and be the
+   *     inbox this reply is from (`eaccount_mismatch`);
+   *  3. recheckThread: the answered email must be in the re-read thread
+   *     (`thread_unverifiable`); nobody may have written since
+   *     (`newer_inbound`) and nothing may have been sent since
+   *     (`already_replied`, which also catches a manual Unibox reply);
+   *  4. the lead must still be replyable: the reply not closed by a label
+   *     (`reply_labeled`), the deal not Lost (`deal_lost`), the address and
+   *     domain not on the Instantly blocklist (`lead_blocked`);
+   *  5. `send_attempted` is recorded, then /emails/reply on that email (so the
+   *     reply stays in its thread) with the time left as its timeout. From
+   *     here the row blocks another reply to this email even if it fails
+   *     (pending_actions_one_reply_per_inbound_idx);
+   *  6. the reply is marked handled and its alert acked (never fails the send).
    */
   async send_reply(p, action) {
+    const deadline = Date.now() + SEND_DEADLINE_MS
     const replyTo = need(p, 'reply_to_uuid')
     const eaccount = need(p, 'eaccount').toLowerCase()
     const body = need(p, 'body')
+    const refuse = (code: string, text: string, extra: Record<string, Json> = {}): never => {
+      throw new ActionFailure(`${code}: ${text}; nothing was sent`, { reply_to_uuid: replyTo, [code]: true, ...extra })
+    }
     let answered
     let thread
+    let replyRow
+    let deal
+    let blocked
     try {
-      answered = await getEmail(replyTo, { fresh: true })
-      thread = answered ? await getThreadEmails(answered.thread_id, { fresh: true }) : []
+      answered = await getEmail(replyTo, { fresh: true, deadline })
+      thread = answered ? await getThreadEmails(answered.thread_id, { fresh: true, deadline }) : []
+      if (answered?.lead) {
+        const campaign = answered.campaign_id ?? str(p.campaign_id)
+        ;[replyRow, deal, blocked] = await Promise.all([
+          getReply(replyTo),
+          campaign ? findDeal(campaign, answered.lead) : Promise.resolve(null),
+          isBlocked(answered.lead),
+        ])
+      }
     } catch (err) {
       throw new ActionFailure(`could not re-check the live thread, nothing was sent: ${err instanceof Error ? err.message : String(err)}`, { reply_to_uuid: replyTo })
     }
-    if (!answered) throw new ActionFailure('email_not_found: the email being answered is not in Instantly any more; nothing was sent', { reply_to_uuid: replyTo })
-    if (answered.direction !== 'in') throw new ActionFailure('not_an_inbound_email: that email is one of ours; nothing was sent', { reply_to_uuid: replyTo })
-    if (answered.eaccount && answered.eaccount !== eaccount) {
-      throw new ActionFailure(`eaccount_mismatch: the reply was received by ${answered.eaccount}, not ${eaccount}; nothing was sent`, {
-        reply_to_uuid: replyTo,
-        received_by: answered.eaccount,
-      })
+    if (!answered) return refuse('email_not_found', 'the email being answered is not in Instantly any more')
+    if (answered.direction !== 'in') return refuse('not_an_inbound_email', 'that email is one of ours')
+    if (!answered.eaccount) return refuse('no_eaccount', 'Instantly does not say which inbox received that email')
+    if (answered.eaccount !== eaccount) {
+      return refuse('eaccount_mismatch', `the reply was received by ${answered.eaccount}, not ${eaccount}`, { received_by: answered.eaccount })
     }
-    const newer = newerInbound(thread, replyTo)
-    if (newer) {
-      throw new ActionFailure('newer_inbound: a newer message arrived in this thread after the one this reply answers; nothing was sent. Read the thread and draft again.', {
-        reply_to_uuid: replyTo,
-        newer_inbound: true,
-        newer_reply_to_uuid: newer.id,
-        newer_at: newer.at,
+    const check = recheckThread(thread, replyTo)
+    if (!check.ok) {
+      if (check.code === 'thread_unverifiable') return refuse('thread_unverifiable', 'the answered email is not in the re-read thread, so it cannot be checked')
+      if (check.code === 'newer_inbound') {
+        return refuse('newer_inbound', 'a newer message arrived in this thread after the one this reply answers. Read the thread and draft again', {
+          newer_reply_to_uuid: check.email.id,
+          newer_at: check.email.created_at ?? check.email.at,
+          thread_id: answered.thread_id,
+        })
+      }
+      return refuse('already_replied', 'an email was already sent in this thread after the one this reply answers', {
+        outbound_email_id: check.email.id,
         thread_id: answered.thread_id,
       })
     }
+    if (!answered.lead) return refuse('lead_unknown', 'Instantly does not say who the lead is')
+    if (replyRow?.handled_how?.startsWith('label:')) return refuse('reply_labeled', `the reply was labeled ${replyRow.handled_how.slice(6)}`)
+    if (deal?.stage === 'Lost') return refuse('deal_lost', 'the CRM deal is Lost')
+    if (blocked) return refuse('lead_blocked', 'the address or its domain is on the Instantly blocklist')
+    if (deadline - Date.now() < SEND_MIN_TIME_MS) return refuse('deadline_exceeded', 'the re-check took too long to send safely now')
+
+    try {
+      await markSendAttempted(action.id)
+    } catch (err) {
+      throw new ActionFailure(`could not record the send attempt, nothing was sent: ${err instanceof Error ? err.message : String(err)}`, { reply_to_uuid: replyTo })
+    }
     const subject = str(p.subject) ?? (answered.subject ? (/^re:/i.test(answered.subject) ? answered.subject : `Re: ${answered.subject}`) : 'Re:')
-    const sent = await sendReply({ eaccount, reply_to_uuid: replyTo, subject, body })
+    const sent = await sendReply({ eaccount, reply_to_uuid: replyTo, subject, body, timeoutMs: deadline - Date.now() })
     try {
       await closeReply(replyTo, 'replied', { actionId: action.id })
     } catch (err) {

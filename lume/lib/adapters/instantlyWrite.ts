@@ -11,7 +11,7 @@ import { instantlyCall } from '@/lib/adapters/instantlyLeads'
  * fresh.
  */
 
-async function request(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> {
+async function request(method: 'GET' | 'POST', path: string, body?: unknown, timeoutMs = 30_000): Promise<unknown> {
   const key = process.env.INSTANTLY_API_KEY?.trim()
   if (!key) throw new InstantlyError(0, 'INSTANTLY_API_KEY is not configured')
   let res: Response
@@ -25,7 +25,7 @@ async function request(method: 'GET' | 'POST', path: string, body?: unknown): Pr
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       cache: 'no-store',
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(Math.max(1_000, timeoutMs)),
     })
   } catch (err) {
     throw new InstantlyError(0, `Instantly ${path} unreachable: ${err instanceof Error ? err.message : String(err)}`)
@@ -63,13 +63,19 @@ export async function resumeCampaign(id: string): Promise<unknown> {
   return request('POST', `/campaigns/${encodeURIComponent(id)}/activate`, {})
 }
 
-export async function sendReply(input: { eaccount: string; reply_to_uuid: string; subject: string; body: string }): Promise<{ id?: string }> {
-  return (await request('POST', '/emails/reply', {
-    eaccount: input.eaccount,
-    reply_to_uuid: input.reply_to_uuid,
-    subject: input.subject,
-    body: { text: input.body },
-  })) as { id?: string }
+/** `timeoutMs`: the executor's remaining deadline (default 30 s). A timeout means the send's outcome is unknown. */
+export async function sendReply(input: { eaccount: string; reply_to_uuid: string; subject: string; body: string; timeoutMs?: number }): Promise<{ id?: string }> {
+  return (await request(
+    'POST',
+    '/emails/reply',
+    {
+      eaccount: input.eaccount,
+      reply_to_uuid: input.reply_to_uuid,
+      subject: input.subject,
+      body: { text: input.body },
+    },
+    Math.min(input.timeoutMs ?? 30_000, 30_000)
+  )) as { id?: string }
 }
 
 /** Duplicate: same inboxes, sending window, cap and sequence as the source. */

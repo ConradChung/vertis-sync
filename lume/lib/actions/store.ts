@@ -101,6 +101,24 @@ export async function finishAction(
   if (res.error) throw new DbError('finishAction', res.error)
 }
 
+/**
+ * send_reply only: record that the Instantly send is about to be attempted.
+ * Set right before /emails/reply; from then on the row blocks a new reply to
+ * the same inbound email even if it fails or is interrupted
+ * (pending_actions_one_reply_per_inbound_idx). Throws when the row is not
+ * this run's executing row, so the caller does not send.
+ */
+export async function markSendAttempted(id: string): Promise<void> {
+  const res = await createServiceClient()
+    .from('pending_actions')
+    .update({ send_attempted: true })
+    .eq('id', id)
+    .eq('status', 'executing')
+    .select('id')
+  if (res.error) throw new DbError('markSendAttempted', res.error)
+  if (!(res.data ?? []).length) throw new Error('markSendAttempted: the row is not executing')
+}
+
 /** Approved rows nobody executed: the Telegram path's waitUntil was cut. */
 export async function getStaleApprovedIds(olderThan: Date, limit = 20): Promise<string[]> {
   const sb = createServiceClient()

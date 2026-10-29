@@ -57,6 +57,8 @@ export interface InboxEmail {
   /** Full text (HTML converted), capped; quotes NOT yet trimmed. */
   text: string
   at: string | null
+  /** When Instantly recorded it (`timestamp_created`): the ordering the send check trusts first. */
+  created_at: string | null
   campaign_id: string | null
   /** Instantly `i_status` (interest), when set. */
   interest: number | null
@@ -113,6 +115,7 @@ export function mapInboxEmail(it: unknown): InboxEmail | null {
     subject: s(it, 'subject'),
     text: bodyText(it),
     at: s(it, 'timestamp_email') ?? s(it, 'timestamp_created'),
+    created_at: s(it, 'timestamp_created'),
     campaign_id: s(it, 'campaign_id'),
     interest: n(it, 'i_status'),
     unread: n(it, 'is_unread') === 1 || it.is_unread === true,
@@ -197,7 +200,23 @@ export interface ThreadView {
   latest_inbound: { reply_to_uuid: string; eaccount: string | null; subject: string | null; at: string | null } | null
 }
 
-const byTime = (a: InboxEmail, b: InboxEmail) => (a.at ?? '').localeCompare(b.at ?? '') || a.id.localeCompare(b.id)
+/** An email's time in ms: Instantly's `timestamp_created` first, else the email's own; NaN when neither parses. */
+export function emailTime(m: Pick<InboxEmail, 'at' | 'created_at'>): number {
+  const created = m.created_at ? Date.parse(m.created_at) : NaN
+  if (Number.isFinite(created)) return created
+  return m.at ? Date.parse(m.at) : NaN
+}
+
+/** Display order: by time, undated last, then id. */
+const byTime = (a: InboxEmail, b: InboxEmail) => {
+  const ta = emailTime(a)
+  const tb = emailTime(b)
+  const fa = Number.isFinite(ta)
+  const fb = Number.isFinite(tb)
+  if (fa && fb && ta !== tb) return ta - tb
+  if (fa !== fb) return fa ? -1 : 1
+  return a.id.localeCompare(b.id)
+}
 
 /** A thread's emails, oldest → newest, quotes trimmed. */
 export function threadView(emails: readonly InboxEmail[]): ThreadView {
@@ -223,20 +242,36 @@ export function threadView(emails: readonly InboxEmail[]): ThreadView {
   }
 }
 
+export type RecheckResult =
+  | { ok: true }
+  | { ok: false; code: 'thread_unverifiable'; email: null }
+  | { ok: false; code: 'newer_inbound' | 'already_replied'; email: InboxEmail }
+
 /**
- * The send safety check: an inbound message in the live thread that is newer
- * than the one being answered (`replyToId`), or null when it is safe to send.
- * If the answered message is not in the thread at all, any inbound counts as
- * newer (fail closed: we cannot prove nothing came after it).
+ * The send safety check on a freshly read thread, for a reply to `replyToId`:
+ *  - `thread_unverifiable`: the answered message is not in the thread (an
+ *    empty or partial read) or has no usable time, so nothing can be proven;
+ *  - `newer_inbound`: another inbound message at or after the answered one's
+ *    time, or with a time that does not parse;
+ *  - `already_replied`: an outbound message at or after it (our reply, a
+ *    manual Unibox reply, or anything else sent since), or undated.
+ * Times are compared with Date.parse, `timestamp_created` first
+ * (emailTime); list order never matters.
  */
-export function newerInbound(emails: readonly InboxEmail[], replyToId: string): InboxEmail | null {
-  const sorted = [...emails].sort(byTime)
-  const idx = sorted.findIndex((m) => m.id === replyToId)
-  const after = idx === -1 ? sorted : sorted.slice(idx + 1)
-  const later = after.find((m) => m.direction === 'in' && m.id !== replyToId)
-  if (later) return later
-  // An inbound message without a timestamp cannot be placed: treat it as newer.
-  return sorted.find((m) => m.direction === 'in' && m.id !== replyToId && !m.at) ?? null
+export function recheckThread(emails: readonly InboxEmail[], replyToId: string): RecheckResult {
+  const answered = emails.find((m) => m.id === replyToId)
+  const t0 = answered ? emailTime(answered) : NaN
+  if (!answered || !Number.isFinite(t0)) return { ok: false, code: 'thread_unverifiable', email: null }
+  const since = (m: InboxEmail) => {
+    const t = emailTime(m)
+    return !Number.isFinite(t) || t >= t0
+  }
+  const others = emails.filter((m) => m.id !== replyToId)
+  const inbound = others.find((m) => m.direction === 'in' && since(m))
+  if (inbound) return { ok: false, code: 'newer_inbound', email: inbound }
+  const outbound = others.find((m) => m.direction === 'out' && since(m))
+  if (outbound) return { ok: false, code: 'already_replied', email: outbound }
+  return { ok: true }
 }
 
 // ---------------------------------------------------------------------------

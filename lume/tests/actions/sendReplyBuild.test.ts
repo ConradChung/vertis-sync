@@ -21,7 +21,7 @@ const CID = '0b6c6d2e-1111-4222-8333-444455556666'
 const inbound = (o: Partial<InboxEmail> = {}): InboxEmail => ({
   id: 'e1', thread_id: 't1', direction: 'in', eaccount: 'frank@ours.com', from: 'ada@acme.com', to: ['frank@ours.com'], cc: [],
   lead: 'ada@acme.com', subject: 'Re: Growth plan', text: 'Tuesday works.\n\nOn Mon Frank wrote:\n> Hi Ada', at: '2026-10-28T10:00:00.000Z',
-  campaign_id: CID, interest: 1, unread: true, auto_reply: false, ...o,
+  campaign_id: CID, interest: 1, unread: true, auto_reply: false, created_at: null, ...o,
 })
 
 beforeEach(() => {

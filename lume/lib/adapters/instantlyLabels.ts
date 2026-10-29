@@ -28,3 +28,30 @@ export async function addToBlocklist(value: string): Promise<'added' | 'already'
     throw err
   }
 }
+
+const domainOf = (email: string) => email.split('@')[1]?.toLowerCase() ?? ''
+
+/**
+ * Is the address (or its domain) on the Instantly blocklist? Two reads of
+ * `GET /block-lists-entries?search=` (the address, then the domain), matched
+ * exactly here. Throws on an Instantly failure: callers fail closed.
+ */
+export async function isBlocked(email: string): Promise<boolean> {
+  const addr = email.trim().toLowerCase()
+  const domain = domainOf(addr)
+  for (const term of [addr, domain].filter(Boolean)) {
+    const body = (await instantlyCall('GET', `/block-lists-entries?search=${encodeURIComponent(term)}&limit=50`)) as { items?: { bl_value?: unknown }[] }
+    for (const it of body.items ?? []) {
+      const v = typeof it.bl_value === 'string' ? it.bl_value.trim().toLowerCase() : ''
+      if (v && (v === addr || v === domain)) return true
+    }
+  }
+  return false
+}
+
+/** Is this email a lead of that campaign in Instantly? (`POST /leads/list` with `campaign` + `contacts`; a read.) */
+export async function leadInCampaign(email: string, campaignId: string): Promise<boolean> {
+  const addr = email.trim().toLowerCase()
+  const body = (await instantlyCall('POST', '/leads/list', { campaign: campaignId, contacts: [addr], limit: 5 })) as { items?: { email?: unknown; campaign?: unknown }[] }
+  return (body.items ?? []).some((l) => typeof l.email === 'string' && l.email.toLowerCase() === addr && l.campaign === campaignId)
+}
