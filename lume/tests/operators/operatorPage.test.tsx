@@ -29,7 +29,7 @@ function data(extra: Partial<CheckinData> = {}): CheckinData {
     scope: { all: false, vertical: K },
     verticals: [K],
     operator: null,
-    summary: { vertical: { id: 'v-k', name: 'Kaspen' }, needs_confirmation: 3, unacked_alerts: 1, urgent_alerts: 1, last_checked_at: null, generated_at: '2026-10-26T10:00:00.000Z' },
+    summary: { vertical: { id: 'v-k', name: 'Kaspen' }, needs_confirmation: 3, unacked_alerts: 1, urgent_alerts: 1, new_replies: 1, last_checked_at: null, generated_at: '2026-10-26T10:00:00.000Z' },
     items,
     alerts: [{ id: 'al1', source: 's', severity: 'urgent', title: 'Stalled', body: null, link: null, campaign_id: null, scope: null, created_at: '', acked_at: null, acked_by_operator: null, dedupe_key: null, owner_only: false }],
     outcomes: [{ id: 'p1', kind: 'run_actor', summary: 'Run actor', status: 'failed', decided_via: 'operator', decided_by_operator: 'op1', decided_at: 'x', executed_at: 'y', error: 'boom', vertical_id: 'v-k' }],
@@ -39,6 +39,12 @@ function data(extra: Partial<CheckinData> = {}): CheckinData {
     ],
     alertVerticals: { al1: 'Kaspen' },
     campaignMatches: null,
+    newReplies: [
+      {
+        reply_to_uuid: 'r1', campaign_id: 'c1', lead: 'Ada <ada@acme.com>', company: 'Acme', excerpt: 'Yes, Tuesday works', received_at: '2026-10-26T09:00:00Z',
+        vertical_id: 'v-k', vertical_name: 'Kaspen', thread_link: '/api/inbox/thread?reply_to_uuid=r1', draft_action_id: 'act-9',
+      },
+    ],
     operatorLabels: { op1: 'K bot' },
     campaigns: [],
     campaignsNote: null,
@@ -64,7 +70,23 @@ describe('/operator page', () => {
     const m = html.match(/<pre id="operator-summary"[^>]*>([\s\S]*?)<\/pre>/)
     expect(m).toBeTruthy()
     const json = JSON.parse(m![1].replace(/&quot;/g, '"'))
-    expect(json).toMatchObject({ needs_confirmation: 3, unacked_alerts: 1, urgent_alerts: 1 })
+    expect(json).toMatchObject({ needs_confirmation: 3, unacked_alerts: 1, urgent_alerts: 1, new_replies: 1 })
+  })
+
+  it('New replies: lead, company, excerpt, the thread link and the awaiting draft', async () => {
+    const html = await render()
+    expect(html).toContain('id="new-replies"')
+    expect(html).toContain('New replies (1)')
+    expect(html).toContain('Ada &lt;ada@acme.com&gt;')
+    expect(html).toContain('Acme')
+    expect(html).toContain('Yes, Tuesday works')
+    expect(html).toContain('href="/api/inbox/thread?reply_to_uuid=r1"')
+    expect(html).toContain('href="/actions/act-9"')
+  })
+
+  it('New replies: empty state', async () => {
+    h.loadCheckin.mockResolvedValue(data({ newReplies: [] }))
+    expect(await render()).toContain('id="new-replies-empty"')
   })
 
   it('renders real forms posting to the existing routes, returning to /operator', async () => {

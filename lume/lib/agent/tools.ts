@@ -4,6 +4,7 @@ import { HIGH_RISK_KIND, TOOL_TIERS, skippable, type ToolName, type ToolTier } f
 import { FilterCriteria } from '@/lib/review/model'
 import { APOLLO_STEPS } from '@/lib/apollo/records'
 import { parseLeadQuery } from '@/lib/adapters/instantlyLeads.map'
+import { EmailId, INTEREST_NAMES, LabelBody } from '@/lib/inbox/schemas'
 import { describeStep, newSkillSchema, placeholdersIn, skillStepSchema, skillVariableSchema, type NewSkill, type Skill } from '@/lib/agent/skillModel'
 
 /**
@@ -696,6 +697,60 @@ const SPECS: Built[] = [
         reply_to_uuid: reply_to_uuid ?? null,
         note: 'Not sent.',
       }),
+    },
+    'low'
+  ),
+  // inbox manager (Phase 3a-3c) -----------------------------------------------
+  tiered(
+    {
+      name: 'list_replies',
+      description:
+        'Received replies in an Instantly campaign inbox, newest first: reply_to_uuid (the email id to reply to), thread_id, eaccount (our inbox that received it), ' +
+        'lead_email, subject, a quote-trimmed excerpt, unread, interest (Instantly status). Filter by campaign, unread, interest (interested, ooo, not_interested, ' +
+        'wrong_person, lost, meeting_booked, …), limit. Instantly allows 20 inbox reads a minute: answers are cached; a rate_limited error says how long to wait.',
+      inputSchema: z.object({
+        campaign_id: campaignId.optional(),
+        unread: z.boolean().optional(),
+        interest: z.enum(INTEREST_NAMES).optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+      }),
+      run: async ({ campaign_id, unread, interest, limit }, { call }) => {
+        const q = new URLSearchParams()
+        if (campaign_id) q.set('campaign_id', campaign_id)
+        if (unread !== undefined) q.set('unread', String(unread))
+        if (interest) q.set('interest', interest)
+        if (limit) q.set('limit', String(limit))
+        const qs = q.toString()
+        return configured(await call(`/api/inbox/replies${qs ? `?${qs}` : ''}`))
+      },
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'get_thread',
+      description:
+        'One email conversation in full, oldest to newest, quotes trimmed, by an email id in it (reply_to_uuid) or its thread_id. ' +
+        'latest_inbound is what a reply answers (its reply_to_uuid and our eaccount). Read it before drafting.',
+      inputSchema: z
+        .object({ reply_to_uuid: EmailId.optional(), thread_id: EmailId.optional() })
+        .refine((v) => !!v.reply_to_uuid !== !!v.thread_id, 'exactly one of reply_to_uuid or thread_id'),
+      run: async ({ reply_to_uuid, thread_id }, { call }) => {
+        const q = reply_to_uuid ? `reply_to_uuid=${encodeURIComponent(reply_to_uuid)}` : `thread_id=${encodeURIComponent(thread_id ?? '')}`
+        return configured(await call(`/api/inbox/thread?${q}`))
+      },
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'label_reply',
+      description:
+        'Label a reply: sets the lead\'s Instantly interest status and moves its CRM deal. category: interested, not_now, wrong_person, not_interested, ooo, ' +
+        'unsubscribe, hostile, booked; or verdict BAD (bad fit) without one. unsubscribe and hostile also add the address to the Instantly blocklist; ' +
+        'BAD blocks only with block: true. Not interested / unsubscribe / hostile / BAD file a CRM Lost close for approval. Sends nothing.',
+      inputSchema: LabelBody,
+      run: async (input, { call }) => ({ labeled: await call('/api/inbox/label', { method: 'POST', body: input }) }),
     },
     'low'
   ),

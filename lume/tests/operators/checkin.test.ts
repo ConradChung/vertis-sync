@@ -12,6 +12,7 @@ import {
   leadsfridayCostText,
   leadsfridayUsd,
   needsConfirmation,
+  newRepliesForScope,
   outcomesForScope,
   statsRanges,
 } from '@/lib/operators/checkin'
@@ -162,10 +163,28 @@ describe('outcomes, summary, ranges', () => {
       now: new Date('2026-10-26T10:00:00Z'),
     })
     expect(s).toEqual({
-      vertical: { id: 'v-r', name: 'Roofers' }, needs_confirmation: 1, unacked_alerts: 2, urgent_alerts: 1,
+      vertical: { id: 'v-r', name: 'Roofers' }, needs_confirmation: 1, unacked_alerts: 2, urgent_alerts: 1, new_replies: 0,
       last_checked_at: '2026-10-26T09:00:00Z', generated_at: '2026-10-26T10:00:00.000Z',
     })
     expect(checkinSummary({ scope: { all: true }, items: [], alerts: [], lastCheckedAt: null, now: new Date(0) }).vertical).toBe('all')
+    expect(checkinSummary({ scope: { all: true }, items: [], alerts: [], newReplies: 4, lastCheckedAt: null, now: new Date(0) }).new_replies).toBe(4)
+  })
+
+  it('newRepliesForScope: routed by campaign (replies scope), newest first, with the thread link and any awaiting draft', () => {
+    const row = (id: string, campaign: string | null, at: string) => ({
+      reply_to_uuid: id, campaign_id: campaign, lead_email: `${id}@x.com`, lead_name: id === 'r1' ? 'Ada' : null, company: 'Acme',
+      excerpt: 'Yes please', received_at: at, thread_id: 't', eaccount: 'f@ours.com', subject: 's', interest: 1,
+      source: 'poll' as const, created_at: at, handled_at: null, handled_how: null, handled_action_id: null,
+    })
+    const rows = [row('r1', 'camp-r', '2026-10-26T08:00:00Z'), row('r2', 'camp-r', '2026-10-26T09:00:00Z'), row('r3', 'camp-k', '2026-10-26T07:00:00Z')]
+    const roof = newRepliesForScope(rows, verticals, { all: false, vertical: ROOF }, { r1: 'act-1' })
+    expect(roof.map((r) => r.reply_to_uuid)).toEqual(['r2', 'r1'])
+    expect(roof[1]).toMatchObject({
+      lead: 'Ada <r1@x.com>', company: 'Acme', excerpt: 'Yes please', vertical_id: 'v-r', vertical_name: 'Roofers',
+      thread_link: '/api/inbox/thread?reply_to_uuid=r1', draft_action_id: 'act-1',
+    })
+    expect(roof[0]).toMatchObject({ lead: 'r2@x.com', draft_action_id: null })
+    expect(newRepliesForScope(rows, verticals, { all: true }, {}).map((r) => r.reply_to_uuid)).toEqual(['r2', 'r1', 'r3'])
   })
 
   it('statsRanges + instantlyCampaignIds', () => {

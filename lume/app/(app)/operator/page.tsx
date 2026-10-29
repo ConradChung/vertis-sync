@@ -94,6 +94,7 @@ export default async function OperatorPage({ searchParams }: { searchParams: Sea
       )}
 
       <NeedsConfirmation data={data} returnTo={returnTo} cqJob={cqJob} cq={cq} matches={matches} />
+      <NewReplies data={data} />
       <Alerts data={data} returnTo={returnTo} />
       <Outcomes data={data} />
       <Campaigns data={data} />
@@ -313,6 +314,52 @@ function Controls({
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * Unhandled positive replies (inbox manager). Read the thread, then draft
+ * through POST /api/inbox/draft (it lands under Needs confirmation as a reply
+ * card); a reply leaves this list once a reply is sent or a label means none
+ * is owed (POST /api/inbox/label).
+ */
+function NewReplies({ data }: { data: CheckinData }) {
+  const rows = data.newReplies
+  return (
+    <section aria-labelledby="new-replies">
+      <h2 id="new-replies">New replies ({rows.length})</h2>
+      <p className="muted">Unhandled positive replies, newest first. API: docs/lume/INBOX-MANAGER-API.md.</p>
+      {rows.length === 0 ? (
+        <p id="new-replies-empty">No unhandled positive replies.</p>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Received (UTC)</th>
+              <th scope="col">Lead</th>
+              <th scope="col">Company</th>
+              <th scope="col">Message</th>
+              <th scope="col">Thread</th>
+              <th scope="col">Draft</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.reply_to_uuid} id={`reply-${r.reply_to_uuid}`} data-reply-to-uuid={r.reply_to_uuid} data-campaign-id={r.campaign_id ?? ''}>
+                <td>{r.received_at}</td>
+                <td>{r.lead}</td>
+                <td>{r.company ?? '—'}</td>
+                <td style={{ whiteSpace: 'pre-wrap' }}>{r.excerpt}</td>
+                <td>
+                  <a href={r.thread_link}>Thread (JSON)</a>
+                </td>
+                <td>{r.draft_action_id ? <Link href={`/actions/${r.draft_action_id}`}>Awaiting confirmation</Link> : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  )
+}
 
 function Alerts({ data, returnTo }: { data: CheckinData; returnTo: string }) {
   return (

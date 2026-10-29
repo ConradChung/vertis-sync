@@ -5,6 +5,7 @@ import { logEvent } from '@/lib/db/service'
 import { ingestInstantlyEvent } from '@/lib/crm/ingest'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { readBodyCapped } from '@/lib/http/readBody'
+import { notePositiveFromWebhook } from '@/lib/inbox/webhook'
 
 /**
  * Instantly webhook → `events`. Public to the middleware; authenticated here
@@ -18,6 +19,10 @@ import { readBodyCapped } from '@/lib/http/readBody'
  * auto-advance logged as `lume.crm_stage_auto`). That runs for duplicates too
  * (idempotent) and never changes the answer: a CRM failure is logged, the
  * event is already stored.
+ *
+ * Inbox manager: a positive reply (lead_interested, or a reply carrying an
+ * interested status) is recorded in lume_replies and raises one feed alert
+ * (lib/inbox/webhook.ts); also never changes the answer.
  */
 export async function POST(req: Request) {
   const auth = requireSecret(req, { query: 'secret' }, 'INSTANTLY_WEBHOOK_SECRET')
@@ -43,6 +48,7 @@ export async function POST(req: Request) {
     } catch (err) {
       console.error('[api/webhooks/instantly] crm ingest failed:', err instanceof Error ? err.message : err)
     }
+    await notePositiveFromWebhook(ev)
     return NextResponse.json({ ok: true, duplicate: inserted === null })
   } catch (err) {
     return dbErrorResponse(err, 'api/webhooks/instantly')

@@ -3,6 +3,7 @@ import { getAnalyticsOverview, isInstantlyConfigured, listCampaigns, mapLimit } 
 import { listDecidedSince } from '@/lib/actions/store'
 import { listAlerts, ALERTS_MAX_LIMIT, type AlertRow } from '@/lib/alertsStore'
 import { getCampaigns, getGates, listEventsSince } from '@/lib/db/service'
+import { listOpenReplies, type ReplyRow } from '@/lib/inbox/store'
 import type { EventRow } from '@/lib/db/types'
 import {
   alertsForScope,
@@ -11,12 +12,14 @@ import {
   DECISION_EVENT_TYPES,
   instantlyCampaignIds,
   needsConfirmation,
+  newRepliesForScope,
   outcomesForScope,
   statsRanges,
   type CheckinItem,
   type CheckinScope,
   type CheckinSummary,
   type DecisionEventItem,
+  type NewReplyItem,
   type OutcomeItem,
 } from '@/lib/operators/checkin'
 import { resolveCampaignQuery, type CampaignLite } from '@/lib/validate/campaignQuery'
@@ -49,6 +52,8 @@ export interface CheckinData {
   summary: CheckinSummary
   items: CheckinItem[]
   alerts: AlertRow[]
+  /** Unhandled positive replies, newest first (inbox manager). */
+  newReplies: NewReplyItem[]
   outcomes: OutcomeItem[]
   /** Gate decisions and campaign picks in the last 24 h (events). */
   decisionEvents: DecisionEventItem[]
@@ -79,6 +84,7 @@ export const LOAD_ERRORS = {
   events: 'Could not load recent gate decisions.',
   checkin: 'Your check-in was not recorded.',
   stats: 'Campaign stats failed this time.',
+  replies: 'Could not load new replies.',
 } as const
 export type LoadError = keyof typeof LOAD_ERRORS
 
@@ -114,12 +120,13 @@ export async function loadCheckin(opts: {
   }
 
   const since = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-  const [gates, alerts, decided, operators, events] = await Promise.all([
+  const [gates, alerts, decided, operators, events, openReplies] = await Promise.all([
     getGates().catch((e) => (fail('gates', e), [])),
     listAlerts({ unackedOnly: true, limit: ALERTS_MAX_LIMIT }).catch((e) => (fail('alerts', e), [] as AlertRow[])),
     listDecidedSince(since).catch((e) => (fail('outcomes', e), [])),
     listOperators({ includeRevoked: true }).catch((e) => (fail('operators', e), [] as Operator[])),
     listEventsSince(DECISION_EVENT_TYPES, since).catch((e) => (fail('events', e), [] as EventRow[])),
+    listOpenReplies().catch((e) => (fail('replies', e), [] as ReplyRow[])),
   ])
 
   // The check-in before this one: the bot's own, or (owner) the latest of the scope's bots.
@@ -146,6 +153,13 @@ export async function loadCheckin(opts: {
   const scopedAlerts = alertsForScope(alerts, verticals, scope, routeOpts)
   const outcomes = outcomesForScope(decided, verticals, scope, routeItemForAction, routeOpts)
   const decisionEvents = decisionEventsForScope(events, verticals, scope, routeOpts)
+  // An awaiting send_reply for a reply (its lume_action gate) is linked from the New replies row.
+  const drafts: Record<string, string> = {}
+  for (const g of gates) {
+    const r = g.kind === 'lume_action' && g.title === 'send_reply' ? g.counts?.reply_to_uuid : null
+    if (typeof r === 'string' && r) drafts[r] = g.target_id
+  }
+  const newReplies = newRepliesForScope(openReplies, verticals, scope, drafts, routeOpts)
   const alertVerticals = Object.fromEntries(scopedAlerts.map((a) => [a.id, verticalFor(a, verticals, routeOpts)?.name ?? null]))
   const operatorLabels = Object.fromEntries(operators.map((o) => [o.id, o.label]))
 
@@ -173,9 +187,10 @@ export async function loadCheckin(opts: {
     scope,
     verticals,
     operator: op,
-    summary: checkinSummary({ scope, items, alerts: scopedAlerts, lastCheckedAt, now }),
+    summary: checkinSummary({ scope, items, alerts: scopedAlerts, newReplies: newReplies.length, lastCheckedAt, now }),
     items,
     alerts: scopedAlerts,
+    newReplies,
     outcomes,
     decisionEvents,
     alertVerticals,

@@ -59,3 +59,15 @@ export async function ackAlerts(target: AckTarget, operatorId: string | null): P
   if (res.error) throw new DbError('ackAlerts', res.error)
   return ((res.data ?? []) as { id: string }[]).map((r) => r.id)
 }
+
+/** Acknowledge the unacked alerts with this dedupe_key (a reply that was answered or labeled). Returns the ids acked. */
+export async function ackAlertsByDedupeKey(dedupeKey: string, operatorId: string | null): Promise<string[]> {
+  const res = await createServiceClient()
+    .from('lume_alerts')
+    .update({ acked_at: new Date().toISOString(), acked_by_operator: operatorId })
+    .eq('dedupe_key', dedupeKey)
+    .is('acked_at', null)
+    .select('id')
+  if (res.error) throw new DbError('ackAlertsByDedupeKey', res.error)
+  return ((res.data ?? []) as { id: string }[]).map((r) => r.id)
+}

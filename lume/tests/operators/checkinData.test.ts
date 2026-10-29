@@ -12,7 +12,9 @@ const h = vi.hoisted(() => ({
   isInstantlyConfigured: vi.fn(),
   listCampaigns: vi.fn(),
   getAnalyticsOverview: vi.fn(),
+  listOpenReplies: vi.fn(),
 }))
+vi.mock('@/lib/inbox/store', () => ({ listOpenReplies: h.listOpenReplies }))
 vi.mock('@/lib/operators/store', () => ({ listVerticals: h.listVerticals, listOperators: h.listOperators, touchOperator: h.touchOperator }))
 vi.mock('@/lib/db/service', () => ({ getGates: h.getGates, getCampaigns: h.getCampaigns, listEventsSince: h.listEventsSince }))
 vi.mock('@/lib/alertsStore', () => ({ listAlerts: h.listAlerts, ALERTS_MAX_LIMIT: 200 }))
@@ -41,6 +43,7 @@ beforeEach(() => {
   h.listAlerts.mockResolvedValue([])
   h.listDecidedSince.mockResolvedValue([])
   h.listEventsSince.mockResolvedValue([])
+  h.listOpenReplies.mockResolvedValue([])
   h.isInstantlyConfigured.mockReturnValue(true)
   h.listCampaigns.mockResolvedValue([{ id: IC, name: 'Kaspen R3', status: 1 }])
   h.getAnalyticsOverview.mockImplementation(async (_id: string, r: { startDate: string }) =>
@@ -116,5 +119,37 @@ describe('loadCheckin', () => {
     const d = await loadCheckin({ operator: null, verticalParam: 'v-k', now })
     expect(h.listEventsSince).toHaveBeenCalledWith(['lume.decision', 'lume.campaign_pick'], new Date('2026-10-25T10:00:00Z'))
     expect(d.decisionEvents.map((e) => e.kind)).toEqual(['campaign_pick'])
+  })
+})
+
+describe('loadCheckin: New replies', () => {
+  const reply = (id: string, campaign: string) => ({
+    reply_to_uuid: id, campaign_id: campaign, lead_email: `${id}@x.com`, lead_name: null, company: null, excerpt: 'yes',
+    received_at: '2026-10-26T09:00:00Z', thread_id: 't', eaccount: null, subject: null, interest: 1, source: 'poll',
+    created_at: '', handled_at: null, handled_how: null, handled_action_id: null,
+  })
+
+  it('routes open replies to the vertical, links awaiting drafts, counts them in the summary', async () => {
+    h.listOpenReplies.mockResolvedValue([reply('r1', IC), reply('r2', 'camp-other')])
+    h.getGates.mockResolvedValue([
+      { kind: 'lume_action', target_table: 'pending_actions', target_id: 'act-1', title: 'send_reply', subtitle: 's', actions: [], counts: { reply_to_uuid: 'r1', campaign_id: IC }, telegram_message_id: null, created_at: '' },
+    ])
+    // Kaspen holds IC and is the default vertical, so it also gets the unclaimed campaign.
+    const d = await loadCheckin({ operator: op({ vertical_id: 'v-k' }), verticalParam: null, now })
+    expect(d.newReplies.map((r) => r.reply_to_uuid).sort()).toEqual(['r1', 'r2'])
+    expect(d.newReplies.find((r) => r.reply_to_uuid === 'r1')!.draft_action_id).toBe('act-1')
+    expect(d.summary.new_replies).toBe(2)
+    const roof = await loadCheckin({ operator: op(), verticalParam: null, now })
+    expect(roof.newReplies).toEqual([])
+    expect(roof.summary.new_replies).toBe(0)
+  })
+
+  it('a failed load is reported, the page still renders', async () => {
+    h.listOpenReplies.mockRejectedValue(new Error('db'))
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const d = await loadCheckin({ operator: null, verticalParam: null, now })
+    expect(d.newReplies).toEqual([])
+    expect(d.errors).toContain('Could not load new replies.')
+    spy.mockRestore()
   })
 })

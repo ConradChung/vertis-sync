@@ -420,6 +420,67 @@ export function decisionEventsForScope(
 }
 
 // ---------------------------------------------------------------------------
+// New replies (inbox manager, Phase 3a)
+
+/** A positive reply as `lume_replies` holds it (lib/inbox/store.ts ReplyRow). */
+export interface OpenReplyLike {
+  reply_to_uuid: string
+  campaign_id: string | null
+  lead_email: string
+  lead_name: string | null
+  company: string | null
+  excerpt: string | null
+  received_at: string
+}
+
+export interface NewReplyItem {
+  reply_to_uuid: string
+  campaign_id: string | null
+  lead: string
+  company: string | null
+  excerpt: string
+  received_at: string
+  vertical_id: string | null
+  vertical_name: string | null
+  /** JSON thread for the bot (GET /api/inbox/thread). */
+  thread_link: string
+  /** An awaiting send_reply for this reply, when one is filed. */
+  draft_action_id: string | null
+}
+
+/**
+ * Unhandled positive replies for the scope, routed like a `replies` item
+ * (the vertical holding the campaign), newest first. `drafts` maps a
+ * reply_to_uuid to its awaiting send_reply action.
+ */
+export function newRepliesForScope(
+  rows: readonly OpenReplyLike[],
+  verticals: readonly Vertical[],
+  scope: CheckinScope,
+  drafts: Record<string, string>,
+  opts: RouteOptions = {}
+): NewReplyItem[] {
+  return rows
+    .map((r) => {
+      const v = verticalFor({ campaign_id: r.campaign_id, scope: 'replies' }, verticals, opts)
+      return {
+        reply_to_uuid: r.reply_to_uuid,
+        campaign_id: r.campaign_id,
+        lead: r.lead_name ? `${r.lead_name} <${r.lead_email}>` : r.lead_email,
+        company: r.company,
+        excerpt: r.excerpt ?? '',
+        received_at: r.received_at,
+        vertical_id: v?.id ?? null,
+        vertical_name: v?.name ?? null,
+        thread_link: `/api/inbox/thread?reply_to_uuid=${encodeURIComponent(r.reply_to_uuid)}`,
+        draft_action_id: drafts[r.reply_to_uuid] ?? null,
+      }
+    })
+    .filter((r) => inScope(r.vertical_id, scope))
+    .sort((a, b) => (a.received_at < b.received_at ? 1 : a.received_at > b.received_at ? -1 : 0))
+}
+
+// ---------------------------------------------------------------------------
 // Summary
 
 export interface CheckinSummary {
@@ -427,6 +488,8 @@ export interface CheckinSummary {
   needs_confirmation: number
   unacked_alerts: number
   urgent_alerts: number
+  /** Unhandled positive replies in scope (the New replies section). */
+  new_replies: number
   last_checked_at: string | null
   generated_at: string
 }
@@ -435,6 +498,7 @@ export function checkinSummary(args: {
   scope: CheckinScope
   items: readonly CheckinItem[]
   alerts: readonly AlertLike[]
+  newReplies?: number
   lastCheckedAt: string | null
   now: Date
 }): CheckinSummary {
@@ -443,6 +507,7 @@ export function checkinSummary(args: {
     needs_confirmation: args.items.length,
     unacked_alerts: args.alerts.length,
     urgent_alerts: args.alerts.filter((a) => a.severity === 'urgent').length,
+    new_replies: args.newReplies ?? 0,
     last_checked_at: args.lastCheckedAt,
     generated_at: args.now.toISOString(),
   }
