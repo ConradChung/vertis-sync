@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { PageHead } from '@/components/shell/PageHead'
 import { VerticalsSettings } from '@/components/settings/VerticalsSettings'
 import { ReplyModesSettings } from '@/components/campaigns/ReplyModeSelect'
+import { SettingsNav } from '@/components/settings/SettingsNav'
 import { OPERATOR_COOKIE } from '@/lib/operators/cookie'
 
 export const metadata: Metadata = { title: 'Verticals' }
@@ -14,6 +15,7 @@ export default async function VerticalsSettingsPage() {
   return (
     <>
       <PageHead eyebrow="Settings" title="Verticals" sub="Lines of business, their campaigns, and the Grok Bot keys that run them." />
+      <SettingsNav current="/settings/verticals" />
       <VerticalsSettings canManageKeys={canManageKeys} />
       <div className="mt-8 max-w-5xl">
         <ReplyModesSettings canChange={canManageKeys} />

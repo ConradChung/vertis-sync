@@ -19,7 +19,7 @@ import { alert, alertLink } from '@/lib/alerts'
  *        `lume_op` cookie (403 operator_forbidden) are refused. Every change
  *        writes its `lume.reply_mode_changed` event in the same transaction
  *        (RPC lume_set_reply_mode), then an owner-only alert.
- * `client` is stored but behaves like `owner` until the Slack app (3g).
+ * `client`: the client approves in their bound Slack channel, or the owner (3g).
  */
 
 const Body = z.strictObject({ campaign_id: CampaignId, mode: z.enum(REPLY_MODES) })
@@ -54,7 +54,7 @@ export async function PUT(req: Request) {
       change.to === 'auto'
         ? `${title}\nReplies with a verdict of GOOD on this campaign are now sent without an approval, after the live thread re-check. BAD, unsubscribe and hostile replies still wait for you.`
         : change.to === 'client'
-          ? `${title}\nClient approval arrives with the Slack app; until then you approve, as in Owner mode.`
+          ? `${title}\nThe client approves, edits or skips each reply in their bound Slack channel; you can still approve. A client never approves their own edit.`
           : `${title}\nEvery reply on this campaign waits for an approval.`
     try {
       await alert({ source: 'lume.settings', severity: change.to === 'auto' ? 'warn' : 'info', title, body, link: alertLink('/settings'), campaign_id, scope: 'replies', owner_only: true })

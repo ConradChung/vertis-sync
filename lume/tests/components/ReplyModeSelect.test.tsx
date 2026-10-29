@@ -27,12 +27,12 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('Reply approval modes', () => {
-  it('lists Instantly campaigns, owner by default, and notes that client approval arrives with the Slack app', async () => {
+  it('lists Instantly campaigns, owner by default, and notes that the client approves in Slack', async () => {
     ui(true)
     const main = (await screen.findByLabelText('Reply approval for Kaspen main')) as HTMLSelectElement
     await waitFor(() => expect((screen.getByLabelText('Reply approval for Zenport') as HTMLSelectElement).value).toBe('client'))
     expect(main.value).toBe('owner')
-    expect(screen.getByText('client approval arrives with the Slack app')).toBeTruthy()
+    expect(screen.getByText('the client approves in Slack, or you')).toBeTruthy()
   })
 
   it('switching to Auto asks first, then PUTs the mode', async () => {

@@ -6,8 +6,9 @@ import type { Json } from '@/lib/db/types'
  *
  *  - owner (default): the owner, /operator or a Grok Bot approves each
  *    send_reply (a bot never its own draft: lib/operators/policy.ts).
- *  - client: the client approves in Slack, or the owner (3g). Until the
- *    Slack app exists it behaves exactly like owner.
+ *  - client: the client approves in their bound Slack channel, or the
+ *    owner (3g, lib/slack/*); decided_via 'client' is re-checked by the
+ *    executor (lib/slack/clientCheck.ts).
  *  - auto: the scoped send grant. A send_reply for the campaign is approved
  *    at creation with decided_via='grant', unless `grantBlocker` finds a
  *    reason to hold it for a person. The executor still runs every live
@@ -121,7 +122,7 @@ export function grantBlocker(c: GrantContext): GrantBlocker | null {
 /** Short human text for a blocker (feed notes, the reply card). */
 export const GRANT_BLOCKER_TEXT: Record<GrantBlocker, string> = {
   mode_owner: 'the campaign is in Owner mode',
-  mode_client: 'the campaign is in Client mode (client approval arrives with the Slack app; the owner approves until then)',
+  mode_client: 'the campaign is in Client mode (the client approves in Slack, or the owner)',
   no_campaign: 'the reply has no campaign',
   campaign_unverified: "the campaign was not confirmed from the lead's email",
   campaign_mismatch: "the reply's campaign is not the answered email's campaign",

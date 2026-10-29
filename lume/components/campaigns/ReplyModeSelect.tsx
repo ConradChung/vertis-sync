@@ -19,7 +19,7 @@ export const REPLY_MODE_LABEL: Record<ReplyMode, string> = {
   auto: 'Auto (send grant)',
 }
 
-export const CLIENT_MODE_NOTE = 'Client approval arrives with the Slack app; until then you approve, as in Owner mode.'
+export const CLIENT_MODE_NOTE = 'The client approves, edits or skips each reply in their Slack channel (Settings → Slack); you can still approve. A client never approves their own edit.'
 export const AUTO_MODE_NOTE = 'Replies with a verdict of GOOD are sent without an approval, after the live thread re-check. BAD, unsubscribe and hostile replies still wait for you.'
 
 interface ReplyModesResponse {
@@ -79,7 +79,7 @@ export function ReplyModeSelect({
           </option>
         ))}
       </select>
-      {mode === 'client' && <span className="text-[11px] text-fg-46">client approval arrives with the Slack app</span>}
+      {mode === 'client' && <span className="text-[11px] text-fg-46">the client approves in Slack, or you</span>}
     </span>
   )
 }
