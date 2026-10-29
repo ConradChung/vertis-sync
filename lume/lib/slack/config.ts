@@ -36,3 +36,6 @@ export const isSlackConfigured = () => slackConfig().configured
 export function slackRedirectUri(requestOrigin: string): string {
   return `${configuredBaseUrl() || requestOrigin.replace(/\/+$/, '')}${SLACK_CALLBACK_PATH}`
 }
+
+/** The OAuth state cookie (httpOnly, scoped to the callback path, 10 minutes). */
+export const SLACK_STATE_COOKIE = 'lume_slack_state'

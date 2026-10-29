@@ -14,6 +14,10 @@ describe('isPublicPath', () => {
     '/api/cron/rotation-tick',
     `/api/actions/${uuid}/execute`,
     '/api/auth/magic-link',
+    '/api/slack/events',
+    '/api/slack/interactions',
+    '/api/slack/install',
+    '/api/slack/oauth/callback',
     '/_next/static/chunks/main.js',
     '/_next/image?url=x',
     '/favicon.ico',
@@ -45,6 +49,13 @@ describe('isPublicPath', () => {
     '/loginx',
     '/login/../overview',
     '/authx/callback',
+    '/api/slack/install-link',
+    '/api/slack/installs',
+    '/api/slack/installs/T0AAA/revoke',
+    '/api/slack/installs/T0AAA/channels',
+    '/api/slack/channels',
+    '/api/slack/events/extra',
+    '/api/slack/oauth',
   ])('treats %s as protected', (path) => {
     expect(isPublicPath(path)).toBe(false)
   })

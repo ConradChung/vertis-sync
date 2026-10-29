@@ -17,6 +17,9 @@ const PUBLIC_PATTERNS: RegExp[] = [
   /^\/api\/webhooks\/.+$/, // Instantly webhooks
   /^\/api\/hooks\/.+$/, // DB triggers / pg_net hooks
   /^\/api\/cron\/.+$/, // Vercel cron / pg_cron ticks
+  // Client Slack app (3g): Slack-signed events / interactions, and the install +
+  // OAuth callback a client opens without a Lume session (signed link / state).
+  /^\/api\/slack\/(events|interactions|install|oauth\/callback)$/,
   new RegExp(`^/api/actions/${UUID}/execute$`, 'i'), // telegram-inbox lume_ok
   /^\/_next\//, // framework assets
   /^\/favicon\.ico$/,
