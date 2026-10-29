@@ -201,7 +201,7 @@ export interface PendingActionRow {
   agent_run_id: string | null
   rule_id: string | null
   telegram_message_id: number | null
-  decided_via: 'lume' | 'telegram' | 'agent' | 'operator' | null
+  decided_via: 'lume' | 'telegram' | 'agent' | 'operator' | 'grant' | 'client' | null
   /** The Grok Bot operator that decided (decided_via 'operator'). */
   decided_by_operator?: string | null
   decided_at: string | null
