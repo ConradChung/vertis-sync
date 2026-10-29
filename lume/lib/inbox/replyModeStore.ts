@@ -29,12 +29,14 @@ export async function listReplyModes(): Promise<ReplyModeRow[]> {
   return (res.data ?? []) as ReplyModeRow[]
 }
 
-/** Upsert the mode; returns the previous one. */
-export async function setReplyMode(campaignId: string, mode: ReplyMode, by: string): Promise<{ from: ReplyMode; to: ReplyMode }> {
-  const from = await getReplyMode(campaignId)
-  const res = await createServiceClient()
-    .from('lume_campaign_reply_modes')
-    .upsert({ campaign_id: campaignId, mode, updated_at: new Date().toISOString(), updated_by: by.slice(0, 120) }, { onConflict: 'campaign_id' })
+/**
+ * Set the mode and, when it changed, write its `lume.reply_mode_changed`
+ * event in the same transaction (RPC `lume_set_reply_mode`, migration
+ * 20261029032934): a change is never stored without its audit row.
+ */
+export async function setReplyMode(campaignId: string, mode: ReplyMode, by: string): Promise<{ from: ReplyMode; to: ReplyMode; event_id: number | null }> {
+  const res = await createServiceClient().rpc('lume_set_reply_mode', { p_campaign_id: campaignId, p_mode: mode, p_by: by.slice(0, 120) })
   if (res.error) throw new DbError('setReplyMode', res.error)
-  return { from, to: mode }
+  const d = (res.data ?? {}) as { from?: string; to?: string; event_id?: number | null }
+  return { from: parseReplyMode(d.from), to: parseReplyMode(d.to), event_id: d.event_id ?? null }
 }

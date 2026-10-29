@@ -5,8 +5,6 @@ vi.mock('@/lib/supabase/server', () => ({
 }))
 const modes = vi.hoisted(() => ({ listReplyModes: vi.fn(), setReplyMode: vi.fn() }))
 vi.mock('@/lib/inbox/replyModeStore', () => modes)
-const svc = vi.hoisted(() => ({ logEvent: vi.fn() }))
-vi.mock('@/lib/db/service', () => svc)
 vi.mock('@/lib/supabase/service', async () => (await import('../stubs/feed')).serviceModule)
 import { feed } from '../stubs/feed'
 
@@ -29,21 +27,19 @@ describe('/api/campaigns/reply-mode', () => {
     expect(await res.json()).toEqual({ modes: [{ campaign_id: 'c-1', mode: 'auto' }] })
   })
 
-  it('PUT by the owner changes the mode, logs an event and an owner-only alert', async () => {
-    modes.setReplyMode.mockResolvedValue({ from: 'owner', to: 'auto' })
+  it('PUT by the owner changes the mode (the event is written atomically by the store) and raises an owner-only alert', async () => {
+    modes.setReplyMode.mockResolvedValue({ from: 'owner', to: 'auto', event_id: 7 })
     const res = await PUT(req('PUT', { campaign_id: '869d73b3-5bf3-4f1c-ba8c-43ac6d0f529d', mode: 'auto' }))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ campaign_id: '869d73b3-5bf3-4f1c-ba8c-43ac6d0f529d', mode: 'auto', from: 'owner' })
     expect(modes.setReplyMode).toHaveBeenCalledWith('869d73b3-5bf3-4f1c-ba8c-43ac6d0f529d', 'auto', 'owner')
-    expect(svc.logEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'lume.reply_mode_changed', payload: expect.objectContaining({ from: 'owner', to: 'auto' }) }))
     expect(feed.rows).toHaveLength(1)
     expect(feed.rows[0]).toMatchObject({ owner_only: true, severity: 'warn', scope: 'replies' })
   })
 
   it('an unchanged mode logs nothing', async () => {
-    modes.setReplyMode.mockResolvedValue({ from: 'owner', to: 'owner' })
+    modes.setReplyMode.mockResolvedValue({ from: 'owner', to: 'owner', event_id: null })
     await PUT(req('PUT', { campaign_id: 'c-1', mode: 'owner' }))
-    expect(svc.logEvent).not.toHaveBeenCalled()
     expect(feed.rows).toHaveLength(0)
   })
 

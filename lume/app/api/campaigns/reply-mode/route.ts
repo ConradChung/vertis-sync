@@ -7,7 +7,6 @@ import { operatorCookieForbidden } from '@/lib/operators/guard'
 import { listReplyModes, setReplyMode } from '@/lib/inbox/replyModeStore'
 import { REPLY_MODES } from '@/lib/inbox/replyMode'
 import { CampaignId } from '@/lib/inbox/schemas'
-import { logEvent } from '@/lib/db/service'
 import { alert, alertLink } from '@/lib/alerts'
 
 /**
@@ -17,8 +16,9 @@ import { alert, alertLink } from '@/lib/alerts'
  *   PUT `{ campaign_id, mode: 'owner' | 'client' | 'auto' }` →
  *        `{ campaign_id, mode, from }`. The owner's own session only, like
  *        minting a key: the agent bearer (403 session_required) and any
- *        `lume_op` cookie (403 operator_forbidden) are refused. Every change is
- *        a `lume.reply_mode_changed` event and an owner-only alert.
+ *        `lume_op` cookie (403 operator_forbidden) are refused. Every change
+ *        writes its `lume.reply_mode_changed` event in the same transaction
+ *        (RPC lume_set_reply_mode), then an owner-only alert.
  * `client` is stored but behaves like `owner` until the Slack app (3g).
  */
 
@@ -56,11 +56,6 @@ export async function PUT(req: Request) {
         : change.to === 'client'
           ? `${title}\nClient approval arrives with the Slack app; until then you approve, as in Owner mode.`
           : `${title}\nEvery reply on this campaign waits for an approval.`
-    try {
-      await logEvent({ type: 'lume.reply_mode_changed', source: 'lume', source_id: campaign_id, campaign_id, title, payload: { campaign_id, from: change.from, to: change.to, by: 'owner' } })
-    } catch (err) {
-      console.error('[api/campaigns/reply-mode] logEvent failed:', err instanceof Error ? err.message : err)
-    }
     try {
       await alert({ source: 'lume.settings', severity: change.to === 'auto' ? 'warn' : 'info', title, body, link: alertLink('/settings'), campaign_id, scope: 'replies', owner_only: true })
     } catch (err) {
