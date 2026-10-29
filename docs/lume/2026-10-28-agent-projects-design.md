@@ -82,7 +82,7 @@ A vertical (non-master) Grok Bot can use only its own vertical's project and unl
 - Unsupported types are rejected with a message.
 - Deleting a project is a **hard delete**: the project row, its files and notes (rows and their Storage objects) are removed. Its chats are never deleted; they move to Unfiled (`on delete set null`).
 - A PDF whose text takes over about 40 seconds to extract, or yields none, is stored as "not readable". Extraction reads at most 500 pages and stops at the 200k-character cap.
-- An upload that is signed but never finalized is recorded in `agent_project_uploads` and its object is deleted by an hourly sweep (`lume-project-upload-sweep` → `/api/cron/project-uploads`) once it is an hour old. A failed finalize deletes its object at once.
+- An upload that is signed but never finalized is recorded in `agent_project_uploads` and its object is deleted by an hourly sweep (`lume-project-upload-sweep` → `/api/cron/project-uploads`) once it is over 3 hours old (signed upload URLs stay valid for 2 hours). A failed finalize deletes its object at once.
 - The `agent-projects` bucket accepts only the supported types (CSV, PDF, plain text, Markdown, JSON, PNG, JPEG, GIF, WebP).
 
 ## Testing

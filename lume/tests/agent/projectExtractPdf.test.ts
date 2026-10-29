@@ -8,17 +8,20 @@ const pdf = vi.hoisted(() => ({
   hangAt: 0,
   getPage: vi.fn(),
   destroy: vi.fn(),
+  taskDestroy: vi.fn(),
 }))
 vi.mock('unpdf', () => ({
-  getDocumentProxy: vi.fn(async () => {
-    if (pdf.hang) return new Promise(() => {})
-    return {
-      numPages: pdf.numPages,
-      destroy: pdf.destroy,
-      getPage: pdf.getPage.mockImplementation(async (i: number) =>
-        i === pdf.hangAt ? new Promise(() => {}) : { getTextContent: async () => ({ items: [{ str: pdf.pageText(i) }] }) }
-      ),
-    }
+  getResolvedPDFJS: async () => ({
+    getDocument: () => {
+      const doc = {
+        numPages: pdf.numPages,
+        destroy: pdf.destroy,
+        getPage: pdf.getPage.mockImplementation(async (i: number) =>
+          i === pdf.hangAt ? new Promise(() => {}) : { getTextContent: async () => ({ items: [{ str: pdf.pageText(i) }] }) }
+        ),
+      }
+      return { promise: pdf.hang ? new Promise(() => {}) : Promise.resolve(doc), destroy: pdf.taskDestroy }
+    },
   }),
 }))
 
@@ -32,18 +35,22 @@ afterEach(() => {
   pdf.hangAt = 0
   pdf.getPage.mockReset()
   pdf.destroy.mockReset()
+  pdf.taskDestroy.mockReset()
 })
 
 describe('PDF extraction limits', () => {
-  it('reads each page in order', async () => {
+  it('reads each page in order, then releases the loading task', async () => {
     const r = await extractText(new Uint8Array([1]), 'pdf')
     expect(r).toEqual({ text: 'page 1\npage 2\npage 3', readable: true, truncated: false })
+    expect(pdf.taskDestroy).toHaveBeenCalled()
   })
 
   it('a PDF that takes too long is not readable (and the document is released)', async () => {
     pdf.hang = true
     const r = await extractText(new Uint8Array([1]), 'pdf', { pdfTimeoutMs: 20 })
     expect(r).toEqual({ text: null, readable: false, truncated: false })
+    // Still loading when the timer fired: the loading task itself is destroyed.
+    expect(pdf.taskDestroy).toHaveBeenCalled()
   })
 
   it('a page that hangs mid-way also times out', async () => {
@@ -51,7 +58,7 @@ describe('PDF extraction limits', () => {
     pdf.hangAt = 2
     const r = await extractText(new Uint8Array([1]), 'pdf', { pdfTimeoutMs: 20 })
     expect(r.readable).toBe(false)
-    expect(pdf.destroy).toHaveBeenCalled()
+    expect(pdf.taskDestroy).toHaveBeenCalled()
   })
 
   it(`stops at ${PDF_MAX_PAGES} pages, marked truncated`, async () => {

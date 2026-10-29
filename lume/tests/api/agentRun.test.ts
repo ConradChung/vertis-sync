@@ -784,8 +784,17 @@ describe('projects', () => {
       expect(h.insertAgentRun).not.toHaveBeenCalled()
     })
 
-    it('with no linked project, any project_id is 403', async () => {
-      expect((await post('hi', { project_id: PID })).status).toBe(403)
+    it('may start a chat in an unlinked project ("New chat in project")', async () => {
+      h.getProject.mockResolvedValue({ ...roofers, vertical_id: null })
+      fakeRunner([{ text: 'ok' }])
+      await events(await post('hi', { project_id: PID }))
+      expect(h.createConversation).toHaveBeenCalledWith('hi', { vertical_id: 'v-roof', operator_id: 'op-1' }, PID)
+    })
+
+    it('a missing project_id is 404, as for the owner', async () => {
+      const res = await post('hi', { project_id: PID })
+      expect(res.status).toBe(404)
+      expect(h.createConversation).not.toHaveBeenCalled()
     })
 
     it("an existing chat filed in another vertical's project gets no block and no project tool scope", async () => {

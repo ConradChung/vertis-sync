@@ -82,7 +82,8 @@ import type { Operator } from '@/lib/operators/types'
  * the stable prompt, and read_project_file reads only that project's files.
  * A project that fails to load is logged and the run goes on without it.
  * A vertical (non-master) Grok Bot may pass `project_id` only for its own
- * vertical's linked project (403 `forbidden_project` otherwise), and a chat it
+ * vertical's project or an unlinked one (403 `forbidden_project` otherwise; the
+ * same `canUseProject` rule as the project APIs), and a chat it
  * continues that is filed in another vertical's project gets no block.
  *
  * SSE events (`data: <json>\n\n`): run (`{ id, conversation_id, project_id? }`), text,
@@ -171,8 +172,10 @@ export async function POST(req: Request) {
           : undefined
       const requested = body.data.project_id?.toLowerCase() ?? null
       if (requested && scope) {
-        const own = scope.verticalId ? await projectForVertical(scope.verticalId) : null
-        if (own?.id !== requested) return NextResponse.json({ error: 'forbidden_project' }, { status: 403 })
+        // Same rule as the project APIs: its own vertical's project or an unlinked one.
+        // A missing project falls through to resolveNewChatProject's 404.
+        const asked = await getProject(requested)
+        if (asked && !canUseProject(scope, asked)) return NextResponse.json({ error: 'forbidden_project' }, { status: 403 })
       }
       const filed = await resolveNewChatProject(
         { requestedProjectId: requested, verticalId: origin?.vertical_id ?? null },

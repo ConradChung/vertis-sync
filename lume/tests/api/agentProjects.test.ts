@@ -489,13 +489,14 @@ describe('/api/cron/project-uploads', () => {
     expect(h.stalePendingUploads).not.toHaveBeenCalled()
   })
 
-  it('removes objects of uploads signed over an hour ago and never finalized; keeps finalized ones', async () => {
+  it('removes objects of uploads signed over 3 hours ago and never finalized; keeps finalized ones', async () => {
     h.stalePendingUploads.mockResolvedValue(['p/a.csv', 'p/b.pdf'])
     h.pathsInUse.mockResolvedValue(new Set(['p/b.pdf']))
     const res = await sweep()
     expect(await res.json()).toEqual({ ok: true, removed: 1, kept: 1 })
     const cutoff = h.stalePendingUploads.mock.calls[0][0] as Date
-    expect(Date.now() - cutoff.getTime()).toBeGreaterThanOrEqual(60 * 60 * 1000 - 1000)
+    // Signed upload URLs stay valid for 2 h: only rows older than that can be orphans.
+    expect(Date.now() - cutoff.getTime()).toBeGreaterThan(2 * 60 * 60 * 1000)
     expect(h.removeProjectObjects).toHaveBeenCalledWith(['p/a.csv'])
     expect(h.deletePendingUploads).toHaveBeenCalledWith(['p/a.csv', 'p/b.pdf'])
   })

@@ -136,7 +136,11 @@ describe('AgentHistory with projects', () => {
     fireEvent.drop(row, { dataTransfer: dt({}, [file]) })
     await waitFor(() => expect(calls('POST', `/api/agent/projects/${P2}/files`)).toHaveLength(1))
     expect(calls('POST', `/api/agent/projects/${P2}/files/sign`)).toEqual([{ filename: 'leads.csv', size: file.size }])
-    expect(storage.uploadToSignedUrl).toHaveBeenCalledWith(`${P2}/abc.csv`, 'tok', file, { contentType: 'text/csv' })
+    const [path, token, body, opts] = storage.uploadToSignedUrl.mock.calls[0]
+    expect([path, token, opts]).toEqual([`${P2}/abc.csv`, 'tok', { contentType: 'text/csv' }])
+    // The raw bytes, not the File: storage-js would send a File as multipart with the browser's type.
+    expect(body).not.toBeInstanceOf(File)
+    expect((body as ArrayBuffer).byteLength).toBe(file.size)
     expect(calls('POST', `/api/agent/projects/${P2}/files`)[0]).toMatchObject({ storage_path: `${P2}/abc.csv`, filename: 'leads.csv', upload_ticket: 't' })
   })
 

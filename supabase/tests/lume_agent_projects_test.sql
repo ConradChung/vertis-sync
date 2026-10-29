@@ -2,7 +2,7 @@
 -- Agent projects: folders of conversations + knowledge (instructions, files, notes),
 -- optionally linked to one vertical.
 begin;
-select plan(41);
+select plan(42);
 
 -- structure
 select has_table('public', 'agent_projects', 'agent_projects exists');
@@ -40,6 +40,10 @@ create temp table lume_sweep_t as select count(*) as n from net.http_request_que
 insert into agent_project_uploads (storage_path, project_id) values ('pgtap/fresh.csv', '00000000-0000-0000-0000-0000000a9099');
 do $$ begin perform public.lume_project_upload_sweep(); end $$;
 select is((select count(*) from net.http_request_queue), (select n from lume_sweep_t), 'no stale upload: the sweep sends nothing');
+-- Signed upload URLs live 2 h: a 150-minute-old row may still get its object, so it is not stale yet.
+insert into agent_project_uploads (storage_path, project_id, created_at) values ('pgtap/150min.csv', '00000000-0000-0000-0000-0000000a9099', now() - interval '150 minutes');
+do $$ begin perform public.lume_project_upload_sweep(); end $$;
+select is((select count(*) from net.http_request_queue), (select n from lume_sweep_t), 'a row younger than 3 h (signed URL may still be live) sends nothing');
 
 -- behaviour
 insert into lume_verticals (id, name) values

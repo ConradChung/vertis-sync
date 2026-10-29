@@ -101,10 +101,15 @@ export async function uploadProjectFile(projectId: string, file: File): Promise<
   })
   if (!sign.ok) return { ok: false, error: `${file.name}: ${sign.error}` }
   try {
+    // The bucket only accepts the supported types, so the request must carry
+    // ours, not the browser's File.type ('' / octet-stream for .md and .txt,
+    // vnd.ms-excel for a Windows .csv). storage-js sends a File or Blob as
+    // multipart with the blob's own type and ignores contentType; only a raw
+    // body (an ArrayBuffer) is sent with Content-Type: contentType.
+    const bytes = await file.arrayBuffer()
     const { error } = await createClient()
       .storage.from('agent-projects')
-      // The bucket only accepts the supported types: send ours, not the browser's guess (often '' or a vendor type).
-      .uploadToSignedUrl(sign.path, sign.token, file, { contentType: mimeFor(type, file.name, file.type) })
+      .uploadToSignedUrl(sign.path, sign.token, bytes, { contentType: mimeFor(type, file.name, file.type) })
     if (error) return { ok: false, error: `${file.name}: ${MESSAGES.storage}` }
   } catch {
     return { ok: false, error: `${file.name}: ${MESSAGES.storage}` }

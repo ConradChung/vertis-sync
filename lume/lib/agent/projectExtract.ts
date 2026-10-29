@@ -68,7 +68,12 @@ export const PDF_TIMEOUT_MS = 40_000
 interface PdfDoc {
   numPages: number
   getPage: (n: number) => Promise<{ getTextContent: () => Promise<{ items: unknown[] }> }>
-  destroy?: () => unknown
+}
+
+/** pdf.js's loading task: destroying it aborts a load still in progress and frees the document. */
+interface PdfLoadingTask {
+  promise: Promise<PdfDoc>
+  destroy: () => Promise<void> | void
 }
 
 const itemText = (it: unknown) => {
@@ -79,16 +84,20 @@ const itemText = (it: unknown) => {
 /**
  * The text layer, page by page: at most PDF_MAX_PAGES pages, stopping once
  * past MAX_TEXT_CHARS, all within `timeoutMs`. null when it fails or runs out
- * of time (the document is released either way).
+ * of time. The loading task is kept and destroyed either way, so a load or a
+ * page still in progress at the timeout is aborted, not left running.
  */
 async function pdfText(bytes: Uint8Array, timeoutMs: number): Promise<{ text: string; truncated: boolean } | null> {
-  let doc: PdfDoc | null = null
+  let task: PdfLoadingTask | null = null
   let stopped = false
   let timer: ReturnType<typeof setTimeout> | undefined
   const work = (async () => {
-    const { getDocumentProxy } = await import('unpdf')
-    // pdf.js takes ownership of the buffer: hand it a copy.
-    doc = (await getDocumentProxy(new Uint8Array(bytes))) as unknown as PdfDoc
+    const { getResolvedPDFJS } = await import('unpdf')
+    const { getDocument } = await getResolvedPDFJS()
+    // pdf.js takes ownership of the buffer: hand it a copy. Text only: no font loading.
+    if (stopped) return null
+    task = getDocument({ data: new Uint8Array(bytes), useSystemFonts: true, disableFontFace: true }) as unknown as PdfLoadingTask
+    const doc = await task.promise
     const pages = Math.min(doc.numPages, PDF_MAX_PAGES)
     let truncated = doc.numPages > PDF_MAX_PAGES
     const parts: string[] = []
@@ -117,7 +126,7 @@ async function pdfText(bytes: Uint8Array, timeoutMs: number): Promise<{ text: st
     clearTimeout(timer)
     work.catch(() => {})
     try {
-      await (doc as PdfDoc | null)?.destroy?.()
+      await (task as PdfLoadingTask | null)?.destroy()
     } catch {
       // released best effort
     }
