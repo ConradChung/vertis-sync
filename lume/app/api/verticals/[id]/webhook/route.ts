@@ -6,6 +6,7 @@ import { dbErrorResponse } from '@/lib/http/errors'
 import { parseJsonBody, uuidParam } from '@/lib/http/json'
 import { operatorCookieForbidden } from '@/lib/operators/guard'
 import { getVertical } from '@/lib/operators/store'
+import { currentOperator } from '@/lib/operators/session'
 import { logEvent } from '@/lib/db/service'
 import { checkWebhookUrl } from '@/lib/webhooks/push'
 import { deleteWebhook, getWebhook, setWebhook, toView } from '@/lib/webhooks/store'
@@ -14,7 +15,8 @@ import { deleteWebhook, getWebhook, setWebhook, toView } from '@/lib/webhooks/st
  * A vertical's outbound webhook (inbox manager 3f): the Grok routine Lume
  * pushes to (lib/webhooks/deliver.ts).
  *   GET    → `{ webhook: { url, secret_masked, updated_at, last_delivery_* } | null }`.
- *            Owner, bots and the agent may read; the secret is always masked.
+ *            The owner, the agent, the master bot, or the bot of this same
+ *            vertical (another vertical's bot: 403); the secret is always masked.
  *   PUT    `{ url, secret? }` → `{ webhook, secret? }`. Without `secret` a
  *            new one is generated when none is stored and returned in this
  *            one response (no-store), never again; with none given and one
@@ -40,6 +42,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   if (!auth.ok) return auth.response
   const id = uuidParam((await ctx.params).id)
   if (!id) return NextResponse.json({ error: 'bad_id' }, { status: 400 })
+  const op = await currentOperator(req)
+  if (op && !op.is_master && op.vertical_id !== id) return NextResponse.json({ error: 'vertical_out_of_scope' }, { status: 403 })
   try {
     const hook = await getWebhook(id)
     return NextResponse.json({ webhook: hook ? toView(hook) : null }, { headers: { 'Cache-Control': 'no-store' } })

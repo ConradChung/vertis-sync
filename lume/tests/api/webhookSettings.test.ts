@@ -9,6 +9,8 @@ const ops = vi.hoisted(() => ({ getVertical: vi.fn() }))
 vi.mock('@/lib/operators/store', () => ops)
 const svc = vi.hoisted(() => ({ logEvent: vi.fn() }))
 vi.mock('@/lib/db/service', async () => ({ ...(await vi.importActual<object>('@/lib/db/service')), ...svc }))
+const sess = vi.hoisted(() => ({ currentOperator: vi.fn() }))
+vi.mock('@/lib/operators/session', () => sess)
 const del = vi.hoisted(() => ({ sendPush: vi.fn() }))
 vi.mock('@/lib/webhooks/deliver', () => del)
 
@@ -31,8 +33,19 @@ beforeEach(() => {
 })
 
 describe('/api/verticals/<id>/webhook', () => {
-  it('GET never returns the secret, only a mask (a bot may read)', async () => {
+  it('GET: the owner, the master bot, or the bot of that same vertical; never another vertical\'s bot', async () => {
     hooks.getWebhook.mockResolvedValue(ROW)
+    sess.currentOperator.mockResolvedValue({ id: 'o', is_master: false, vertical_id: 'another' })
+    expect((await GET(req('GET', undefined, { cookie: 'lume_op=x' }), params)).status).toBe(403)
+    sess.currentOperator.mockResolvedValue({ id: 'm', is_master: true, vertical_id: null })
+    expect((await GET(req('GET', undefined, { cookie: 'lume_op=x' }), params)).status).toBe(200)
+    sess.currentOperator.mockResolvedValue(null)
+    expect((await GET(req('GET'), params)).status).toBe(200)
+  })
+
+  it('GET never returns the secret, only a mask (its own vertical\'s bot may read)', async () => {
+    hooks.getWebhook.mockResolvedValue(ROW)
+    sess.currentOperator.mockResolvedValue({ id: 'o', is_master: false, vertical_id: VID })
     const res = await GET(req('GET', undefined, { cookie: 'lume_op=x' }), params)
     const text = await res.text()
     expect(text).not.toContain(SECRET)
