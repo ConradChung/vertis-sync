@@ -63,6 +63,8 @@ Settings → Slack → the workspace → **Bind a channel**:
 
 - **Channel**: the bot lists the channels it can see. A private channel appears only after the client invited
   `@Lume`; Lume can post only where it is a member.
+- **Bind only the client's internal channels**, never a Slack Connect channel shared with another organisation:
+  everyone in a shared channel would see the leads and could press Approve.
 - **Vertical**: the vertical whose campaigns this channel follows.
 - **Campaigns**: tick some to narrow it; none ticked means all of the vertical's campaigns. A campaign you later
   remove from the vertical stops being posted here.
