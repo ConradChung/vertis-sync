@@ -77,7 +77,7 @@ export interface ToolDeps {
    * The Grok Bot running this chat, if any. A vertical (non-master) bot does
    * not get the vertical-management tools (MASTER_ONLY_TOOLS); list_verticals stays.
    */
-  operator?: { is_master: boolean } | null
+  operator?: { is_master: boolean; vertical_id?: string | null } | null
   /**
    * The Grok Bot this chat belongs to (the one running it, else the one that
    * started it). A send_reply drafted here is recorded as that bot's draft,
@@ -1133,7 +1133,13 @@ const SPECS: Built[] = [
       description:
         "Create the Inbox project for a vertical: a project named '<vertical> · Inbox', linked to the vertical, with the five Inbox Manager notes from the SOP (qualify-rules.md, voice-samples.md, voice-rules.md, reply-templates.md, settings.md) holding {{placeholders}} for the owner to fill. Safe to re-run: it adds only missing notes and never overwrites one. If the vertical already has another linked project it changes nothing and returns error vertical_has_project with that project.",
       inputSchema: z.object({ vertical_id: uuid }),
-      run: async ({ vertical_id }, { call }) => (await call(`/api/verticals/${vertical_id.toLowerCase()}/inbox-project`, { method: 'POST', body: {} })) as ToolResult,
+      run: async ({ vertical_id }, { call, deps }) => {
+        const id = vertical_id.toLowerCase()
+        // Same rule as the route: a vertical bot only for its own vertical (the bearer call cannot carry its cookie).
+        const op = deps.operator
+        if (op && !op.is_master && op.vertical_id?.toLowerCase() !== id) throw new Error('create_inbox_project refused: a vertical Grok Bot can only create its own vertical\'s Inbox project')
+        return (await call(`/api/verticals/${id}/inbox-project`, { method: 'POST', body: {} })) as ToolResult
+      },
     },
     'low'
   ),
@@ -1215,7 +1221,7 @@ function skillStore(deps: ToolDeps): SkillStore {
 }
 
 /** Only the owner or the master Grok Bot may create / change verticals or issue keys. */
-export const MASTER_ONLY_TOOLS: ReadonlySet<string> = new Set(['create_vertical', 'update_vertical', 'issue_operator_key', 'create_inbox_project'])
+export const MASTER_ONLY_TOOLS: ReadonlySet<string> = new Set(['create_vertical', 'update_vertical', 'issue_operator_key'])
 
 export function buildTools(deps: ToolDeps): AgentTool[] {
   const call = routeCaller(deps)

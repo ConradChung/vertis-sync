@@ -443,6 +443,28 @@ describe('vertical tools (G9)', () => {
   })
 })
 
+describe('create_inbox_project for a vertical Grok Bot', () => {
+  const VID = '3941b73f-c74e-4cc5-9766-f0140e6ad9c9'
+  it('a vertical bot gets it, for its own vertical only (like the route)', async () => {
+    const { fetch, tool, tools } = setup(undefined, { operator: { is_master: false, vertical_id: VID } })
+    expect(tools.map((t) => t.name)).toContain('create_inbox_project')
+    const t = tool('create_inbox_project')
+    await t.run(t.inputSchema.parse({ vertical_id: VID.toUpperCase() }))
+    expect(fetch.mock.calls[0][0]).toBe(`https://lume.test/api/verticals/${VID}/inbox-project`)
+    await expect(t.run(t.inputSchema.parse({ vertical_id: '0b9f6a52-1c3e-4d7a-9f00-1234567890ab' }))).rejects.toThrow(/own vertical/)
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('the master bot and the owner may for any vertical', async () => {
+    for (const operator of [{ is_master: true, vertical_id: null }, null]) {
+      const { fetch, tool } = setup(undefined, { operator })
+      const t = tool('create_inbox_project')
+      await t.run(t.inputSchema.parse({ vertical_id: '0b9f6a52-1c3e-4d7a-9f00-1234567890ab' }))
+      expect(fetch).toHaveBeenCalledTimes(1)
+    }
+  })
+})
+
 describe('send_reply on an Auto-mode campaign', () => {
   it('reports auto_approved_by_campaign when the grant approved it at creation', async () => {
     const { createAction, tool } = setup()
@@ -458,7 +480,7 @@ describe('master-only vertical tools', () => {
     const names = (operator: { is_master: boolean } | null) => setup(undefined, { operator }).tools.map((t) => t.name)
     const vert = names({ is_master: false })
     expect(vert).toContain('list_verticals')
-    for (const n of ['create_vertical', 'update_vertical', 'issue_operator_key', 'create_inbox_project']) {
+    for (const n of ['create_vertical', 'update_vertical', 'issue_operator_key']) {
       expect(vert).not.toContain(n)
       expect(names({ is_master: true })).toContain(n)
       expect(names(null)).toContain(n)
