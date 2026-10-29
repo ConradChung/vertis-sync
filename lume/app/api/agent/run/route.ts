@@ -412,6 +412,7 @@ async function executeRun({
         summary: (e.summary as string | null) ?? null,
         tool: String(e.tool ?? ''),
         ...(e.state ? { state: e.state as StoredApproval['state'] } : {}),
+        ...(e.reply && typeof e.reply === 'object' ? { reply: e.reply as StoredApproval['reply'] } : {}),
       }
       reply.approvals = [...reply.approvals.filter((x) => x.action_id !== a.action_id), a]
     } else if (e.type === 'error') reply.error = String(e.message ?? 'The run failed.')
@@ -449,14 +450,14 @@ async function executeRun({
         const state: StoredApproval['state'] =
           result.outcome === 'executed' ? 'auto_executed' : result.outcome === 'handled_elsewhere' ? 'handled_elsewhere' : 'auto_failed'
         autoRan.set(id, state === 'auto_failed' ? 'error' : 'ok')
-        send({ type: 'approval', action_id: result.action_id, deep_link: result.deep_link, summary: result.summary ?? null, tool: name, tool_id: id, state })
+        send({ type: 'approval', action_id: result.action_id, deep_link: result.deep_link, summary: result.summary ?? null, tool: name, tool_id: id, state, ...(result.reply ? { reply: result.reply } : {}) })
         await save({ tool_calls: snapshot() })
         return
       }
       if (ok && result?.status === 'awaiting_approval' && typeof result?.action_id === 'string' && result.action_id) {
         approvalActionId = result.action_id
         if (entry) entry.action_id = result.action_id
-        send({ type: 'approval', action_id: result.action_id, deep_link: result.deep_link, summary: result.summary ?? null, tool: name, tool_id: id, state: 'awaiting' })
+        send({ type: 'approval', action_id: result.action_id, deep_link: result.deep_link, summary: result.summary ?? null, tool: name, tool_id: id, state: 'awaiting', ...(result.reply ? { reply: result.reply } : {}) })
         await save({ status: 'needs_approval', approval_action_id: approvalActionId, tool_calls: snapshot() })
         return
       }

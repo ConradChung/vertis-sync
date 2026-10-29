@@ -174,3 +174,61 @@ describe('ApprovalCard', () => {
     expect(screen.getByRole('button', { name: 'Approve' })).toBeTruthy()
   })
 })
+
+describe('ApprovalCard: send_reply (inbox manager)', () => {
+  const R: ChatApproval = {
+    action_id: 'r1', deep_link: '/actions/r1', summary: 'Send reply to ada@acme.com', tool: 'send_reply',
+    reply: {
+      lead_email: 'ada@acme.com', lead_name: 'Ada Lovelace', company: 'Acme', verdict: 'GOOD', their_message: 'Tuesday works for me.',
+      draft: 'Great, Tuesday 10am PT?', proposed_times: ['Tue 10:00 PT', 'Wed 14:00 PT'], research_note: '40 staff', eaccount: 'frank@ours.com', edited_by: null,
+    },
+  }
+
+  it('shows lead, company, verdict, their message, the draft and the proposed times', () => {
+    render(<ApprovalCard approvals={[R]} />)
+    expect(screen.getByText('Ada Lovelace <ada@acme.com>')).toBeTruthy()
+    expect(screen.getByText('Acme')).toBeTruthy()
+    expect(screen.getByText('GOOD')).toBeTruthy()
+    expect(screen.getByText('Tuesday works for me.')).toBeTruthy()
+    expect(screen.getByText('Great, Tuesday 10am PT?')).toBeTruthy()
+    expect(screen.getByText('Tue 10:00 PT · Wed 14:00 PT')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy()
+  })
+
+  it('Edit → change the body → Approve sends the edited body', async () => {
+    const fetchMock = stubDecide(Response.json({ ok: true, status: 'executed', result: {}, error: null }))
+    render(<ApprovalCard approvals={[R]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    const box = screen.getByLabelText('Reply body') as HTMLTextAreaElement
+    expect(box.value).toBe('Great, Tuesday 10am PT?')
+    fireEvent.change(box, { target: { value: 'Tuesday 11am PT instead?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Approve edited reply' }))
+    await screen.findByText('Executed')
+    const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1]
+    expect(JSON.parse(init.body as string)).toEqual({ decision: 'approve', body: 'Tuesday 11am PT instead?' })
+  })
+
+  it('Edit then Cancel: a plain approve again', async () => {
+    const fetchMock = stubDecide(Response.json({ ok: true, status: 'executed', result: {}, error: null }))
+    render(<ApprovalCard approvals={[R]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel edit' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    await screen.findByText('Executed')
+    const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1]
+    expect(JSON.parse(init.body as string)).toEqual({ decision: 'approve' })
+  })
+
+  it('an empty edited body cannot be approved', () => {
+    render(<ApprovalCard approvals={[R]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    fireEvent.change(screen.getByLabelText('Reply body'), { target: { value: '   ' } })
+    expect((screen.getByRole('button', { name: 'Approve edited reply' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('a settled reply shows its card, no Edit', () => {
+    render(<ApprovalCard approvals={[{ ...R, status: 'executed', state: 'awaiting' }]} />)
+    expect(screen.getByText('Great, Tuesday 10am PT?')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
+  })
+})

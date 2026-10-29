@@ -116,6 +116,7 @@ export function applyAgentEvent(m: ChatMessage, e: AgentEvent): ChatMessage {
             summary: (e.summary as string | null) ?? null,
             tool: String(e.tool ?? ''),
             ...(e.state ? { state: e.state as ChatApproval['state'] } : {}),
+            ...(e.reply && typeof e.reply === 'object' ? { reply: e.reply as ChatApproval['reply'] } : {}),
           },
         ],
       }

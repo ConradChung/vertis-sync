@@ -2,12 +2,15 @@
 
 import Link from 'next/link'
 import { ShieldAlert } from 'lucide-react'
+import type { ReplyCard } from '@/lib/inbox/model'
 
 export interface PendingApproval {
   action_id: string
   deep_link: string
   summary: string | null
   tool: string
+  /** send_reply: the reply card (lead, company, verdict, their message, draft, times). */
+  reply?: ReplyCard
 }
 
 /**

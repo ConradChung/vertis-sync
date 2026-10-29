@@ -6,6 +6,8 @@ import { ShieldAlert, Zap } from 'lucide-react'
 import type { PendingApproval } from '@/components/orb/PlanCard'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
+import { Textarea } from '@/components/ui/textarea'
+import type { ReplyCard } from '@/lib/inbox/model'
 import type { StoredApproval } from '@/lib/agent/history'
 import { cn } from '@/lib/utils'
 import { OneTimeLink } from '@/components/operator/OneTimeLink'
@@ -118,7 +120,11 @@ function Decision({ a, onDecided }: { a: ChatApproval; onDecided?: (d: ApprovalD
     }
   }, [])
 
-  const decide = async (decision: 'approve' | 'reject') => {
+  // send_reply: Edit the body before approving (sent as `body`; the decide route stores it).
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(a.reply?.draft ?? '')
+
+  const decide = async (decision: 'approve' | 'reject', editedBody?: string) => {
     setPending(decision)
     setError(null)
     const report = (status: string, err: string | null, elsewhere = false) => {
@@ -129,7 +135,7 @@ function Decision({ a, onDecided }: { a: ChatApproval; onDecided?: (d: ApprovalD
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision }),
+        body: JSON.stringify(editedBody !== undefined ? { decision, body: editedBody } : { decision }),
       })
       const body = (await res.json().catch(() => ({}))) as { status?: string; error?: string | null; sign_in_url?: string }
       if (typeof body.sign_in_url === 'string' && mounted.current) setSignIn(body.sign_in_url)
@@ -177,13 +183,35 @@ function Decision({ a, onDecided }: { a: ChatApproval; onDecided?: (d: ApprovalD
           </span>
         )}
       </div>
+      {a.reply && <ReplyDetails reply={a.reply} />}
+      {a.reply && editing && !settled && (
+        <div className="mt-2 pl-6">
+          <Textarea aria-label="Reply body" value={draft} onChange={(e) => setDraft(e.target.value)} rows={6} className="text-[13px]" />
+        </div>
+      )}
       <div className="mt-2.5 flex items-center gap-2 pl-6">
-        {!settled && (
+        {!settled && editing && (
+          <>
+            <Button size="sm" onClick={() => void decide('approve', draft.trim())} disabled={!!pending || !draft.trim()}>
+              {pending === 'approve' && <Spinner className="size-3" aria-hidden />}
+              Approve edited reply
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => (setEditing(false), setDraft(a.reply?.draft ?? ''))} disabled={!!pending}>
+              Cancel edit
+            </Button>
+          </>
+        )}
+        {!settled && !editing && (
           <>
             <Button size="sm" onClick={() => void decide('approve')} disabled={!!pending}>
               {pending === 'approve' && <Spinner className="size-3" aria-hidden />}
               Approve
             </Button>
+            {a.reply && (
+              <Button size="sm" variant="outline" onClick={() => setEditing(true)} disabled={!!pending}>
+                Edit
+              </Button>
+            )}
             <Button size="sm" variant="outline" onClick={() => void decide('reject')} disabled={!!pending}>
               {pending === 'reject' && <Spinner className="size-3" aria-hidden />}
               Deny
@@ -205,5 +233,30 @@ function Decision({ a, onDecided }: { a: ChatApproval; onDecided?: (d: ApprovalD
         </div>
       )}
     </section>
+  )
+}
+
+/** The send_reply card: who, what they said, the draft and the times offered. */
+function ReplyDetails({ reply }: { reply: ReplyCard }) {
+  const who = reply.lead_name ? `${reply.lead_name} <${reply.lead_email ?? '?'}>` : (reply.lead_email ?? 'unknown lead')
+  const row = (label: string, value: string | null, pre = false) =>
+    value ? (
+      <div className="grid grid-cols-[88px_1fr] gap-2">
+        <dt className="text-fg-46">{label}</dt>
+        <dd className={cn('min-w-0 text-fg-70', pre && 'whitespace-pre-line')}>{value}</dd>
+      </div>
+    ) : null
+  return (
+    <dl className="mt-2 flex flex-col gap-1 pl-6 text-[12.5px]" aria-label="Reply details">
+      {row('Lead', who)}
+      {row('Company', reply.company)}
+      {row('Verdict', reply.verdict)}
+      {row('Their message', reply.their_message, true)}
+      {row('Draft', reply.draft, true)}
+      {row('Times', reply.proposed_times.length ? reply.proposed_times.join(' · ') : null)}
+      {row('Research', reply.research_note, true)}
+      {row('From', reply.eaccount)}
+      {row('Edited by', reply.edited_by)}
+    </dl>
   )
 }

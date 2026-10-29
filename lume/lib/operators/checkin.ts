@@ -2,6 +2,7 @@ import type { EventRow, GateRow, Json, PendingActionRow } from '@/lib/db/types'
 import type { Vertical } from '@/lib/operators/types'
 import { scopeForGate, scopeForGateAction, verticalFor, type RouteOptions } from '@/lib/operators/route'
 import { BUTTON_SPECS, KIND_LABEL, LFO_PRESETS, SPENDING_ACTIONS } from '@/lib/validate/actions'
+import { replyCardOf, type ReplyCard } from '@/lib/inbox/model'
 
 /**
  * The `/operator` check-in page's model (Phase G5). Pure: the page loader
@@ -49,6 +50,8 @@ export interface GateButton {
 export type Control =
   /** A pending action: Approve / Deny forms to POST /api/actions/<id>/decide. */
   | { type: 'approve_deny'; action_id: string }
+  /** A send_reply: the reply card, an editable body (sent as `body` with Approve) and Deny. */
+  | { type: 'reply'; action_id: string; card: ReplyCard }
   /** Gate buttons, each a form to POST /api/gates/decide. */
   | { type: 'gate_buttons'; buttons: GateButton[] }
   /** Leadsfriday count: number input + presets (callback `lfo_count:<id>` + count), and Cancel. */
@@ -204,6 +207,7 @@ function controlOf(gate: GateRow): Control {
       if (gate.title === 'issue_operator_key') {
         return { type: 'link', href: `/actions/${id}`, reason: 'The new sign-in link is shown once, on the action page' }
       }
+      if (gate.title === 'send_reply') return { type: 'reply', action_id: id, card: replyCardOf(gate.counts) }
       return { type: 'approve_deny', action_id: id }
     case 'lfo_count':
       return { type: 'lfo_count', target_id: id, presets: LFO_PRESETS, cancel: btn('Cancel', 'lfo_cancel', id, 'reject') }

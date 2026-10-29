@@ -1,3 +1,4 @@
+import type { ReplyCard } from '@/lib/inbox/model'
 /**
  * Pure helpers for Agent chat history: conversation titles, sidebar date
  * groups, and turning stored messages back into prompt context.
@@ -34,6 +35,8 @@ export interface StoredApproval {
   state?: 'awaiting' | 'auto_executed' | 'auto_failed' | 'handled_elsewhere'
   /** The pending_actions row's live status, attached when a conversation loads (null: row gone). Never stored. */
   status?: string | null
+  /** send_reply: the reply card as filed (lib/inbox/model.ts ReplyCard). */
+  reply?: ReplyCard
 }
 
 export interface StoredMessage {

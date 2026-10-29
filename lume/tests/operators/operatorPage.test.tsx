@@ -84,6 +84,24 @@ describe('/operator page', () => {
     expect(html).toContain('href="/actions/act-9"')
   })
 
+  it('a send_reply confirmation: the card and an editable body that posts to decide', async () => {
+    const reply = describeGate(
+      gate('lume_action', {
+        target_table: 'pending_actions', target_id: 'act-r', title: 'send_reply', subtitle: 'Send reply to ada@acme.com',
+        counts: { reply_to_uuid: 'e1', body: 'Tuesday 10am PT?', lead_email: 'ada@acme.com', lead_name: 'Ada', company: 'Acme', verdict: 'GOOD', their_message: 'Yes please', proposed_times: ['Tue 10:00 PT', 'Wed 14:00 PT'] },
+      }),
+      [K]
+    )
+    h.loadCheckin.mockResolvedValue(data({ items: [reply] }))
+    const html = await render()
+    expect(html).toContain('Ada &lt;ada@acme.com&gt;')
+    expect(html).toContain('Yes please')
+    expect(html).toContain('Tue 10:00 PT · Wed 14:00 PT')
+    expect(html).toMatch(/<form[^>]*action="\/api\/actions\/act-r\/decide"[^>]*>(?:(?!<\/form>)[\s\S])*name="decision" value="approve"(?:(?!<\/form>)[\s\S])*<textarea[^>]*name="body"[^>]*>Tuesday 10am PT\?<\/textarea>/)
+    expect(html).toContain('Approve (with any edits)')
+    expect(html).toMatch(/action="\/api\/actions\/act-r\/decide"[\s\S]*?name="decision" value="reject"/)
+  })
+
   it('New replies: empty state', async () => {
     h.loadCheckin.mockResolvedValue(data({ newReplies: [] }))
     expect(await render()).toContain('id="new-replies-empty"')

@@ -80,3 +80,31 @@ describe('label_reply', () => {
     expect(() => s.parse({ reply_to_uuid: 'e1', category: 'maybe' })).toThrow()
   })
 })
+
+describe('send_reply (reply card + optional judgment fields)', () => {
+  it('eaccount is optional (the server fills the receiving inbox); verdict, times and a research note pass through', async () => {
+    const { run, prepare } = setup()
+    await run('send_reply', { reply_to_uuid: 'e1', body: 'Tuesday?', verdict: 'GOOD', proposed_times: ['Tue 10:00 PT'], research_note: 'fits' })
+    expect(prepare.mock.calls[0][0]).toEqual({
+      kind: 'send_reply',
+      payload: { reply_to_uuid: 'e1', body: 'Tuesday?', verdict: 'GOOD', proposed_times: ['Tue 10:00 PT'], research_note: 'fits' },
+    })
+  })
+
+  it('the approval result carries the reply card built from the server snapshot', async () => {
+    const createAction = vi.fn().mockResolvedValue({ id: 'a9' })
+    const prepare = vi.fn(async () => ({
+      ok: true as const,
+      kind: 'send_reply' as const,
+      payload: { summary: 's', reply_to_uuid: 'e1', body: 'Tuesday?', eaccount: 'f@ours.com', lead_email: 'ada@acme.com', lead_name: 'Ada', company: 'Acme', their_message: 'Yes', proposed_times: ['Tue'] },
+    }))
+    const tools = buildTools({ fetch: vi.fn(), createAction, prepare: prepare as never, agentRunId: 'r', baseUrl: 'https://lume.test', secret: 's' })
+    const t = tools.find((x) => x.name === 'send_reply')!
+    const out = await t.run(t.inputSchema.parse({ reply_to_uuid: 'e1', body: 'Tuesday?' }))
+    expect(out).toMatchObject({
+      status: 'awaiting_approval',
+      action_id: 'a9',
+      reply: { lead_email: 'ada@acme.com', lead_name: 'Ada', company: 'Acme', their_message: 'Yes', draft: 'Tuesday?', proposed_times: ['Tue'], eaccount: 'f@ours.com' },
+    })
+  })
+})

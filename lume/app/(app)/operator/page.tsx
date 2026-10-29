@@ -211,6 +211,57 @@ function Controls({
           <Link href={`/actions/${c.action_id}`}>Details</Link>
         </>
       )
+    case 'reply': {
+      const r = c.card
+      const who = r.lead_name ? `${r.lead_name} <${r.lead_email ?? '?'}>` : (r.lead_email ?? 'unknown lead')
+      return (
+        <>
+          <dl className="reply-card" aria-label="Reply details">
+            <dt>Lead</dt>
+            <dd>{who}</dd>
+            <dt>Company</dt>
+            <dd>{r.company ?? '—'}</dd>
+            <dt>Verdict</dt>
+            <dd>{r.verdict ?? '—'}</dd>
+            <dt>Their message</dt>
+            <dd style={{ whiteSpace: 'pre-wrap' }}>{r.their_message ?? '—'}</dd>
+            <dt>Proposed times</dt>
+            <dd>{r.proposed_times.length ? r.proposed_times.join(' · ') : '—'}</dd>
+            {r.research_note && (
+              <>
+                <dt>Research</dt>
+                <dd style={{ whiteSpace: 'pre-wrap' }}>{r.research_note}</dd>
+              </>
+            )}
+            <dt>From</dt>
+            <dd>{r.eaccount ?? '—'}</dd>
+            {r.edited_by && (
+              <>
+                <dt>Edited by</dt>
+                <dd>{r.edited_by}</dd>
+              </>
+            )}
+          </dl>
+          <form method="post" action={`/api/actions/${c.action_id}/decide`} className="block">
+            <input type="hidden" name="decision" value="approve" />
+            <Hidden returnTo={returnTo} />
+            <label htmlFor={`body-${c.action_id}`}>Draft (edit before approving if needed)</label>
+            <textarea id={`body-${c.action_id}`} name="body" rows={8} cols={72} required defaultValue={r.draft} />{' '}
+            <button type="submit" data-tone="approve">
+              Approve (with any edits)
+            </button>
+          </form>
+          <form method="post" action={`/api/actions/${c.action_id}/decide`}>
+            <input type="hidden" name="decision" value="reject" />
+            <Hidden returnTo={returnTo} />
+            <button type="submit" data-tone="reject">
+              Deny
+            </button>
+          </form>{' '}
+          <Link href={`/actions/${c.action_id}`}>Details</Link>
+        </>
+      )
+    }
     case 'gate_buttons':
       return (
         <>

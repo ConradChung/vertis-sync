@@ -5,6 +5,7 @@ import { FilterCriteria } from '@/lib/review/model'
 import { APOLLO_STEPS } from '@/lib/apollo/records'
 import { parseLeadQuery } from '@/lib/adapters/instantlyLeads.map'
 import { EmailId, INTEREST_NAMES, LabelBody } from '@/lib/inbox/schemas'
+import { replyCardOf } from '@/lib/inbox/model'
 import { describeStep, newSkillSchema, placeholdersIn, skillStepSchema, skillVariableSchema, type NewSkill, type Skill } from '@/lib/agent/skillModel'
 
 /**
@@ -166,6 +167,8 @@ async function requestApproval(
 ): Promise<ToolResult> {
   const built = await deps.prepare({ kind, payload: request })
   if (!built.ok) throw new Error(`${kind} refused: ${built.error} (HTTP ${built.status})`)
+  // A reply shows the owner its card in the chat (components/agent/ApprovalCard.tsx).
+  const card = built.kind === 'send_reply' ? { reply: replyCardOf(built.payload) } : {}
   try {
     const meta = built.ruleId ? { agentRunId: deps.agentRunId, ruleId: built.ruleId } : { agentRunId: deps.agentRunId }
     const action = await deps.createAction(built.kind, built.payload, 'agent', meta)
@@ -180,6 +183,7 @@ async function requestApproval(
           deep_link: `/actions/${action.id}`,
           summary: built.payload.summary,
           note: 'Skip mode could not auto-approve; it awaits the owner.',
+          ...card,
         }
       }
       return {
@@ -190,6 +194,7 @@ async function requestApproval(
         outcome: done.status,
         result: done.result,
         ...(done.error ? { error: done.error } : {}),
+        ...card,
       }
     }
     return {
@@ -197,6 +202,7 @@ async function requestApproval(
       action_id: action.id,
       deep_link: `/actions/${action.id}`,
       summary: built.payload.summary,
+      ...card,
     }
   } catch (err) {
     // Same action already waiting (same job / rule / campaign / reply): point at it rather than fail.
@@ -874,22 +880,32 @@ const SPECS: Built[] = [
   tiered(
     {
       name: 'send_reply',
-      description: 'Send an email reply to a lead through Instantly. Get eaccount and reply_to_uuid from the campaign inbox.',
+      description:
+        'Send an email reply to a lead through Instantly, answering one inbound email (reply_to_uuid from list_replies / get_thread). ' +
+        'It goes from the inbox that received that email, in its thread. Read the thread first. The card shows the owner the lead, company, ' +
+        'their message, your draft, your verdict (GOOD / UNSURE / BAD) and the times you propose; they can edit the draft. ' +
+        'Right before sending Lume re-reads the thread and refuses (newer_inbound) if they wrote again; one reply per inbound email.',
       inputSchema: z.object({
-        eaccount: z.email().max(320).describe('our sending account (inbox) address'),
         reply_to_uuid: id.describe('Instantly email id being replied to'),
         body: z.string().min(1).max(20_000),
+        eaccount: z.email().max(320).optional().describe('our inbox; filled from the email being answered when Lume can read it'),
         subject: z.string().max(300).optional(),
         campaign_id: id.optional(),
         lead_email: z.string().max(300).optional(),
+        verdict: z.enum(['GOOD', 'UNSURE', 'BAD']).optional(),
+        proposed_times: z.array(z.string().min(1).max(120)).max(10).optional().describe('times offered in the draft, with time zone'),
+        research_note: z.string().max(2000).optional().describe('one or two lines of research behind the verdict'),
       }),
-      payload: ({ eaccount, reply_to_uuid, body, subject, campaign_id, lead_email }) => ({
-        eaccount,
+      payload: ({ eaccount, reply_to_uuid, body, subject, campaign_id, lead_email, verdict, proposed_times, research_note }) => ({
         reply_to_uuid,
         body,
+        ...(eaccount ? { eaccount } : {}),
         ...(subject ? { subject } : {}),
         ...(campaign_id ? { campaign_id } : {}),
         ...(lead_email ? { lead_email } : {}),
+        ...(verdict ? { verdict } : {}),
+        ...(proposed_times?.length ? { proposed_times } : {}),
+        ...(research_note ? { research_note } : {}),
       }),
     },
     'high'

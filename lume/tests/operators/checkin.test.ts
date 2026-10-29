@@ -170,6 +170,21 @@ describe('outcomes, summary, ranges', () => {
     expect(checkinSummary({ scope: { all: true }, items: [], alerts: [], newReplies: 4, lastCheckedAt: null, now: new Date(0) }).new_replies).toBe(4)
   })
 
+  it('a send_reply item gets the reply card control (edit + approve), not plain Approve / Deny', () => {
+    const g = gate('lume_action', {
+      target_table: 'pending_actions', target_id: 'act-r', title: 'send_reply', subtitle: 'Send reply to ada@acme.com',
+      counts: { reply_to_uuid: 'e1', body: 'Tuesday?', lead_email: 'ada@acme.com', company: 'Acme', verdict: 'GOOD', proposed_times: ['Tue 10:00 PT'], campaign_id: 'camp-r' },
+    })
+    const item = describeGate(g, verticals)
+    expect(item.what).toBe('Send a reply to a lead')
+    expect(item.vertical_id).toBe('v-r')
+    expect(item.control).toEqual({
+      type: 'reply',
+      action_id: 'act-r',
+      card: expect.objectContaining({ lead_email: 'ada@acme.com', company: 'Acme', verdict: 'GOOD', draft: 'Tuesday?', proposed_times: ['Tue 10:00 PT'] }),
+    })
+  })
+
   it('newRepliesForScope: routed by campaign (replies scope), newest first, with the thread link and any awaiting draft', () => {
     const row = (id: string, campaign: string | null, at: string) => ({
       reply_to_uuid: id, campaign_id: campaign, lead_email: `${id}@x.com`, lead_name: id === 'r1' ? 'Ada' : null, company: 'Acme',
