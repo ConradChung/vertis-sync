@@ -4,6 +4,8 @@ const hooks = vi.hoisted(() => ({ getWebhook: vi.fn(), recordDelivery: vi.fn() }
 vi.mock('@/lib/webhooks/store', () => hooks)
 const ops = vi.hoisted(() => ({ listVerticals: vi.fn(), listOperators: vi.fn() }))
 vi.mock('@/lib/operators/store', () => ops)
+const dns = vi.hoisted(() => ({ resolvePublicHost: vi.fn(), pinnedLookup: vi.fn(() => () => {}) }))
+vi.mock('@/lib/webhooks/dns', () => dns)
 const next = vi.hoisted(() => ({ after: vi.fn() }))
 vi.mock('next/server', () => next)
 vi.mock('@/lib/supabase/service', async () => (await import('../stubs/feed')).serviceModule)
@@ -22,6 +24,8 @@ beforeEach(() => {
   ops.listVerticals.mockResolvedValue([V])
   ops.listOperators.mockResolvedValue([])
   hooks.getWebhook.mockResolvedValue(HOOK)
+  dns.resolvePublicHost.mockResolvedValue({ address: '104.18.2.3', family: 4 })
+  dns.pinnedLookup.mockImplementation(() => () => {})
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
@@ -36,6 +40,10 @@ describe('deliver', () => {
     expect(JSON.parse(init.body)).toEqual(PAYLOAD)
     expect(init.signal).toBeInstanceOf(AbortSignal)
     expect(init.redirect).toBe('manual')
+    // the connection is pinned to the address that was checked
+    expect(dns.resolvePublicHost).toHaveBeenCalledWith('grok.test')
+    expect(dns.pinnedLookup).toHaveBeenCalledWith({ address: '104.18.2.3', family: 4 })
+    expect(init.dispatcher).toBeDefined()
     expect(verifySignature(HOOK.secret, init.body, init.headers['X-Lume-Timestamp'], init.headers['X-Lume-Signature'])).toBe(true)
   })
 
@@ -46,6 +54,15 @@ describe('deliver', () => {
     expect(await deliver(HOOK, PAYLOAD, { fetch: fe, retryDelayMs: 0 })).toMatchObject({ ok: false, attempts: 2, error: 'timed out after 5000 ms' })
     const f4 = vi.fn().mockResolvedValue(new Response('', { status: 404 }))
     expect(await deliver(HOOK, PAYLOAD, { fetch: f4, retryDelayMs: 0 })).toMatchObject({ ok: false, attempts: 1, status: 404, error: 'HTTP 404' })
+  })
+})
+
+describe('deliver: address checks', () => {
+  it('a host that resolves to a private, loopback, link-local or CGNAT address is never contacted', async () => {
+    dns.resolvePublicHost.mockRejectedValue(new Error('private_address'))
+    const fetch = vi.fn()
+    expect(await deliver(HOOK, PAYLOAD, { fetch, retryDelayMs: 0 })).toEqual({ ok: false, attempts: 0, error: 'private_address' })
+    expect(fetch).not.toHaveBeenCalled()
   })
 })
 

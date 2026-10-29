@@ -11,6 +11,8 @@ const svc = vi.hoisted(() => ({ logEvent: vi.fn() }))
 vi.mock('@/lib/db/service', async () => ({ ...(await vi.importActual<object>('@/lib/db/service')), ...svc }))
 const sess = vi.hoisted(() => ({ currentOperator: vi.fn() }))
 vi.mock('@/lib/operators/session', () => sess)
+const dns = vi.hoisted(() => ({ resolvePublicHost: vi.fn() }))
+vi.mock('@/lib/webhooks/dns', () => dns)
 const del = vi.hoisted(() => ({ sendPush: vi.fn() }))
 vi.mock('@/lib/webhooks/deliver', () => del)
 
@@ -29,6 +31,7 @@ beforeEach(() => {
   process.env.LUME_ALLOWED_EMAIL = 'owner@example.com'
   vi.stubEnv('LUME_INTERNAL_SECRET', 'internal-secret')
   ops.getVertical.mockResolvedValue({ id: VID, name: 'Roofers', archived_at: null })
+  dns.resolvePublicHost.mockResolvedValue({ address: '104.18.2.3', family: 4 })
   hooks.setWebhook.mockImplementation(async (_v: string, url: string, secret: string) => ({ ...ROW, url, secret }))
 })
 
@@ -84,6 +87,16 @@ describe('/api/verticals/<id>/webhook', () => {
   it('PUT refuses non-https and private hosts', async () => {
     expect((await PUT(req('PUT', { url: 'http://grok.test/hook' }), params)).status).toBe(400)
     expect(await (await PUT(req('PUT', { url: 'https://10.0.0.1/hook' }), params)).json()).toEqual({ error: 'private_host' })
+  })
+
+  it('PUT refuses a host whose DNS points at a private address (checked at save; again at every send)', async () => {
+    hooks.getWebhook.mockResolvedValue(null)
+    dns.resolvePublicHost.mockRejectedValue(new Error('private_address'))
+    const res = await PUT(req('PUT', { url: 'https://rebind.example/hook' }), params)
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'private_address' })
+    expect(dns.resolvePublicHost).toHaveBeenCalledWith('rebind.example')
+    expect(hooks.setWebhook).not.toHaveBeenCalled()
   })
 
   it('writes are owner-session only: the bearer and any bot cookie are refused', async () => {

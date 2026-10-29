@@ -9,6 +9,7 @@ import { getVertical } from '@/lib/operators/store'
 import { currentOperator } from '@/lib/operators/session'
 import { logEvent } from '@/lib/db/service'
 import { checkWebhookUrl } from '@/lib/webhooks/push'
+import { resolvePublicHost } from '@/lib/webhooks/dns'
 import { deleteWebhook, getWebhook, setWebhook, toView } from '@/lib/webhooks/store'
 
 /**
@@ -21,7 +22,8 @@ import { deleteWebhook, getWebhook, setWebhook, toView } from '@/lib/webhooks/st
  *            Without `secret` a new one is generated when none is stored (or
  *            always with `regenerate_secret: true`) and returned in this one
  *            response (no-store), never again; with none given and one
- *            stored, it is kept. 400 invalid_url / https_only / … .
+ *            stored, it is kept. 400 invalid_url / https_only / private_host /
+ *            private_address (DNS points inside) / dns_failed.
  *   DELETE → `{ deleted: true }`.
  * PUT and DELETE: the owner's own session only (no agent bearer, no
  * `lume_op` cookie), like minting a key.
@@ -66,6 +68,12 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
   if (!body.ok) return body.response
   const bad = checkWebhookUrl(body.data.url)
   if (bad) return NextResponse.json({ error: bad }, { status: 400 })
+  // Resolve now too (deliver re-checks and pins at every send): no private, loopback, link-local or CGNAT address.
+  try {
+    await resolvePublicHost(new URL(body.data.url).hostname)
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error && err.message === 'private_address' ? 'private_address' : 'dns_failed' }, { status: 400 })
+  }
   try {
     const v = await getVertical(id)
     if (!v || v.archived_at) return NextResponse.json({ error: 'vertical_not_found' }, { status: 404 })

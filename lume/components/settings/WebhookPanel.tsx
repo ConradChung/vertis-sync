@@ -23,6 +23,8 @@ const ERR: Record<string, string> = {
   operator_forbidden: 'A Grok Bot session cannot change webhooks.',
   session_required: 'Only your own browser session can do that.',
   no_webhook: 'Save a webhook first.',
+  private_address: 'That host resolves to a private or internal address.',
+  dns_failed: 'That host name does not resolve.',
 }
 
 export function WebhookPanel({ verticalId, verticalName, canManage }: { verticalId: string; verticalName: string; canManage: boolean }) {

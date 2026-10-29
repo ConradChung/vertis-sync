@@ -1,6 +1,8 @@
 import 'server-only'
 import { randomUUID } from 'node:crypto'
 import { after } from 'next/server'
+import { Agent, fetch as undiciFetch } from 'undici'
+import { pinnedLookup, resolvePublicHost } from '@/lib/webhooks/dns'
 import { alert, alertLink } from '@/lib/alerts'
 import { hasLiveMaster, verticalFor, type RouteItem } from '@/lib/operators/route'
 import { listOperators, listVerticals } from '@/lib/operators/store'
@@ -15,6 +17,10 @@ import { buildPush, signatureHeaders, type PushPayload } from '@/lib/webhooks/pu
  *  - `pushForItem` never blocks the caller: it schedules the work with
  *    `after()` (outside a request scope it starts unawaited) and swallows
  *    every error.
+ *  - The host is resolved first and refused when any address is private,
+ *    loopback, link-local or CGNAT (lib/webhooks/dns.ts); the connection is
+ *    pinned to the checked address (undici Agent `connect.lookup`), so DNS
+ *    rebinding cannot redirect it.
  *  - Each attempt has a 5 s timeout; one retry on a timeout, a network error,
  *    a 429 or a 5xx; never on another 4xx. Redirects are not followed.
  *  - A failed delivery is a warn in the feed (owner only) and is recorded on
@@ -26,7 +32,8 @@ import { buildPush, signatureHeaders, type PushPayload } from '@/lib/webhooks/pu
 export const PUSH_TIMEOUT_MS = 5_000
 
 export interface DeliverOptions {
-  fetch?: typeof fetch
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  fetch?: (url: string, init: any) => Promise<Response>
   timeoutMs?: number
   retryDelayMs?: number
 }
@@ -39,23 +46,34 @@ export interface DeliverResult {
 }
 
 export async function deliver(hook: { url: string; secret: string }, payload: PushPayload, opts: DeliverOptions = {}): Promise<DeliverResult> {
-  const doFetch = opts.fetch ?? fetch
+  const doFetch = opts.fetch ?? (undiciFetch as unknown as NonNullable<DeliverOptions['fetch']>)
   const timeoutMs = opts.timeoutMs ?? PUSH_TIMEOUT_MS
   const body = JSON.stringify(buildPush(payload))
   const deliveryId = randomUUID()
+  let pinned
+  try {
+    pinned = await resolvePublicHost(new URL(hook.url).hostname)
+  } catch (err) {
+    return { ok: false, attempts: 0, error: err instanceof Error && /^(private_address|dns_failed)$/.test(err.message) ? err.message : 'dns_failed' }
+  }
+  const dispatcher = new Agent({ connect: { lookup: pinnedLookup(pinned) as never } })
   let last: DeliverResult = { ok: false, attempts: 0, error: 'not sent' }
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const headers = signatureHeaders(hook.secret, body, payload.type, Math.floor(Date.now() / 1000), deliveryId)
-    try {
-      const res = await doFetch(hook.url, { method: 'POST', headers, body, signal: AbortSignal.timeout(timeoutMs), redirect: 'manual', cache: 'no-store' })
-      if (res.ok) return { ok: true, status: res.status, attempts: attempt }
-      last = { ok: false, status: res.status, error: `HTTP ${res.status}`, attempts: attempt }
-      if (res.status < 500 && res.status !== 429) return last
-    } catch (err) {
-      const name = err instanceof Error ? err.name : ''
-      last = { ok: false, attempts: attempt, error: name === 'TimeoutError' || name === 'AbortError' ? `timed out after ${timeoutMs} ms` : 'network error' }
+  try {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const headers = signatureHeaders(hook.secret, body, payload.type, Math.floor(Date.now() / 1000), deliveryId)
+      try {
+        const res = await doFetch(hook.url, { method: 'POST', headers, body, signal: AbortSignal.timeout(timeoutMs), redirect: 'manual', dispatcher })
+        if (res.ok) return { ok: true, status: res.status, attempts: attempt }
+        last = { ok: false, status: res.status, error: `HTTP ${res.status}`, attempts: attempt }
+        if (res.status < 500 && res.status !== 429) return last
+      } catch (err) {
+        const name = err instanceof Error ? err.name : ''
+        last = { ok: false, attempts: attempt, error: name === 'TimeoutError' || name === 'AbortError' ? `timed out after ${timeoutMs} ms` : 'network error' }
+      }
+      if (attempt === 1 && (opts.retryDelayMs ?? 500) > 0) await new Promise((r) => setTimeout(r, opts.retryDelayMs ?? 500))
     }
-    if (attempt === 1 && (opts.retryDelayMs ?? 500) > 0) await new Promise((r) => setTimeout(r, opts.retryDelayMs ?? 500))
+  } finally {
+    void dispatcher.close().catch(() => {})
   }
   return last
 }
