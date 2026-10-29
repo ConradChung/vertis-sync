@@ -38,15 +38,16 @@ export function WebhookPanel({ verticalId, verticalName, canManage }: { vertical
     setMsg({ ok: false, text: (code && ERR[code]) || code || `Request failed (HTTP ${status})` })
   }
 
-  async function save() {
+  async function save(regenerate = false) {
     setMsg(null)
-    const r = await sendJson(`/api/verticals/${verticalId}/webhook`, { url: shownUrl.trim(), ...(secret.trim() ? { secret: secret.trim() } : {}) }, { method: 'PUT' })
+    const extra = regenerate ? { regenerate_secret: true } : secret.trim() ? { secret: secret.trim() } : {}
+    const r = await sendJson(`/api/verticals/${verticalId}/webhook`, { url: shownUrl.trim(), ...extra }, { method: 'PUT' })
     if (r.status !== 200) return fail(r.status, r.body)
     const b = r.body as { secret?: string }
     setRevealed(b.secret ?? null)
     setSecret('')
     setUrl(null)
-    setMsg({ ok: true, text: 'Webhook saved.' })
+    setMsg({ ok: true, text: regenerate ? 'New secret generated; put it in the Grok routine now. The old one no longer verifies.' : 'Webhook saved.' })
     void hook.mutate()
   }
 
@@ -99,6 +100,16 @@ export function WebhookPanel({ verticalId, verticalName, canManage }: { vertical
               <>
                 <Button type="button" size="sm" variant="outline" onClick={() => void test()}>
                   Send test
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (confirm(`Generate a new webhook secret for “${verticalName}”? The current one stops verifying at once.`)) void save(true)
+                  }}
+                >
+                  Regenerate secret
                 </Button>
                 <Button type="button" size="sm" variant="ghost" onClick={() => void remove()}>
                   Remove

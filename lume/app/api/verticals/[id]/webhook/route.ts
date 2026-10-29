@@ -17,19 +17,24 @@ import { deleteWebhook, getWebhook, setWebhook, toView } from '@/lib/webhooks/st
  *   GET    → `{ webhook: { url, secret_masked, updated_at, last_delivery_* } | null }`.
  *            The owner, the agent, the master bot, or the bot of this same
  *            vertical (another vertical's bot: 403); the secret is always masked.
- *   PUT    `{ url, secret? }` → `{ webhook, secret? }`. Without `secret` a
- *            new one is generated when none is stored and returned in this
- *            one response (no-store), never again; with none given and one
+ *   PUT    `{ url, secret? | regenerate_secret? }` → `{ webhook, secret? }`.
+ *            Without `secret` a new one is generated when none is stored (or
+ *            always with `regenerate_secret: true`) and returned in this one
+ *            response (no-store), never again; with none given and one
  *            stored, it is kept. 400 invalid_url / https_only / … .
  *   DELETE → `{ deleted: true }`.
  * PUT and DELETE: the owner's own session only (no agent bearer, no
  * `lume_op` cookie), like minting a key.
  */
 
-const Body = z.strictObject({
-  url: z.string().trim().min(1).max(2000),
-  secret: z.string().trim().min(16).max(200).optional(),
-})
+const Body = z
+  .strictObject({
+    url: z.string().trim().min(1).max(2000),
+    secret: z.string().trim().min(16).max(200).optional(),
+    /** Replace the stored secret with a new generated one (returned once). */
+    regenerate_secret: z.literal(true).optional(),
+  })
+  .refine((b) => !(b.secret && b.regenerate_secret), 'secret or regenerate_secret, not both')
 
 async function guardWrite(req: Request) {
   const auth = await requireOwnerSession(req)
@@ -65,8 +70,8 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
     const v = await getVertical(id)
     if (!v || v.archived_at) return NextResponse.json({ error: 'vertical_not_found' }, { status: 404 })
     const existing = await getWebhook(id)
-    const generated = !body.data.secret && !existing ? randomBytes(32).toString('base64url') : null
-    const secret = body.data.secret ?? existing?.secret ?? generated!
+    const generated = body.data.regenerate_secret || (!body.data.secret && !existing) ? randomBytes(32).toString('base64url') : null
+    const secret = generated ?? body.data.secret ?? existing!.secret
     const hook = await setWebhook(id, body.data.url, secret)
     try {
       await logEvent({ type: 'lume.webhook_set', source: 'lume', source_id: id, title: `Webhook set for ${v.name}`, payload: { vertical_id: id, host: new URL(body.data.url).host, secret_changed: !!(body.data.secret || generated) } })

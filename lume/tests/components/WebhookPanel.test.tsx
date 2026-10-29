@@ -61,4 +61,16 @@ describe('WebhookPanel', () => {
     expect((screen.getByLabelText('Webhook URL') as HTMLInputElement).disabled).toBe(true)
     expect(screen.queryByRole('button', { name: 'Save webhook' })).toBeNull()
   })
+
+  it('Regenerate secret asks, then PUTs regenerate_secret and shows the new one once', async () => {
+    data[`/api/verticals/${VID}/webhook`] = {
+      webhook: { vertical_id: VID, url: 'https://grok.test/hook', secret_masked: '••••2345', updated_at: '', last_delivery_at: null, last_delivery_ok: null, last_error: null },
+    }
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    sendJson.mockResolvedValue({ status: 200, body: { webhook: {}, secret: 'NEW-SECRET-abcdefghijklmnop' } })
+    ui()
+    fireEvent.click(await screen.findByRole('button', { name: 'Regenerate secret' }))
+    await waitFor(() => expect((screen.getByLabelText('Generated webhook secret') as HTMLInputElement).value).toBe('NEW-SECRET-abcdefghijklmnop'))
+    expect(sendJson).toHaveBeenCalledWith(`/api/verticals/${VID}/webhook`, { url: 'https://grok.test/hook', regenerate_secret: true }, { method: 'PUT' })
+  })
 })

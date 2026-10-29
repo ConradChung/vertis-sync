@@ -72,6 +72,15 @@ describe('/api/verticals/<id>/webhook', () => {
     expect(JSON.parse(text).secret).toBeUndefined()
   })
 
+  it('PUT regenerate_secret replaces a stored secret with a new one, returned once', async () => {
+    hooks.getWebhook.mockResolvedValue(ROW)
+    const b = await (await PUT(req('PUT', { url: 'https://grok.test/hook', regenerate_secret: true }), params)).json()
+    expect(b.secret).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(b.secret).not.toBe(SECRET)
+    expect(hooks.setWebhook).toHaveBeenCalledWith(VID, 'https://grok.test/hook', b.secret)
+    expect((await PUT(req('PUT', { url: 'https://grok.test/hook', regenerate_secret: true, secret: 'x'.repeat(20) }), params)).status).toBe(400)
+  })
+
   it('PUT refuses non-https and private hosts', async () => {
     expect((await PUT(req('PUT', { url: 'http://grok.test/hook' }), params)).status).toBe(400)
     expect(await (await PUT(req('PUT', { url: 'https://10.0.0.1/hook' }), params)).json()).toEqual({ error: 'private_host' })
