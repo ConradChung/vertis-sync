@@ -12,6 +12,8 @@ import { uuidParam } from '@/lib/http/json'
 import { internalOrigin, requestOrigin } from '@/lib/http/origin'
 import { currentOperator } from '@/lib/operators/session'
 import { MASTER_ONLY_ERROR } from '@/lib/operators/guard'
+import { parseCampaignPayload } from '@/lib/actions/payloads'
+import type { Json, PendingActionRow } from '@/lib/db/types'
 
 /**
  * Confirm / Cancel a pending action from Lume. Runs the same claim as
@@ -36,12 +38,21 @@ import { MASTER_ONLY_ERROR } from '@/lib/operators/guard'
  * and nowhere else. A form post for it is refused (a redirect cannot carry it
  * safely); it is decided on its /actions page. A vertical Grok Bot may not
  * decide it at all (403 master_only): only the master bot or the owner.
+ *
+ * Edit (send_reply only, inbox manager 3b): `{ decision: 'approve', body }`
+ * (or a `body` form field from /operator) replaces the reply before it is
+ * approved. The new payload keeps the first draft as `original_body`, adds
+ * `edited_by` (`owner` or `operator:<id>`) and `edited_at`, is re-validated
+ * with the send_reply schema (summary rewritten), and is written by the same
+ * conditional claim, so it applies only if this decision wins. A body equal
+ * to the current one is not an edit. Another kind with a body: 400
+ * edit_not_supported; a deny ignores the body.
  */
 
 // executeAction may wait on pipeline.decide() (170 s); outlive it.
 export const maxDuration = 300
 
-const Body = z.object({ decision: z.enum(['approve', 'reject']) })
+const Body = z.object({ decision: z.enum(['approve', 'reject']), body: z.string().trim().min(1).max(20_000).optional() })
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const auth = await requireOwnerSession(req)
@@ -50,21 +61,48 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const id = uuidParam((await ctx.params).id)
   if (!id) return NextResponse.json({ error: 'bad_id' }, { status: 400 })
 
-  const body = await readJsonOrForm(req, Body, 1024, (f) => ({ decision: f.get('decision') }))
+  const body = await readJsonOrForm(req, Body, 64 * 1024, (f) => ({ decision: f.get('decision'), body: f.get('body') || undefined }))
   if (!body.ok) return body.response
   const approve = body.data.decision === 'approve'
   const form = body.form
 
   const op = await currentOperator(req)
 
-  // Kinds with their own rules are checked before any claim.
-  if (form || (op && !op.is_master)) {
-    let kind: string | null = null
+  const editBody = approve ? (body.data.body ?? null) : null
+
+  // Kinds with their own rules (and an Edit) are checked before any claim.
+  let edited: Record<string, Json> | undefined
+  if (form || (op && !op.is_master) || editBody !== null) {
+    let current: PendingActionRow | null = null
     try {
-      kind = (await getAction(id))?.kind ?? null
+      current = await getAction(id)
     } catch (err) {
       if (form) return formRedirect(req, form.returnTo, { error: 'db_error' })
       return dbErrorResponse(err, 'api/actions/decide')
+    }
+    const kind = current?.kind ?? null
+    if (editBody !== null) {
+      const refuse = (status: number, error: string) =>
+        form ? formRedirect(req, form.returnTo, { error }) : NextResponse.json({ error, ...(status === 409 && current ? { status: current.status } : {}) }, { status })
+      if (!current) return refuse(404, 'not_found')
+      if (current.kind !== 'send_reply') return refuse(400, 'edit_not_supported')
+      if (current.status !== 'awaiting') return refuse(409, 'already_handled')
+      const p = current.payload ?? {}
+      if (editBody !== String(p.body ?? '').trim()) {
+        const next = parseCampaignPayload(
+          'send_reply',
+          {
+            ...p,
+            body: editBody,
+            original_body: typeof p.original_body === 'string' && p.original_body ? p.original_body : p.body,
+            edited_by: op ? `operator:${op.id}` : 'owner',
+            edited_at: new Date().toISOString(),
+          },
+          { trustSummary: false }
+        )
+        if (!next.ok) return refuse(400, 'invalid_body')
+        edited = next.payload
+      }
     }
     if (kind === 'issue_operator_key') {
       if (op && !op.is_master) {
@@ -77,7 +115,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   let claimed
   try {
-    claimed = await claimDecision(id, approve, op ? 'operator' : 'lume', op?.id)
+    claimed = edited
+      ? await claimDecision(id, approve, op ? 'operator' : 'lume', op?.id, edited)
+      : await claimDecision(id, approve, op ? 'operator' : 'lume', op?.id)
     if (!claimed) {
       const row = await getAction(id)
       if (form) return formRedirect(req, form.returnTo, { error: row ? 'already_handled' : 'not_found' })
@@ -93,7 +133,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const verdict = approve ? '✅ Approved' : '❌ Rejected'
   // The feed gets one row for the decision; Telegram gets exactly the edit and
   // note as before while ALERT_CHANNELS includes telegram.
-  const decidedText = `${verdict} — ${claimed.kind} (from ${op ? `Grok Bot “${op.label}”` : 'Lume'})`
+  const decidedText = `${verdict} — ${claimed.kind}${edited ? ' (edited)' : ''} (from ${op ? `Grok Bot “${op.label}”` : 'Lume'})`
   const decided = claimed
   const route = routeItemForAction(decided)
   try {

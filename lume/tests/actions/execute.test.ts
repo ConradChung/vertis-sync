@@ -585,6 +585,93 @@ describe('POST /api/actions/[id]/decide', () => {
     noSideEffects()
   })
 
+  describe('Edit (send_reply): the approver changes the body before approving', () => {
+    const REPLY = { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'Draft body', lead_email: 'ada@acme.com', summary: 'old' }
+    beforeEach(() => {
+      em.getEmail.mockReset().mockResolvedValue({ id: 'u-1', thread_id: 'th', direction: 'in', eaccount: 'me@x.com', subject: 'Re: x', at: 't1' })
+      em.getThreadEmails.mockReset().mockResolvedValue([{ id: 'u-1', thread_id: 'th', direction: 'in', eaccount: 'me@x.com', at: 't1' }])
+      inboxReplies.closeReply.mockReset()
+      ins.sendReply.mockResolvedValue({ id: 'sent-1' })
+    })
+
+    it('JSON: stores the edited body, the original, edited_by and edited_at in the same claim, then sends the edit', async () => {
+      store.getAction.mockResolvedValue(row('send_reply', REPLY, { status: 'awaiting', claim_status: 'awaiting' }))
+      store.claimDecision.mockImplementation(async (...a: unknown[]) =>
+        row('send_reply', (a[4] as PendingActionRow['payload'] | undefined) ?? REPLY, { status: 'approved' })
+      )
+      store.claimExecution.mockImplementation(async () => row('send_reply', store.claimDecision.mock.calls[0][4]))
+      const res = await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve', body: 'Edited body' }), params(ID))
+      expect(res.status).toBe(200)
+      const [, approve, via, opId, payload] = store.claimDecision.mock.calls[0]
+      expect([approve, via, opId]).toEqual([true, 'lume', undefined])
+      expect(payload).toMatchObject({ body: 'Edited body', original_body: 'Draft body', edited_by: 'owner', reply_to_uuid: 'u-1', eaccount: 'me@x.com' })
+      expect(typeof payload.edited_at).toBe('string')
+      expect(payload.summary).toContain('Edited body')
+      expect(ins.sendReply).toHaveBeenCalledWith(expect.objectContaining({ body: 'Edited body' }))
+    })
+
+    it('the same body is not an edit (plain claim)', async () => {
+      store.getAction.mockResolvedValue(row('send_reply', REPLY, { status: 'awaiting', claim_status: 'awaiting' }))
+      store.claimDecision.mockResolvedValue(row('send_reply', REPLY, { status: 'approved' }))
+      await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve', body: '  Draft body ' }), params(ID))
+      expect(store.claimDecision).toHaveBeenCalledWith(ID, true, 'lume', undefined)
+    })
+
+    it('a second edit keeps the first original body', async () => {
+      store.getAction.mockResolvedValue(row('send_reply', { ...REPLY, original_body: 'First draft' }, { status: 'awaiting', claim_status: 'awaiting' }))
+      store.claimDecision.mockResolvedValue(null)
+      await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve', body: 'Third' }), params(ID))
+      expect(store.claimDecision.mock.calls[0][4]).toMatchObject({ original_body: 'First draft', body: 'Third' })
+    })
+
+    it('a Grok Bot edit is attributed to the operator', async () => {
+      const OP = '9b2f4c1e-0d3a-4e5b-8c7d-6e5f4a3b2c1d'
+      vi.stubEnv('LUME_INTERNAL_SECRET', 'internal-secret')
+      ops.getOperator.mockResolvedValue({ id: OP, vertical_id: 'v1', is_master: false, label: 'Inbox bot', revoked_at: null })
+      store.getAction.mockResolvedValue(row('send_reply', REPLY, { status: 'awaiting', claim_status: 'awaiting' }))
+      store.claimDecision.mockResolvedValue(null)
+      await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve', body: 'Bot edit' }, { cookie: `lume_op=${signOperatorCookie(OP, 'internal-secret')}` }), params(ID))
+      vi.unstubAllEnvs()
+      expect(store.claimDecision.mock.calls[0]).toEqual([ID, true, 'operator', OP, expect.objectContaining({ edited_by: `operator:${OP}` })])
+    })
+
+    it('editing another kind is refused; deny ignores a body', async () => {
+      store.getAction.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }, { status: 'awaiting', claim_status: 'awaiting' }))
+      const res = await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve', body: 'x' }), params(ID))
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'edit_not_supported' })
+      expect(store.claimDecision).not.toHaveBeenCalled()
+      store.claimDecision.mockResolvedValue(row('pause_campaign', { campaign_id: 'camp-1' }, { status: 'rejected' }))
+      await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'reject', body: 'x' }), params(ID))
+      expect(store.claimDecision).toHaveBeenCalledWith(ID, false, 'lume', undefined)
+    })
+
+    it('an action already decided: 409, nothing stored', async () => {
+      store.getAction.mockResolvedValue(row('send_reply', REPLY, { status: 'executed' }))
+      const res = await decidePOST(req(`/api/actions/${ID}/decide`, { decision: 'approve', body: 'late edit' }), params(ID))
+      expect(res.status).toBe(409)
+      expect(store.claimDecision).not.toHaveBeenCalled()
+    })
+
+    it('the /operator form: body field → the same edit, 303 back', async () => {
+      store.getAction.mockResolvedValue(row('send_reply', REPLY, { status: 'awaiting', claim_status: 'awaiting' }))
+      store.claimDecision.mockResolvedValue(row('send_reply', REPLY, { status: 'approved' }))
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }))
+      const res = await decidePOST(
+        new Request(`http://localhost/api/actions/${ID}/decide`, {
+          method: 'POST',
+          body: 'decision=approve&body=Form+edit%0ASecond+line&return_to=%2Foperator',
+          headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'http://localhost' },
+        }),
+        params(ID)
+      )
+      expect(res.status).toBe(303)
+      expect(store.claimDecision.mock.calls[0][4]).toMatchObject({ body: 'Form edit\nSecond line', edited_by: 'owner' })
+      vi.restoreAllMocks()
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+    })
+  })
+
   describe('plain HTML form (the /operator page)', () => {
     const form = (body: string, headers: Record<string, string> = {}) =>
       new Request(`http://localhost/api/actions/${ID}/decide`, {
