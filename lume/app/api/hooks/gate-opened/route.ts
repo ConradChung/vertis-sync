@@ -62,9 +62,12 @@ export async function POST(req: Request) {
   const pinged = ping.ok
 
   // 3f: a new Needs-confirmation item; wake the vertical's Grok routine (never blocks).
-  pushForItem(gate ? scopeForGate(gate) : { scope: scopeForGateKind(kind) }, {
-    type: 'needs_confirmation', item_id: target_id, summary: pushSummary('needs_confirmation', { kind }), link: alertLink('/operator'),
-  })
+  // A lume_action gate is a pending action: createAction already pushed it.
+  if (kind !== 'lume_action') {
+    pushForItem(gate ? scopeForGate(gate) : { scope: scopeForGateKind(kind) }, {
+      type: 'needs_confirmation', item_id: target_id, summary: pushSummary('needs_confirmation', { kind }), link: alertLink('/operator'),
+    })
+  }
 
   try {
     await logEvent({

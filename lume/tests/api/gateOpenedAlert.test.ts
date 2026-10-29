@@ -71,4 +71,11 @@ describe('gate-opened webhook push (3f)', () => {
       { type: 'needs_confirmation', item_id: ID, summary: 'New item needs confirmation: push review. Check /operator.', link: '/operator' }
     )
   })
+
+  it('a lume_action gate is not pushed again (createAction already pushed that pending action)', async () => {
+    push.pushForItem.mockReset()
+    h.getGate.mockResolvedValue({ kind: 'lume_action', title: 'pause_campaign', counts: { campaign_id: 'c-9' } })
+    await hook({ kind: 'lume_action', target_table: 'pending_actions', target_id: ID })
+    expect(push.pushForItem).not.toHaveBeenCalled()
+  })
 })
