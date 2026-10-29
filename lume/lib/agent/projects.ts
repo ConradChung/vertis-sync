@@ -2,7 +2,7 @@ import 'server-only'
 import { createServiceClient } from '@/lib/supabase/service'
 import { DbError } from '@/lib/db/service'
 import type { ConversationSummary } from '@/lib/agent/history'
-import { BLOCK_BUDGET, type Project, type ProjectItem, type ProjectItemText, type ProjectSummary } from '@/lib/agent/projectModel'
+import { pickInlineIds, type Project, type ProjectItem, type ProjectItemText, type ProjectSummary } from '@/lib/agent/projectModel'
 
 /**
  * `agent_projects` / `agent_project_files` and filing conversations
@@ -21,7 +21,17 @@ export class ProjectConflictError extends Error {
   }
 }
 
+/** The project was deleted while this write was in flight (fk violation). */
+export class ProjectGoneError extends Error {
+  constructor() {
+    super('project_not_found')
+    this.name = 'ProjectGoneError'
+  }
+}
+
 type PgErr = { code?: string; message?: string; details?: string } | null
+
+const gone = (err: PgErr) => err?.code === '23503'
 
 function conflict(err: PgErr): ProjectConflictError | null {
   if (err?.code !== '23505') return null
@@ -31,7 +41,7 @@ function conflict(err: PgErr): ProjectConflictError | null {
 
 export async function listProjects(): Promise<ProjectSummary[]> {
   const sb = createServiceClient()
-  const res = await sb.from('agent_projects').select(PROJECT_COLS).is('archived_at', null).order('position').order('created_at').limit(500)
+  const res = await sb.from('agent_projects').select(PROJECT_COLS).is('archived_at', null).order('position').order('created_at').order('id').limit(500)
   if (res.error) throw new DbError('listProjects', res.error)
   const projects = (res.data ?? []) as Project[]
   if (!projects.length) return []
@@ -136,21 +146,23 @@ export async function listItems(projectId: string): Promise<ProjectItem[]> {
     .select(ITEM_COLS)
     .eq('project_id', projectId)
     .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
     .limit(1000)
   if (res.error) throw new DbError('listItems', res.error)
   return (res.data ?? []) as ProjectItem[]
 }
 
 /**
- * Items for the Project block: every item, with text only for those small
- * enough to be inlined (the rest are read on demand). Scoped to one project.
+ * Items for the Project block: every item's metadata, then text only for the
+ * ids `pickInlineIds` chose from `text_chars` within the budget (the rest are
+ * read on demand). Scoped to one project.
  */
 export async function itemsForBlock(projectId: string): Promise<ProjectItemText[]> {
   const sb = createServiceClient()
   const items = await listItems(projectId)
-  const small = items.filter((i) => i.readable && (i.text_chars ?? 0) > 0 && (i.text_chars ?? 0) <= BLOCK_BUDGET).map((i) => i.id)
-  if (!small.length) return items.map((i) => ({ ...i, text_content: null }))
-  const texts = await sb.from('agent_project_files').select('id, text_content').eq('project_id', projectId).in('id', small)
+  const chosen = pickInlineIds(items)
+  if (!chosen.length) return items.map((i) => ({ ...i, text_content: null }))
+  const texts = await sb.from('agent_project_files').select('id, text_content').eq('project_id', projectId).in('id', chosen)
   if (texts.error) throw new DbError('itemsForBlock', texts.error)
   const byId = new Map(((texts.data ?? []) as { id: string; text_content: string | null }[]).map((t) => [t.id, t.text_content]))
   return items.map((i) => ({ ...i, text_content: byId.get(i.id) ?? null }))
@@ -181,6 +193,7 @@ export async function addNote(projectId: string, name: string, content: string):
     .insert({ project_id: projectId, kind: 'note', name, mime: 'text/plain', size_bytes: new TextEncoder().encode(content).byteLength, text_content: content })
     .select(ITEM_COLS)
     .single()
+  if (gone(res.error)) throw new ProjectGoneError()
   if (res.error || !res.data) throw new DbError('addNote', res.error ?? new Error('no data'))
   return res.data as ProjectItem
 }
@@ -200,6 +213,7 @@ export async function addFile(row: {
     .insert({ ...row, kind: 'file' })
     .select(ITEM_COLS)
     .single()
+  if (gone(res.error)) throw new ProjectGoneError()
   if (res.error || !res.data) throw new DbError('addFile', res.error ?? new Error('no data'))
   return res.data as ProjectItem
 }
@@ -227,6 +241,7 @@ export async function moveConversation(conversationId: string, projectId: string
     .eq('id', conversationId)
     .is('archived_at', null)
     .select('id')
+  if (gone(res.error)) throw new ProjectGoneError()
   if (res.error) throw new DbError('moveConversation', res.error)
   return (res.data ?? []).length > 0
 }
@@ -238,6 +253,7 @@ export async function projectConversations(projectId: string, limit = 200): Prom
     .eq('project_id', projectId)
     .is('archived_at', null)
     .order('updated_at', { ascending: false })
+    .order('id', { ascending: false })
     .limit(limit)
   if (res.error) throw new DbError('projectConversations', res.error)
   return (res.data ?? []) as ConversationSummary[]

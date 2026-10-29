@@ -2,7 +2,7 @@
 -- Agent projects: folders of conversations + knowledge (instructions, files, notes),
 -- optionally linked to one vertical.
 begin;
-select plan(31);
+select plan(41);
 
 -- structure
 select has_table('public', 'agent_projects', 'agent_projects exists');
@@ -25,6 +25,21 @@ select ok(not has_table_privilege('anon', 'public.agent_project_files', 'insert'
 
 -- storage bucket
 select ok((select not public from storage.buckets where id = 'agent-projects'), 'agent-projects bucket exists and is private');
+
+-- pending uploads + the hourly sweep
+select has_table('public', 'agent_project_uploads', 'agent_project_uploads exists');
+select ok((select relrowsecurity from pg_class where oid = 'public.agent_project_uploads'::regclass), 'agent_project_uploads has RLS on');
+select ok(not has_table_privilege('anon', 'public.agent_project_uploads', 'select'), 'anon cannot read agent_project_uploads');
+select ok(not has_table_privilege('authenticated', 'public.agent_project_uploads', 'insert'), 'authenticated cannot write agent_project_uploads');
+select is_definer('public', 'lume_project_upload_sweep', array[]::text[], 'lume_project_upload_sweep() is security definer');
+select ok(not has_function_privilege('anon', 'public.lume_project_upload_sweep()', 'execute'), 'anon cannot execute the sweep');
+select is((select schedule from cron.job where jobname = 'lume-project-upload-sweep'), '17 * * * *', 'the sweep runs hourly');
+select ok((select allowed_mime_types @> array['text/csv', 'application/pdf', 'text/markdown', 'image/png'] from storage.buckets where id = 'agent-projects'), 'the bucket accepts the supported types');
+select ok((select not ('application/octet-stream' = any(allowed_mime_types)) from storage.buckets where id = 'agent-projects'), 'the bucket refuses anything else');
+create temp table lume_sweep_t as select count(*) as n from net.http_request_queue;
+insert into agent_project_uploads (storage_path, project_id) values ('pgtap/fresh.csv', '00000000-0000-0000-0000-0000000a9099');
+do $$ begin perform public.lume_project_upload_sweep(); end $$;
+select is((select count(*) from net.http_request_queue), (select n from lume_sweep_t), 'no stale upload: the sweep sends nothing');
 
 -- behaviour
 insert into lume_verticals (id, name) values

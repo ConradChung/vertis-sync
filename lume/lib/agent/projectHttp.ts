@@ -1,6 +1,6 @@
 import 'server-only'
 import { NextResponse } from 'next/server'
-import { ProjectConflictError } from '@/lib/agent/projects'
+import { ProjectConflictError, ProjectGoneError } from '@/lib/agent/projects'
 import { getVertical } from '@/lib/operators/store'
 import { dbErrorResponse } from '@/lib/http/errors'
 
@@ -9,9 +9,10 @@ import { dbErrorResponse } from '@/lib/http/errors'
 export const notFound = (error = 'not_found') => NextResponse.json({ error }, { status: 404 })
 export const badId = () => NextResponse.json({ error: 'invalid_id' }, { status: 400 })
 
-/** A taken name or vertical → 409; anything else the usual 500. */
+/** A taken name or vertical → 409; a project deleted mid-request → 404; anything else the usual 500. */
 export function projectErrorResponse(err: unknown, where: string): NextResponse {
   if (err instanceof ProjectConflictError) return NextResponse.json({ error: err.code }, { status: 409 })
+  if (err instanceof ProjectGoneError) return NextResponse.json({ error: 'project_not_found' }, { status: 404 })
   return dbErrorResponse(err, where)
 }
 

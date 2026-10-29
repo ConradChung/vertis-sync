@@ -4,7 +4,9 @@ import { CSV_MAX_ROWS, MAX_TEXT_CHARS, type FileType } from '@/lib/agent/project
  * Text extraction for project files, run once at upload:
  *  - CSV: header plus the first CSV_MAX_ROWS rows (quote-aware, so a quoted
  *    newline stays inside its row); line endings become \n.
- *  - PDF: the text layer (unpdf, a serverless build of pdf.js).
+ *  - PDF: the text layer (unpdf, a serverless build of pdf.js), page by
+ *    page: at most PDF_MAX_PAGES pages, stopping past the character cap, all
+ *    within PDF_TIMEOUT_MS (a timeout is "not readable").
  *  - MD / TXT / JSON: as-is.
  *  - Images: none (listed by name only).
  * Everything is capped at MAX_TEXT_CHARS. A file that yields no text (binary,
@@ -32,49 +34,104 @@ function capped(text: string, truncated = false): Extracted {
   return { text, readable: true, truncated }
 }
 
-/** The header plus up to `maxRows` rows; `more` when rows were left out. */
+/**
+ * The header plus up to `maxRows` data rows; `more` when rows were left out.
+ * Quote-aware (a quoted newline stays in its field, "" is an escaped quote);
+ * \n, \r\n and a lone \r all end a row; blank lines are not rows.
+ */
 export function csvHead(text: string, maxRows = CSV_MAX_ROWS): { text: string; more: boolean } {
   const rows: string[] = []
   let cur = ''
   let quoted = false
-  for (let i = 0; i < text.length; i++) {
+  const end = () => {
+    if (cur.length) rows.push(cur)
+    cur = ''
+  }
+  for (let i = 0; i < text.length && rows.length <= maxRows + 1; i++) {
     const c = text[i]
     if (c === '"') quoted = !quoted
     if (!quoted && (c === '\n' || c === '\r')) {
       if (c === '\r' && text[i + 1] === '\n') i++
-      rows.push(cur)
-      cur = ''
-      if (rows.length > maxRows + 1) break
+      end()
       continue
     }
     cur += c
   }
-  if (cur && rows.length <= maxRows + 1) rows.push(cur)
-  const kept = rows.filter((r, i) => i === 0 || r.length > 0)
-  const more = kept.length > maxRows + 1
-  return { text: kept.slice(0, maxRows + 1).join('\n'), more }
+  if (rows.length <= maxRows + 1) end()
+  return { text: rows.slice(0, maxRows + 1).join('\n'), more: rows.length > maxRows + 1 }
 }
 
-async function pdfText(bytes: Uint8Array): Promise<string | null> {
-  try {
-    const { extractText: pdfExtract, getDocumentProxy } = await import('unpdf')
+/** PDFs: pages read at most, and the wall-clock budget for the whole extraction. */
+export const PDF_MAX_PAGES = 500
+export const PDF_TIMEOUT_MS = 40_000
+
+interface PdfDoc {
+  numPages: number
+  getPage: (n: number) => Promise<{ getTextContent: () => Promise<{ items: unknown[] }> }>
+  destroy?: () => unknown
+}
+
+const itemText = (it: unknown) => {
+  const o = it as { str?: unknown; hasEOL?: unknown }
+  return `${typeof o.str === 'string' ? o.str : ''}${o.hasEOL ? '\n' : ''}`
+}
+
+/**
+ * The text layer, page by page: at most PDF_MAX_PAGES pages, stopping once
+ * past MAX_TEXT_CHARS, all within `timeoutMs`. null when it fails or runs out
+ * of time (the document is released either way).
+ */
+async function pdfText(bytes: Uint8Array, timeoutMs: number): Promise<{ text: string; truncated: boolean } | null> {
+  let doc: PdfDoc | null = null
+  let stopped = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const work = (async () => {
+    const { getDocumentProxy } = await import('unpdf')
     // pdf.js takes ownership of the buffer: hand it a copy.
-    const pdf = await getDocumentProxy(new Uint8Array(bytes))
-    const { text } = await pdfExtract(pdf, { mergePages: true })
-    return Array.isArray(text) ? text.join('\n') : text
+    doc = (await getDocumentProxy(new Uint8Array(bytes))) as unknown as PdfDoc
+    const pages = Math.min(doc.numPages, PDF_MAX_PAGES)
+    let truncated = doc.numPages > PDF_MAX_PAGES
+    const parts: string[] = []
+    let len = 0
+    for (let n = 1; n <= pages && !stopped; n++) {
+      const content = await (await doc.getPage(n)).getTextContent()
+      const t = content.items.map(itemText).join('')
+      parts.push(t)
+      len += t.length + 1
+      if (len > MAX_TEXT_CHARS) {
+        truncated = truncated || len - 1 > MAX_TEXT_CHARS || n < doc.numPages
+        break
+      }
+    }
+    return { text: parts.join('\n'), truncated }
+  })()
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs)
+  })
+  try {
+    return await Promise.race([work, timeout])
   } catch {
     return null
+  } finally {
+    stopped = true
+    clearTimeout(timer)
+    work.catch(() => {})
+    try {
+      await (doc as PdfDoc | null)?.destroy?.()
+    } catch {
+      // released best effort
+    }
   }
 }
 
-export async function extractText(bytes: Uint8Array, type: FileType): Promise<Extracted> {
+export async function extractText(bytes: Uint8Array, type: FileType, opts: { pdfTimeoutMs?: number } = {}): Promise<Extracted> {
   try {
     switch (type) {
       case 'image':
         return UNREADABLE
       case 'pdf': {
-        const t = await pdfText(bytes)
-        return t === null ? UNREADABLE : capped(t)
+        const t = await pdfText(bytes, opts.pdfTimeoutMs ?? PDF_TIMEOUT_MS)
+        return t === null ? UNREADABLE : capped(t.text, t.truncated)
       }
       case 'csv': {
         const t = decode(bytes)

@@ -115,10 +115,43 @@ export function formatBytes(n: number): string {
 
 const isImage = (i: ProjectItem) => (i.mime ?? '').startsWith('image/')
 
-/** Text inside the block can never close it: `</project…` is neutralised. */
-const neutralise = (s: string) => s.replace(/<\/(project(?:_item)?)/gi, '<\\/$1')
+/**
+ * Text inside the block can never open or close one of its tags: any
+ * `<project…` / `</project…` spelling (spaces, case) loses its `<`.
+ */
+export const neutralise = (s: string) => s.replace(/<(\s*\/?\s*project)/gi, '‹$1')
 const attr = (s: string) => s.replace(/["<>\n\r]/g, ' ').slice(0, 120)
 const short = (s: string) => (s.length > NAME_MAX ? `${s.slice(0, NAME_MAX - 1)}…` : s)
+/** A name for running text: one line, no tag openers. */
+const label = (s: string) => neutralise(short(s.replace(/[\n\r]+/g, ' ')))
+
+/** Newest first; ties broken by id so the block (and its cache) is stable. */
+export function newestFirst<T extends { created_at: string; id: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+}
+
+/** Per-item markup around inline text (tag, attributes, newlines), for budgeting from metadata. */
+const WRAP_OVERHEAD = 200
+
+/**
+ * From metadata alone (`text_chars`): the ids whose text is worth fetching
+ * for the block, newest first, greedily within BLOCK_BUDGET. A superset of
+ * what `projectBlock` will inline (it also spends budget on the header and
+ * the index), so only these items' text is ever loaded.
+ */
+export function pickInlineIds(items: ProjectItem[], budget = BLOCK_BUDGET): string[] {
+  let left = budget
+  const ids: string[] = []
+  for (const i of newestFirst(items).slice(0, INDEX_MAX)) {
+    const n = i.text_chars ?? 0
+    if (!i.readable || n <= 0) continue
+    if (n + WRAP_OVERHEAD <= left) {
+      ids.push(i.id)
+      left -= n + WRAP_OVERHEAD
+    }
+  }
+  return ids
+}
 
 const sizeLabel = (i: ProjectItemText) => formatBytes(i.size_bytes)
 
@@ -133,12 +166,12 @@ const wrap = (i: ProjectItemText) => `<project_item id="${i.id}" name="${attr(i.
  * caller passes this project's items alone.
  */
 export function projectBlock(project: Pick<Project, 'id' | 'name' | 'instructions'>, items: ProjectItemText[]): string {
-  const sorted = [...items].sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))
+  const sorted = newestFirst(items)
   const instructions = project.instructions.trim()
   const head = [
     `<project name="${attr(project.name)}">`,
-    `Project: ${project.name}`,
-    `This chat is filed in Conrad's project "${project.name}". Follow its instructions and use its files and notes in this chat. ` +
+    `Project: ${label(project.name)}`,
+    `This chat is filed in Conrad's project "${label(project.name)}". Follow its instructions and use its files and notes in this chat. ` +
       'Items not shown in full below can be read with read_project_file(id, offset).',
     '',
     'Instructions:',
@@ -154,7 +187,7 @@ export function projectBlock(project: Pick<Project, 'id' | 'name' | 'instruction
   const LONG = ' · not inline, use read_project_file'
   const base = (i: ProjectItemText) => {
     const flags = [i.truncated ? 'truncated' : null].filter(Boolean)
-    return `- [${i.kind}] ${short(i.name)} · ${sizeLabel(i)}${flags.length ? ` · ${flags.join(', ')}` : ''} · id ${i.id}`
+    return `- [${i.kind}] ${label(i.name)} · ${sizeLabel(i)}${flags.length ? ` · ${flags.join(', ')}` : ''} · id ${i.id}`
   }
   let shown = sorted.slice(0, INDEX_MAX)
   const more = () => (sorted.length > shown.length ? `\n- …and ${sorted.length - shown.length} more (ask Conrad, or list the project)` : '')

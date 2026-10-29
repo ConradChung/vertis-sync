@@ -72,3 +72,22 @@ describe('extractText', () => {
     expect(await extractText(new Uint8Array([137, 80, 78, 71]), 'image')).toEqual({ text: null, readable: false, truncated: false })
   })
 })
+
+describe('csvHead row counting', () => {
+  it('blank lines are not rows; exactly 200 rows (trailing newline) is not truncated; 201 is', async () => {
+    const { csvHead } = await import('@/lib/agent/projectExtract')
+    const rows = (n: number) => Array.from({ length: n }, (_, i) => `r${i}`)
+    expect(csvHead(`h\n${rows(200).join('\n')}\n`).more).toBe(false)
+    expect(csvHead(`h\n${rows(201).join('\n')}`).more).toBe(true)
+    const gappy = csvHead(`h\n\n\nr0\n\r\nr1\n`)
+    expect(gappy).toEqual({ text: 'h\nr0\nr1', more: false })
+    const withBlanks = csvHead(`h\n${rows(200).join('\n\n')}\n\n\n`)
+    expect(withBlanks.more).toBe(false)
+    expect(withBlanks.text.split('\n')).toHaveLength(201)
+  })
+
+  it('a lone \\r ends a row too; escaped quotes stay in their field', async () => {
+    const { csvHead } = await import('@/lib/agent/projectExtract')
+    expect(csvHead('a,b\r1,"say ""hi""\nthere"\r2,3').text).toBe('a,b\n1,"say ""hi""\nthere"\n2,3')
+  })
+})
