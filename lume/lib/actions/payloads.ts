@@ -10,7 +10,14 @@ import type { Json } from '@/lib/db/types'
  * Shapes (executor fields first; the rest are display extras):
  *   send_reply      { eaccount, reply_to_uuid, body, subject?,
  *                     campaign_id?, lead_email?, campaign_name?,
- *                     recipient_verified? }
+ *                     recipient_verified?, thread_id?,
+ *                     card: lead_name?, company?, their_message?, verdict?,
+ *                     proposed_times?, research_note?, drafted_by?,
+ *                     edit: original_body?, edited_by?, edited_at? }
+ *                   The card facts (lead_name, company, their_message,
+ *                   thread_id) are server-filled by buildActionRequest from
+ *                   Instantly + the CRM; the edit fields only by the decide
+ *                   route's Edit.
  *   pause_campaign  { campaign_id, campaign_name? }
  *   resume_campaign { campaign_id, campaign_name? }
  *   create_campaign { source_campaign_id, name, campaign_name? }
@@ -44,6 +51,19 @@ export const CAMPAIGN_PAYLOADS = {
     campaign_name: LABEL,
     /** Set by the server builder: false when the recipient could not be looked up. */
     recipient_verified: z.boolean().optional(),
+    thread_id: LABEL,
+    // The reply card (inbox manager): server facts + the drafter's judgment.
+    lead_name: LABEL,
+    company: LABEL,
+    their_message: z.string().trim().max(2000).optional(),
+    verdict: z.enum(['GOOD', 'UNSURE', 'BAD']).optional(),
+    proposed_times: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
+    research_note: z.string().trim().max(2000).optional(),
+    drafted_by: LABEL,
+    // Edit before approval (decide route): the draft as filed, and who changed it.
+    original_body: z.string().trim().max(20_000).optional(),
+    edited_by: LABEL,
+    edited_at: LABEL,
   }),
   pause_campaign: z.object({ campaign_id: ID, campaign_name: LABEL }),
   resume_campaign: z.object({ campaign_id: ID, campaign_name: LABEL }),

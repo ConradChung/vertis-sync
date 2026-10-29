@@ -82,8 +82,12 @@ describe('POST /api/actions — campaign kinds', () => {
     expect(row.payload.summary).toBeTruthy()
     expect(sendActionPrompt).toHaveBeenCalledTimes(1)
 
-    // Names come from lume_campaigns / the email event: no network at all here.
-    expect(fetchSpy).not.toHaveBeenCalled()
+    // Names come from lume_campaigns / the email event; send_reply also reads the
+    // email from Instantly (GET /emails/<id>, cached). Nothing is ever written.
+    for (const [url, init] of fetchSpy.mock.calls as unknown as [string, RequestInit | undefined][]) {
+      expect(init?.method ?? 'GET').toBe('GET')
+      expect(kind === 'send_reply' && url.includes('/api/v2/emails/')).toBe(true)
+    }
   })
 
   it('409 when the same action is already awaiting', async () => {

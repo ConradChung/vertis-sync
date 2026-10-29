@@ -14,6 +14,9 @@ import { ACTOR_RUN_CAP_USD } from '@/lib/apify/pricing'
 import { buildUpdateSequence } from '@/lib/campaigns/sequenceAction'
 import { getVertical } from '@/lib/operators/store'
 import { buildRemoveLeads, removeLeadsBody } from '@/lib/actions/removeLeads'
+import { getEmail } from '@/lib/adapters/instantlyEmails'
+import { findDeal, findLeadByEmail } from '@/lib/crm/service'
+import { trimQuotes, type InboxEmail } from '@/lib/inbox/model'
 
 /**
  * Turn a requested action `{ kind, payload }` into the snapshot the owner
@@ -172,7 +175,9 @@ export async function buildActionRequest(input: unknown): Promise<ActionBuild> {
       return buildJobAction(req.kind, (req.payload as { job_id: string }).job_id.toLowerCase())
     default: {
       const kind = req.kind as CampaignActionKind
-      const p = parseCampaignPayload(kind, await withServerExtras(kind, req.payload), { trustSummary: false })
+      const extras = await withServerExtras(kind, req.payload)
+      if ('error' in extras) return fail(400, extras.error)
+      const p = parseCampaignPayload(kind, extras.payload, { trustSummary: false })
       if (!p.ok) return fail(400, 'invalid_payload')
       return { ok: true, kind, payload: p.payload as Record<string, Json> & { summary: string } }
     }
@@ -271,29 +276,85 @@ async function replyRecipient(replyToUuid: string): Promise<{ lead: string; camp
  * `campaign_name` is looked up from the campaign id; for send_reply,
  * `lead_email` is the looked-up recipient (`recipient_verified: true`), or the
  * caller's claim marked `recipient_verified: false` when no lookup knows it.
- * Shape errors are left for `parseCampaignPayload`.
+ *
+ * send_reply, when Instantly has the email (cached read, lib/adapters/
+ * instantlyEmails.ts): the reply goes from the SAME inbox that received it
+ * (`eaccount` overwritten), in its thread (`thread_id`); the card's facts
+ * come from here, never the caller: `their_message` (quotes trimmed),
+ * `lead_name` / `company` (CRM deal, else lead bank). An outbound email is
+ * refused (`not_an_inbound_email`). The caller's judgment fields (verdict,
+ * proposed_times, research_note) pass through. Edit fields are dropped (only
+ * the decide route's Edit writes them). Shape errors are left for
+ * `parseCampaignPayload`.
  */
-async function withServerExtras(kind: CampaignActionKind, raw: Record<string, unknown>): Promise<Record<string, unknown>> {
+const CARD_FACTS = ['their_message', 'lead_name', 'company', 'thread_id', 'original_body', 'edited_by', 'edited_at'] as const
+
+async function withServerExtras(kind: CampaignActionKind, raw: Record<string, unknown>): Promise<{ payload: Record<string, unknown> } | { error: string }> {
   const p: Record<string, unknown> = { ...raw }
   delete p.campaign_name
   delete p.source_name
   delete p.recipient_verified
   if (kind === 'send_reply') {
+    for (const k of CARD_FACTS) delete p[k]
     const claimed = text(p.lead_email) ?? text(p.to)
     delete p.lead_email
     delete p.to
     const replyTo = text(p.reply_to_uuid)
-    const found = replyTo ? await replyRecipient(replyTo) : null
-    if (found) {
-      p.lead_email = found.lead
+    const email = replyTo ? await liveEmail(replyTo) : null
+    if (email && email.direction !== 'in') return { error: 'not_an_inbound_email' }
+    if (email?.lead) {
+      p.lead_email = email.lead
       p.recipient_verified = true
-      if (!text(p.campaign_id) && found.campaign_id) p.campaign_id = found.campaign_id
+      if (email.eaccount) p.eaccount = email.eaccount
+      if (!text(p.campaign_id) && email.campaign_id) p.campaign_id = email.campaign_id
+      p.thread_id = email.thread_id
+      const said = trimQuotes(email.text)
+      if (said) p.their_message = said.length > 2000 ? `${said.slice(0, 1999)}…` : said
+      if (!text(p.subject) && email.subject) p.subject = /^re:/i.test(email.subject) ? email.subject : `Re: ${email.subject}`
+      const campaign = text(p.campaign_id)
+      if (campaign) Object.assign(p, await leadCard(campaign, email.lead))
     } else {
-      if (claimed) p.lead_email = claimed
-      p.recipient_verified = false
+      const found = replyTo ? await replyRecipient(replyTo) : null
+      if (found) {
+        p.lead_email = found.lead
+        p.recipient_verified = true
+        if (!text(p.campaign_id) && found.campaign_id) p.campaign_id = found.campaign_id
+      } else {
+        if (claimed) p.lead_email = claimed
+        p.recipient_verified = false
+      }
     }
   }
   const id = text(kind === 'create_campaign' ? p.source_campaign_id : p.campaign_id)
   if (id) p.campaign_name = await campaignName(id)
-  return p
+  return { payload: p }
+}
+
+/** The email being answered, from Instantly (cached); null when unknown or unreachable. */
+async function liveEmail(id: string): Promise<InboxEmail | null> {
+  if (!isInstantlyConfigured()) return null
+  try {
+    return await getEmail(id)
+  } catch (err) {
+    console.error('[actions/build] Instantly email read failed:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
+/** Name and company for the reply card: the CRM deal, else the lead bank; omitted when unknown. */
+async function leadCard(campaignId: string, email: string): Promise<{ lead_name?: string; company?: string }> {
+  try {
+    const deal = await findDeal(campaignId, email)
+    let name = deal?.name ?? null
+    let company = deal?.company ?? null
+    if (!name || !company) {
+      const lead = await findLeadByEmail(campaignId, email)
+      name = name ?? ([lead?.first_name, lead?.last_name].filter(Boolean).join(' ') || null)
+      company = company ?? lead?.company_name ?? null
+    }
+    return { ...(name ? { lead_name: name } : {}), ...(company ? { company } : {}) }
+  } catch (err) {
+    console.error('[actions/build] lead card lookup failed:', err instanceof Error ? err.message : err)
+    return {}
+  }
 }
