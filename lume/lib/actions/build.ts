@@ -286,7 +286,9 @@ async function replyRecipient(replyToUuid: string): Promise<{ lead: string; camp
  * (`eaccount` overwritten), in its thread (`thread_id`); the card's facts
  * come from here, never the caller: `their_message` (quotes trimmed),
  * `lead_name` / `company` (CRM deal, else lead bank). An outbound email is
- * refused (`not_an_inbound_email`). The caller's judgment fields (verdict,
+ * refused (`not_an_inbound_email`), and so is one with no receiving inbox
+ * (`no_eaccount`). The email's `campaign_id` replaces the caller's.
+ * `reply_to_uuid` is lowercased. The caller's judgment fields (verdict,
  * proposed_times, research_note) pass through. Edit fields are dropped (only
  * the decide route's Edit writes them), and so is `drafted_by_operator`
  * (the caller of the builder sets it from who is asking). Shape errors are left for
@@ -304,14 +306,17 @@ async function withServerExtras(kind: CampaignActionKind, raw: Record<string, un
     const claimed = text(p.lead_email) ?? text(p.to)
     delete p.lead_email
     delete p.to
-    const replyTo = text(p.reply_to_uuid)
+    const replyTo = text(p.reply_to_uuid)?.toLowerCase() ?? null
+    if (replyTo) p.reply_to_uuid = replyTo
     const email = replyTo ? await liveEmail(replyTo) : null
     if (email && email.direction !== 'in') return { error: 'not_an_inbound_email' }
+    if (email && !email.eaccount) return { error: 'no_eaccount' }
     if (email?.lead) {
       p.lead_email = email.lead
       p.recipient_verified = true
-      if (email.eaccount) p.eaccount = email.eaccount
-      if (!text(p.campaign_id) && email.campaign_id) p.campaign_id = email.campaign_id
+      p.eaccount = email.eaccount
+      // The email's own campaign, never the caller's: routing and scope follow it.
+      if (email.campaign_id) p.campaign_id = email.campaign_id
       p.thread_id = email.thread_id
       const said = trimQuotes(email.text)
       if (said) p.their_message = said.length > 2000 ? `${said.slice(0, 1999)}…` : said

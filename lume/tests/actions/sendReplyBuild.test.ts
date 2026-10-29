@@ -74,6 +74,22 @@ describe('send_reply snapshot', () => {
     expect(await build({ reply_to_uuid: 'e1', body: 'x' })).toEqual({ ok: false, status: 400, error: 'not_an_inbound_email' })
   })
 
+  it("the email's campaign always wins over the caller's (routing and scope follow the real campaign)", async () => {
+    const b = await build({ reply_to_uuid: 'e1', body: 'x', campaign_id: 'someone-elses-campaign' })
+    expect(b.ok && b.payload.campaign_id).toBe(CID)
+  })
+
+  it('an email with no receiving inbox is refused (no guessing the eaccount)', async () => {
+    em.getEmail.mockResolvedValue(inbound({ eaccount: null }))
+    expect(await build({ reply_to_uuid: 'e1', body: 'x', eaccount: 'frank@ours.com' })).toEqual({ ok: false, status: 400, error: 'no_eaccount' })
+  })
+
+  it('reply_to_uuid is lowercased (one reply per inbound email holds whatever case the caller used)', async () => {
+    const b = await build({ reply_to_uuid: '01A15496-15CC-7596-ADBF-B4A18D6B24EE', body: 'x' })
+    expect(b.ok && b.payload.reply_to_uuid).toBe('01a15496-15cc-7596-adbf-b4a18d6b24ee')
+    expect(em.getEmail).toHaveBeenCalledWith('01a15496-15cc-7596-adbf-b4a18d6b24ee')
+  })
+
   it('a caller subject is kept', async () => {
     const b = await build({ reply_to_uuid: 'e1', body: 'x', subject: 'Re: Tuesday' })
     expect(b.ok && b.payload.subject).toBe('Re: Tuesday')
