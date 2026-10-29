@@ -129,13 +129,17 @@ BOOKING (your own connectors, then Lume)
 - Reschedule: book the new time, cancel the old one (exactly one live event), log the new booking, draft the
   confirmation. Cancel: cancel with a short, polite reason and tell Conrad.
 
-FOLLOW-UPS (follow-up routine)
+FOLLOW-UPS (follow-up routine) — ALWAYS ASK
+- Follow-ups always need Conrad's approval. Auto mode never sends one.
 - Follow {{follow-up plan}} for leads who were offered times and did not reply. Skip anyone booked, blocked,
   labelled, with an active reminder, or whose offered times have not passed yet.
-- Read the live thread first (GET /api/inbox/thread). If the lead wrote, it is a new reply, not a follow-up.
-- Draft the follow-up with freshly checked times (POST /api/inbox/draft, answering the lead's latest message).
+- Read the live thread first (GET /api/inbox/thread). If the lead wrote again, it is a new reply: handle it
+  ON EVERY WAKE, not as a follow-up.
+- Lume has no follow-up route yet. /api/inbox/draft answers one inbound email once, so it refuses (409
+  already_drafted_or_replied) a follow-up in a thread you already answered. Do not retry it or work around it.
+  Send Conrad the follow-up you drafted, with freshly checked times and the thread link, and let him send it.
 - When follow-ups run out: stop, release holds, {{after follow-ups}}, and report one line.
-- Not now: on the reminder date, re-read the thread, check times, draft a re-ping.
+- Not now: on the reminder date, re-read the thread, check times, and send Conrad the re-ping the same way.
 
 LEARNING
 Every correction becomes a one-line rule: POST /api/inbox/files/rule { file, rule } to voice-rules.md,
@@ -170,7 +174,7 @@ NEVER
 |---|---|---|
 | Positive reply handler | **Webhook** (the URL you give Lume) | "ON EVERY WAKE" |
 | Backstop poll | Every 10–15 minutes | "ON EVERY WAKE" (silent when nothing is due) |
-| Follow-ups | Every weekday morning | "FOLLOW-UPS" |
+| Follow-ups | Every weekday morning | "FOLLOW-UPS" (always asks Conrad) |
 | Reconnect reminders | One-time, per lead | Re-read the thread, check times, draft a re-ping |
 | Call prep (optional) | Before each booked call | Short brief: company, what they said, fit read, open questions |
 
@@ -178,7 +182,13 @@ NEVER
 
 Set it per vertical in **Settings → Verticals** (owner only): the routine's webhook URL (public `https://` only) and a
 secret. Leave the secret blank and Lume generates one and shows it **once**; afterwards it is shown masked
-(`••••abcd`) and never leaves the server again. **Send test** sends one `test` push and shows the result.
+(`••••abcd`) and never leaves the server again. **Regenerate secret** replaces it with a new one, also shown once; the
+old one stops verifying at once. **Send test** sends one `test` push and shows the result. Only you, the master bot and
+that vertical's own bot can see the webhook (masked).
+
+Lume resolves the host when you save and again before every push. It refuses the host if **any** address is private,
+loopback, link-local (169.254/16, fe80::/10), CGNAT (100.64/10), multicast or reserved. The connection is then pinned
+to the checked address, so a DNS answer that changes in between is never used.
 
 Lume POSTs when one of these routes to the vertical:
 
@@ -241,14 +251,23 @@ own browser session; a Grok Bot or Lume's agent cannot), and every change is log
 Auto approves a reply only when all of these hold. Otherwise the reply waits for a person, as in Owner mode:
 
 - the drafter's verdict is **GOOD** (UNSURE follows your UNSURE rule; no verdict means not scored);
-- the lead's message does not look like an **unsubscribe or hostile** reply;
-- the reply has not been labelled, and Instantly does not mark it not interested;
-- the lead was never labelled **BAD**, unsubscribe, hostile or not interested on this campaign;
-- the recipient was verified.
+- the campaign came from the lead's email itself (`campaign_verified`, set by Lume, never by a caller), and the
+  recipient was verified (`recipient_verified: true`);
+- the lead's **whole** email (quotes trimmed, not only the card excerpt) does not look like an opt-out or hostile
+  reply. That includes "stop" in a short message, remove, unsub, unsubscribe, "no thanks", "not for us",
+  "wrong person", and the common German, French and Spanish opt-outs (abmelden, désabonner / désinscrire, baja /
+  darme de baja, cancelar);
+- the reply has not been labelled, and Instantly does not mark it out of office (0) or not interested (< 0). An
+  email with no interest status that Lume never recorded as a positive reply is held too;
+- the lead was never labelled **BAD**, unsubscribe, hostile or not interested, **in any campaign**.
+
+**Follow-ups always ask.** Auto only covers a reply to a new inbound message. It never covers a follow-up or a re-ping.
 
 At send time the executor re-checks everything it checks for any reply (live thread, newer inbound, already replied,
-inbox, labels, Lost deal, blocklist, deadline). For a grant it then re-evaluates the grant itself: if you switched the
-campaign back to Owner, or a label arrived in between, the send is refused with `grant_revoked`. Skip-permissions mode
+inbox, labels, Lost deal, blocklist, deadline). For a grant it then requires the answered email's campaign to be the
+grant's campaign (`campaign_mismatch`), and re-evaluates the grant against its fresh read of the email: if you switched
+the campaign back to Owner, or a label, an out-of-office or an opt-out arrived in between, the send is refused with
+`grant_revoked`. Skip-permissions mode
 never sends a reply; the grant is the only path that sends one without a tap.
 
 The self-draft rule (`lib/operators/policy.ts`, `canApproveSend`) is about bots approving. The grant is not an

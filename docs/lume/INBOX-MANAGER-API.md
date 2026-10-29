@@ -207,7 +207,8 @@ uncached. It sends nothing unless every check passes:
 | `no_eaccount` / `eaccount_mismatch` | Lume cannot confirm the reply would come from the inbox that received the email |
 | `reply_labeled` / `deal_lost` / `lead_blocked` | A label closed the reply, the CRM deal is Lost, or the address or its domain is on the Instantly blocklist |
 | `deadline_exceeded` | The checks took too long to send safely |
-| `grant_revoked` / `grant_unverifiable` | Auto mode only: the grant no longer holds (the campaign left Auto, or a label or negative interest arrived), or it could not be re-checked |
+| `campaign_mismatch` | Auto mode only: the answered email is not in the grant's campaign |
+| `grant_revoked` / `grant_unverifiable` | Auto mode only: the grant no longer holds (the campaign left Auto, or a label, an out-of-office / negative interest or an opt-out arrived), or it could not be re-checked |
 
 Times are compared as real timestamps, using Instantly's `timestamp_created` first. Lume records `send_attempted` right
 before it calls `/emails/reply`. From then on, that row blocks any further reply to the same email, even if the call
@@ -249,9 +250,11 @@ await fetch(`/api/actions/${id}/decide`, { method: 'POST', headers: { 'Content-T
 
 Each Instantly campaign has a mode, `owner` (default), `client` or `auto`, stored in `lume_campaign_reply_modes`
 (`GET /api/campaigns/reply-mode`; `PUT { campaign_id, mode }` is owner-session only). In `auto`, a new `send_reply` is
-approved at creation with `decided_via='grant'` when the verdict is GOOD and nothing holds it (BAD, an unsubscribe or
-hostile message, a labelled reply, a negative interest, a lead labelled BAD / unsubscribe / hostile / not interested
-before, an unverified recipient). The executor then runs every check above and re-evaluates the grant last. `client`
+approved at creation with `decided_via='grant'` when the verdict is GOOD, the campaign is `campaign_verified` and the
+recipient `recipient_verified`, and nothing holds it. It is held by: BAD; an opt-out, stop, "no thanks" or hostile message
+anywhere in the email's full text; a labelled reply; an out-of-office or negative interest; an unknown interest with no
+recorded reply; or a lead labelled BAD / unsubscribe / hostile / not interested before, in any campaign. A mode change
+and its audit event are one transaction (RPC `lume_set_reply_mode`). Follow-ups always ask. The executor then runs every check above and re-evaluates the grant last. `client`
 behaves like `owner` until the Slack app (3g). Details: `docs/lume/INBOX-MANAGER-SETUP.md` → "Reply approval modes".
 
 ## POST `/api/inbox/label`
