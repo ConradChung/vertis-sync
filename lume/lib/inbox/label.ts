@@ -1,7 +1,8 @@
 import 'server-only'
 import { createAction, DuplicateActionError } from '@/lib/actions/create'
 import { getEmail } from '@/lib/adapters/instantlyEmails'
-import { addToBlocklist, setInterestStatus } from '@/lib/adapters/instantlyLabels'
+import { addToBlocklist, leadInCampaign, setInterestStatus } from '@/lib/adapters/instantlyLabels'
+import { claimDecision, listAwaitingReplyActions } from '@/lib/actions/store'
 import { addActivity, ensureDeal, setStage } from '@/lib/crm/service'
 import type { ActivitySource } from '@/lib/crm/types'
 import { logEvent } from '@/lib/db/service'
@@ -15,10 +16,13 @@ import { markLeadRepliesHandled } from '@/lib/inbox/store'
 /**
  * label_reply and log-booking (inbox manager 3b / 3c). Low tier: nothing is
  * sent to the lead. In order:
- *  1. resolve the lead and campaign (from the reply's email, else as given)
- *     and check the caller's scope;
+ *  1. resolve the lead and campaign (from the reply's email, else as given:
+ *     then Instantly must confirm the lead is in that campaign before any
+ *     write) and check the caller's scope;
  *  2. Instantly: the interest status, then the blocklist (unsubscribe,
  *     hostile, BAD + block). If Instantly fails, the CRM is not touched;
+ *  2b. a label that blocks, closes or handles denies every awaiting
+ *     send_reply for that reply and lead, so no stale draft can be approved;
  *  3. CRM: the deal (created at Contacted when missing) moves to the plan's
  *     stage directly (never out of Won / Lost); a Lost close is filed as a
  *     `crm_close_deal` pending action for approval (one per deal); a meeting
@@ -40,6 +44,8 @@ export interface LabelOutcome {
   close_action_id: string | null
   meeting: boolean
   handled: boolean
+  /** Awaiting send_reply drafts this label denied. */
+  denied_drafts: string[]
 }
 
 const CLOSED = new Set(['Won', 'Lost'])
@@ -56,6 +62,8 @@ async function resolveTarget(input: { reply_to_uuid?: string; lead_email?: strin
   }
   if (!lead || !campaign) throw new InboxError(400, 'lead_or_campaign_unknown')
   if (!campaignAllowed(scope, campaign)) throw outOfScope()
+  // Named by address: prove it is this campaign's lead before writing anything.
+  if (!input.reply_to_uuid && !(await leadInCampaign(lead, campaign))) throw new InboxError(400, 'lead_not_in_campaign')
   return { lead, campaign }
 }
 
@@ -73,6 +81,16 @@ async function apply(
   if (plan.block) {
     await addToBlocklist(lead)
     blocked = true
+  }
+
+  // 2b. No stale reply may go out after this label.
+  const denied: string[] = []
+  if (plan.block || plan.close || plan.handled) {
+    const via = meta.actor === 'owner' ? 'lume' : meta.actor === 'agent' ? 'agent' : 'operator'
+    const opId = meta.actor.startsWith('operator:') ? meta.actor.slice(9) : undefined
+    for (const a of await listAwaitingReplyActions(campaign, lead, target.reply_to_uuid ?? null)) {
+      if (await claimDecision(a.id, false, via, opId)) denied.push(a.id)
+    }
   }
 
   // 3. CRM
@@ -136,6 +154,7 @@ async function apply(
     close_action_id: closeId,
     meeting: plan.meeting,
     handled: plan.handled,
+    denied_drafts: denied,
   }
   try {
     await logEvent({

@@ -12,9 +12,13 @@ const h = vi.hoisted(() => ({
   closeReply: vi.fn(),
   markLeadRepliesHandled: vi.fn(),
   logEvent: vi.fn(),
+  leadInCampaign: vi.fn(),
+  listAwaitingReplyActions: vi.fn(),
+  claimDecision: vi.fn(),
 }))
 vi.mock('@/lib/adapters/instantlyEmails', () => ({ getEmail: h.getEmail }))
-vi.mock('@/lib/adapters/instantlyLabels', () => ({ setInterestStatus: h.setInterestStatus, addToBlocklist: h.addToBlocklist }))
+vi.mock('@/lib/adapters/instantlyLabels', () => ({ setInterestStatus: h.setInterestStatus, addToBlocklist: h.addToBlocklist, leadInCampaign: h.leadInCampaign }))
+vi.mock('@/lib/actions/store', () => ({ listAwaitingReplyActions: h.listAwaitingReplyActions, claimDecision: h.claimDecision }))
 vi.mock('@/lib/crm/service', () => ({ ensureDeal: h.ensureDeal, setStage: h.setStage, addActivity: h.addActivity }))
 vi.mock('@/lib/actions/create', () => ({
   createAction: h.createAction,
@@ -52,6 +56,9 @@ beforeEach(() => {
   h.createAction.mockResolvedValue({ id: 'close-1' })
   h.markLeadRepliesHandled.mockResolvedValue([])
   h.addToBlocklist.mockResolvedValue('added')
+  h.leadInCampaign.mockResolvedValue(true)
+  h.listAwaitingReplyActions.mockResolvedValue([])
+  h.claimDecision.mockResolvedValue({ id: 'x' })
 })
 
 describe('applyLabel', () => {
@@ -131,6 +138,54 @@ describe('applyLabel', () => {
     h.setInterestStatus.mockRejectedValue(new Error('Instantly 500'))
     await expect(applyLabel({ reply_to_uuid: 'e1', category: 'interested' }, ALL, 'owner')).rejects.toThrow('Instantly 500')
     expect(h.ensureDeal).not.toHaveBeenCalled()
+  })
+})
+
+describe('applyLabel: awaiting drafts and lead checks (review fixes)', () => {
+  it('a label that blocks / closes / handles denies the awaiting send_reply drafts for that reply and lead', async () => {
+    h.listAwaitingReplyActions.mockResolvedValue([{ id: 'draft-1' }, { id: 'draft-2' }])
+    const out = await applyLabel({ reply_to_uuid: 'e1', category: 'unsubscribe' }, BOT, 'operator:op-1')
+    expect(h.listAwaitingReplyActions).toHaveBeenCalledWith(C1, 'ada@acme.com', 'e1')
+    expect(h.claimDecision.mock.calls).toEqual([
+      ['draft-1', false, 'operator', 'op-1'],
+      ['draft-2', false, 'operator', 'op-1'],
+    ])
+    expect(out.denied_drafts).toEqual(['draft-1', 'draft-2'])
+  })
+
+  it('a label that leaves a reply owed (interested) keeps the draft', async () => {
+    h.listAwaitingReplyActions.mockResolvedValue([{ id: 'draft-1' }])
+    await applyLabel({ reply_to_uuid: 'e1', category: 'interested' }, ALL, 'owner')
+    expect(h.claimDecision).not.toHaveBeenCalled()
+  })
+
+  it('the owner / agent deny as lume / agent', async () => {
+    h.listAwaitingReplyActions.mockResolvedValue([{ id: 'draft-1' }])
+    await applyLabel({ reply_to_uuid: 'e1', category: 'ooo' }, ALL, 'owner')
+    await applyLabel({ reply_to_uuid: 'e1', category: 'ooo' }, ALL, 'agent')
+    expect(h.claimDecision.mock.calls).toEqual([
+      ['draft-1', false, 'lume', undefined],
+      ['draft-1', false, 'agent', undefined],
+    ])
+  })
+
+  it('by lead_email: the lead must be in that campaign in Instantly before any write', async () => {
+    h.leadInCampaign.mockResolvedValue(false)
+    await expect(applyLabel({ lead_email: 'bob@other.com', campaign_id: C1, category: 'unsubscribe' }, BOT, 'operator:op-1')).rejects.toMatchObject({ status: 400, code: 'lead_not_in_campaign' })
+    expect(h.leadInCampaign).toHaveBeenCalledWith('bob@other.com', C1)
+    expect(h.setInterestStatus).not.toHaveBeenCalled()
+    expect(h.addToBlocklist).not.toHaveBeenCalled()
+  })
+
+  it("by lead_email for another vertical's lead: refused before Instantly is asked", async () => {
+    await expect(applyLabel({ lead_email: 'bob@other.com', campaign_id: C2, category: 'hostile' }, BOT, 'operator:op-1')).rejects.toMatchObject({ status: 403 })
+    expect(h.leadInCampaign).not.toHaveBeenCalled()
+    expect(h.addToBlocklist).not.toHaveBeenCalled()
+  })
+
+  it('by reply_to_uuid: the email itself proves the lead and campaign (no extra lookup)', async () => {
+    await applyLabel({ reply_to_uuid: 'e1', category: 'hostile' }, ALL, 'owner')
+    expect(h.leadInCampaign).not.toHaveBeenCalled()
   })
 })
 

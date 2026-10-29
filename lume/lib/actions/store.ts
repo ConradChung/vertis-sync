@@ -119,6 +119,24 @@ export async function markSendAttempted(id: string): Promise<void> {
   if (!(res.data ?? []).length) throw new Error('markSendAttempted: the row is not executing')
 }
 
+/**
+ * Awaiting send_reply rows for one reply (`reply_to_uuid`) or one lead
+ * (campaign + lead_email): what a closing label must deny. Two indexed reads,
+ * merged by id.
+ */
+export async function listAwaitingReplyActions(campaignId: string, leadEmail: string, replyToUuid?: string | null): Promise<Pick<PendingActionRow, 'id'>[]> {
+  const sb = createServiceClient()
+  const base = () => sb.from('pending_actions').select('id').eq('kind', 'send_reply').eq('status', 'awaiting')
+  const [byLead, byReply] = await Promise.all([
+    base().eq('payload->>campaign_id', campaignId).eq('payload->>lead_email', leadEmail.toLowerCase()).limit(50),
+    replyToUuid ? base().eq('payload->>reply_to_uuid', replyToUuid).limit(50) : Promise.resolve({ data: [], error: null }),
+  ])
+  if (byLead.error) throw new DbError('listAwaitingReplyActions', byLead.error)
+  if (byReply.error) throw new DbError('listAwaitingReplyActions', byReply.error as PostgrestError)
+  const ids = new Set([...(byLead.data ?? []), ...(byReply.data ?? [])].map((r) => (r as { id: string }).id))
+  return [...ids].map((id) => ({ id }))
+}
+
 /** Approved rows nobody executed: the Telegram path's waitUntil was cut. */
 export async function getStaleApprovedIds(olderThan: Date, limit = 20): Promise<string[]> {
   const sb = createServiceClient()

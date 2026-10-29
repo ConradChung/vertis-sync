@@ -79,6 +79,13 @@ describe('label_reply', () => {
     expect(s.parse({ lead_email: 'a@b.co', campaign_id: CID, category: 'ooo' })).toBeTruthy()
     expect(() => s.parse({ reply_to_uuid: 'e1', category: 'maybe' })).toThrow()
   })
+  it('contradictions are refused: block without BAD, BAD + block on interested / booked', () => {
+    const s = setup().tool('label_reply').inputSchema
+    expect(() => s.parse({ reply_to_uuid: 'e1', category: 'ooo', block: true })).toThrow()
+    expect(() => s.parse({ reply_to_uuid: 'e1', category: 'interested', verdict: 'BAD', block: true })).toThrow()
+    expect(() => s.parse({ reply_to_uuid: 'e1', category: 'booked', verdict: 'BAD', block: true })).toThrow()
+    expect(s.parse({ reply_to_uuid: 'e1', category: 'not_interested', verdict: 'BAD', block: true })).toBeTruthy()
+  })
 })
 
 describe('send_reply (reply card + optional judgment fields)', () => {

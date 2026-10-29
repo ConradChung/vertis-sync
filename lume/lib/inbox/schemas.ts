@@ -32,6 +32,8 @@ export const LabelBody = z
   })
   .refine(hasTarget, TARGET_MSG)
   .refine((v) => !!v.category || v.verdict === 'BAD', 'a category, or verdict BAD')
+  .refine((v) => !v.block || v.verdict === 'BAD', 'block is for verdict BAD only')
+  .refine((v) => !(v.block && (v.category === 'interested' || v.category === 'booked')), 'a lead marked interested or booked cannot be blocked')
 export type LabelInput = z.infer<typeof LabelBody>
 
 export const BookingBody = z
