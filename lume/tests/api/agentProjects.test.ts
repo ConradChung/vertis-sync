@@ -23,16 +23,32 @@ const h = vi.hoisted(() => ({
   removeProjectObjects: vi.fn(),
   getVertical: vi.fn(),
   extractText: vi.fn(),
+  recordPendingUpload: vi.fn(),
+  clearPendingUpload: vi.fn(),
+  stalePendingUploads: vi.fn(),
+  pathsInUse: vi.fn(),
+  deletePendingUploads: vi.fn(),
+  currentOperator: vi.fn(),
+  getConversation: vi.fn(),
 }))
-vi.mock('@/lib/auth/guards', () => ({ requireOwner: h.requireOwner }))
+vi.mock('@/lib/operators/session', () => ({ currentOperator: h.currentOperator }))
+vi.mock('@/lib/agent/conversations', () => ({ getConversation: h.getConversation }))
+vi.mock('@/lib/auth/guards', async (orig) => ({ ...(await orig<typeof import('@/lib/auth/guards')>()), requireOwner: h.requireOwner }))
 vi.mock('@/lib/agent/projects', async () => {
   class ProjectConflictError extends Error {
     constructor(readonly code: string) {
       super(code)
     }
   }
+  class ProjectGoneError extends Error {}
   return {
     ProjectConflictError,
+    ProjectGoneError,
+    recordPendingUpload: h.recordPendingUpload,
+    clearPendingUpload: h.clearPendingUpload,
+    stalePendingUploads: h.stalePendingUploads,
+    pathsInUse: h.pathsInUse,
+    deletePendingUploads: h.deletePendingUploads,
     listProjects: h.listProjects,
     getProject: h.getProject,
     createProject: h.createProject,
@@ -60,7 +76,8 @@ vi.mock('@/lib/agent/projectExtract', () => ({ extractText: h.extractText }))
 vi.mock('@/lib/operators/store', () => ({ getVertical: h.getVertical }))
 vi.mock('@/lib/db/service', () => ({ isDbError: () => false }))
 
-import { ProjectConflictError } from '@/lib/agent/projects'
+import { ProjectConflictError, ProjectGoneError } from '@/lib/agent/projects'
+import { POST as sweepPOST } from '@/app/api/cron/project-uploads/route'
 import { GET as listGET, POST as createPOST } from '@/app/api/agent/projects/route'
 import { DELETE as projectDELETE, GET as projectGET, PATCH as projectPATCH } from '@/app/api/agent/projects/[id]/route'
 import { PUT as orderPUT } from '@/app/api/agent/projects/order/route'
@@ -89,6 +106,10 @@ beforeEach(() => {
   h.getProject.mockImplementation(async (id: string) => (id === PID ? project : null))
   h.projectBytes.mockResolvedValue(0)
   h.itemByStoragePath.mockResolvedValue(null)
+  h.currentOperator.mockResolvedValue(null)
+  h.removeProjectObjects.mockResolvedValue(true)
+  h.recordPendingUpload.mockResolvedValue(undefined)
+  h.clearPendingUpload.mockResolvedValue(undefined)
   h.getVertical.mockResolvedValue({ id: VID, name: 'Roofers' })
 })
 
@@ -305,5 +326,186 @@ describe('/api/agent/projects/[id]/files/[fileId]', () => {
     expect(h.removeProjectObjects).toHaveBeenCalledWith([`${PID}/x.csv`])
     h.deleteItem.mockResolvedValue(null)
     expect((await itemDELETE(req('DELETE'), fctx())).status).toBe(404)
+  })
+})
+
+describe('pending uploads and cleanup', () => {
+  async function signed(filename = 'leads.csv') {
+    h.signProjectUpload.mockResolvedValue({ token: 'tok', signedUrl: 'https://s' })
+    return (await (await signPOST(req('POST', { filename, size: 10 }), ctx())).json()) as { path: string; upload_ticket: string }
+  }
+
+  it('sign records the path as pending before the object can exist', async () => {
+    const { path } = await signed()
+    expect(h.recordPendingUpload).toHaveBeenCalledWith(path, PID)
+    expect(h.recordPendingUpload.mock.invocationCallOrder[0]).toBeLessThan(h.signProjectUpload.mock.invocationCallOrder[0])
+  })
+
+  it('a successful finalize clears the pending row and keeps the object', async () => {
+    const { path, upload_ticket } = await signed()
+    h.downloadProjectObject.mockResolvedValue(new Uint8Array(3))
+    h.extractText.mockResolvedValue({ text: 'a', readable: true, truncated: false })
+    h.addFile.mockResolvedValue({ id: FID })
+    expect((await filePOST(req('POST', { storage_path: path, filename: 'leads.csv', upload_ticket }), ctx())).status).toBe(201)
+    expect(h.clearPendingUpload).toHaveBeenCalledWith(path)
+    expect(h.removeProjectObjects).not.toHaveBeenCalled()
+  })
+
+  it('a finalize that fails (store error) removes the object and the pending row', async () => {
+    const { path, upload_ticket } = await signed()
+    h.downloadProjectObject.mockResolvedValue(new Uint8Array(3))
+    h.extractText.mockResolvedValue({ text: null, readable: false, truncated: false })
+    h.addFile.mockRejectedValue(new Error('db down'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect((await filePOST(req('POST', { storage_path: path, filename: 'leads.csv', upload_ticket }), ctx())).status).toBe(500)
+    expect(h.removeProjectObjects).toHaveBeenCalledWith([path])
+    expect(h.clearPendingUpload).toHaveBeenCalledWith(path)
+  })
+
+  it('a finalize whose download throws also cleans up', async () => {
+    const { path, upload_ticket } = await signed()
+    h.downloadProjectObject.mockRejectedValue(new Error('storage 503'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect((await filePOST(req('POST', { storage_path: path, filename: 'leads.csv', upload_ticket }), ctx())).status).toBe(500)
+    expect(h.removeProjectObjects).toHaveBeenCalledWith([path])
+  })
+
+  it('a replay (item already there) keeps its object', async () => {
+    const { path, upload_ticket } = await signed()
+    h.itemByStoragePath.mockResolvedValue({ id: FID })
+    expect((await filePOST(req('POST', { storage_path: path, filename: 'leads.csv', upload_ticket }), ctx())).status).toBe(409)
+    expect(h.removeProjectObjects).not.toHaveBeenCalled()
+  })
+
+  it('a finalize whose name does not match the signed type is 415 and cleaned up', async () => {
+    const { path, upload_ticket } = await signed()
+    expect((await filePOST(req('POST', { storage_path: path, filename: 'leads.pdf', upload_ticket }), ctx())).status).toBe(415)
+    expect(h.removeProjectObjects).toHaveBeenCalledWith([path])
+  })
+
+  it("a CSV import ticket is not accepted (purpose-bound HMAC)", async () => {
+    const { uploadTicket } = await import('@/lib/import/ticket')
+    const { path } = await signed()
+    expect((await filePOST(req('POST', { storage_path: path, filename: 'leads.csv', upload_ticket: uploadTicket(path) }), ctx())).status).toBe(403)
+  })
+})
+
+describe('the delete race', () => {
+  it('a note or a move into a project deleted meanwhile is 404, not 500', async () => {
+    h.addNote.mockRejectedValue(new ProjectGoneError())
+    const res = await notePOST(req('POST', { content: 'x' }), ctx())
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'project_not_found' })
+    h.moveConversation.mockRejectedValue(new ProjectGoneError())
+    expect((await movePUT(req('PUT', { project_id: PID }), ctx(CID))).status).toBe(404)
+  })
+
+  it('finalize into a project deleted meanwhile is 404 and the object goes', async () => {
+    h.signProjectUpload.mockResolvedValue({ token: 'tok', signedUrl: 'https://s' })
+    const { path, upload_ticket } = (await (await signPOST(req('POST', { filename: 'a.csv', size: 1 }), ctx())).json()) as { path: string; upload_ticket: string }
+    h.downloadProjectObject.mockResolvedValue(new Uint8Array(1))
+    h.extractText.mockResolvedValue({ text: 'a', readable: true, truncated: false })
+    h.addFile.mockRejectedValue(new ProjectGoneError())
+    expect((await filePOST(req('POST', { storage_path: path, filename: 'a.csv', upload_ticket }), ctx())).status).toBe(404)
+    expect(h.removeProjectObjects).toHaveBeenCalledWith([path])
+  })
+})
+
+describe('vertical Grok Bot scope', () => {
+  const OWN = '5f3c2b1a-9d8e-4f7a-8b6c-5d4e3f2a1b0c'
+  const OTHER = '6f3c2b1a-9d8e-4f7a-8b6c-5d4e3f2a1b0c'
+  const own = { ...project, id: PID, vertical_id: OWN }
+  const theirs = { ...project, id: PID2, name: 'Theirs', vertical_id: OTHER }
+  const unlinked = { ...project, id: FID, name: 'Shared', vertical_id: null }
+  beforeEach(() => {
+    h.currentOperator.mockResolvedValue({ id: 'op-1', vertical_id: OWN, is_master: false, label: 'bot', revoked_at: null })
+    h.getProject.mockImplementation(async (id: string) => [own, theirs, unlinked].find((p) => p.id === id) ?? null)
+    h.listProjects.mockResolvedValue([own, theirs, unlinked].map((p) => ({ ...p, item_count: 0, total_bytes: 0 })))
+  })
+
+  it("lists only its own vertical's project and unlinked ones", async () => {
+    const body = await (await listGET(req())).json()
+    expect(body.projects.map((p: { id: string }) => p.id)).toEqual([PID, FID])
+  })
+
+  it("another vertical's project is 403 on every route; its own and unlinked are fine", async () => {
+    h.listItems.mockResolvedValue([])
+    h.projectConversations.mockResolvedValue([])
+    expect((await projectGET(req(), ctx(PID2))).status).toBe(403)
+    expect((await projectPATCH(req('PATCH', { instructions: 'x' }), ctx(PID2))).status).toBe(403)
+    expect((await projectDELETE(req('DELETE'), ctx(PID2))).status).toBe(403)
+    expect((await notePOST(req('POST', { content: 'x' }), ctx(PID2))).status).toBe(403)
+    expect((await signPOST(req('POST', { filename: 'a.csv', size: 1 }), ctx(PID2))).status).toBe(403)
+    expect((await itemGET(req(), fctx(PID2))).status).toBe(403)
+    expect((await itemDELETE(req('DELETE'), fctx(PID2))).status).toBe(403)
+    expect(h.updateProject).not.toHaveBeenCalled()
+    expect(h.deleteProject).not.toHaveBeenCalled()
+    expect(h.getItemText).not.toHaveBeenCalled()
+    expect((await projectGET(req(), ctx(PID))).status).toBe(200)
+    expect((await projectGET(req(), ctx(FID))).status).toBe(200)
+  })
+
+  it('cannot link a project to another vertical; may link to its own or unlink', async () => {
+    expect((await createPOST(req('POST', { name: 'x', vertical_id: OTHER }))).status).toBe(403)
+    expect((await projectPATCH(req('PATCH', { vertical_id: OTHER }), ctx(FID))).status).toBe(403)
+    h.updateProject.mockResolvedValue(own)
+    expect((await projectPATCH(req('PATCH', { vertical_id: null }), ctx(PID))).status).toBe(200)
+  })
+
+  it("cannot reorder another vertical's project", async () => {
+    expect((await orderPUT(req('PUT', { ids: [PID2, PID] }))).status).toBe(403)
+    h.reorderProjects.mockResolvedValue(2)
+    expect((await orderPUT(req('PUT', { ids: [FID, PID] }))).status).toBe(200)
+  })
+
+  it("cannot move a chat into, or out of, another vertical's project", async () => {
+    h.moveConversation.mockResolvedValue(true)
+    expect((await movePUT(req('PUT', { project_id: PID2 }), ctx(CID))).status).toBe(403)
+    h.getConversation.mockResolvedValue({ id: CID, title: 't', created_at: '', updated_at: '', project_id: PID2 })
+    expect((await movePUT(req('PUT', { project_id: null }), ctx(CID))).status).toBe(403)
+    h.getConversation.mockResolvedValue({ id: CID, title: 't', created_at: '', updated_at: '', project_id: null })
+    expect((await movePUT(req('PUT', { project_id: PID }), ctx(CID))).status).toBe(200)
+  })
+
+  it('the master bot and the internal bearer are unscoped', async () => {
+    h.currentOperator.mockResolvedValue({ id: 'op-m', vertical_id: null, is_master: true, label: 'Master', revoked_at: null })
+    h.listItems.mockResolvedValue([])
+    h.projectConversations.mockResolvedValue([])
+    expect((await projectGET(req(), ctx(PID2))).status).toBe(200)
+    h.currentOperator.mockResolvedValue({ id: 'op-1', vertical_id: OWN, is_master: false, label: 'bot', revoked_at: null })
+    h.requireOwner.mockResolvedValue({ ok: true, via: 'internal', user: null })
+    expect((await projectGET(req(), ctx(PID2))).status).toBe(200)
+  })
+})
+
+describe('/api/cron/project-uploads', () => {
+  const sweep = (secret = 'hook') => sweepPOST(new Request('http://localhost/api/cron/project-uploads', { method: 'POST', headers: { 'X-Lume-Hook-Secret': secret } }))
+  beforeEach(() => {
+    process.env.LUME_HOOK_SECRET = 'hook'
+  })
+
+  it('needs the hook secret', async () => {
+    expect((await sweep('wrong')).status).toBe(401)
+    expect(h.stalePendingUploads).not.toHaveBeenCalled()
+  })
+
+  it('removes objects of uploads signed over an hour ago and never finalized; keeps finalized ones', async () => {
+    h.stalePendingUploads.mockResolvedValue(['p/a.csv', 'p/b.pdf'])
+    h.pathsInUse.mockResolvedValue(new Set(['p/b.pdf']))
+    const res = await sweep()
+    expect(await res.json()).toEqual({ ok: true, removed: 1, kept: 1 })
+    const cutoff = h.stalePendingUploads.mock.calls[0][0] as Date
+    expect(Date.now() - cutoff.getTime()).toBeGreaterThanOrEqual(60 * 60 * 1000 - 1000)
+    expect(h.removeProjectObjects).toHaveBeenCalledWith(['p/a.csv'])
+    expect(h.deletePendingUploads).toHaveBeenCalledWith(['p/a.csv', 'p/b.pdf'])
+  })
+
+  it('a failed Storage delete keeps the orphan rows for the next run', async () => {
+    h.stalePendingUploads.mockResolvedValue(['p/a.csv', 'p/b.pdf'])
+    h.pathsInUse.mockResolvedValue(new Set(['p/b.pdf']))
+    h.removeProjectObjects.mockResolvedValue(false)
+    const res = await sweep()
+    expect(res.status).toBe(502)
+    expect(h.deletePendingUploads).toHaveBeenCalledWith(['p/b.pdf'])
   })
 })

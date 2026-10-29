@@ -258,3 +258,41 @@ export async function projectConversations(projectId: string, limit = 200): Prom
   if (res.error) throw new DbError('projectConversations', res.error)
   return (res.data ?? []) as ConversationSummary[]
 }
+
+/** A signed upload awaiting finalize (swept after an hour if it never is). */
+export async function recordPendingUpload(path: string, projectId: string): Promise<void> {
+  const res = await createServiceClient().from('agent_project_uploads').insert({ storage_path: path, project_id: projectId })
+  if (res.error) throw new DbError('recordPendingUpload', res.error)
+}
+
+/** Best effort: the sweep removes a leftover row later anyway. */
+export async function clearPendingUpload(path: string): Promise<void> {
+  const res = await createServiceClient().from('agent_project_uploads').delete().eq('storage_path', path)
+  if (res.error) console.error('[agent-projects] clearPendingUpload failed:', res.error.message)
+}
+
+/** Pending uploads older than `before`, oldest first. */
+export async function stalePendingUploads(before: Date, limit = 200): Promise<string[]> {
+  const res = await createServiceClient()
+    .from('agent_project_uploads')
+    .select('storage_path')
+    .lt('created_at', before.toISOString())
+    .order('created_at')
+    .limit(limit)
+  if (res.error) throw new DbError('stalePendingUploads', res.error)
+  return ((res.data ?? []) as { storage_path: string }[]).map((r) => r.storage_path)
+}
+
+/** Which of `paths` an item points at (finalized; never delete those objects). */
+export async function pathsInUse(paths: string[]): Promise<Set<string>> {
+  if (!paths.length) return new Set()
+  const res = await createServiceClient().from('agent_project_files').select('storage_path').in('storage_path', paths)
+  if (res.error) throw new DbError('pathsInUse', res.error)
+  return new Set(((res.data ?? []) as { storage_path: string }[]).map((r) => r.storage_path))
+}
+
+export async function deletePendingUploads(paths: string[]): Promise<void> {
+  if (!paths.length) return
+  const res = await createServiceClient().from('agent_project_uploads').delete().in('storage_path', paths)
+  if (res.error) throw new DbError('deletePendingUploads', res.error)
+}

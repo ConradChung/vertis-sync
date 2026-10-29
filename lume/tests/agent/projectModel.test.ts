@@ -191,3 +191,19 @@ describe('pickInlineIds', () => {
     expect(ids).toEqual(['new', 'old'])
   })
 })
+
+describe('project scope', () => {
+  it('full access when unscoped; a vertical bot gets its own and unlinked projects only', async () => {
+    const { canUseProject, canLinkVertical } = await import('@/lib/agent/projectModel')
+    expect(canUseProject(null, { vertical_id: 'v2' })).toBe(true)
+    const bot = { verticalId: 'v1' }
+    expect(canUseProject(bot, { vertical_id: 'v1' })).toBe(true)
+    expect(canUseProject(bot, { vertical_id: null })).toBe(true)
+    expect(canUseProject(bot, { vertical_id: 'v2' })).toBe(false)
+    expect(canLinkVertical(bot, 'v1')).toBe(true)
+    expect(canLinkVertical(bot, null)).toBe(true)
+    expect(canLinkVertical(bot, undefined)).toBe(true)
+    expect(canLinkVertical(bot, 'v2')).toBe(false)
+    expect(canLinkVertical(null, 'v2')).toBe(true)
+  })
+})

@@ -1,24 +1,26 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireOwner } from '@/lib/auth/guards'
-import { addFile, getProject, itemByStoragePath, projectBytes } from '@/lib/agent/projects'
+import { addFile, clearPendingUpload, itemByStoragePath, projectBytes } from '@/lib/agent/projects'
 import { extractText } from '@/lib/agent/projectExtract'
 import { fileTypeOf, MAX_FILE_BYTES, MAX_PROJECT_BYTES, mimeFor } from '@/lib/agent/projectModel'
 import { downloadProjectObject, PROJECT_UPLOAD_PATH, removeProjectObjects } from '@/lib/agent/projectStorage'
-import { badId, notFound } from '@/lib/agent/projectHttp'
-import { dbErrorResponse } from '@/lib/http/errors'
+import { verifyProjectUploadTicket } from '@/lib/agent/projectTicket'
+import { badId, projectErrorResponse, projectScope, requireProject } from '@/lib/agent/projectHttp'
 import { parseJsonBody, uuidParam } from '@/lib/http/json'
-import { verifyUploadTicket } from '@/lib/import/ticket'
 
 /**
  * Step 2 of adding a file: the browser has put it at the signed path.
  * Checks, in order: the path is `<this project>/<uuid>.<ext>` (400), the
- * ticket is its HMAC (403), the name's type is supported and matches the
- * path's extension (415), no item already points at it (409), the object
- * exists (404), it fits 20 MB and the project's 200 MB (413; the object is
- * removed). Then the text is extracted (lib/agent/projectExtract.ts) and the
- * item stored; a file with no extractable text is stored as not readable.
- * Body `{ storage_path, filename, upload_ticket, mime? }` → 201 `{ item }`.
+ * ticket is its purpose-bound HMAC (403), the name's type is supported and
+ * matches the path's extension (415), the caller may use the project
+ * (404 / 403), no item already points at it (409), the object exists (404),
+ * it fits 20 MB and the project's 200 MB (413). Then the text is extracted
+ * (lib/agent/projectExtract.ts: a PDF that takes over ~40 s is "not
+ * readable") and the item stored. Any rejection or failure after the ticket
+ * check removes the object and its pending-upload row (except a replay, whose
+ * object belongs to the item already there). Body
+ * `{ storage_path, filename, upload_ticket, mime? }` → 201 `{ item }`.
  */
 
 export const maxDuration = 60
@@ -45,23 +47,36 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   const m = PROJECT_UPLOAD_PATH.exec(path)
   if (!m || m[1] !== id) return NextResponse.json({ error: 'invalid_path' }, { status: 400 })
-  if (!verifyUploadTicket(path, upload_ticket)) return NextResponse.json({ error: 'invalid_ticket' }, { status: 403 })
-  const type = fileTypeOf(filename)
-  if (!type || fileTypeOf(`x.${m[2]}`) !== type) return NextResponse.json({ error: 'unsupported_media_type' }, { status: 415 })
+  if (!verifyProjectUploadTicket(path, upload_ticket)) return NextResponse.json({ error: 'invalid_ticket' }, { status: 403 })
+
+  // From here the path is one we signed: anything but success drops the object.
+  let keep = false
+  const discard = async () => {
+    if (keep) return
+    await removeProjectObjects([path])
+    await clearPendingUpload(path)
+  }
+  const reject = async (error: string, status: number) => {
+    await discard()
+    return NextResponse.json({ error }, { status })
+  }
 
   try {
-    if (!(await getProject(id))) return notFound()
-    if (await itemByStoragePath(path)) return NextResponse.json({ error: 'already_added' }, { status: 409 })
+    const type = fileTypeOf(filename)
+    if (!type || fileTypeOf(`x.${m[2]}`) !== type) return await reject('unsupported_media_type', 415)
+    const found = await requireProject(id, await projectScope(req, auth))
+    if ('response' in found) {
+      await discard()
+      return found.response
+    }
+    if (await itemByStoragePath(path)) {
+      keep = true
+      return NextResponse.json({ error: 'already_added' }, { status: 409 })
+    }
     const bytes = await downloadProjectObject(path, MAX_FILE_BYTES)
-    if (bytes === null) return NextResponse.json({ error: 'upload_missing' }, { status: 404 })
-    if (bytes === 'too_large') {
-      await removeProjectObjects([path])
-      return NextResponse.json({ error: 'too_large' }, { status: 413 })
-    }
-    if ((await projectBytes(id)) + bytes.byteLength > MAX_PROJECT_BYTES) {
-      await removeProjectObjects([path])
-      return NextResponse.json({ error: 'project_full' }, { status: 413 })
-    }
+    if (bytes === null) return await reject('upload_missing', 404)
+    if (bytes === 'too_large') return await reject('too_large', 413)
+    if ((await projectBytes(id)) + bytes.byteLength > MAX_PROJECT_BYTES) return await reject('project_full', 413)
     const extracted = await extractText(bytes, type)
     try {
       const item = await addFile({
@@ -74,13 +89,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         readable: extracted.readable,
         truncated: extracted.truncated,
       })
+      keep = true
+      await clearPendingUpload(path)
       return NextResponse.json({ item }, { status: 201 })
     } catch (err) {
-      // No row points at the object (unless a racing finalize just wrote one).
-      if ((err as { code?: unknown } | null)?.code !== '23505') await removeProjectObjects([path])
+      // A racing finalize already wrote the row for this path: its object stays.
+      if ((err as { code?: unknown } | null)?.code === '23505') keep = true
       throw err
     }
   } catch (err) {
-    return dbErrorResponse(err, 'api/agent/projects/[id]/files')
+    await discard()
+    return projectErrorResponse(err, 'api/agent/projects/[id]/files')
   }
 }

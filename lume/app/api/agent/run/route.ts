@@ -19,7 +19,7 @@ import { withKnowledge } from '@/lib/agent/memoryModel'
 import { skillContext } from '@/lib/agent/skillModel'
 import { createSkill, findSkillByName, getSkill, listSkills, markSkillRun } from '@/lib/agent/skills'
 import { getProject, itemsForBlock, projectForVertical } from '@/lib/agent/projects'
-import { projectBlock, resolveNewChatProject } from '@/lib/agent/projectModel'
+import { canUseProject, projectBlock, resolveNewChatProject, type ProjectScope } from '@/lib/agent/projectModel'
 import { toRunnableTools, type ToolHooks } from '@/lib/agent/runnable'
 import { failStaleRuns, insertAgentRun, updateAgentRun, type AgentRunPatch } from '@/lib/agent/runs'
 import { buildTools, type ToolDeps } from '@/lib/agent/tools'
@@ -81,6 +81,9 @@ import type { Operator } from '@/lib/operators/types'
  * small items inline; `projectBlock`) as a second, cached system block after
  * the stable prompt, and read_project_file reads only that project's files.
  * A project that fails to load is logged and the run goes on without it.
+ * A vertical (non-master) Grok Bot may pass `project_id` only for its own
+ * vertical's linked project (403 `forbidden_project` otherwise), and a chat it
+ * continues that is filed in another vertical's project gets no block.
  *
  * SSE events (`data: <json>\n\n`): run (`{ id, conversation_id, project_id? }`), text,
  * tool_start, tool_end, approval, done, error.
@@ -135,6 +138,9 @@ export async function POST(req: Request) {
   // A Grok Bot on the owner session; never the agent's internal bearer.
   const operator = auth.via === 'session' ? await currentOperator(req) : null
 
+  // A vertical Grok Bot is confined to its own vertical's projects (and unlinked ones).
+  const scope: ProjectScope = operator && !operator.is_master ? { verticalId: operator.vertical_id } : null
+
   let runId: string
   let conversationId: string
   let projectId: string | null = null
@@ -163,8 +169,13 @@ export async function POST(req: Request) {
         : ownerVertical
           ? { vertical_id: ownerVertical.id, operator_id: null }
           : undefined
+      const requested = body.data.project_id?.toLowerCase() ?? null
+      if (requested && scope) {
+        const own = scope.verticalId ? await projectForVertical(scope.verticalId) : null
+        if (own?.id !== requested) return NextResponse.json({ error: 'forbidden_project' }, { status: 403 })
+      }
       const filed = await resolveNewChatProject(
-        { requestedProjectId: body.data.project_id?.toLowerCase() ?? null, verticalId: origin?.vertical_id ?? null },
+        { requestedProjectId: requested, verticalId: origin?.vertical_id ?? null },
         { getProject, projectForVertical }
       )
       if (!filed.ok) return NextResponse.json({ error: 'project_not_found' }, { status: 404 })
@@ -215,7 +226,7 @@ export async function POST(req: Request) {
         return ''
       })
       // This conversation's project only: its row and its own items, never another's.
-      const project = projectId ? await loadProjectBlock(projectId) : null
+      const project = projectId ? await loadProjectBlock(projectId, scope) : null
       const reply = await executeRun({
         runId,
         prompt: withKnowledge(knowledge, prompt),
@@ -256,11 +267,14 @@ export async function POST(req: Request) {
 
 const errText = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
-/** The Project block for one project, or null when it is gone or fails to load (logged; the run goes on). */
-async function loadProjectBlock(projectId: string): Promise<{ id: string; block: string } | null> {
+/**
+ * The Project block for one project, or null when it is gone, out of the
+ * caller's scope, or fails to load (logged; the run goes on).
+ */
+async function loadProjectBlock(projectId: string, scope: ProjectScope): Promise<{ id: string; block: string } | null> {
   try {
     const p = await getProject(projectId)
-    if (!p) return null
+    if (!p || !canUseProject(scope, p)) return null
     return { id: p.id, block: projectBlock(p, await itemsForBlock(p.id)) }
   } catch (err) {
     console.error('[api/agent/run] project load failed:', errText(err))

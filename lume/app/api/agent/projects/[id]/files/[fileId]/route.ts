@@ -3,16 +3,16 @@ import { deleteItem, getItemText } from '@/lib/agent/projects'
 import { requireOwner } from '@/lib/auth/guards'
 import { readChunk } from '@/lib/agent/projectModel'
 import { removeProjectObjects } from '@/lib/agent/projectStorage'
-import { badId, notFound } from '@/lib/agent/projectHttp'
-import { dbErrorResponse } from '@/lib/http/errors'
+import { badId, notFound, projectErrorResponse, projectScope, requireProject } from '@/lib/agent/projectHttp'
 import { uuidParam } from '@/lib/http/json'
 
 /**
  * One file or note of one project. The lookup always matches both ids, so a
  * file id from another project is a 404 here (the agent's read_project_file
- * only ever passes its own chat's project).
+ * only ever passes its own chat's project); a vertical Grok Bot gets 403 for
+ * another vertical's project.
  *  GET `?offset=` → `{ id, name, kind, readable, truncated, text, offset, next_offset, total_chars }`
- *  DELETE → removes the row and its Storage object.
+ *  DELETE → removes the row and its Storage object (404 when already gone).
  */
 type Ctx = { params: Promise<{ id: string; fileId: string }> }
 
@@ -28,6 +28,8 @@ export async function GET(req: Request, ctx: Ctx) {
   if (!id || !fileId) return badId()
   const offset = Number(new URL(req.url).searchParams.get('offset') ?? 0)
   try {
+    const found = await requireProject(id, await projectScope(req, auth))
+    if ('response' in found) return found.response
     const item = await getItemText(id, fileId)
     if (!item) return notFound()
     const chunk = readChunk(item.text_content ?? '', Number.isFinite(offset) ? offset : 0)
@@ -41,7 +43,7 @@ export async function GET(req: Request, ctx: Ctx) {
       ...(item.readable ? {} : { note: 'Stored, but no text could be extracted from this file.' }),
     })
   } catch (err) {
-    return dbErrorResponse(err, 'api/agent/projects/[id]/files/[fileId]')
+    return projectErrorResponse(err, 'api/agent/projects/[id]/files/[fileId]')
   }
 }
 
@@ -51,11 +53,13 @@ export async function DELETE(req: Request, ctx: Ctx) {
   const { id, fileId } = await ids(ctx)
   if (!id || !fileId) return badId()
   try {
+    const found = await requireProject(id, await projectScope(req, auth))
+    if ('response' in found) return found.response
     const gone = await deleteItem(id, fileId)
     if (!gone) return notFound()
     if (gone.storage_path) await removeProjectObjects([gone.storage_path])
     return NextResponse.json({ ok: true })
   } catch (err) {
-    return dbErrorResponse(err, 'api/agent/projects/[id]/files/[fileId]')
+    return projectErrorResponse(err, 'api/agent/projects/[id]/files/[fileId]')
   }
 }

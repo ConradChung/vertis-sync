@@ -40,13 +40,15 @@ export async function downloadProjectObject(path: string, maxBytes = MAX_FILE_BY
   return new Uint8Array(await data.arrayBuffer())
 }
 
-/** Best effort: a failed removal is logged, never thrown. */
-export async function removeProjectObjects(paths: string[]): Promise<void> {
-  if (!paths.length) return
+/** Best effort: a failed removal is logged, never thrown. true when Storage confirmed it. */
+export async function removeProjectObjects(paths: string[]): Promise<boolean> {
+  if (!paths.length) return true
   try {
     const { error } = await createServiceClient().storage.from(PROJECT_BUCKET).remove(paths)
-    if (error) console.error('[agent-projects] remove failed:', error.message)
+    if (!error) return true
+    console.error('[agent-projects] remove failed:', error.message)
   } catch (err) {
     console.error('[agent-projects] remove failed:', err instanceof Error ? err.message : err)
   }
+  return false
 }

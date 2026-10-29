@@ -243,3 +243,18 @@ export async function resolveNewChatProject(
   const linked = await deps.projectForVertical(input.verticalId)
   return { ok: true, projectId: linked?.id ?? null }
 }
+
+/**
+ * Who may use a project. `scope` is null for full access (the owner, the
+ * master Grok Bot, the agent's internal bearer); a vertical Grok Bot's scope
+ * is its vertical: it may use its own vertical's project and unlinked ones,
+ * never another vertical's.
+ */
+export type ProjectScope = { verticalId: string | null } | null
+
+export const canUseProject = (scope: ProjectScope, project: Pick<Project, 'vertical_id'>) =>
+  !scope || project.vertical_id === null || project.vertical_id === scope.verticalId
+
+/** Linking (create / PATCH vertical_id): a vertical bot may link only to its own vertical, or unlink. */
+export const canLinkVertical = (scope: ProjectScope, verticalId: string | null | undefined) =>
+  !scope || verticalId === undefined || verticalId === null || verticalId === scope.verticalId

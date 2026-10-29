@@ -758,6 +758,47 @@ describe('projects', () => {
     expect(typeof system()).toBe('string')
   })
 
+  describe('a vertical Grok Bot', () => {
+    const OTHER = '9a1c2b3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d'
+    const bot = { id: 'op-1', vertical_id: 'v-roof', is_master: false, label: 'Roofers bot', revoked_at: null }
+    beforeEach(() => {
+      h.currentOperator.mockResolvedValue(bot)
+      h.getVertical.mockResolvedValue({ id: 'v-roof', name: 'Roofers', campaign_ids: [] })
+    })
+
+    it("may start a chat in its own vertical's project", async () => {
+      h.projectForVertical.mockResolvedValue({ id: PID, name: 'Roofers Austin' })
+      h.getProject.mockResolvedValue({ ...roofers, vertical_id: 'v-roof' })
+      fakeRunner([{ text: 'ok' }])
+      await events(await post('hi', { project_id: PID }))
+      expect(h.createConversation).toHaveBeenCalledWith('hi', { vertical_id: 'v-roof', operator_id: 'op-1' }, PID)
+    })
+
+    it("any other project_id is 403 and nothing is created", async () => {
+      h.projectForVertical.mockResolvedValue({ id: PID, name: 'Roofers Austin' })
+      h.getProject.mockResolvedValue({ ...roofers, id: OTHER, vertical_id: 'v-dent' })
+      const res = await post('hi', { project_id: OTHER })
+      expect(res.status).toBe(403)
+      expect(await res.json()).toEqual({ error: 'forbidden_project' })
+      expect(h.createConversation).not.toHaveBeenCalled()
+      expect(h.insertAgentRun).not.toHaveBeenCalled()
+    })
+
+    it('with no linked project, any project_id is 403', async () => {
+      expect((await post('hi', { project_id: PID })).status).toBe(403)
+    })
+
+    it("an existing chat filed in another vertical's project gets no block and no project tool scope", async () => {
+      h.getConversation.mockResolvedValue({ id: CONV, title: 'Old', created_at: '', updated_at: '', project_id: OTHER })
+      h.getProject.mockResolvedValue({ ...roofers, id: OTHER, vertical_id: 'v-dent' })
+      h.itemsForBlock.mockResolvedValue([note])
+      fakeRunner([{ text: 'ok' }])
+      await events(await post('next', { conversation_id: CONV }))
+      expect(typeof system()).toBe('string')
+      expect(h.itemsForBlock).not.toHaveBeenCalled()
+    })
+  })
+
   it('a project that fails to load never blocks the run (no block, logged)', async () => {
     h.getConversation.mockResolvedValue({ id: CONV, title: 'Old', created_at: '', updated_at: '', project_id: PID })
     h.getProject.mockResolvedValue(roofers)
