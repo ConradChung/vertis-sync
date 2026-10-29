@@ -31,19 +31,33 @@ export async function addToBlocklist(value: string): Promise<'added' | 'already'
 
 const domainOf = (email: string) => email.split('@')[1]?.toLowerCase() ?? ''
 
+export const BLOCKLIST_PAGE = 100
+export const BLOCKLIST_MAX_PAGES = 5
+
 /**
- * Is the address (or its domain) on the Instantly blocklist? Two reads of
- * `GET /block-lists-entries?search=` (the address, then the domain), matched
- * exactly here. Throws on an Instantly failure: callers fail closed.
+ * Is the address (or its domain) on the Instantly blocklist? Searches
+ * `GET /block-lists-entries?search=` for the address, then the domain,
+ * paging through every result (`next_starting_after`) and matching exactly
+ * here. If a search still has a full page left after BLOCKLIST_MAX_PAGES, or a
+ * full page comes back with no cursor, the answer cannot be proven: it throws
+ * `blocklist_unverifiable` (as on any Instantly failure), and callers refuse.
  */
 export async function isBlocked(email: string): Promise<boolean> {
   const addr = email.trim().toLowerCase()
   const domain = domainOf(addr)
   for (const term of [addr, domain].filter(Boolean)) {
-    const body = (await instantlyCall('GET', `/block-lists-entries?search=${encodeURIComponent(term)}&limit=50`)) as { items?: { bl_value?: unknown }[] }
-    for (const it of body.items ?? []) {
-      const v = typeof it.bl_value === 'string' ? it.bl_value.trim().toLowerCase() : ''
-      if (v && (v === addr || v === domain)) return true
+    let cursor: string | null = null
+    for (let page = 0; ; page++) {
+      const q = `search=${encodeURIComponent(term)}&limit=${BLOCKLIST_PAGE}${cursor ? `&starting_after=${encodeURIComponent(cursor)}` : ''}`
+      const body = (await instantlyCall('GET', `/block-lists-entries?${q}`)) as { items?: { bl_value?: unknown }[]; next_starting_after?: unknown }
+      const items = body.items ?? []
+      for (const it of items) {
+        const v = typeof it.bl_value === 'string' ? it.bl_value.trim().toLowerCase() : ''
+        if (v && (v === addr || v === domain)) return true
+      }
+      if (items.length < BLOCKLIST_PAGE) break
+      cursor = typeof body.next_starting_after === 'string' && body.next_starting_after ? body.next_starting_after : null
+      if (!cursor || page + 1 >= BLOCKLIST_MAX_PAGES) throw new Error(`blocklist_unverifiable: more than ${page + 1} page(s) of matches for ${term}`)
     }
   }
   return false
