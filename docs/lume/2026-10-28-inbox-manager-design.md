@@ -55,6 +55,8 @@ trail and one supervised card. Approval works the same whether it comes from Lum
 5. **3e Grants** (if approved). Scoped send grants and `decided_via='grant'`.
 6. **3f Webhook push** (if approved). Per-vertical Grok webhook URL. Lume POSTs to it on a positive reply or a new confirmation.
 
+Status: 3a–3c built 2026-10-28 on branch `lume` (not deployed). Routes and the bot flow: `docs/lume/INBOX-MANAGER-API.md`.
+
 ## Decisions (owner, 2026-10-28)
 
 - Send path: through Lume.
