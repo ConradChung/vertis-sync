@@ -92,6 +92,10 @@ describe('threadView / newerInbound', () => {
     const d = mapInboxEmail(raw({ id: 'o2', ue_type: 1, from_address_email: 'frank@ours.com', timestamp_email: '2026-10-29T09:00:00.000Z' }))!
     expect(newerInbound([a, b, d], 'i1')).toBeNull()
   })
+  it('newerInbound: another inbound with no timestamp cannot be ordered, so it counts as newer', () => {
+    const undated = { ...c, id: 'i3', at: null }
+    expect(newerInbound([a, b, undated], 'i1')?.id).toBe('i3')
+  })
   it('newerInbound: an answered message missing from the thread is treated as unsafe', () => {
     expect(newerInbound([a, c], 'gone')?.id).toBe('i2')
   })

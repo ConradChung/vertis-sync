@@ -233,7 +233,10 @@ export function newerInbound(emails: readonly InboxEmail[], replyToId: string): 
   const sorted = [...emails].sort(byTime)
   const idx = sorted.findIndex((m) => m.id === replyToId)
   const after = idx === -1 ? sorted : sorted.slice(idx + 1)
-  return after.find((m) => m.direction === 'in' && m.id !== replyToId) ?? null
+  const later = after.find((m) => m.direction === 'in' && m.id !== replyToId)
+  if (later) return later
+  // An inbound message without a timestamp cannot be placed: treat it as newer.
+  return sorted.find((m) => m.direction === 'in' && m.id !== replyToId && !m.at) ?? null
 }
 
 // ---------------------------------------------------------------------------
