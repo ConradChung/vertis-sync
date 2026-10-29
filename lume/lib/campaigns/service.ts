@@ -10,20 +10,25 @@ import type { CampaignJob, LeadSources } from '@/lib/campaigns/types'
  * passed `requireOwner()` first.
  */
 
-/** An awaiting action of `kind` whose `payload->>field` equals `value`. */
+/**
+ * An action of `kind` whose `payload->>field` equals `value`, in one of
+ * `statuses` (default: awaiting only). Newest first.
+ */
 export async function findAwaitingActionBy(
   kind: PendingActionKind,
   field: string,
-  value: string
+  value: string,
+  statuses: readonly PendingActionRow['status'][] = ['awaiting']
 ): Promise<PendingActionRow | null> {
   if (!/^[a-z_]+$/.test(field)) throw new Error(`bad payload field: ${field}`)
   const sb = createServiceClient()
   const res = await sb
     .from('pending_actions')
     .select('*')
-    .eq('status', 'awaiting')
+    .in('status', [...statuses])
     .eq('kind', kind)
     .eq(`payload->>${field}`, value)
+    .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
   if (res.error) throw new DbError('findAwaitingActionBy', res.error)

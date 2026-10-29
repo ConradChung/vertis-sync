@@ -75,7 +75,12 @@ describe('POST /api/actions — campaign kinds', () => {
     expect(body).toMatchObject({ ok: true, action: { id: 'act-1', kind } })
     expect(typeof body.action.summary).toBe('string')
 
-    expect(findAwaitingActionBy).toHaveBeenCalledWith(kind, key, value)
+    if (kind === 'send_reply') {
+      // One reply per inbound message: an executed or in-flight reply blocks too (pending_actions_one_reply_per_inbound_idx).
+      expect(findAwaitingActionBy).toHaveBeenCalledWith(kind, key, value, ['awaiting', 'approved', 'executing', 'executed'])
+    } else {
+      expect(findAwaitingActionBy).toHaveBeenCalledWith(kind, key, value)
+    }
     expect(svc.insertPendingAction).toHaveBeenCalledTimes(1)
     const row = svc.insertPendingAction.mock.calls[0][0]
     expect(row).toMatchObject({ kind, requested_by: 'user', payload: { ...payload, campaign_name: 'Kaspen PM' } })
@@ -171,6 +176,14 @@ describe('POST /api/actions — campaign kinds', () => {
     for (const [, init] of fetchSpy.mock.calls as unknown as [string, RequestInit | undefined][]) {
       expect(init?.method ?? 'GET').toBe('GET')
     }
+  })
+
+  it('send_reply to an inbound message already answered → 409 duplicate pointing at the earlier reply', async () => {
+    findAwaitingActionBy.mockResolvedValue({ id: 'sent-before', status: 'executed' })
+    const res = await post({ kind: 'send_reply', payload: { eaccount: 'me@send.com', reply_to_uuid: 'e2', body: 'again' } })
+    expect(res.status).toBe(409)
+    expect(JSON.stringify(await res.json())).toContain('sent-before')
+    expect(svc.insertPendingAction).not.toHaveBeenCalled()
   })
 
   it('23505 from the campaign unique index → 409 duplicate', async () => {

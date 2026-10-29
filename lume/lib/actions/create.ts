@@ -56,6 +56,13 @@ export const JOB_KINDS: ReadonlySet<PendingActionKind> = new Set<PendingActionKi
 
 const LOWER_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
+/**
+ * send_reply: one reply per inbound message, whatever stage the first is at
+ * (migration lume_inbox_replies, pending_actions_one_reply_per_inbound_idx);
+ * a failed, denied or expired one does not block a new draft.
+ */
+export const BLOCKING_REPLY_STATUSES = ['awaiting', 'approved', 'executing', 'executed'] as const satisfies readonly PendingActionRow['status'][]
+
 /** Kinds that must name their rule (`meta.ruleId`). */
 const RULE_KINDS: ReadonlySet<PendingActionKind> = new Set<PendingActionKind>(['activate_rule', 'delete_rule'])
 
@@ -159,7 +166,9 @@ export async function createAction(
       : ruleId
         ? findAwaitingRuleAction(kind, ruleId)
         : campaignKey
-          ? findAwaitingActionBy(kind, campaignKey.field, campaignKey.value)
+          ? kind === 'send_reply'
+            ? findAwaitingActionBy(kind, campaignKey.field, campaignKey.value, BLOCKING_REPLY_STATUSES)
+            : findAwaitingActionBy(kind, campaignKey.field, campaignKey.value)
           : Promise.resolve(null)
 
   const existing = await findExisting()

@@ -8,6 +8,9 @@ import {
   sendReply,
 } from '@/lib/adapters/instantlyWrite'
 import { sendMessage } from '@/lib/adapters/telegram'
+import { getEmail, getThreadEmails } from '@/lib/adapters/instantlyEmails'
+import { newerInbound } from '@/lib/inbox/model'
+import { closeReply } from '@/lib/inbox/replies'
 import { alert, alertLink, titleFrom } from '@/lib/alerts'
 import { routeItemForAction } from '@/lib/operators/route'
 import { createOperatorKey, getVertical } from '@/lib/operators/store'
@@ -208,14 +211,58 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
     return { rule_id: ruleId, deleted: true }
   },
 
-  async send_reply(p) {
-    const sent = await sendReply({
-      eaccount: need(p, 'eaccount'),
-      reply_to_uuid: need(p, 'reply_to_uuid'),
-      subject: str(p.subject) ?? 'Re:',
-      body: need(p, 'body'),
-    })
-    return { reply_to_uuid: need(p, 'reply_to_uuid'), email_id: sent.id ?? null }
+  /**
+   * Reply to one inbound email, safely (inbox manager 3b):
+   *  1. re-read the email being answered and its whole thread FRESH from
+   *     Instantly (no cache; waits for a /emails slot rather than guessing);
+   *  2. abort `newer_inbound` if the lead (or anyone) wrote again after it:
+   *     the draft answers an old message;
+   *  3. reply only from the inbox that received it (`eaccount_mismatch`
+   *     otherwise), through /emails/reply on that email, so it lands in the
+   *     same thread;
+   *  4. then mark the reply handled and ack its alert (never fails the send).
+   * One reply per inbound message is DB-enforced
+   * (pending_actions_one_reply_per_inbound_idx). If the re-check cannot be
+   * made, nothing is sent.
+   */
+  async send_reply(p, action) {
+    const replyTo = need(p, 'reply_to_uuid')
+    const eaccount = need(p, 'eaccount').toLowerCase()
+    const body = need(p, 'body')
+    let answered
+    let thread
+    try {
+      answered = await getEmail(replyTo, { fresh: true })
+      thread = answered ? await getThreadEmails(answered.thread_id, { fresh: true }) : []
+    } catch (err) {
+      throw new ActionFailure(`could not re-check the live thread, nothing was sent: ${err instanceof Error ? err.message : String(err)}`, { reply_to_uuid: replyTo })
+    }
+    if (!answered) throw new ActionFailure('email_not_found: the email being answered is not in Instantly any more; nothing was sent', { reply_to_uuid: replyTo })
+    if (answered.direction !== 'in') throw new ActionFailure('not_an_inbound_email: that email is one of ours; nothing was sent', { reply_to_uuid: replyTo })
+    if (answered.eaccount && answered.eaccount !== eaccount) {
+      throw new ActionFailure(`eaccount_mismatch: the reply was received by ${answered.eaccount}, not ${eaccount}; nothing was sent`, {
+        reply_to_uuid: replyTo,
+        received_by: answered.eaccount,
+      })
+    }
+    const newer = newerInbound(thread, replyTo)
+    if (newer) {
+      throw new ActionFailure('newer_inbound: a newer message arrived in this thread after the one this reply answers; nothing was sent. Read the thread and draft again.', {
+        reply_to_uuid: replyTo,
+        newer_inbound: true,
+        newer_reply_to_uuid: newer.id,
+        newer_at: newer.at,
+        thread_id: answered.thread_id,
+      })
+    }
+    const subject = str(p.subject) ?? (answered.subject ? (/^re:/i.test(answered.subject) ? answered.subject : `Re: ${answered.subject}`) : 'Re:')
+    const sent = await sendReply({ eaccount, reply_to_uuid: replyTo, subject, body })
+    try {
+      await closeReply(replyTo, 'replied', { actionId: action.id })
+    } catch (err) {
+      console.error('[actions] closing the reply failed:', err instanceof Error ? err.message : err)
+    }
+    return { reply_to_uuid: replyTo, email_id: sent.id ?? null, thread_id: answered.thread_id, eaccount }
   },
 
   async pause_campaign(p) {

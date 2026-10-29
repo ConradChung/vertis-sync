@@ -49,6 +49,11 @@ const ins = vi.hoisted(() => ({
 }))
 vi.mock('@/lib/adapters/instantlyWrite', () => ins)
 
+const em = vi.hoisted(() => ({ getEmail: vi.fn(), getThreadEmails: vi.fn() }))
+vi.mock('@/lib/adapters/instantlyEmails', () => em)
+const inboxReplies = vi.hoisted(() => ({ closeReply: vi.fn() }))
+vi.mock('@/lib/inbox/replies', () => inboxReplies)
+
 const tg = vi.hoisted(() => ({ sendMessage: vi.fn(), editMessage: vi.fn(), sendDecisionNote: vi.fn(), sendActionPrompt: vi.fn() }))
 vi.mock('@/lib/adapters/telegram', () => tg)
 
@@ -299,11 +304,86 @@ describe('executeAction dispatch table', () => {
     expect(store.deleteRule).toHaveBeenCalledWith(RULE)
   })
 
-  it('send_reply: Instantly reply with eaccount, reply_to_uuid, body', async () => {
-    store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi' }))
-    ins.sendReply.mockResolvedValue({ id: 'e-1' })
-    expect(await executeAction(ID)).toMatchObject({ status: 'executed', result: { email_id: 'e-1' } })
-    expect(ins.sendReply).toHaveBeenCalledWith({ eaccount: 'me@x.com', reply_to_uuid: 'u-1', subject: 'Re:', body: 'hi' })
+  describe('send_reply', () => {
+    const mail = (id: string, direction: 'in' | 'out', at: string, extra: Record<string, unknown> = {}) => ({
+      id, thread_id: 'th-1', direction, eaccount: 'me@x.com', from: direction === 'in' ? 'ada@acme.com' : 'me@x.com', to: [], cc: [],
+      lead: 'ada@acme.com', subject: 'Re: Growth', text: 't', at, campaign_id: 'camp-1', interest: 1, unread: false, auto_reply: false, ...extra,
+    })
+    const SENT = mail('o-1', 'out', '2026-10-27T09:00:00Z')
+    const ANSWERED = mail('u-1', 'in', '2026-10-28T10:00:00Z')
+
+    beforeEach(() => {
+      em.getEmail.mockReset().mockResolvedValue(ANSWERED)
+      em.getThreadEmails.mockReset().mockResolvedValue([SENT, ANSWERED])
+      inboxReplies.closeReply.mockReset().mockResolvedValue(undefined)
+      ins.sendReply.mockResolvedValue({ id: 'e-1' })
+    })
+
+    it('re-reads the email and the live thread FRESH, then replies from the same inbox in the thread', async () => {
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi', subject: 'Re: Growth' }))
+      expect(await executeAction(ID)).toMatchObject({ status: 'executed', result: { email_id: 'e-1', reply_to_uuid: 'u-1', thread_id: 'th-1', eaccount: 'me@x.com' } })
+      expect(em.getEmail).toHaveBeenCalledWith('u-1', { fresh: true })
+      expect(em.getThreadEmails).toHaveBeenCalledWith('th-1', { fresh: true })
+      expect(ins.sendReply).toHaveBeenCalledWith({ eaccount: 'me@x.com', reply_to_uuid: 'u-1', subject: 'Re: Growth', body: 'hi' })
+      expect(inboxReplies.closeReply).toHaveBeenCalledWith('u-1', 'replied', { actionId: ID })
+      // the live checks happen before the send
+      expect(em.getThreadEmails.mock.invocationCallOrder[0]).toBeLessThan(ins.sendReply.mock.invocationCallOrder[0])
+    })
+
+    it('no subject: Re: the original subject', async () => {
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi' }))
+      await executeAction(ID)
+      expect(ins.sendReply).toHaveBeenCalledWith(expect.objectContaining({ subject: 'Re: Growth' }))
+    })
+
+    it('a newer inbound message in the live thread: aborted with newer_inbound, nothing sent', async () => {
+      em.getThreadEmails.mockResolvedValue([SENT, ANSWERED, mail('u-2', 'in', '2026-10-28T11:00:00Z')])
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi' }))
+      const out = await executeAction(ID)
+      expect(out).toMatchObject({ status: 'failed', result: { newer_inbound: true, newer_reply_to_uuid: 'u-2' } })
+      expect(out.ran && out.error).toMatch(/^newer_inbound/)
+      expect(ins.sendReply).not.toHaveBeenCalled()
+      expect(inboxReplies.closeReply).not.toHaveBeenCalled()
+    })
+
+    it('our own later send does not block (it is not inbound)', async () => {
+      em.getThreadEmails.mockResolvedValue([SENT, ANSWERED, mail('o-2', 'out', '2026-10-28T12:00:00Z')])
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi' }))
+      expect(await executeAction(ID)).toMatchObject({ status: 'executed' })
+    })
+
+    it('a different inbox than the one that received it: refused', async () => {
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'other@x.com', reply_to_uuid: 'u-1', body: 'hi' }))
+      const out = await executeAction(ID)
+      expect(out).toMatchObject({ status: 'failed' })
+      expect(out.ran && out.error).toMatch(/^eaccount_mismatch/)
+      expect(ins.sendReply).not.toHaveBeenCalled()
+    })
+
+    it('the answered email is gone, or is not inbound: refused', async () => {
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi' }))
+      em.getEmail.mockResolvedValue(null)
+      expect((await executeAction(ID)).ran && ins.sendReply).not.toHaveBeenCalled()
+      em.getEmail.mockResolvedValue(SENT)
+      const out = await executeAction(ID)
+      expect(out.ran && out.error).toMatch(/^not_an_inbound_email/)
+      expect(ins.sendReply).not.toHaveBeenCalled()
+    })
+
+    it('the live re-check cannot be made (rate limit / outage): failed, nothing sent', async () => {
+      em.getThreadEmails.mockRejectedValue(new Error('Instantly /emails rate limit'))
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi' }))
+      const out = await executeAction(ID)
+      expect(out).toMatchObject({ status: 'failed' })
+      expect(out.ran && out.error).toMatch(/live thread/)
+      expect(ins.sendReply).not.toHaveBeenCalled()
+    })
+
+    it('a failed closeReply after the send never turns it into a failure', async () => {
+      inboxReplies.closeReply.mockRejectedValue(new Error('db'))
+      store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi' }))
+      expect(await executeAction(ID)).toMatchObject({ status: 'executed' })
+    })
   })
 
   it('pause_campaign / resume_campaign', async () => {
