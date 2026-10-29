@@ -114,9 +114,9 @@ export async function getThread(by: { reply_to_uuid?: string; thread_id?: string
     threadId = email.thread_id
   }
   if (!threadId) throw new InboxError(400, 'reply_to_uuid_or_thread_id')
-  const emails = await getThreadEmails(threadId)
+  const { emails, truncated } = await getThreadEmails(threadId)
   if (!emails.length) throw new InboxError(404, 'thread_not_found')
-  const view = threadView(emails)
+  const view = { ...threadView(emails), truncated }
   if (!scope.all && !emails.every((m) => campaignAllowed(scope, m.campaign_id))) throw outOfScope()
   return view
 }

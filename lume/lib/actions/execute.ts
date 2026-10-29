@@ -229,7 +229,8 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
    *     (no cache; waits for a /emails slot within the deadline);
    *  2. the answered email must be inbound, have an `eaccount`, and be the
    *     inbox this reply is from (`eaccount_mismatch`);
-   *  3. recheckThread: the answered email must be in the re-read thread
+   *  3. recheckThread: the thread read must be complete (not truncated) and
+   *     the answered email must be in it
    *     (`thread_unverifiable`); nobody may have written since
    *     (`newer_inbound`) and nothing may have been sent since
    *     (`already_replied`, which also catches a manual Unibox reply);
@@ -252,12 +253,15 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
     }
     let answered
     let thread
+    let truncated = false
     let replyRow
     let deal
     let blocked
     try {
       answered = await getEmail(replyTo, { fresh: true, deadline })
-      thread = answered ? await getThreadEmails(answered.thread_id, { fresh: true, deadline }) : []
+      const read = answered ? await getThreadEmails(answered.thread_id, { fresh: true, deadline }) : { emails: [], truncated: false }
+      thread = read.emails
+      truncated = read.truncated
       if (answered?.lead) {
         const campaign = answered.campaign_id ?? str(p.campaign_id)
         ;[replyRow, deal, blocked] = await Promise.all([
@@ -275,6 +279,7 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
     if (answered.eaccount !== eaccount) {
       return refuse('eaccount_mismatch', `the reply was received by ${answered.eaccount}, not ${eaccount}`, { received_by: answered.eaccount })
     }
+    if (truncated) return refuse('thread_unverifiable', 'the thread is longer than Lume reads in one check, so it cannot be proven nothing came after')
     const check = recheckThread(thread, replyTo)
     if (!check.ok) {
       if (check.code === 'thread_unverifiable') return refuse('thread_unverifiable', 'the answered email is not in the re-read thread, so it cannot be checked')

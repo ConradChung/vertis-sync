@@ -198,8 +198,12 @@ export async function getEmail(id: string, opts: { fresh?: boolean; deadline?: n
   return got.body === NOT_FOUND ? null : mapInboxEmail(got.body)
 }
 
-/** Every email of a thread (`search=thread:<id>`, oldest first), up to 500. */
-export async function getThreadEmails(threadId: string, opts: { fresh?: boolean; deadline?: number } = {}): Promise<InboxEmail[]> {
+/**
+ * Every email of a thread (`search=thread:<id>`, oldest first), up to 500.
+ * `truncated`: the read stopped at that cap with more left, so the thread is
+ * NOT complete (the send re-check refuses on it).
+ */
+export async function getThreadEmails(threadId: string, opts: { fresh?: boolean; deadline?: number } = {}): Promise<{ emails: InboxEmail[]; truncated: boolean }> {
   const out: InboxEmail[] = []
   let cursor: string | undefined
   for (let page = 0; page < MAX_THREAD_PAGES; page++) {
@@ -210,12 +214,12 @@ export async function getThreadEmails(threadId: string, opts: { fresh?: boolean;
       opts.fresh === true,
       opts.deadline
     )
-    if (got.body === NOT_FOUND) break
+    if (got.body === NOT_FOUND) return { emails: out, truncated: false }
     const items = itemsOf(got.body)
     out.push(...mapAll(items))
     const next = nextOf(got.body)
-    if (items.length < PAGE || !next) break
+    if (items.length < PAGE || !next) return { emails: out, truncated: false }
     cursor = next
   }
-  return out
+  return { emails: out, truncated: true }
 }

@@ -198,6 +198,8 @@ export interface ThreadView {
   lead_email: string | null
   subject: string | null
   messages: ThreadMessage[]
+  /** The read stopped at its cap (500 emails): older or newer messages may be missing. */
+  truncated?: boolean
   /** The newest message from the lead: what a reply answers. Null when the lead never wrote. */
   latest_inbound: { reply_to_uuid: string; eaccount: string | null; subject: string | null; at: string | null } | null
 }

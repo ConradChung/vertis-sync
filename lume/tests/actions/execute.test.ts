@@ -324,7 +324,7 @@ describe('executeAction dispatch table', () => {
 
     beforeEach(() => {
       em.getEmail.mockReset().mockResolvedValue(ANSWERED)
-      em.getThreadEmails.mockReset().mockResolvedValue([SENT, ANSWERED])
+      em.getThreadEmails.mockReset().mockResolvedValue({ emails: [SENT, ANSWERED], truncated: false })
       inboxReplies.closeReply.mockReset().mockResolvedValue(undefined)
       inboxStore.getReply.mockReset().mockResolvedValue(null)
       crmSvc.findDeal.mockReset().mockResolvedValue({ id: 'd1', stage: 'Interested' })
@@ -363,7 +363,7 @@ describe('executeAction dispatch table', () => {
     })
 
     it('a newer inbound message in the live thread: aborted with newer_inbound, nothing sent', async () => {
-      em.getThreadEmails.mockResolvedValue([SENT, ANSWERED, mail('u-2', 'in', '2026-10-28T11:00:00Z')])
+      em.getThreadEmails.mockResolvedValue({ emails: [SENT, ANSWERED, mail('u-2', 'in', '2026-10-28T11:00:00Z')], truncated: false })
       store.claimExecution.mockResolvedValue(row('send_reply', { eaccount: 'me@x.com', reply_to_uuid: 'u-1', body: 'hi' }))
       const out = await executeAction(ID)
       expect(out).toMatchObject({ status: 'failed', result: { newer_inbound: true, newer_reply_to_uuid: 'u-2' } })
@@ -373,23 +373,29 @@ describe('executeAction dispatch table', () => {
     })
 
     it('an outbound email after the answered one (our reply, a manual Unibox reply): already_replied, nothing sent', async () => {
-      em.getThreadEmails.mockResolvedValue([SENT, ANSWERED, mail('o-2', 'out', '2026-10-28T12:00:00Z')])
+      em.getThreadEmails.mockResolvedValue({ emails: [SENT, ANSWERED, mail('o-2', 'out', '2026-10-28T12:00:00Z')], truncated: false })
       store.claimExecution.mockResolvedValue(replyRow())
       const out = await refusedWith(/^already_replied/)
       expect(out.ran && out.result).toMatchObject({ already_replied: true, outbound_email_id: 'o-2' })
     })
 
     it('an inbound in the same second as the answered one counts as newer', async () => {
-      em.getThreadEmails.mockResolvedValue([SENT, ANSWERED, mail('u-2', 'in', '2026-10-28T10:00:00Z')])
+      em.getThreadEmails.mockResolvedValue({ emails: [SENT, ANSWERED, mail('u-2', 'in', '2026-10-28T10:00:00Z')], truncated: false })
       store.claimExecution.mockResolvedValue(replyRow())
       await refusedWith(/^newer_inbound/)
     })
 
-    it('an empty (or partial) re-read thread: thread_unverifiable, nothing sent', async () => {
-      em.getThreadEmails.mockResolvedValue([])
+    it('a thread read cut at its page cap (truncated): thread_unverifiable, nothing sent', async () => {
+      em.getThreadEmails.mockResolvedValue({ emails: [SENT, ANSWERED], truncated: true })
       store.claimExecution.mockResolvedValue(replyRow())
       await refusedWith(/^thread_unverifiable/)
-      em.getThreadEmails.mockResolvedValue([SENT])
+    })
+
+    it('an empty (or partial) re-read thread: thread_unverifiable, nothing sent', async () => {
+      em.getThreadEmails.mockResolvedValue({ emails: [], truncated: false })
+      store.claimExecution.mockResolvedValue(replyRow())
+      await refusedWith(/^thread_unverifiable/)
+      em.getThreadEmails.mockResolvedValue({ emails: [SENT], truncated: false })
       await refusedWith(/^thread_unverifiable/)
     })
 
@@ -435,7 +441,7 @@ describe('executeAction dispatch table', () => {
       now.mockImplementation(() => t)
       em.getThreadEmails.mockImplementation(async () => {
         t += 100_000 // the re-check ate most of the 120 s budget
-        return [SENT, ANSWERED]
+        return { emails: [SENT, ANSWERED], truncated: false }
       })
       store.claimExecution.mockResolvedValue(replyRow())
       await refusedWith(/^deadline_exceeded/)
@@ -757,7 +763,7 @@ describe('POST /api/actions/[id]/decide', () => {
     beforeEach(() => {
       const answered = { id: 'u-1', thread_id: 'th', direction: 'in', eaccount: 'me@x.com', subject: 'Re: x', at: '2026-10-28T10:00:00Z', created_at: null, lead: 'ada@acme.com', campaign_id: 'camp-1' }
       em.getEmail.mockReset().mockResolvedValue(answered)
-      em.getThreadEmails.mockReset().mockResolvedValue([answered])
+      em.getThreadEmails.mockReset().mockResolvedValue({ emails: [answered], truncated: false })
       inboxReplies.closeReply.mockReset()
       ins.sendReply.mockResolvedValue({ id: 'sent-1' })
     })

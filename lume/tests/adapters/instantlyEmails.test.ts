@@ -102,12 +102,20 @@ describe('getEmail / getThreadEmails', () => {
     fetchMock.mockResolvedValueOnce(new Response('nope', { status: 404 }))
     expect(await getEmail('gone')).toBeNull()
   })
+  it('thread: past the page cap with more to read → truncated', async () => {
+    fetchMock.mockImplementation(async () => Response.json({ items: Array.from({ length: 100 }, (_, i) => item(`p${i}`)), next_starting_after: 'more' }))
+    const out = await getThreadEmails('t1')
+    expect(out.truncated).toBe(true)
+    expect(out.emails).toHaveLength(500)
+  })
+
   it('thread: every page of search=thread:<id>, ascending', async () => {
     const page1 = Array.from({ length: 100 }, (_, i) => item(`p${i}`))
     fetchMock.mockResolvedValueOnce(Response.json({ items: page1, next_starting_after: 'cur' }))
     fetchMock.mockResolvedValueOnce(Response.json({ items: [item('q1')] }))
     const out = await getThreadEmails('t1')
-    expect(out).toHaveLength(101)
+    expect(out.emails).toHaveLength(101)
+    expect(out.truncated).toBe(false)
     expect(urlOf(0).searchParams.get('sort_order')).toBe('asc')
     expect(urlOf(1).searchParams.get('starting_after')).toBe('cur')
   })

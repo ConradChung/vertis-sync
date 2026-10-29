@@ -149,7 +149,7 @@ describe('GET /api/inbox/thread', () => {
 
   it('by reply_to_uuid: oldest → newest, trimmed, with latest_inbound', async () => {
     h.getEmail.mockResolvedValue(email())
-    h.getThreadEmails.mockResolvedValue([email(), out])
+    h.getThreadEmails.mockResolvedValue({ emails: [email(), out], truncated: false })
     const res = await threadGET(get('/api/inbox/thread?reply_to_uuid=e1'))
     expect(h.getThreadEmails).toHaveBeenCalledWith('t1')
     const { thread } = await res.json()
@@ -162,8 +162,14 @@ describe('GET /api/inbox/thread', () => {
     expect(thread.latest_inbound).toMatchObject({ reply_to_uuid: 'e1', eaccount: 'frank@ours.com' })
   })
 
+  it('a thread longer than the read cap says truncated', async () => {
+    h.getThreadEmails.mockResolvedValue({ emails: [out], truncated: true })
+    const { thread } = await (await threadGET(get('/api/inbox/thread?thread_id=t1'))).json()
+    expect(thread.truncated).toBe(true)
+  })
+
   it('by thread_id', async () => {
-    h.getThreadEmails.mockResolvedValue([out])
+    h.getThreadEmails.mockResolvedValue({ emails: [out], truncated: false })
     expect((await threadGET(get('/api/inbox/thread?thread_id=t1'))).status).toBe(200)
     expect(h.getEmail).not.toHaveBeenCalled()
   })
@@ -184,7 +190,7 @@ describe('GET /api/inbox/thread', () => {
 
   it('a vertical bot: a thread_id whose emails sit in another campaign is 403', async () => {
     h.currentOperator.mockResolvedValue(BOT)
-    h.getThreadEmails.mockResolvedValue([email({ campaign_id: C2 })])
+    h.getThreadEmails.mockResolvedValue({ emails: [email({ campaign_id: C2 })], truncated: false })
     expect((await threadGET(get('/api/inbox/thread?thread_id=t1'))).status).toBe(403)
   })
 })
