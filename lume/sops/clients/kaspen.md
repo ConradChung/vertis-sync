@@ -9,8 +9,13 @@ name: Kaspen
 placeholder: false
 match:
   campaign_names: [kaspen, zenport] # case-insensitive "name contains"
-  campaign_ids: []
-  vertical: Kaspen
+  # Pinned Instantly campaign ids, so a rename never drops Kaspen to the base
+  # SOP (looked up 2026-10-29 in project rcfrumrbauwvyzfebxck):
+  campaign_ids:
+    - 04ca2257-5ea6-434e-bf62-f55add156914 # campaigns: "ZenPort Rerun" (also recorded as "Scaleport Rerun"); in the Kaspen / Zenport vertical
+    - 869d73b3-5bf3-4f1c-ba8c-43ac6d0f529d # in the Kaspen / Zenport vertical (lume_verticals.campaign_ids)
+    - bcf7a6d2-1302-47fc-ae77-9d2a760c91c1 # named as Kaspen's by the owner; not yet in campaigns / lume_campaigns
+  vertical: Kaspen / Zenport # lume_verticals.name
 
 banned_phrases:
   - I'd love to

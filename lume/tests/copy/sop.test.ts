@@ -205,6 +205,22 @@ describe('the committed SOPs (lume/sops)', () => {
     expect(k.prose).toMatch(/## Test plan/)
   })
 
+  it.each([
+    ['04ca2257-5ea6-434e-bf62-f55add156914'], // campaigns: "ZenPort Rerun" (also recorded as "Scaleport Rerun")
+    ['869d73b3-5bf3-4f1c-ba8c-43ac6d0f529d'], // in the "Kaspen / Zenport" vertical
+    ['bcf7a6d2-1302-47fc-ae77-9d2a760c91c1'], // named as Kaspen's by the owner; not in the DB yet
+  ])('Kaspen is pinned to campaign %s, so a rename never drops it to the base', (id) => {
+    const lib = loadSopLibrary()
+    expect(sopForCampaign({ id, name: 'Renamed in Instantly' }, lib).client).toBe('kaspen')
+    expect(sopForCampaign({ id: '00000000-0000-4000-8000-000000000000', name: 'Renamed in Instantly' }, lib).client).toBeNull()
+  })
+
+  it("Kaspen is the SOP of the real vertical's chats (\"Kaspen / Zenport\")", () => {
+    const lib = loadSopLibrary()
+    expect(findClient(lib, 'kaspen')!.match.vertical).toBe('Kaspen / Zenport')
+    expect(clientForContext(lib, { vertical: 'Kaspen / Zenport' })?.client).toBe('kaspen')
+  })
+
   it('renders a stable prompt block with the rules summary and the prose', () => {
     const lib = loadSopLibrary()
     const block = sopPromptBlock(lib)
