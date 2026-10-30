@@ -6,6 +6,8 @@
  * parser itself (exceljs / the CSV reader) lives in lib/sheets/parse.ts.
  */
 
+import { csvCell } from '@/lib/csv/cell'
+
 /** Per attached file. */
 export const MAX_SHEET_FILE_BYTES = 10 * 1024 * 1024
 /** Spreadsheet files per message (the 5-image limit is separate). */
@@ -205,14 +207,14 @@ export function csvField(v: string): string {
 export const csvLine = (cells: readonly string[]) => cells.map(csvField).join(',')
 
 /**
- * Header + rows → CSV for the ingest gate: line breaks inside a cell become
- * spaces (the pipeline reads files line by line, like lib/import/csv.ts
- * toCsv), `\n` endings, trailing newline, no BOM.
+ * Header + rows → CSV for the ingest gate, through the shared formula-safe
+ * cell writer (lib/csv/cell.ts): line breaks inside a cell become spaces (the
+ * pipeline reads files line by line), a leading = + - @ is prefixed with ',
+ * `\n` endings, trailing newline, no BOM.
  */
 export function sheetToIngestCsv(sheet: Pick<ParsedSheet, 'header' | 'rows'>): string {
-  const flat = (v: string) => v.replace(/\r\n|\r|\n/g, ' ')
-  const lines = [csvLine(sheet.header.map(flat)), ...sheet.rows.map((r) => csvLine(r.map(flat)))]
-  return lines.join('\n') + '\n'
+  const line = (cells: readonly string[]) => cells.map(csvCell).join(',')
+  return [line(sheet.header), ...sheet.rows.map(line)].join('\n') + '\n'
 }
 
 // ---------------------------------------------------------------------------

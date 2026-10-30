@@ -6,6 +6,7 @@
  * edge function (supabase/functions/influencer-reactions).
  */
 import { domainOf } from '@/lib/apollo/records'
+import { csvCell } from '@/lib/csv/cell'
 
 export interface InfluencerRow {
   id: string
@@ -295,18 +296,8 @@ export function splitLocation(raw: string | null): { city: string; state: string
   return { city: '', state: '', country: '' }
 }
 
-/**
- * One CSV cell: newlines flattened and the ends trimmed (a leading tab or CR
- * goes), a leading = + - @ (the OWASP formula-injection set) prefixed with ',
- * quoted when needed. Numbers are written as numbers.
- */
-export function csvCell(v: string | number | null | undefined): string {
-  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : ''
-  let s = v === null || v === undefined ? '' : String(v)
-  s = s.replace(/[\r\n]+/g, ' ').trim()
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`
-  return /[",]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-}
+/** One CSV cell (formula-safe); shared with every Lume export (lib/csv/cell.ts). */
+export { csvCell }
 
 export function influencerApolloCsv(
   reactors: readonly ExportReactor[],

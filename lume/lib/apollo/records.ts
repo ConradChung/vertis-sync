@@ -4,6 +4,8 @@
  * import expects, and estimate credits. No I/O here.
  */
 
+import { csvCell } from '@/lib/csv/cell'
+
 export interface ApolloRecord {
   first_name: string | null
   last_name: string | null
@@ -99,10 +101,8 @@ export const APOLLO_CSV_COLUMNS = [
   'Country',
 ] as const
 
-const cell = (v: string | null) => {
-  const s = v ?? ''
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-}
+/** Formula-safe (a leading = + - @ is prefixed with '), newlines flattened: lib/csv/cell.ts. */
+const cell = (v: string | null) => csvCell(v)
 
 export function toApolloCsv(records: readonly ApolloRecord[]): string {
   const lines = [APOLLO_CSV_COLUMNS.join(',')]
