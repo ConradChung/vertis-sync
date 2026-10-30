@@ -13,8 +13,8 @@ describe('planning playbook', () => {
       '1. Confirm the target.',
       '2. ICP research',
       '3. Lead source.',
-      '4. Review, filter, then enrich.',
-      '5. Validation.',
+      '4. Review and filter.',
+      '5. Validation, always in this order:',
       '6. Copy.',
       '7. Campaign setup.',
       '8. Assign leads',
@@ -29,6 +29,23 @@ describe('planning playbook', () => {
     expect(SYSTEM_PROMPT).toMatch(/only when Conrad asks/)
     expect(SYSTEM_PROMPT).toMatch(/Never send anything to Apollo/)
     expect(SYSTEM_PROMPT).not.toMatch(/enrich_with_apollo/)
+  })
+
+  it('only scrapes sources with emails automatically; Apollo links are the default', () => {
+    expect(SYSTEM_PROMPT).toContain('Only scrape automatically from a source that returns decision-maker emails.')
+    expect(SYSTEM_PROMPT).toContain('Never plan or propose an automatic scrape of a source without emails')
+    expect(at('3. Lead source.')).toBeLessThan(at('Apollo scrapes come with emails'))
+  })
+
+  it('validation order: barriers before the validator, city enrichment after it', () => {
+    const s = at('5. Validation, always in this order:')
+    const barriers = SYSTEM_PROMPT.indexOf('company and location barriers', s)
+    const finder = SYSTEM_PROMPT.indexOf('email finder', s)
+    const validator = SYSTEM_PROMPT.indexOf('validator', s)
+    const city = SYSTEM_PROMPT.indexOf('operating-city enrichment, only on the valid emails', s)
+    expect(barriers).toBeGreaterThan(s)
+    expect([barriers, finder, validator, city]).toEqual([barriers, finder, validator, city].sort((a, b) => a - b))
+    expect(SYSTEM_PROMPT).not.toMatch(/Validator → City enrich → Barriers/)
   })
 
   it('never ranks campaigns before a launch exists', () => {

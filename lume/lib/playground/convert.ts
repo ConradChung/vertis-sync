@@ -224,7 +224,7 @@ const SKILL_APPROVAL: Record<SkillStep['type'], boolean | undefined> = {
 const SKILL_WHY: Record<SkillStep['type'], string> = {
   apify_actor: 'Scrape the lead source with a capped Apify run; Conrad confirms every input first.',
   import: 'Stage the results at the ingest gate so nothing reaches a campaign unreviewed.',
-  validate: 'Find and validate emails, then apply the company and location barriers; only valid emails go forward.',
+  validate: 'Apply the company and location barriers first, then find and validate emails, then enrich the valid ones with operating city; only valid emails go forward.',
   duplicate_campaign: 'Create the campaign by copying settings (inboxes, schedule, limits) from an existing one, then add the new copy.',
   assign_leads: 'Move the validated leads into the campaign.',
   rotation_rule: 'Keep the campaign topped up from the lead bank on a schedule.',
