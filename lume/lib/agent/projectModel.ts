@@ -30,10 +30,11 @@ export const NOTE_MAX = 20_000
  */
 export const STALE_UPLOAD_MS = 3 * 60 * 60 * 1000
 
-export type FileType = 'csv' | 'pdf' | 'text' | 'json' | 'image'
+export type FileType = 'csv' | 'xlsx' | 'pdf' | 'text' | 'json' | 'image'
 
 const EXT: Record<string, FileType> = {
   csv: 'csv',
+  xlsx: 'xlsx',
   pdf: 'pdf',
   md: 'text',
   markdown: 'text',
@@ -56,6 +57,7 @@ export function fileTypeOf(name: string): FileType | null {
 
 export const MIME: Record<FileType, string> = {
   csv: 'text/csv',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   pdf: 'application/pdf',
   text: 'text/plain',
   json: 'application/json',

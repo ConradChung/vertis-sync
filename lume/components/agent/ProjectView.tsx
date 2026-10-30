@@ -332,7 +332,7 @@ export function ProjectView({ id }: { id: string }) {
           >
             {uploading ? <Loader2 className="size-5 animate-spin text-positive" /> : <Upload className={cn('size-5', over ? 'text-positive' : 'text-fg-46')} />}
             <p className="text-[13px] text-fg">{uploading ? `Uploading ${uploading} file${uploading === 1 ? '' : 's'}…` : 'Drop files here, or click to browse'}</p>
-            <p className="text-[12px] text-fg-46">CSV, PDF, MD, TXT, JSON or images · up to 20 MB each</p>
+            <p className="text-[12px] text-fg-46">CSV, XLSX, PDF, MD, TXT, JSON or images · up to 20 MB each</p>
           </div>
           <input
             ref={fileRef}

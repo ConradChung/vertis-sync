@@ -38,7 +38,8 @@ describe('fileTypeOf', () => {
     expect(fileTypeOf('p.webp')).toBe('image')
     expect(fileTypeOf('evil.exe')).toBeNull()
     expect(fileTypeOf('noext')).toBeNull()
-    expect(fileTypeOf('sheet.xlsx')).toBeNull()
+    expect(fileTypeOf('sheet.xlsx')).toBe('xlsx')
+    expect(fileTypeOf('old.xls')).toBeNull()
   })
 })
 

@@ -91,3 +91,24 @@ describe('csvHead row counting', () => {
     expect(csvHead('a,b\r1,"say ""hi""\nthere"\r2,3').text).toBe('a,b\n1,"say ""hi""\nthere"\n2,3')
   })
 })
+
+describe('extractText: xlsx', () => {
+  it('every sheet as CSV under a heading; a non-workbook is not readable', async () => {
+    const { default: ExcelJS } = await import('exceljs')
+    const wb = new ExcelJS.Workbook()
+    const a = wb.addWorksheet('Leads')
+    a.addRow(['Name', 'Signed'])
+    a.addRow(['Ann, A', new Date(Date.UTC(2026, 0, 15))])
+    wb.addWorksheet('Notes').addRow(['k'])
+    const bytes = new Uint8Array(await wb.xlsx.writeBuffer())
+    const r = await extractText(bytes, 'xlsx')
+    expect(r).toEqual({ readable: true, truncated: false, text: '## Sheet "Leads" (1 rows × 2 columns)\nName,Signed\n"Ann, A",2026-01-15\n\n## Sheet "Notes" (0 rows × 1 columns)\nk' })
+    expect(await extractText(new TextEncoder().encode('a,b'), 'xlsx')).toEqual({ text: null, readable: false, truncated: false })
+  })
+  it('xlsx is an accepted project file type', async () => {
+    const { fileTypeOf, ACCEPT, mimeFor } = await import('@/lib/agent/projectModel')
+    expect(fileTypeOf('book.XLSX')).toBe('xlsx')
+    expect(ACCEPT).toContain('.xlsx')
+    expect(mimeFor('xlsx', 'book.xlsx')).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  })
+})

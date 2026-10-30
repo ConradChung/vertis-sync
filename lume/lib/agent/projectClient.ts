@@ -45,7 +45,7 @@ const MESSAGES: Record<string, string> = {
   name_taken: 'A project with that name already exists.',
   vertical_taken: 'That vertical is already linked to another project.',
   vertical_not_found: 'That vertical no longer exists.',
-  unsupported_media_type: 'Unsupported file type. Use CSV, PDF, MD, TXT, JSON or an image.',
+  unsupported_media_type: 'Unsupported file type. Use CSV, XLSX, PDF, MD, TXT, JSON or an image.',
   too_large: 'Over the 20 MB per-file limit.',
   project_full: "This project is at its 200 MB limit.",
   project_not_found: 'That project no longer exists.',

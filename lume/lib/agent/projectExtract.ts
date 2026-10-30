@@ -1,4 +1,6 @@
 import { CSV_MAX_ROWS, MAX_TEXT_CHARS, type FileType } from '@/lib/agent/projectModel'
+import { csvLine, type ParsedWorkbook } from '@/lib/sheets/model'
+import { parseSpreadsheet } from '@/lib/sheets/parse'
 
 /**
  * Text extraction for project files, run once at upload:
@@ -7,6 +9,10 @@ import { CSV_MAX_ROWS, MAX_TEXT_CHARS, type FileType } from '@/lib/agent/project
  *  - PDF: the text layer (unpdf, a serverless build of pdf.js), page by
  *    page: at most PDF_MAX_PAGES pages, stopping past the character cap, all
  *    within PDF_TIMEOUT_MS (a timeout is "not readable").
+ *  - XLSX: parsed like a chat attachment (lib/sheets/parse.ts: zip-bomb,
+ *    sheet and cell caps; header detected, dates ISO, formulas their cached
+ *    values), then every sheet as CSV under a `## Sheet "<name>"` line, so
+ *    read_project_file pages through it. A file the parser refuses is not readable.
  *  - MD / TXT / JSON: as-is.
  *  - Images: none (listed by name only).
  * Everything is capped at MAX_TEXT_CHARS. A file that yields no text (binary,
@@ -59,6 +65,24 @@ export function csvHead(text: string, maxRows = CSV_MAX_ROWS): { text: string; m
   }
   if (rows.length <= maxRows + 1) end()
   return { text: rows.slice(0, maxRows + 1).join('\n'), more: rows.length > maxRows + 1 }
+}
+
+/** Each sheet as CSV under a heading with its counts, stopping once past the character cap. */
+export function workbookText(wb: ParsedWorkbook, max = MAX_TEXT_CHARS): string {
+  const parts: string[] = []
+  let len = 0
+  for (const s of wb.sheets) {
+    const head = `## Sheet "${s.name}" (${s.rows.length} rows × ${s.header.length} columns${s.hidden ? ', hidden' : ''})`
+    const lines = [head, ...(s.header.length ? [csvLine(s.header)] : []), ...s.rows.map(csvLine)]
+    for (const l of lines) {
+      parts.push(l)
+      len += l.length + 1
+      if (len > max + 1) return parts.join('\n')
+    }
+    parts.push('')
+    len += 1
+  }
+  return parts.join('\n').trimEnd()
 }
 
 /** PDFs: pages read at most, and the wall-clock budget for the whole extraction. */
@@ -147,6 +171,10 @@ export async function extractText(bytes: Uint8Array, type: FileType, opts: { pdf
         if (t === null) return UNREADABLE
         const head = csvHead(t)
         return capped(head.text, head.more)
+      }
+      case 'xlsx': {
+        const parsed = await parseSpreadsheet(bytes, 'xlsx')
+        return parsed.ok ? capped(workbookText(parsed.workbook)) : UNREADABLE
       }
       case 'text':
       case 'json': {

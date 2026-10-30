@@ -9,7 +9,7 @@ import { badId, projectErrorResponse, projectScope, requireProject } from '@/lib
 import { parseJsonBody, uuidParam } from '@/lib/http/json'
 
 /**
- * Step 1 of adding a file to a project: checks the declared name (CSV, PDF,
+ * Step 1 of adding a file to a project: checks the declared name (CSV, XLSX, PDF,
  * MD, TXT, JSON, images → else 415), size (20 MB → 413 too_large) and the
  * project's 200 MB total (413 project_full), picks the path
  * `<project>/<uuid>.<ext>`, records it in agent_project_uploads (an upload
