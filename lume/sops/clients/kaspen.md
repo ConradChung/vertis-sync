@@ -45,7 +45,7 @@ word_count:
 # Patterns are case-insensitive regular expressions.
 proof_points:
   - id: frank_1000_doors # Frank runs ~1,000 doors in Vancouver and uses Kaspen himself
-    patterns: ['\b1,?000 doors', '\bthousand doors']
+    patterns: ['\b1,?000[- ]doors?\b', '\b1k[- ]doors?\b', '\bthousand doors']
   - id: live_21k_units # live on 21,000 units
     patterns: ['\b21,?000 units', '\b21k units']
   - id: miami_98k # a 350-unit Miami portfolio saves $98k/year in payroll

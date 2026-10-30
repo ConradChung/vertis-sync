@@ -97,6 +97,15 @@ describe('Kaspen SOP lint', () => {
     expect(only(s)).toEqual([['proof_point_repeat', 3, 'A']])
   })
 
+  it.each(['1,000 doors', '1000 doors', '1k doors', '1,000-door', '1000-door', 'a thousand doors'])(
+    'frank_1000_doors recognises "%s" (repeated in step 4)',
+    (phrase) => {
+      const s = zenport()
+      s[3].variants[0].body = s[3].variants[0].body.replace('in my own portfolio', `in my own ${phrase} portfolio`)
+      expect(only(s)).toEqual([['proof_point_repeat', 4, 'A']])
+    }
+  )
+
   it('only_in_step: "Vancouver" after step 1', () => {
     const s = zenport()
     s[1].variants[0].body = s[1].variants[0].body.replace('goes home at 5.', 'goes home at 5, even in Vancouver.')
