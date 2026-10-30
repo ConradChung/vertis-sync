@@ -2,12 +2,13 @@ import { z } from 'zod'
 
 /** Shapes shared by the influencer routes and the agent's tools (match the DB checks). */
 export const Slug = z.string().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, 'lowercase-words-with-dashes').max(80)
-export const LinkedinProfileUrl = z
+/** Transform-free (the agent's tool schemas must convert to JSON Schema); strip the trailing slash with `profileUrl`. */
+export const LinkedinProfileUrlRaw = z
   .string()
-  .trim()
   .max(300)
   .regex(/^https:\/\/(www\.)?linkedin\.com\/in\/[^/?#\s]+\/?$/, 'a https://www.linkedin.com/in/<profile> URL')
-  .transform((u) => u.replace(/\/+$/, ''))
+export const profileUrl = (u: string) => u.trim().replace(/\/+$/, '')
+export const LinkedinProfileUrl = LinkedinProfileUrlRaw.transform(profileUrl)
 export const LookbackDays = z.number().int().min(7).max(730)
 export const MaxReactionsPerPost = z.number().int().min(1).max(1000)
 export const MaxVerifyUsd = z.number().positive().max(50)

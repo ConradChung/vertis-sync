@@ -274,12 +274,18 @@ export function ManageSkills({ open, onOpenChange, list }: { open: boolean; onOp
                         <h3 className="text-[14px] font-semibold text-fg">{s.name}</h3>
                         <p className="mt-0.5 text-[12.5px] leading-5 text-fg-46">{s.description || 'No description.'}</p>
                       </div>
-                      <Button size="icon-sm" variant="ghost" onClick={() => setEditing(s.id)} aria-label={`Edit ${s.name}`}>
-                        <Pencil />
-                      </Button>
-                      <Button size="icon-sm" variant="ghost" onClick={() => setConfirm(s)} aria-label={`Delete ${s.name}`} className="hover:text-red">
-                        <Trash2 />
-                      </Button>
+                      {s.builtin ? (
+                        <span className="rounded-control border border-line px-2 py-0.5 font-mono text-[11px] text-fg-46">Built-in</span>
+                      ) : (
+                        <>
+                          <Button size="icon-sm" variant="ghost" onClick={() => setEditing(s.id)} aria-label={`Edit ${s.name}`}>
+                            <Pencil />
+                          </Button>
+                          <Button size="icon-sm" variant="ghost" onClick={() => setConfirm(s)} aria-label={`Delete ${s.name}`} className="hover:text-red">
+                            <Trash2 />
+                          </Button>
+                        </>
+                      )}
                     </div>
                   )}
                   <ol className="mt-3 flex flex-col gap-1 text-[12.5px] text-fg-70" aria-label={`${s.name} steps`}>

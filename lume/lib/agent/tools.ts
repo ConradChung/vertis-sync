@@ -7,6 +7,9 @@ import { APOLLO_STEPS } from '@/lib/apollo/records'
 import { parseLeadQuery } from '@/lib/adapters/instantlyLeads.map'
 import { EmailId, INTEREST_NAMES, LabelBody } from '@/lib/inbox/schemas'
 import { labelPlan, replyCardOf } from '@/lib/inbox/model'
+import { builtinSkillById, builtinSkillByName, BUILTIN_SKILLS } from '@/lib/agent/builtinSkills'
+import { LinkedinProfileUrlRaw, profileUrl, LookbackDays, MaxReactionsPerPost, MaxVerifyUsd, Slug } from '@/lib/influencers/schemas'
+import { APOLLO_IMPORT_STEPS } from '@/lib/influencers/model'
 import { describeStep, newSkillSchema, placeholdersIn, skillStepSchema, skillVariableSchema, type NewSkill, type Skill } from '@/lib/agent/skillModel'
 
 /**
@@ -1185,16 +1188,188 @@ const SPECS: Built[] = [
     },
     'high'
   ),
+  // PM influencer reactions → Apollo CSV (built-in skill) ----------------------
+  tiered(
+    {
+      name: 'list_influencers',
+      description:
+        'The PM influencers whose LinkedIn post reactions the built-in "PM influencer reactions → Apollo CSV" skill mines: name, slug, active, lookback_days, ' +
+        'max_reactions_per_post, notes, and their last run (last_ran_at, posts, reactions, unique reactors, verified leads, leads at 700+ doors, cost per vendor), ' +
+        'zero_yield + warning when the last run found no leads; plus the 3 newest runs and the 2026-10-08 full-run benchmarks.',
+      inputSchema: z.object({}),
+      run: async (_i, { call }) => (await call('/api/influencers')) as ToolResult,
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'estimate_influencer_run',
+      description:
+        "Price a PM influencer reactions run before proposing it, from each influencer's last-run numbers and the unit prices ($2/1k posts, $1.5/1k reactions, " +
+        '~$0.006 per Perplexity call): the posts cost now (approval 1), the expected reactions cost range (the exact bill comes after top posts, approval 2), ' +
+        'the Perplexity range (capped by max_verify_usd), expected verified leads and 700+ leads, per influencer, warnings for zero-yield influencers, ' +
+        'and the Apify month-to-date spend vs the shared $29 monthly cap. Without slugs: every active influencer.',
+      inputSchema: z.object({
+        slugs: z.array(Slug).max(100).optional(),
+        max_verify_usd: MaxVerifyUsd.optional().describe('Perplexity cap for the run (default 10)'),
+      }),
+      run: async ({ slugs, max_verify_usd }, { call }) => {
+        const q = new URLSearchParams()
+        if (slugs?.length) q.set('slugs', slugs.join(','))
+        q.set('max_verify_usd', String(max_verify_usd ?? 10))
+        return (await call(`/api/influencers/estimate?${q}`)) as ToolResult
+      },
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'get_influencer_run',
+      description:
+        'Status of a PM influencer reactions run: status (running, awaiting_approval, done, failed, cancelled), stage (posts, top_posts, reactions, triage, ' +
+        'verify, doors, output), per-stage counts, the exact reactions bill per influencer once top posts are ranked (reactions_estimate), and estimated and ' +
+        'actual cost per vendor (apify_posts, apify_reactions, perplexity, anthropic). Without run_id: the newest runs.',
+      inputSchema: z.object({ run_id: uuid.optional() }),
+      run: async ({ run_id }, { call }) =>
+        (await call(run_id ? `/api/influencers/runs/${run_id.toLowerCase()}` : '/api/influencers/runs')) as ToolResult,
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'start_influencer_run',
+      description:
+        'Propose a PM influencer reactions run for the chosen influencers (slugs from list_influencers). Only after you quoted estimate_influencer_run for ' +
+        'exactly these influencers in this chat. The approval covers the posts scrape (Apify, capped) and the Haiku top-10 ranking; the run then STOPS ' +
+        'with the exact reactions bill, which needs approve_reactions. max_verify_usd caps the Perplexity spend later (default 10, at most 50). One run at a time.',
+      inputSchema: z.object({
+        slugs: z.array(Slug).min(1).max(100),
+        max_verify_usd: MaxVerifyUsd.optional(),
+        estimate_shown_to_owner: z.literal(true).describe('true only if you showed estimate_influencer_run for these influencers in this chat'),
+      }),
+      payload: ({ slugs, max_verify_usd }) => ({ slugs, ...(max_verify_usd !== undefined ? { max_verify_usd } : {}) }),
+    },
+    'high'
+  ),
+  tiered(
+    {
+      name: 'approve_reactions',
+      description:
+        'Propose the reactions scrape of a PM influencer run that is awaiting_approval (get_influencer_run): the approval shows the EXACT bill from top posts ' +
+        '(reactions per influencer at $1.5/1k, Apify charge capped), then triage and Perplexity verify under max_verify_usd (optionally changed here). ' +
+        'Show Conrad the bill per influencer before calling it.',
+      inputSchema: z.object({ run_id: uuid, max_verify_usd: MaxVerifyUsd.optional() }),
+      payload: ({ run_id, max_verify_usd }) => ({ run_id: run_id.toLowerCase(), ...(max_verify_usd !== undefined ? { max_verify_usd } : {}) }),
+    },
+    'high'
+  ),
+  tiered(
+    {
+      name: 'export_influencer_csv',
+      description:
+        'Export verified PM decision makers from the influencer reactions pipeline as an Apollo contact-import CSV: First Name, Last Name, Title, Company, ' +
+        'Website (company domain), Person Linkedin Url, City, State, Country, optionally Door Count and Reacted To. Filters: min_door_count (e.g. 700), ' +
+        'only_new (never exported before), verified_only (default true), run_id, influencer_slugs. Marks the rows exported. Returns a download link and ' +
+        'the Apollo steps; nothing is sent to Apollo.',
+      inputSchema: z.object({
+        min_door_count: z.number().int().min(0).max(1_000_000).optional(),
+        only_new: z.boolean().optional(),
+        verified_only: z.boolean().optional(),
+        run_id: uuid.optional(),
+        influencer_slugs: z.array(Slug).max(100).optional(),
+        door_count_column: z.boolean().optional(),
+        reacted_to_column: z.boolean().optional(),
+      }),
+      run: async (input, { call }) => {
+        const body = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined))
+        if (typeof body.run_id === 'string') body.run_id = body.run_id.toLowerCase()
+        let r: Record<string, unknown>
+        try {
+          r = (await call('/api/influencers/exports', { method: 'POST', body })) as Record<string, unknown>
+        } catch (err) {
+          if (err instanceof Error && /HTTP 422 nothing_to_export/.test(err.message)) {
+            return { status: 'nothing_to_export', filters: body, note: 'No reactor matches these filters (only_new skips rows already exported).' }
+          }
+          throw err
+        }
+        return {
+          status: 'ready',
+          ...r,
+          steps: r.steps ?? APOLLO_IMPORT_STEPS,
+          note:
+            'Give Conrad the download link as a Markdown link and the Apollo steps. When he pastes the Apollo people-search URL back, ' +
+            'call create_order with it (a Leadsfriday order; nothing is spent until he picks a count). Lume never sends anything to Apollo.',
+        }
+      },
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'add_influencer',
+      description:
+        'Add a PM influencer to mine in later runs: name and LinkedIn profile URL (https://www.linkedin.com/in/...), optional slug (default from the name), ' +
+        'lookback_days (default 90; 365 for people who post rarely) and max_reactions_per_post (default 1000; lower it for big audiences). Inert: nothing runs.',
+      inputSchema: z.object({
+        name: z.string().trim().min(1).max(200),
+        linkedin_url: LinkedinProfileUrlRaw,
+        slug: Slug.optional(),
+        lookback_days: LookbackDays.optional(),
+        max_reactions_per_post: MaxReactionsPerPost.optional(),
+        notes: z.string().trim().max(1000).optional(),
+      }),
+      run: async (input, { call }) =>
+        (await call('/api/influencers', {
+          method: 'POST',
+          body: Object.fromEntries(Object.entries({ ...input, linkedin_url: profileUrl(input.linkedin_url) }).filter(([, v]) => v !== undefined)),
+        })) as ToolResult,
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'update_influencer',
+      description:
+        "Change an influencer by slug: name, linkedin_url, lookback_days, max_reactions_per_post, active (false = never picked), notes. Inert: it changes what the next run uses.",
+      inputSchema: z
+        .object({
+          slug: Slug,
+          name: z.string().trim().min(1).max(200).optional(),
+          linkedin_url: LinkedinProfileUrlRaw.optional(),
+          lookback_days: LookbackDays.optional(),
+          max_reactions_per_post: MaxReactionsPerPost.optional(),
+          active: z.boolean().optional(),
+          notes: z.string().trim().max(1000).nullable().optional(),
+        })
+        .refine((v) => Object.entries(v).some(([k, x]) => k !== 'slug' && x !== undefined), 'at least one change'),
+      run: async ({ slug, ...patch }, { call }) => {
+        if (patch.linkedin_url) patch.linkedin_url = profileUrl(patch.linkedin_url)
+        return (await call(`/api/influencers/${slug}`, { method: 'PATCH', body: Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) })) as ToolResult
+      },
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'cancel_influencer_run',
+      description: 'Cancel a running or awaiting PM influencer run and abort its live Apify runs. Only stops spending; what was already scraped stays.',
+      inputSchema: z.object({ run_id: uuid }),
+      run: async ({ run_id }, { call }) => (await call(`/api/influencers/runs/${run_id.toLowerCase()}/cancel`, { method: 'POST', body: {} })) as ToolResult,
+    },
+    'low'
+  ),
   // skills (saved pipelines) -------------------------------------------------
   tiered(
     {
       name: 'list_skills',
-      description: "List the owner's saved skills (re-runnable pipelines): name, description, steps outline, variables, run count.",
+      description:
+        "List the skills: the built-in ones that ship with Lume (builtin: true, e.g. PM influencer reactions → Apollo CSV), then the owner's saved skills (re-runnable pipelines): name, description, steps outline, variables, run count.",
       inputSchema: z.object({}),
       run: async (_input, { deps }) => {
-        const skills = await skillStore(deps).list()
+        const skills = [...BUILTIN_SKILLS, ...(await skillStore(deps).list())]
         return {
           skills: skills.map((s) => ({
+            ...('builtin' in s && s.builtin ? { builtin: true } : {}),
             id: s.id,
             name: s.name,
             description: s.description,
@@ -1214,6 +1389,8 @@ const SPECS: Built[] = [
       description: 'Get one saved skill in full (steps with input templates, variables) by id or by name.',
       inputSchema: z.object({ id: uuid.optional(), name: z.string().min(1).max(80).optional() }).refine((v) => v.id || v.name, 'id or name'),
       run: async ({ id: skillId, name }, { deps }) => {
+        const builtin = skillId ? builtinSkillById(skillId) : builtinSkillByName(name ?? '')
+        if (builtin) return { skill: builtin }
         const store = skillStore(deps)
         const skill = skillId ? await store.get(skillId.toLowerCase()) : await store.findByName(name ?? '')
         if (!skill) throw new Error(`No saved skill ${skillId ? `with id ${skillId}` : `named "${name}"`}`)

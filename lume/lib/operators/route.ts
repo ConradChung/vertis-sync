@@ -95,6 +95,9 @@ const KIND_SCOPE: Record<PendingActionKind, VerticalScope | null> = {
   crm_close_deal: 'replies',
   // An Apify scrape is a paid data order.
   run_actor: 'orders',
+  // The PM influencer reactions pipeline (Apify + Perplexity): a paid data order.
+  influencer_run: 'orders',
+  influencer_reactions: 'orders',
   decide_gate: null,
   // Owner / master-bot business: never a vertical's item.
   issue_operator_key: null,

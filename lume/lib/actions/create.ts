@@ -9,6 +9,7 @@ import type { Json, PendingActionKind, PendingActionRow } from '@/lib/db/types'
 import { CRM_CLOSE_KIND, parseCrmClosePayload } from '@/lib/crm/actions'
 import { updateSequencePayloadError } from '@/lib/campaigns/sequenceAction'
 import { removeLeadsPayloadError } from '@/lib/actions/removeLeadsPayload'
+import { INFLUENCER_ACTION_KEY, influencerPayloadError } from '@/lib/influencers/actionPayload'
 import { tryGrantSend } from '@/lib/actions/grant'
 import { pushForItem } from '@/lib/webhooks/deliver'
 import { pushSummary } from '@/lib/webhooks/push'
@@ -141,6 +142,13 @@ export async function createAction(
     const err = removeLeadsPayloadError(payload)
     if (err) throw new InvalidActionPayloadError(err)
     campaignKey = { field: 'campaign_id', value: String(payload.campaign_id) }
+  } else if (kind === 'influencer_run' || kind === 'influencer_reactions') {
+    // One awaiting run start at a time; one awaiting reactions approval per run
+    // (pending_actions_one_awaiting_influencer_run_idx / _reactions_idx).
+    const err = influencerPayloadError(kind, payload)
+    if (err) throw new InvalidActionPayloadError(err)
+    const field = INFLUENCER_ACTION_KEY[kind]
+    campaignKey = { field, value: String(payload[field]) }
   } else if (kind === 'update_sequence') {
     const err = updateSequencePayloadError(payload)
     if (err) throw new InvalidActionPayloadError(err)

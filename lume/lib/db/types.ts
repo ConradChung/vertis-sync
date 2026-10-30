@@ -180,6 +180,8 @@ export type PendingActionKind =
   | 'update_sequence'
   | 'issue_operator_key'
   | 'remove_leads'
+  | 'influencer_run'
+  | 'influencer_reactions'
 
 export type PendingActionStatus =
   | 'awaiting'

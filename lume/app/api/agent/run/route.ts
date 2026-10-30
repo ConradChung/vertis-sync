@@ -20,6 +20,7 @@ import { clientForContext, loadSopLibrary, sopPromptBlock } from '@/lib/copy/sop
 import { loadKnowledge } from '@/lib/agent/memory'
 import { withKnowledge } from '@/lib/agent/memoryModel'
 import { skillContext } from '@/lib/agent/skillModel'
+import { builtinSkillById } from '@/lib/agent/builtinSkills'
 import { createSkill, findSkillByName, getSkill, listSkills, markSkillRun } from '@/lib/agent/skills'
 import { getProject, itemsForBlock, projectForVertical } from '@/lib/agent/projects'
 import { canUseProject, projectBlock, resolveNewChatProject, type ProjectScope } from '@/lib/agent/projectModel'
@@ -200,7 +201,8 @@ export async function POST(req: Request) {
     }
     // Before any write, so a missing skill leaves no empty conversation behind.
     if (body.data.skill_id) {
-      skill = await getSkill(body.data.skill_id.toLowerCase())
+      // A built-in skill (lib/agent/builtinSkills.ts) is not in agent_skills.
+      skill = builtinSkillById(body.data.skill_id) ?? (await getSkill(body.data.skill_id.toLowerCase()))
       if (!skill) return NextResponse.json({ error: 'skill_not_found' }, { status: 404 })
     }
     if (body.data.conversation_id) {
@@ -243,7 +245,7 @@ export async function POST(req: Request) {
     }
     if (skill) {
       prompt = `${skillContext(skill, skillMode)}\n\n${prompt}`
-      if (skillMode === 'run') await markSkillRun(skill.id)
+      if (skillMode === 'run' && !builtinSkillById(skill.id)) await markSkillRun(skill.id)
     }
     if (operator) {
       const vertical = operator.vertical_id ? await getVertical(operator.vertical_id) : null

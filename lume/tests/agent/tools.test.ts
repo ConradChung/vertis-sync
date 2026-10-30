@@ -52,6 +52,8 @@ describe('buildTools', () => {
       update_campaign_sequence: { campaign_id: 'c1', steps: [{ delay: 0, variants: [{ subject: 'Hi', body: 'Hello' }] }] },
       issue_operator_key: { vertical_id: JOB.toUpperCase(), label: 'Dentists bot' },
       remove_leads: { campaign_id: 'c1', state: 'bounced', reason: 'free the cap' },
+      start_influencer_run: { slugs: ['peter-lohmann'], estimate_shown_to_owner: true },
+      approve_reactions: { run_id: JOB },
     }
     const { fetch, createAction, tool } = setup()
     for (const [name, tier] of Object.entries(TOOL_TIERS)) {
@@ -408,7 +410,10 @@ describe('skill tools', () => {
 
   it('list_skills outlines steps; get_skill finds by id or by name', async () => {
     const { tool, store, fetch } = withSkills()
-    expect(await tool('list_skills').run({})).toEqual({ skills: [{ id: saved.id, name: 'Roofers', description: 'd', steps: ['Launch'], variables: ['city'], run_count: 2, last_run_at: null }] })
+    const listed = (await tool('list_skills').run({})) as { skills: Record<string, unknown>[] }
+    // The built-in skills come first (lib/agent/builtinSkills.ts), then the saved ones.
+    expect(listed.skills[0]).toMatchObject({ builtin: true })
+    expect(listed.skills.slice(1)).toEqual([{ id: saved.id, name: 'Roofers', description: 'd', steps: ['Launch'], variables: ['city'], run_count: 2, last_run_at: null }])
     await tool('get_skill').run({ id: saved.id.toUpperCase() })
     expect(store.get).toHaveBeenCalledWith(saved.id)
     await tool('get_skill').run({ name: 'roofers' })

@@ -26,6 +26,7 @@ vi.mock('@/lib/db/service', () => ({ isDbError: () => false }))
 import { GET as listGET, POST } from '@/app/api/agent/skills/route'
 import { DELETE, GET, PATCH } from '@/app/api/agent/skills/[id]/route'
 import { DuplicateSkillNameError } from '@/lib/agent/skills'
+import { BUILTIN_SKILLS } from '@/lib/agent/builtinSkills'
 
 const ID = '0f3c2b1a-9d8e-4f7a-8b6c-5d4e3f2a1b0c'
 const ctx = (id = ID) => ({ params: Promise.resolve({ id }) })
@@ -39,9 +40,9 @@ beforeEach(() => {
 })
 
 describe('/api/agent/skills', () => {
-  it('GET lists skills', async () => {
+  it('GET lists the built-in skills first, then the saved ones', async () => {
     h.listSkills.mockResolvedValue([skill])
-    expect(await (await listGET(req())).json()).toEqual({ skills: [skill] })
+    expect(await (await listGET(req())).json()).toEqual({ skills: [...JSON.parse(JSON.stringify(BUILTIN_SKILLS)), skill] })
   })
 
   it('POST validates steps with zod and creates', async () => {

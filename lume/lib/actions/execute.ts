@@ -36,6 +36,7 @@ import { payloadLintSteps } from '@/lib/campaigns/sequenceAction'
 import { sopGate, sopRefusalText, type SopGate } from '@/lib/copy/sopGate'
 import { formatViolation } from '@/lib/copy/sopLint'
 import { checkRunActor, tightenOptions } from '@/lib/apify/service'
+import { executeInfluencerReactions, executeInfluencerRun } from '@/lib/influencers/actions'
 import type { RunOptions } from '@/lib/apify/pricing'
 import type { Json, PendingActionRow } from '@/lib/db/types'
 import { nextRun } from '@/lib/rules/nextRun'
@@ -438,6 +439,20 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
    * campaign's client overlay): a blocking violation, or an SOP that fails to
    * load, refuses the write with each rule and step named.
    */
+  /** Start a PM influencer reactions run (posts + top posts), after re-checking the influencers and that no run is active. */
+  async influencer_run(p, action) {
+    const out = await executeInfluencerRun(p, action.id)
+    if (!out.ok) throw new ActionFailure(out.error, out.result)
+    return out.result
+  },
+
+  /** Continue a run past its reactions bill, only if the run still waits with the bill that was approved. */
+  async influencer_reactions(p, action) {
+    const out = await executeInfluencerReactions(p, action.id)
+    if (!out.ok) throw new ActionFailure(out.error, out.result)
+    return out.result
+  },
+
   async update_sequence(p) {
     const campaignId = need(p, 'campaign_id')
     const beforeHash = need(p, 'before_hash')

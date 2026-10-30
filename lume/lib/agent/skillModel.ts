@@ -84,6 +84,8 @@ export interface Skill {
   updated_at: string
   last_run_at: string | null
   run_count: number
+  /** Ships with Lume (lib/agent/builtinSkills.ts): listed and runnable, never renamed or deleted. */
+  builtin?: boolean
 }
 
 export type SkillMode = 'run' | 'reference'

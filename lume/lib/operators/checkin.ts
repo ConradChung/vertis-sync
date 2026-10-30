@@ -106,6 +106,8 @@ const ACTION_LABEL: Record<string, string> = {
   issue_operator_key: 'Issue a Grok Bot operator key',
   remove_leads: 'Remove leads from a campaign',
   label_reply: 'Label a reply (blocklists the lead)',
+  influencer_run: 'Start a PM influencer reactions run (spends money)',
+  influencer_reactions: 'Approve the influencer reactions bill (spends money)',
 }
 
 function priorityOf(gate: GateRow): Priority {
