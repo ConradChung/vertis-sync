@@ -1,7 +1,9 @@
 ---
-# Cold-email SOP — machine rules (read by lib/copy/sop.ts, linted by lib/copy/sopLint.ts).
-# This file is the single source of truth: the agent's system prompt, the
-# update_sequence lint gate and the PDF (cold-email-sop.Rmd) all read it.
+# Cold-email SOP, BASE — machine rules (read by lib/copy/sop.ts, linted by lib/copy/sopLint.ts).
+# This file is the source of truth for general rules and generic fallbacks: the
+# agent's system prompt, the update_sequence lint gate and the PDF
+# (cold-email-sop.Rmd) all read it. Client overlays in sops/clients/<client>.md
+# extend or override it for their campaigns (see sops/README.md).
 #
 # PLACEHOLDER: every value below is a starting placeholder. The owner replaces
 # them with the real SOP, then sets `placeholder: false`. A malformed block
@@ -39,32 +41,44 @@ subject: # PLACEHOLDER
   allowed_capitalized: [I, PMS, AI]
 
 # Each proof point at most once per sequence thread (any step, any variant).
-# Patterns are plain phrases (case-insensitive, whole words), not regexes.
+# Patterns are regular expressions (case-insensitive); any match = the point is used.
 proof_points: # PLACEHOLDER
   - id: example_case_study
-    patterns: [PLACEHOLDER case study client, PLACEHOLDER case study]
+    patterns: ['PLACEHOLDER case study']
   - id: example_metric
-    patterns: [PLACEHOLDER 30% fewer after-hours calls]
+    patterns: ['PLACEHOLDER 30% fewer after-hours calls']
+# Optional: at most N distinct proof points in one email (null = no limit).
+max_proof_points_per_email: null
 
 # {{variables}} that count as personalization.
 personalization_fields: [hook, city, door_count, pms, open_role, jurisdiction]
 max_personalization_fields_per_email: 1
 
-# Step 1 may not ask a yes/no question that requires a meeting.
+# Step 1 may not ask a yes/no question that requires a meeting: a sentence
+# ending in "?" that contains a meeting word (whole words) or matches a
+# meeting pattern (regex).
 step1_cta:
   forbid_yes_no_meeting: true
   meeting_words: # PLACEHOLDER
-    - call
-    - meeting
+    - a call
+    - quick call
+    - a meeting
     - meet
     - demo
-    - chat
+    - a chat
     - hop on
     - jump on
     - zoom
     - calendar
-    - 15 minutes
-    - 15 mins
+  meeting_patterns: ['\b(10|15|20|30)[ -]?min(ute)?s?\b']
+
+# Optional rules, off by default (client overlays usually set them):
+#   no_exclamation: true            no "!" in any subject or body
+#   subject: { min_words: 2, no_company: true, forbid: [phrase] }
+#   only_in_step: { Vancouver: [1] }  a phrase allowed only in those steps
+#   step_rules: { "4": { forbid: [program], require: [{ pattern: <regex>, label: <text> }] } }
+#   signoff: { "1": Full Name }       the body's last line, per step
+#   sequence: { steps: 4, delays_days: [0, 3, 4, 5], step1_variants: 5 }  warning only, never blocks
 
 # One fallback sentence per field, used when a lead has no high-confidence value.
 fallbacks: # PLACEHOLDER
