@@ -1,0 +1,5 @@
+# Knitted output of cold-email-sop.Rmd (never committed)
+*.pdf
+*.tex
+*.log
+*.knit.md

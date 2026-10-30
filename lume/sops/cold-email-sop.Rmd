@@ -1,0 +1,123 @@
+---
+title: "Cold-email SOP`r if (nzchar(params$client)) paste0(' — ', params$client)`"
+params:
+  client: kaspen # a file in clients/ (without .md); "" for the base SOP alone
+output:
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include = FALSE}
+# Renders the SOP straight from the .md files (the single source of truth):
+# the YAML front matter becomes tables, the prose is printed as written.
+# Nothing here duplicates SOP content. See README.md for how to knit.
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+read_sop <- function(path) {
+  if (!file.exists(path)) stop("SOP file not found: ", path)
+  lines <- readLines(path, encoding = "UTF-8", warn = FALSE)
+  fences <- which(trimws(lines) == "---")
+  if (length(fences) < 2 || fences[1] != 1) stop(path, ": missing the YAML front matter block")
+  end <- fences[2]
+  list(
+    rules = yaml::yaml.load(paste(lines[2:(end - 1)], collapse = "\n")),
+    prose = if (end < length(lines)) paste(lines[(end + 1):length(lines)], collapse = "\n") else ""
+  )
+}
+
+# Table cells. Regex patterns go in as raw LaTeX (\texttt with every special
+# character escaped), so "|", "$", "\" and "_" print literally: no table
+# split, no TeX math. The output is a PDF only, so raw LaTeX is safe here.
+esc <- function(x) as.character(x)
+tex_lit <- function(x) {
+  x <- gsub("\\", "\001", as.character(x), fixed = TRUE)
+  x <- gsub("([{}$&#%_])", "\\\\\\1", x, perl = TRUE)
+  x <- gsub("^", "\\textasciicircum{}", x, fixed = TRUE)
+  x <- gsub("~", "\\textasciitilde{}", x, fixed = TRUE)
+  x <- gsub("|", "\\textbar{}", x, fixed = TRUE)
+  x <- gsub("\001", "\\textbackslash{}", x, fixed = TRUE)
+  paste0("\\texttt{", x, "}")
+}
+code <- function(x) if (length(x)) paste(tex_lit(x), collapse = ", ") else "none"
+flat <- function(x) if (is.null(x) || !length(x)) "none" else esc(paste(unlist(x), collapse = ", "))
+yes <- function(x) if (isTRUE(x)) "yes" else "no"
+
+table_md <- function(df, caption) {
+  cat("\n\n**", caption, "**\n\n", sep = "")
+  cat(paste(knitr::kable(df, format = "pipe", escape = FALSE), collapse = "\n"), "\n\n")
+}
+
+# One section of tables per rules block; an overlay shows only the keys it sets.
+render_rules <- function(r) {
+  s <- data.frame(Setting = character(), Value = character())
+  add <- function(k, v) s[nrow(s) + 1, ] <<- c(k, v)
+  if (!is.null(r$client)) add("client", paste0(r$client, " (", esc(r$name), ")"))
+  if (!is.null(r$match)) {
+    add("applies to campaigns named", flat(r$match$campaign_names))
+    add("applies to campaign ids", flat(r$match$campaign_ids))
+    add("applies to vertical", flat(r$match$vertical))
+  }
+  if (!is.null(r$placeholder)) add("placeholder values", yes(r$placeholder))
+  if (!is.null(r$no_exclamation)) add("no exclamation marks", yes(r$no_exclamation))
+  for (k in names(r$word_count)) add(paste("words,", if (k == "step1") "step 1" else "follow-ups"), paste0(r$word_count[[k]]$min, "-", r$word_count[[k]]$max))
+  sj <- r$subject
+  if (!is.null(sj$casing)) add("subject casing", sj$casing)
+  if (!is.null(sj$min_words)) add("subject min words", sj$min_words)
+  if (!is.null(sj$max_words)) add("subject max words", sj$max_words)
+  if (!is.null(sj$allowed_capitalized)) add("subject may keep capitals", flat(sj$allowed_capitalized))
+  if (!is.null(sj$no_company)) add("no company name in subject", yes(sj$no_company))
+  if (!is.null(sj$forbid)) add("subject may not contain", flat(sj$forbid))
+  if (!is.null(r$personalization_fields)) add("personalization fields", code(unlist(r$personalization_fields)))
+  if (!is.null(r$max_personalization_fields_per_email)) add("max personalization fields per email", r$max_personalization_fields_per_email)
+  if ("max_proof_points_per_email" %in% names(r)) add("max proof points per email", flat(r$max_proof_points_per_email))
+  cta <- r$step1_cta
+  if (!is.null(cta$forbid_yes_no_meeting)) add("step 1: no yes/no meeting ask", yes(cta$forbid_yes_no_meeting))
+  if (!is.null(cta$meeting_words)) add("step 1 meeting words", flat(cta$meeting_words))
+  if (!is.null(cta$meeting_patterns)) add("step 1 meeting patterns", code(unlist(cta$meeting_patterns)))
+  sq <- r$sequence
+  if (!is.null(sq)) add("sequence shape (warning only)", paste0(sq$steps, " steps; delays ", paste(unlist(sq$delays_days), collapse = "/"), " days; ", sq$step1_variants, " step-1 variants"))
+  if (nrow(s)) table_md(s, "Settings")
+
+  if (length(r$banned_phrases)) table_md(data.frame(`Banned phrase` = esc(unlist(r$banned_phrases)), check.names = FALSE), "Banned phrases")
+  if (length(r$proof_points)) {
+    pp <- r$proof_points
+    table_md(data.frame(`Proof point` = sapply(pp, function(p) code(p$id)), `Patterns (regex)` = sapply(pp, function(p) code(unlist(p$patterns))), check.names = FALSE), "Proof points (each at most once per sequence)")
+  }
+  if (length(r$only_in_step)) {
+    table_md(data.frame(Phrase = esc(names(r$only_in_step)), `Only in step` = sapply(r$only_in_step, flat), check.names = FALSE, row.names = NULL), "Phrases limited to steps")
+  }
+  if (length(r$step_rules)) {
+    sr <- r$step_rules
+    table_md(data.frame(
+      Step = names(sr),
+      Forbid = sapply(sr, function(x) flat(x$forbid)),
+      Require = sapply(sr, function(x) if (length(x$require)) paste(sapply(x$require, function(q) paste0(esc(q$label), ": ", code(q$pattern))), collapse = "; ") else "none"),
+      row.names = NULL
+    ), "Step rules")
+  }
+  if (length(r$signoff)) table_md(data.frame(Step = names(r$signoff), `Sign-off` = esc(unlist(r$signoff)), check.names = FALSE, row.names = NULL), "Sign-offs")
+  if (length(r$fallbacks)) table_md(data.frame(Field = code(names(r$fallbacks)), Fallback = esc(unlist(r$fallbacks)), row.names = NULL), "Fallback sentences")
+}
+
+base <- read_sop("cold-email-sop.md")
+client <- if (nzchar(params$client)) read_sop(file.path("clients", paste0(params$client, ".md"))) else NULL
+```
+
+# Base rules
+
+```{r base-rules, results = "asis"}
+render_rules(base$rules)
+```
+
+```{r base-prose, results = "asis"}
+cat(base$prose, "\n")
+```
+
+```{r client, results = "asis"}
+if (!is.null(client)) {
+  cat("\n\\newpage\n\n# Client rules: ", esc(client$rules$name), "\n\n", sep = "")
+  cat("These extend or override the base rules for this client's campaigns: banned phrases are added to the base list; every other setting shown here replaces the base's.\n\n")
+  render_rules(client$rules)
+  cat("\n\\newpage\n\n", client$prose, "\n", sep = "")
+}
+```
