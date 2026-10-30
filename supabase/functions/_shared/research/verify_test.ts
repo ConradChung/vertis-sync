@@ -159,3 +159,76 @@ Deno.test('verifyCandidates: the stored snippet is whitespace-normalized and cap
   const r = verifyCandidates([c({ snippet: 'We  manage\n1,237 doors' })], pages)
   assertEquals(r.kept[0]?.snippet, 'We manage 1,237 doors')
 })
+
+// --- value support (review item 2) ----------------------------------------------
+
+const p2: Page[] = [
+  {
+    url: 'https://acme-pm.com/',
+    text: 'Since 1998 we have served Vancouver owners. We manage 1,237 doors across 40 buildings. ' +
+      'Founded in 2005. Our team of 25 handles 350 residential rental units. Contact us today. ' +
+      'Proudly Canadian. Serving the United States and Canada. Offices in Dubai, UAE.',
+    links: [],
+  },
+  {
+    url: 'https://acme-pm.com/contact',
+    text: 'Office: 123 Main St, Burnaby, BC V5H 2E2. Call 604-555-0100. After-hours emergency line: 604-555-0199. ' +
+      'Our answering service picks up at night. Monday to Friday 9am-5pm. Doors under management: 2,400',
+    links: [],
+  },
+]
+const at = (x: Partial<Candidate>) => verifyCandidates([c(x)], p2)
+
+Deno.test('door_count: "Since 1998" is not a door count (a year, no unit word)', () => {
+  assertEquals(at({ value: 1998, snippet: 'Since 1998 we have served Vancouver owners.' }).dropped[0]?.reason, 'no_unit_word')
+  assertEquals(at({ value: 2005, snippet: 'Founded in 2005.' }).dropped[0]?.reason, 'no_unit_word')
+})
+
+Deno.test('door_count: a number without a unit word nearby is refused', () => {
+  assertEquals(at({ value: 25, snippet: 'Our team of 25 handles 350 residential rental units.' }).dropped[0]?.reason, 'no_unit_word')
+  assertEquals(at({ value: 40, snippet: 'We manage 1,237 doors across 40 buildings.' }).dropped[0]?.reason, 'no_unit_word')
+})
+
+Deno.test('door_count: unit word within ~3 tokens after or before the number', () => {
+  assertEquals(at({ value: 1237, snippet: 'We manage 1,237 doors' }).kept[0]?.value, 1237)
+  assertEquals(at({ value: 350, snippet: 'handles 350 residential rental units' }).kept[0]?.value, 350)
+  assertEquals(at({ value: 2400, snippet: 'Doors under management: 2,400', source_url: 'https://acme-pm.com/contact' }).kept[0]?.value, 2400)
+})
+
+Deno.test('after_hours: the snippet must carry an after-hours keyword', () => {
+  const ok = (snippet: string) => at({ field: 'after_hours', value: true, snippet, source_url: 'https://acme-pm.com/contact' })
+  assertEquals(ok('After-hours emergency line: 604-555-0199.').kept.length, 1)
+  assertEquals(ok('Our answering service picks up at night.').kept.length, 1)
+  assertEquals(ok('Call 604-555-0100.').dropped[0]?.reason, 'no_after_hours_keyword')
+  assertEquals(ok('Monday to Friday 9am-5pm.').dropped[0]?.reason, 'no_after_hours_keyword')
+  assertEquals(at({ field: 'after_hours', value: true, snippet: 'Contact us today.' }).dropped[0]?.reason, 'no_after_hours_keyword')
+})
+
+Deno.test('country: named (or a common alias) in the snippet', () => {
+  const kept = (value: string, snippet: string) => at({ field: 'country', value, snippet }).kept[0]?.value
+  assertEquals(kept('Canada', 'Serving the United States and Canada.'), 'Canada')
+  assertEquals(kept('Canada', 'Proudly Canadian.'), 'Canada')
+  assertEquals(kept('United Arab Emirates', 'Offices in Dubai, UAE.'), 'United Arab Emirates')
+  assertEquals(kept('USA', 'Serving the United States and Canada.'), 'United States')
+})
+
+Deno.test('country: "Contact us" is not the United States (short aliases are case-sensitive words)', () => {
+  assertEquals(at({ field: 'country', value: 'United States', snippet: 'Contact us today.' }).dropped[0]?.reason, 'country_not_supported')
+  assertEquals(at({ field: 'country', value: 'US', snippet: 'Contact us today.' }).dropped[0]?.reason, 'country_not_supported')
+})
+
+Deno.test('country: derived from a verified region (province/state -> country), else refused', () => {
+  const contact = 'https://acme-pm.com/contact'
+  const r = verifyCandidates([
+    c({ field: 'region', value: 'BC', snippet: '123 Main St, Burnaby, BC', source_url: contact }),
+    c({ field: 'country', value: 'Canada', snippet: 'Burnaby, BC V5H 2E2', source_url: contact }),
+  ], p2)
+  assertEquals(r.kept.map((k) => [k.field, k.value]), [['region', 'BC'], ['country', 'Canada']])
+  const wrong = verifyCandidates([
+    c({ field: 'region', value: 'BC', snippet: '123 Main St, Burnaby, BC', source_url: contact }),
+    c({ field: 'country', value: 'United States', snippet: 'Burnaby, BC V5H 2E2', source_url: contact }),
+  ], p2)
+  assertEquals(wrong.dropped.map((d) => d.reason), ['country_not_supported'])
+  const noRegion = verifyCandidates([c({ field: 'country', value: 'Canada', snippet: 'Burnaby, BC V5H 2E2', source_url: contact })], p2)
+  assertEquals(noRegion.dropped.map((d) => d.reason), ['country_not_supported'])
+})
