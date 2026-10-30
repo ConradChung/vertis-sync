@@ -174,11 +174,38 @@ describe('Kaspen SOP lint', () => {
     ['a 350-unit portfolio', 'a door or unit count'],
     ['my 1,000 doors', 'a door or unit count'],
     ['all 21,000 units we run', 'a door or unit count'],
+    ['350 rental units', 'a door or unit count'],
+    ['1,000+ residential doors', 'a door or unit count'],
+    ['a thousand doors', 'a door or unit count'],
+    ['one thousand units', 'a door or unit count'],
+    ['a 98k payroll saving', '$98k'],
+    ['$98,000 a year', '$98k'],
   ])('step 3 forbids a door count and Miami: "%s"', (phrase, label) => {
     const s = zenport()
     s[2].variants[0].body = s[2].variants[0].body.replace('one more angle.', `one more angle, seen across ${phrase}.`)
     const out = lintSequence(s, RULES).filter((x) => x.rule === 'step_forbid')
     expect(out).toEqual([expect.objectContaining({ rule: 'step_forbid', step: 3, variant: 'A', message: `step 3 may not use ${label}` })])
+  })
+
+  it.each([
+    ['5 days late', ''],
+    ['198k in rent', ''],
+    ['2 thousand calls', ''],
+  ])('step 3 leaves non-counts alone: "%s"', (phrase) => {
+    const s = zenport()
+    s[2].variants[0].body = s[2].variants[0].body.replace('one more angle.', `one more angle, ${phrase}.`)
+    expect(lintSequence(s, RULES)).toEqual([])
+  })
+
+  it('step 3 count patterns stay linear on long adversarial input', () => {
+    const inputs = ['1,'.repeat(9_000), '1 ' + 'a'.repeat(18_000), '1 a '.repeat(4_500), '98'.repeat(9_000), 'a thousand '.repeat(1_600)]
+    for (const junk of inputs) {
+      const s = zenport()
+      s[2].variants[0].body = `${junk}\n\nFrank`
+      const t = performance.now()
+      lintSequence(s, RULES)
+      expect(performance.now() - t).toBeLessThan(500)
+    }
   })
 
   it('the step-3 ban leaves door counts alone elsewhere (21,000 units in step 4 passes)', () => {
