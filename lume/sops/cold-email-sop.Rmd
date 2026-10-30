@@ -70,6 +70,7 @@ render_rules <- function(r) {
   if (!is.null(r$personalization_fields)) add("personalization fields", code(unlist(r$personalization_fields)))
   if (!is.null(r$max_personalization_fields_per_email)) add("max personalization fields per email", r$max_personalization_fields_per_email)
   if ("max_proof_points_per_email" %in% names(r)) add("max proof points per email", flat(r$max_proof_points_per_email))
+  for (c in r$allowed_proof_point_combos) add("proof points allowed together", flat(c))
   cta <- r$step1_cta
   if (!is.null(cta$forbid_yes_no_meeting)) add("step 1: no yes/no meeting ask", yes(cta$forbid_yes_no_meeting))
   if (!is.null(cta$meeting_words)) add("step 1 meeting words", flat(cta$meeting_words))

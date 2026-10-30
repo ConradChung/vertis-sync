@@ -62,6 +62,8 @@ const casing = z.enum(['lowercase', 'sentence', 'any'])
 const proofPoints = z
   .array(z.object({ id: z.string().regex(/^[a-z0-9_]+$/, 'snake_case id'), patterns: z.array(regex).min(1) }).strict())
   .refine((pp) => new Set(pp.map((p) => p.id)).size === pp.length, { message: 'proof point ids must be unique' })
+/** Proof points one email may cite together, past max_proof_points_per_email. */
+const proofCombos = z.array(z.array(z.string().regex(/^[a-z0-9_]+$/, 'snake_case id')).min(2))
 const fieldName = z.string().regex(/^[A-Za-z_][\w.]*$/, 'a {{variable}} name')
 const stepRule = z
   .object({
@@ -104,6 +106,7 @@ export const SopRulesSchema = z
       .refine((s) => s.min_words <= s.max_words, { message: 'min_words must be <= max_words' }),
     proof_points: proofPoints,
     max_proof_points_per_email: z.number().int().min(0).nullable().default(null),
+    allowed_proof_point_combos: proofCombos.default([]),
     /** Phrase → the only steps it may appear in. */
     only_in_step: z.record(text, z.array(z.number().int().min(1)).min(1)).default({}),
     personalization_fields: z.array(fieldName).min(1),
@@ -159,6 +162,7 @@ const OverlaySchema = z
       .optional(),
     proof_points: proofPoints.optional(),
     max_proof_points_per_email: z.number().int().min(0).nullable().optional(),
+    allowed_proof_point_combos: proofCombos.optional(),
     only_in_step: z.record(text, z.array(z.number().int().min(1)).min(1)).optional(),
     personalization_fields: z.array(fieldName).min(1).optional(),
     max_personalization_fields_per_email: z.number().int().min(0).optional(),
@@ -241,6 +245,7 @@ export function mergeRules(base: SopRules, o: SopOverlay, label = o.client): Sop
     subject: { ...base.subject, ...o.subject },
     proof_points: o.proof_points ?? base.proof_points,
     max_proof_points_per_email: o.max_proof_points_per_email !== undefined ? o.max_proof_points_per_email : base.max_proof_points_per_email,
+    allowed_proof_point_combos: o.allowed_proof_point_combos ?? base.allowed_proof_point_combos,
     only_in_step: { ...base.only_in_step, ...o.only_in_step },
     personalization_fields: o.personalization_fields ?? base.personalization_fields,
     max_personalization_fields_per_email: o.max_personalization_fields_per_email ?? base.max_personalization_fields_per_email,
@@ -357,6 +362,7 @@ export function blockingRules(lib: SopLibrary, client: ClientSop | null): SopRul
     },
     proof_points: o.proof_points ?? [],
     max_proof_points_per_email: o.max_proof_points_per_email ?? null,
+    allowed_proof_point_combos: o.allowed_proof_point_combos ?? [],
     only_in_step: o.only_in_step ?? {},
     max_personalization_fields_per_email: o.max_personalization_fields_per_email ?? NEVER,
     step1_cta: { ...r.step1_cta, forbid_yes_no_meeting: o.step1_cta?.forbid_yes_no_meeting ?? false },
@@ -404,6 +410,7 @@ export function rulesSummary(r: SopRules): string {
     `- Body length: step 1 ${r.word_count.step1.min}-${r.word_count.step1.max} words; follow-ups ${r.word_count.followup.min}-${r.word_count.followup.max} words (a {{variable}} counts as one word).`,
     `- Subjects: ${casingText}, ${subjectWords}${r.subject.allowed_capitalized.length ? `; may keep capitals: ${r.subject.allowed_capitalized.join(', ')}` : ''}${r.subject.no_company ? '; never the company name or {{companyName}}/{{company}}' : ''}${r.subject.forbid.length ? `; never ${quoted(r.subject.forbid)}` : ''}. An empty subject on a follow-up keeps the same thread.`,
     `- Proof points, each at most once per sequence thread (any step or variant)${r.max_proof_points_per_email !== null ? `, at most ${r.max_proof_points_per_email} per email` : ''}: ${r.proof_points.map((p) => p.id).join(', ') || 'none'}.`,
+    ...r.allowed_proof_point_combos.map((c) => `- Exception: ${c.join(' + ')} may appear together in one email.`),
     ...Object.entries(r.only_in_step).map(([p, steps]) => `- "${p}" only in step ${steps.join(', ')}.`),
     `- Personalization variables: ${r.personalization_fields.map((f) => `{{${f}}}`).join(', ')}; at most ${r.max_personalization_fields_per_email} per email ({{company}} and {{companyName}} are the same field; {{firstName}} is not personalization).`,
     ...(r.step1_cta.forbid_yes_no_meeting

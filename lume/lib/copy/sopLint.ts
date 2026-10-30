@@ -22,7 +22,8 @@ import type { SopRules } from '@/lib/copy/sop'
  *   variants of the SAME step may share a proof point; a later step reusing
  *   it is flagged.
  * - proof_points_per_email: more distinct proof points in one email than
- *   `max_proof_points_per_email`.
+ *   `max_proof_points_per_email`, unless every one of them belongs to one
+ *   of `allowed_proof_point_combos`.
  * - only_in_step: a phrase outside the steps it is allowed in.
  * - subject_casing / subject_length / subject_content: non-empty subjects
  *   only (an empty follow-up subject keeps the thread). {{variables}} are
@@ -284,7 +285,8 @@ export function lintSequence(steps: LintStep[], rules: SopRules): SopViolation[]
         }
       }
       const maxPP = rules.max_proof_points_per_email
-      if (maxPP !== null && used.length > maxPP) {
+      const allowedCombo = rules.allowed_proof_point_combos.some((c) => used.every((id) => c.includes(id)))
+      if (maxPP !== null && used.length > maxPP && !allowedCombo) {
         add({ rule: 'proof_points_per_email', message: `${used.length} proof points (${used.join(', ')}); at most ${maxPP} per email`, excerpt: used.join(', ') })
       }
 

@@ -91,6 +91,18 @@ describe('Kaspen SOP lint', () => {
     expect(only(s)).toEqual([['proof_points_per_email', 1, 'A']])
   })
 
+  it('the Miami variant may carry two proof points: $98k Miami plus 1,000 doors', () => {
+    const s = zenport()
+    s[0].variants[0].body = s[0].variants[0].body.replace('Vancouver and', 'Vancouver, a 350-unit Miami portfolio saves $98k a year, and')
+    expect(only(s).filter(([r]) => r === 'proof_points_per_email')).toEqual([])
+  })
+
+  it('the Miami pair does not open the door to a third proof point', () => {
+    const s = zenport()
+    s[0].variants[0].body = s[0].variants[0].body.replace('Vancouver and', 'Vancouver, Miami saves $98k, live on 21,000 units, and')
+    expect(only(s).filter(([r]) => r === 'proof_points_per_email')).toEqual([['proof_points_per_email', 1, 'A']])
+  })
+
   it('proof_point_repeat: a proof point from step 1 again in step 3', () => {
     const s = zenport()
     s[2].variants[0].body = s[2].variants[0].body.replace('schedules the fix before the tenant complains', 'runs the same way on my 1,000 doors')

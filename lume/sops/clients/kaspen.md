@@ -46,7 +46,8 @@ word_count:
   step1: { min: 60, max: 90 }
   followup: { min: 1, max: 59 } # steps 2-4: under 60
 
-# Each at most once per sequence, and never more than one per email.
+# Each at most once per sequence, and never more than one per email (except the
+# Miami pair below).
 # Patterns are case-insensitive regular expressions.
 proof_points:
   - id: frank_1000_doors # Frank runs ~1,000 doors in Vancouver and uses Kaspen himself
@@ -64,6 +65,10 @@ proof_points:
   - id: before_tenant # schedules the fix before the tenant complains
     patterns: ['\bbefore the tenant']
 max_proof_points_per_email: 1
+# Owner, 2026-10-29: the Miami payroll variant may cite the $98k case study and
+# Frank's 1,000 doors together. Nothing else may join them.
+allowed_proof_point_combos:
+  - [miami_98k, frank_1000_doors]
 
 only_in_step:
   Vancouver: [1]
@@ -191,7 +196,8 @@ Treat these as established. Do not relitigate them; fix them.
 
 ## Proof points
 
-Each at most once per sequence, never more than one per email.
+Each at most once per sequence, never more than one per email. One exception:
+the Miami payroll variant may pair the $98k case study with Frank's 1,000 doors.
 
 - Frank runs ~1,000 doors in Vancouver and uses Kaspen himself.
 - Live on 21,000 units.
