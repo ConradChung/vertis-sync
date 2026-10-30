@@ -34,7 +34,7 @@ Names only; values live in Vercel (Root Directory `lume`) and `.env.local`.
 | Name | Where | Used for |
 | --- | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Vercel | Browser + session client; Realtime |
-| `SUPABASE_SERVICE_ROLE_KEY` | Vercel | Server-only data layer and Storage (`raw-uploads`) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Vercel | Server-only data layer and Storage (`raw-uploads`, `agent-projects`, `agent-chat-images`) |
 | `LUME_ALLOWED_EMAIL` | Vercel | The one account allowed to sign in (middleware + magic-link route) |
 | `LUME_ACTION_SECRET` | Vercel **and** edge secret | `X-Lume-Secret`: Lume → `telegram-inbox` decisions, and `telegram-inbox` → `/api/actions/<id>/execute` after a Telegram `lume_ok` |
 | `LUME_HOOK_SECRET` | Vercel (+ vault `lume_hook_secret`, same value) | `X-Lume-Hook-Secret` on `/api/hooks/gate-opened` and `/api/cron/rotation-tick` (called by pg_net) |
@@ -212,6 +212,25 @@ Environment variable names are listed in `.env.example`.
   pipeline parses line by line). The rail's count picker sends
   `lfo_count:<id>:<n>` via `/api/gates/decide` (click only).
 - Live read check: `LUME_SMOKE=1 npm run smoke:db` (row counts only).
+- Agent chat images (paste ⌘V, drop, or the paperclip; png / jpeg / gif / webp,
+  ≤ 5 per message, image-only messages allowed). **Vercel body cap:** functions
+  refuse request bodies over ~4.5 MB, and 5 images inline would not fit, so the
+  run never carries image bytes. The browser shrinks each image
+  (`lib/agent/imageClient.ts`: long edge ≤ 1568 px, re-encoded to ≤ ~1.5 MB)
+  and uploads it alone to `POST /api/agent/images` (raw body, ≤ 2 MB,
+  `requireOwner`), which sniffs the magic bytes (the client's type is never
+  trusted) and stores it in the private `agent-chat-images` bucket
+  (service role only: no Storage policies; bucket limit 2 MB and the four
+  image types) at `<uuid>.<ext>`. `/api/agent/run` then gets only
+  `images: [{ path, name }]`, reads each object back, re-sniffs it, and sends it
+  to Claude as a base64 `image` block before the text; the user message stores
+  `{ path, name, media_type }` in `agent_messages.attachments` (no base64 in
+  rows). Later runs replay the images of the newest 3 owner turns that have
+  any (≤ 5 images, `selectReplayImages`); older or unreadable ones become
+  "[image omitted: <name>]". Bubbles show images through
+  `GET /api/agent/images/<path>` (owner session, `private` cache, `nosniff`),
+  never a signed URL. An image removed from the composer before sending stays
+  in the bucket (orphan, harmless; no cleanup job yet).
 
 ## Design system notes
 
