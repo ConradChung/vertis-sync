@@ -6,7 +6,7 @@
 --   signals (dedupe key, expiry default + index), jurisdictions,
 --   lead_personalization_log. Service role only. Everything rolls back.
 begin;
-select plan(42);
+select plan(43);
 
 -- companies ------------------------------------------------------------------
 select has_table('public', 'companies', 'companies exists');
@@ -42,7 +42,7 @@ select is(
   (public.lume_research_reserve_crawl('00000000-0000-0000-0000-00000000c001', 'https://pgtap-acme.com/', 0.02, 0, 1000000))->>'ok',
   'true', 'a reserve under the cap is accepted');
 select is(
-  (public.lume_research_reserve_crawl('00000000-0000-0000-0000-00000000c001', 'https://pgtap-acme.com/', 0.02, 1000000 - 0.02 - public.lume_research_month_spend(), 1000000))->>'error',
+  (public.lume_research_reserve_crawl('00000000-0000-0000-0000-00000000c001', 'https://pgtap-acme.com/', 0.02, 1000000 - 0.02 - public.lume_research_reserved_usd(), 1000000))->>'error',
   'crawl_in_progress', 'landing exactly on the cap passes the budget (refused here only because a crawl is active)');
 select is(
   (select cost_usd from public.company_crawls where company_id = '00000000-0000-0000-0000-00000000c001'),
@@ -101,6 +101,10 @@ select throws_ok(
   $$insert into public.signals(company_id, signal_type, detail, source_url, dedupe_key)
     values ('00000000-0000-0000-0000-00000000c001', 'open_role', '{}', 'https://pgtap-acme.com/careers', 'maintenance-coordinator')$$,
   '23505', null, 'the same signal is recorded once (dedupe key)');
+select lives_ok(
+  $$insert into public.signals(company_id, signal_type, detail, source_url, dedupe_key)
+    values ('00000000-0000-0000-0000-00000000c001', 'open_role', '{"title":"Leasing Agent"}', 'https://pgtap-acme.com/careers', 'leasing-agent')$$,
+  'several open roles per company: the key includes the normalized role title (dedupe_key)');
 select is(
   (select (expires_at - detected_at) from public.signals where dedupe_key = 'maintenance-coordinator'),
   interval '30 days', 'a signal expires 30 days after detection by default');

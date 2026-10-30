@@ -28,7 +28,10 @@ function startRoutes(opts: { reserve?: unknown; usage?: Response } = {}): Route[
     [(u, m) => u.startsWith('https://db.test/rest/v1/companies') && m === 'POST', () => json([{ id: COMPANY }], 201)],
     [(u) => u === 'https://api.apify.com/v2/users/me/usage/monthly', () => opts.usage ?? json({ data: { totalUsageCreditsUsdAfterVolumeDiscount: 3.5 } })],
     [(u) => u === 'https://db.test/rest/v1/rpc/lume_research_reserve_crawl', () =>
-      json(opts.reserve ?? { ok: true, crawl_id: CRAWL, month_spend_usd: 0.4, external_usd: 3.5, estimate_usd: 0.02, cap_usd: 29 })],
+      json(opts.reserve ?? {
+        ok: true, crawl_id: CRAWL, basis: 'account', account_usd: 3.5, reserved_usd: 0.04, month_spend_usd: 0.4,
+        committed_usd: 3.54, estimate_usd: 0.02, cap_usd: 29,
+      })],
     [(u, m) => u.startsWith('https://api.apify.com/v2/acts/apify~website-content-crawler/runs') && m === 'POST', () =>
       json({ data: { id: 'run1', status: 'READY', defaultDatasetId: 'ds1' } }, 201)],
     [(u, m) => u.startsWith('https://db.test/rest/v1/company_crawls?id=eq.') && m === 'PATCH', () => json([{ id: CRAWL }])],
@@ -63,31 +66,40 @@ Deno.test('input: GET is 405; bad JSON, missing or bad domain is 400', async () 
 
 Deno.test('budget gate: Apify usage + month spend + estimate is checked before any spend; budget_exceeded starts nothing', async () => {
   const f = stubFetch(startRoutes({
-    reserve: { ok: false, error: 'budget_exceeded', month_spend_usd: 1.2, external_usd: 28, estimate_usd: 0.02, cap_usd: 29 },
+    reserve: { ok: false, error: 'budget_exceeded', basis: 'account', account_usd: 28.99, reserved_usd: 0, committed_usd: 28.99, estimate_usd: 0.02, cap_usd: 29 },
   }))
   try {
     const res = await handle(post({ url: 'https://www.acme-pm.com/about' }), () => {})
     assertEquals(res.status, 409)
     const body = await res.json()
     assertEquals(body.error, 'budget_exceeded')
-    assertEquals(body.cap_usd, 29)
+    assertEquals([body.basis, body.committed_usd, body.cap_usd], ['account', 28.99, 29])
     const [rpc] = bodyOf(f.calls, (u) => u.endsWith('/rpc/lume_research_reserve_crawl'))
     assertEquals(rpc, { p_company: COMPANY, p_start_url: 'https://www.acme-pm.com/', p_estimate: 0.02, p_external_usd: 3.5, p_cap: 29 })
     assert(!f.calls.some((c) => c.url.includes('/acts/')), 'no Apify run started')
   } finally { f.restore() }
 })
 
-Deno.test('budget gate: the cap comes from LUME_RESEARCH_APIFY_CAP_USD; unreadable Apify usage counts as 0', async () => {
+Deno.test('budget gate: the cap comes from LUME_RESEARCH_APIFY_CAP_USD; unreadable Apify usage is sent as null (ledger fallback), never 0', async () => {
   Deno.env.set('LUME_RESEARCH_APIFY_CAP_USD', '12')
   const f = stubFetch(startRoutes({ usage: new Response('nope', { status: 403 }), reserve: { ok: false, error: 'budget_exceeded' } }))
   try {
     await handle(post({ domain: 'acme-pm.com' }), () => {})
     const [rpc] = bodyOf(f.calls, (u) => u.endsWith('/rpc/lume_research_reserve_crawl'))
-    assertEquals([rpc.p_external_usd, rpc.p_cap], [0, 12])
+    assertEquals([rpc.p_external_usd, rpc.p_cap], [null, 12])
   } finally {
     Deno.env.delete('LUME_RESEARCH_APIFY_CAP_USD')
     f.restore()
   }
+})
+
+Deno.test('budget gate: Apify usage that is not a number is unreadable too (null)', async () => {
+  const f = stubFetch(startRoutes({ usage: json({ data: { totalUsageCreditsUsdAfterVolumeDiscount: 'n/a' } }), reserve: { ok: false, error: 'budget_exceeded' } }))
+  try {
+    await handle(post({ domain: 'acme-pm.com' }), () => {})
+    const [rpc] = bodyOf(f.calls, (u) => u.endsWith('/rpc/lume_research_reserve_crawl'))
+    assertEquals(rpc.p_external_usd, null)
+  } finally { f.restore() }
 })
 
 Deno.test('crawl_in_progress is a 409 too', async () => {
@@ -106,7 +118,7 @@ Deno.test('start: upserts the company, starts a capped cheerio run, marks the cr
     assertEquals(res.status, 202)
     assertEquals(await res.json(), {
       ok: true, crawl_id: CRAWL, company_id: COMPANY, domain: 'acme-pm.com',
-      estimate_usd: 0.02, month_spend_usd: 0.4, external_usd: 3.5, cap_usd: 29,
+      estimate_usd: 0.02, basis: 'account', account_usd: 3.5, reserved_usd: 0.04, committed_usd: 3.54, cap_usd: 29,
     })
     const [company] = bodyOf(f.calls, (u, m) => u.startsWith('https://db.test/rest/v1/companies') && m === 'POST')
     assertEquals(company, { domain: 'acme-pm.com', website: 'https://acme-pm.com/' })

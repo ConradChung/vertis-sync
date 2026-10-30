@@ -10,11 +10,14 @@
 //
 // Start:
 //   1. normalize the domain, upsert `companies`
-//   2. budget gate BEFORE any spend: lume_research_reserve_crawl() sums this
-//      month's company_crawls.cost_usd + Apify's account monthly usage (when
-//      readable, else 0) + this run's worst-case estimate, and refuses with
-//      budget_exceeded above LUME_RESEARCH_APIFY_CAP_USD (default 29). On
-//      success it inserts the pending crawl carrying the estimate as its cost.
+//   2. budget gate BEFORE any spend. The cap (LUME_RESEARCH_APIFY_CAP_USD,
+//      default 29) is the Apify plan's account-wide monthly cap.
+//      lume_research_reserve_crawl() computes committed = Apify account usage
+//      (already includes our finished runs) + estimates of our crawls still
+//      pending/running; when account usage is unreadable we send null and it
+//      falls back to our own month-to-date sum (finished + reserved), never $0.
+//      Refused with budget_exceeded when committed + this run's estimate > cap;
+//      otherwise it inserts the pending crawl carrying the estimate.
 //   3. start apify/website-content-crawler (cheerio, <= 8 pages, 1 GB, 180 s)
 //   4. answer 202; polling continues in the background
 // Continue (self-reinvoked past ~110 s, like operating-city-enricher):
@@ -100,7 +103,7 @@ function notifyFailure(crawlId: string, domainOrUrl: string, reason: string): Pr
   }).catch(() => undefined)
 }
 
-/** Apify account usage this cycle, or null when it can't be read (counts as 0 in the gate). */
+/** Apify account usage this cycle, or null when it can't be read (the gate then uses our ledger). */
 async function apifyMonthlyUsage(): Promise<number | null> {
   try {
     const res = await apify('/users/me/usage/monthly')
@@ -154,9 +157,9 @@ async function start(target: { domain: string; startUrl: string }, waitUntil: (p
 
   const cap = parseCap(Deno.env.get('LUME_RESEARCH_APIFY_CAP_USD'))
   const estimate = crawlEstimateUsd()
-  const external = (await apifyMonthlyUsage()) ?? 0
+  const account = await apifyMonthlyUsage()
   const gate = (await rest('POST', 'rpc/lume_research_reserve_crawl', {
-    p_company: companyId, p_start_url: target.startUrl, p_estimate: estimate, p_external_usd: external, p_cap: cap,
+    p_company: companyId, p_start_url: target.startUrl, p_estimate: estimate, p_external_usd: account, p_cap: cap,
   }, 'return=representation')) as Record<string, unknown>
   if (!gate || gate.ok !== true) {
     const error = typeof gate?.error === 'string' ? gate.error : 'reserve_failed'
@@ -190,7 +193,8 @@ async function start(target: { domain: string; startUrl: string }, waitUntil: (p
   waitUntil(runContinue(crawlId, deps))
   return reply({
     ok: true, crawl_id: crawlId, company_id: companyId, domain: target.domain,
-    estimate_usd: estimate, month_spend_usd: gate.month_spend_usd, external_usd: gate.external_usd, cap_usd: gate.cap_usd,
+    estimate_usd: estimate, basis: gate.basis, account_usd: gate.account_usd, reserved_usd: gate.reserved_usd,
+    committed_usd: gate.committed_usd, cap_usd: gate.cap_usd,
   }, 202)
 }
 
