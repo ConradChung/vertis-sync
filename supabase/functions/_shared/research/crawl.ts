@@ -25,6 +25,8 @@ export const DEFAULT_CAP_USD = 29
 
 const PAGE_KEYWORDS = ['about', 'contact', 'career', 'job', 'employment', 'resident', 'tenant', 'portal', 'login']
 const MAX_TEXT_CHARS = 40_000
+/** Only this much of a page's html goes through the link regex (bounds CPU on huge pages; portal links sit in the header). */
+export const MAX_HTML_BYTES = 200_000
 const MAX_LINKS = 400
 
 const DOMAIN_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/
@@ -140,7 +142,8 @@ export function pagesFromItems(items: unknown[]): Page[] {
     if (!text.trim()) continue
     const links: PageLink[] = []
     const hrefs = new Set<string>()
-    for (const l of [...linksFromHtml(str(item.html)), ...linksFromMarkdown(str(item.markdown))]) {
+    const html = str(item.html).slice(0, MAX_HTML_BYTES)
+    for (const l of [...linksFromHtml(html), ...linksFromMarkdown(str(item.markdown).slice(0, MAX_HTML_BYTES))]) {
       if (hrefs.has(l.href) || links.length >= MAX_LINKS) continue
       hrefs.add(l.href)
       links.push(l)

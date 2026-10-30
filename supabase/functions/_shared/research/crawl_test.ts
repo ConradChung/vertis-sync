@@ -7,6 +7,7 @@ import {
   crawlEstimateUsd,
   linksFromHtml,
   linksFromMarkdown,
+  MAX_HTML_BYTES,
   normalizeTarget,
   pagesFromItems,
   parseCap,
@@ -124,4 +125,15 @@ Deno.test('parseCap: LUME_RESEARCH_APIFY_CAP_USD, default 29, junk -> 29', () =>
   assertEquals(parseCap('0'), 29)
   assertEquals(parseCap('-3'), 29)
   assertEquals(parseCap('lots'), 29)
+})
+
+Deno.test('pagesFromItems: html is cut to 200 KB before the link regex; links past it are ignored', () => {
+  assertEquals(MAX_HTML_BYTES, 200_000)
+  const pad = 'x'.repeat(MAX_HTML_BYTES)
+  const pages = pagesFromItems([{
+    url: 'https://acme-pm.com/',
+    text: 'home',
+    html: `<a href="https://early.example.com/">Early</a>${pad}<a href="https://late.example.com/">Late</a>`,
+  }])
+  assertEquals(pages[0].links.map((l) => l.href), ['https://early.example.com/'])
 })
