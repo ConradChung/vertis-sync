@@ -9,9 +9,11 @@
 //     that page's whitespace-normalized text
 //   - the value is well-formed AND supported by its snippet:
 //       door_count  a positive integer (<= 1,000,000) written in the snippet
-//                   with a unit word (doors / units / homes / properties /
-//                   rentals / apartments) within 3 words after or before it,
-//                   so "Since 1998" or "a team of 25" never count
+//                   with a unit word (doors / units / homes / rentals /
+//                   apartments; not "properties", a building count) within 3
+//                   words after or before it, in the same sentence (. ! ? |
+//                   end the window), so "Since 1998", "a team of 25" or
+//                   "Founded in 1998. Units available" never count
 //       after_hours a boolean, and the snippet carries an after-hours keyword
 //                   (after-hours, 24/7, 24 hours, emergency, night, on-call,
 //                   answering service)
@@ -108,7 +110,10 @@ function numbersIn(snippet: string): number[] {
   return (snippet.match(/\d{1,3}(?:[,\s.]\d{3})+|\d+/g) ?? []).map((t) => Number(t.replace(/[,\s.]/g, '')))
 }
 
-const UNIT_WORD = /^(doors?|units?|homes?|properties|rentals?|apartments?)$/i
+// Not "properties": a building count ("40 properties totaling 2,400 units") is not a door count.
+const UNIT_WORD = /^(doors?|units?|homes?|rentals?|apartments?)$/i
+/** Sentence / separator punctuation ends a unit window ("Founded in 1998. Units available"). */
+const SENTENCE_END = /^[.!?|]$/
 const UNIT_WINDOW = 3
 const AFTER_HOURS = /\bafter[\s-]?hours\b|\b24\s*\/\s*7\b|\b24[\s-]*(hours?|hrs?)\b|\bemergenc(y|ies)\b|\bnights?\b|\bovernight\b|\bon[\s-]?call\b|\banswering service\b/i
 
@@ -128,7 +133,7 @@ export function doorCountHasUnit(snippet: string, n: number): boolean {
   const windowWords = (from: number, step: 1 | -1) => {
     const words: string[] = []
     for (let i = from; i >= 0 && i < toks.length && words.length < UNIT_WINDOW; i += step) {
-      if (toks[i].kind === 'num') break
+      if (toks[i].kind === 'num' || SENTENCE_END.test(toks[i].text)) break
       if (toks[i].kind === 'word') words.push(toks[i].text)
     }
     return words

@@ -265,3 +265,18 @@ Deno.test('city matches whole words only', () => {
   assertEquals(one('Read the New Yorker', [{ field: 'city', value: 'York' }]), [])
 })
 
+
+// --- round-2 review minors -----------------------------------------------------------
+
+Deno.test('door_count: "properties" is not a unit word (40 properties totaling 2,400 units keeps 2,400 only)', () => {
+  const t = 'We manage 40 properties totaling 2,400 units'
+  assertEquals(one(t, [{ field: 'door_count', value: 40 }]), [])
+  assertEquals(one(t, [{ field: 'door_count', value: 2400 }]), ['door_count=2400'])
+})
+
+Deno.test('door_count: the unit window stops at sentence punctuation', () => {
+  assertEquals(one('Founded in 1998. Units available now', [{ field: 'door_count', value: 1998 }]), [])
+  assertEquals(one('Est. 2001 | Homes for rent', [{ field: 'door_count', value: 2001 }]), [])
+  assertEquals(one('Our 25 property managers', [{ field: 'door_count', value: 25 }]), [])
+})
+
