@@ -15,6 +15,17 @@ describe('csvCell', () => {
     expect(csvCell(12)).toBe('12')
     expect(csvCell(null)).toBe('')
   })
+  it('leaves phone numbers and plain numbers unchanged (no letters, no | or !)', () => {
+    for (const v of ['+1 555 123 4567', '-5', '(555) 123-4567', '+44 (0)20 7946 0958', '555.123.4567', '-3.5', '+1/555/0100']) expect(csvCell(v), v).toBe(v)
+  })
+  it('still neutralises formulas that start like numbers', () => {
+    expect(csvCell('+SUM(A1)')).toBe("'+SUM(A1)")
+    expect(csvCell('=1+1')).toBe("'=1+1")
+    expect(csvCell("-1+cmd|' /C calc'!A0")).toBe("'-1+cmd|' /C calc'!A0")
+    expect(csvCell('@x')).toBe("'@x")
+    expect(csvCell('-2+3')).toBe("'-2+3")
+    expect(csvCell('+1 555|calc')).toBe("'+1 555|calc")
+  })
   it('is the same helper the influencer export uses', () => {
     expect(influencerCsvCell).toBe(csvCell)
   })
@@ -26,6 +37,7 @@ describe('exports neutralise formulas', () => {
     expect(csv.split('\n')[1]).toBe("'=1+1,'@x,,'+t,'-c,,,,,,")
   })
   it('the ingest CSV from an attached sheet', () => {
-    expect(sheetToIngestCsv({ header: ['Name', '=evil'], rows: [['@a', '+1 555 0100'], ['Ann, A', 'two\nlines']] })).toBe("Name,'=evil\n'@a,'+1 555 0100\n\"Ann, A\",two lines\n")
+    // Phone numbers go to validation as written.
+    expect(sheetToIngestCsv({ header: ['Name', '=evil'], rows: [['@a', '+1 555 0100'], ['Ann, A', 'two\nlines']] })).toBe("Name,'=evil\n'@a,+1 555 0100\n\"Ann, A\",two lines\n")
   })
 })

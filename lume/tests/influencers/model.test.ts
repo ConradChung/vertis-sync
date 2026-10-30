@@ -162,11 +162,14 @@ describe('influencerApolloCsv', () => {
   it('neutralises every OWASP formula lead character: = + - @ (tab / CR are trimmed away)', () => {
     const titleOf = (title: string) => influencerApolloCsv([reactor({ title })], { names }).csv.split('\n')[1].split(',')[2]
     expect(titleOf('=1+1')).toBe("'=1+1")
-    expect(titleOf('+1')).toBe("'+1")
+    // A plain number / phone passes through (lib/csv/cell.ts); anything formula-like does not.
+    expect(titleOf('+1')).toBe('+1')
+    expect(titleOf('+1A')).toBe("'+1A")
     expect(titleOf('-2+3')).toBe("'-2+3")
     expect(titleOf('@SUM(A1)')).toBe("'@SUM(A1)")
     expect(titleOf('\t=1')).toBe("'=1")
-    expect(titleOf('\r-1')).toBe("'-1")
+    expect(titleOf('\r-1')).toBe('-1')
+    expect(titleOf('\r-1+x')).toBe("'-1+x")
     expect(titleOf('Owner - Founder')).toBe('Owner - Founder')
   })
   it('the Apollo steps end with the search link pasted back to Lume for a Leadsfriday order', () => {
