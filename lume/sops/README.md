@@ -24,7 +24,9 @@ machine rules, followed by prose.
   only warn. A campaign that no client SOP covers is never refused; it gets
   warnings in the tool log, the editor and `/actions/<id>`. A client
   campaign is refused only by the rules its overlay sets. Once the base is
-  `placeholder: false`, its rules block too.
+  `placeholder: false`, its rules block too. Since 2026-10-29 the base is the
+  owner's general playbook (generalized from Kaspen) with `placeholder: false`,
+  so every campaign is blocked by it.
 - **Overlay selection.** An overlay applies to a campaign when the campaign's
   name contains one of `match.campaign_names` (case-insensitive) or its id is
   in `match.campaign_ids`. If two overlays match one campaign, that is an
