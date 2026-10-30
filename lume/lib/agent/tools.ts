@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { Json, PendingActionKind } from '@/lib/db/types'
+import { clientSopText, findClient, loadSopLibrary } from '@/lib/copy/sop'
 import { HIGH_RISK_KIND, TOOL_TIERS, skippable, type ToolName, type ToolTier } from '@/lib/agent/permissions'
 import { FilterCriteria } from '@/lib/review/model'
 import { APOLLO_STEPS } from '@/lib/apollo/records'
@@ -353,6 +354,26 @@ const SPECS: Built[] = [
       run: async ({ campaign_id }, { call }) => ({
         stats: await call(`/api/campaigns/${encodeURIComponent(campaign_id)}/analytics`),
       }),
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'get_sop',
+      description:
+        "A client's cold-email SOP (lume/sops/clients/<client>.md): the base rules merged with the client's, and the client's own text " +
+        '(voice, CTA rules, proof points, mistakes not to repeat, sequence plan, reply handling, test plan). ' +
+        'Call it before drafting or editing copy for a client whose SOP is not already in your instructions; ' +
+        'update_campaign_sequence is linted against exactly these rules for that client\'s campaigns. Without client, lists the available client SOPs.',
+      inputSchema: z.object({ client: z.string().min(1).max(100).optional().describe('client id or name, e.g. kaspen') }),
+      run: async ({ client }) => {
+        const lib = loadSopLibrary()
+        const list = lib.clients.map((c) => ({ client: c.client, name: c.name, match: c.match }))
+        if (!client) return { clients: list }
+        const c = findClient(lib, client)
+        if (!c) return { status: 'not_found', client, clients: list }
+        return { client: c.client, name: c.name, match: c.match, sop: clientSopText(c) }
+      },
     },
     'read'
   ),

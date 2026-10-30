@@ -74,6 +74,7 @@ vi.mock('@/lib/supabase/service', async () => (await import('../stubs/feed')).se
 import { feed } from '../stubs/feed'
 
 import { POST } from '@/app/api/agent/run/route'
+import { SYSTEM_PROMPT } from '@/lib/agent/prompt'
 
 type FakeTool = { name: string; run: (input: unknown, ctx: unknown) => Promise<unknown> }
 
@@ -713,10 +714,14 @@ describe('projects', () => {
   const note = { id: FID, kind: 'note', name: 'Tone', mime: 'text/plain', size_bytes: 6, readable: true, truncated: false, created_at: '2026-10-01T00:00:00Z', text_content: 'casual' }
   const system = () => h.toolRunner.mock.calls[0][0].system as unknown
 
-  it('without a project the system prompt is the plain cached string', async () => {
+  it('without a project the system is the stable prompt and the SOP block, each cached', async () => {
     fakeRunner([{ text: 'ok' }])
     await events(await post('hi'))
-    expect(typeof system()).toBe('string')
+    const blocks = system() as { text: string; cache_control?: unknown }[]
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0].text).toBe(SYSTEM_PROMPT)
+    expect(blocks[1].text).toMatch(/^Cold-email SOP/)
+    expect(blocks.map((b) => b.cache_control)).toEqual([{ type: 'ephemeral' }, { type: 'ephemeral' }])
     expect(h.itemsForBlock).not.toHaveBeenCalled()
   })
 
@@ -728,12 +733,14 @@ describe('projects', () => {
     const ev = await events(await post('next', { conversation_id: CONV }))
     expect(h.itemsForBlock).toHaveBeenCalledWith(PID)
     const blocks = system() as { type: string; text: string; cache_control?: unknown }[]
-    expect(blocks).toHaveLength(2)
-    expect(blocks[0].cache_control).toEqual({ type: 'ephemeral' })
-    expect(blocks[1].cache_control).toEqual({ type: 'ephemeral' })
-    expect(blocks[1].text).toContain('Project: Roofers Austin')
-    expect(blocks[1].text).toContain('Never order more than 2k.')
-    expect(blocks[1].text).toContain('casual')
+    expect(blocks).toHaveLength(3)
+    // 3 explicit breakpoints + the automatic one = the API's limit of 4.
+    expect(blocks.map((b) => b.cache_control)).toEqual([{ type: 'ephemeral' }, { type: 'ephemeral' }, { type: 'ephemeral' }])
+    expect(h.toolRunner.mock.calls[0][0].cache_control).toEqual({ type: 'ephemeral' })
+    expect(blocks[1].text).toMatch(/^Cold-email SOP/)
+    expect(blocks[2].text).toContain('Project: Roofers Austin')
+    expect(blocks[2].text).toContain('Never order more than 2k.')
+    expect(blocks[2].text).toContain('casual')
     // The per-run user turn carries no project text (it stays in the cached prefix).
     expect(lastSent()).not.toContain('Roofers Austin')
     expect(ev[0]).toMatchObject({ type: 'run', conversation_id: CONV, project_id: PID })
@@ -772,7 +779,7 @@ describe('projects', () => {
     fakeRunner([{ text: 'ok' }])
     await events(await post('How are we doing?', { vertical_id: VID }))
     expect(h.createConversation).toHaveBeenCalledWith('How are we doing?', { vertical_id: VID, operator_id: null }, PID)
-    expect((system() as { text: string }[])[1].text).toContain('Roofers Austin')
+    expect((system() as { text: string }[])[2].text).toContain('Roofers Austin')
   })
 
   it("a vertical Grok Bot's new chat auto-files into its vertical's project", async () => {
@@ -790,7 +797,7 @@ describe('projects', () => {
     fakeRunner([{ text: 'ok' }])
     await events(await post('hi', { vertical_id: VID }))
     expect(h.createConversation).toHaveBeenCalledWith('hi', { vertical_id: VID, operator_id: null })
-    expect(typeof system()).toBe('string')
+    expect(system()).toHaveLength(2) // stable prompt + SOP, no project block
   })
 
   describe('a vertical Grok Bot', () => {
@@ -838,9 +845,34 @@ describe('projects', () => {
       h.itemsForBlock.mockResolvedValue([note])
       fakeRunner([{ text: 'ok' }])
       await events(await post('next', { conversation_id: CONV }))
-      expect(typeof system()).toBe('string')
+      expect(system()).toHaveLength(2) // stable prompt + SOP, no project block
       expect(h.itemsForBlock).not.toHaveBeenCalled()
     })
+  })
+
+  it("the SOP block carries the client SOP of the chat's vertical or project, else the overlay list", async () => {
+    h.getVertical.mockResolvedValue({ id: VID, name: 'Kaspen', campaign_ids: [] })
+    fakeRunner([{ text: 'ok' }])
+    await events(await post('draft step 1', { vertical_id: VID }))
+    const sop = (system() as { text: string }[])[1].text
+    expect(sop).toMatch(/Client SOP: Kaspen \(client id kaspen/)
+    expect(sop).toMatch(/## Do not repeat these mistakes/)
+
+    h.toolRunner.mockClear()
+    h.getConversation.mockResolvedValue({ id: CONV, title: 'Old', created_at: '', updated_at: '', project_id: PID })
+    h.getProject.mockResolvedValue({ ...roofers, name: 'Zenport launch' })
+    fakeRunner([{ text: 'ok' }])
+    await events(await post('next', { conversation_id: CONV }))
+    expect((system() as { text: string }[])[1].text).toMatch(/Client SOP: Kaspen/)
+
+    h.toolRunner.mockClear()
+    h.getConversation.mockResolvedValue(null)
+    fakeRunner([{ text: 'ok' }])
+    await events(await post('hi'))
+    const index = (system() as { text: string }[])[1].text
+    expect(index).not.toMatch(/Client SOP: Kaspen/)
+    expect(index).toMatch(/- kaspen: Kaspen; campaigns whose name contains "kaspen", "zenport"/)
+    expect(index).toMatch(/call get_sop/)
   })
 
   it('a project that fails to load never blocks the run (no block, logged)', async () => {
@@ -850,6 +882,6 @@ describe('projects', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     fakeRunner([{ text: 'ok' }])
     await events(await post('next', { conversation_id: CONV }))
-    expect(typeof system()).toBe('string')
+    expect(system()).toHaveLength(2) // stable prompt + SOP, no project block
   })
 })

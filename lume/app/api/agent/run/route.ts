@@ -14,6 +14,7 @@ import { buildMessages, MESSAGE_MAX, type ContextTurn } from '@/lib/agent/chat'
 import { createConversation, getConversation, getConversationOperator, getMessages, insertMessage } from '@/lib/agent/conversations'
 import { contextFromMessages, titleFromPrompt, type StoredApproval, type StoredToolEntry } from '@/lib/agent/history'
 import { SYSTEM_PROMPT } from '@/lib/agent/prompt'
+import { clientForContext, loadSopLibrary, sopPromptBlock } from '@/lib/copy/sop'
 import { loadKnowledge } from '@/lib/agent/memory'
 import { withKnowledge } from '@/lib/agent/memoryModel'
 import { skillContext } from '@/lib/agent/skillModel'
@@ -79,8 +80,15 @@ import type { Operator } from '@/lib/operators/types'
  * it, a chat tagged with a vertical (its Grok Bot's, or the owner's from
  * /operator) is filed in that vertical's linked project, if any. A run in a
  * filed conversation gets a "Project" block (name, instructions, file index,
- * small items inline; `projectBlock`) as a second, cached system block after
- * the stable prompt, and read_project_file reads only that project's files.
+ * small items inline; `projectBlock`) as a cached system block after the
+ * stable prompt and the SOP block, and read_project_file reads only that
+ * project's files.
+ *
+ * Cold-email SOP: every run carries the SOP as its own cached system block
+ * between the stable prompt and the project block (`sopPromptBlock`: base
+ * rules + prose, plus the client overlay matching the chat's vertical or
+ * project name, else the overlay list for `get_sop`). A malformed SOP fails
+ * the run (SSE `error`) instead of running without it.
  * A project that fails to load is logged and the run goes on without it.
  * A vertical (non-master) Grok Bot may pass `project_id` only for its own
  * vertical's project or an unlinked one (403 `forbidden_project` otherwise; the
@@ -151,6 +159,8 @@ export async function POST(req: Request) {
   let prompt = message
   let history: ContextTurn[] = []
   let ownerVertical: Awaited<ReturnType<typeof getVertical>> = null
+  /** The chat's vertical name, for picking its client cold-email SOP. */
+  let verticalName: string | null = null
   const skillMode = body.data.skill_mode ?? 'reference'
   let skill: Awaited<ReturnType<typeof getSkill>> = null
   try {
@@ -202,8 +212,10 @@ export async function POST(req: Request) {
     }
     if (operator) {
       const vertical = operator.vertical_id ? await getVertical(operator.vertical_id) : null
+      verticalName = vertical?.name ?? null
       prompt = `${operatorPromptLine(operator, vertical)}\n\n${prompt}`
     } else if (ownerVertical) {
+      verticalName = ownerVertical.name
       prompt = `${verticalPromptLine(ownerVertical)}\n\n${prompt}`
     }
     runId = (await insertAgentRun(prompt, MODEL)).id
@@ -247,6 +259,7 @@ export async function POST(req: Request) {
         draftedByOperator: operator?.id ?? chatOperatorId,
         conversationId,
         project,
+        sopContext: { vertical: verticalName, project: project?.name ?? null },
         skipPermissions: body.data.skip_permissions === true,
         send,
       })
@@ -282,11 +295,11 @@ const errText = (err: unknown) => (err instanceof Error ? err.message : String(e
  * The Project block for one project, or null when it is gone, out of the
  * caller's scope, or fails to load (logged; the run goes on).
  */
-async function loadProjectBlock(projectId: string, scope: ProjectScope): Promise<{ id: string; block: string } | null> {
+async function loadProjectBlock(projectId: string, scope: ProjectScope): Promise<{ id: string; name: string; block: string } | null> {
   try {
     const p = await getProject(projectId)
     if (!p || !canUseProject(scope, p)) return null
-    return { id: p.id, block: projectBlock(p, await itemsForBlock(p.id)) }
+    return { id: p.id, name: p.name, block: projectBlock(p, await itemsForBlock(p.id)) }
   } catch (err) {
     console.error('[api/agent/run] project load failed:', errText(err))
     return null
@@ -394,6 +407,7 @@ async function executeRun({
   operator,
   conversationId,
   project,
+  sopContext,
   skipPermissions,
   send: emit,
 }: {
@@ -412,6 +426,8 @@ async function executeRun({
   conversationId: string
   /** The conversation's project and its block (null: Unfiled). */
   project: { id: string; block: string } | null
+  /** The chat's vertical / project names: they pick the client SOP for the SOP block. */
+  sopContext: { vertical: string | null; project: string | null }
   skipPermissions: boolean
   send: (e: SseEvent) => void
 }): Promise<RunReply> {
@@ -512,22 +528,27 @@ async function executeRun({
   let outcome = ''
   let status: 'done' | 'needs_approval' | 'failed' = 'done'
   try {
+    // The cold-email SOP block (base + the chat's client overlay, or the overlay index).
+    // A malformed SOP fails the run loudly here rather than drafting without it.
+    const lib = loadSopLibrary()
+    const sopBlock = sopPromptBlock(lib, clientForContext(lib, sopContext))
     const client = new Anthropic()
     const runner = client.beta.messages.toolRunner({
       model: MODEL,
       max_tokens: 16000,
       thinking: { type: 'adaptive' },
       output_config: { effort: 'low' },
-      // Caches the stable system prompt + tool list across the run's turns and across runs.
+      // Automatic caching: one breakpoint that follows the conversation tail.
       cache_control: { type: 'ephemeral' },
-      // A filed chat: the stable prompt keeps its own breakpoint (shared by every
-      // chat), then the project's block is cached per project.
-      system: project
-        ? [
-            { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
-            { type: 'text', text: project.block, cache_control: { type: 'ephemeral' } },
-          ]
-        : SYSTEM_PROMPT,
+      // Explicit breakpoints, most stable first (4 per request in total, the
+      // automatic one included): the static prompt (shared by every chat), the
+      // SOP block (changes only with the SOP files or the chat's client), then
+      // a filed chat's project block. At most 3 explicit + 1 automatic = 4.
+      system: [
+        { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: sopBlock, cache_control: { type: 'ephemeral' } },
+        ...(project ? [{ type: 'text' as const, text: project.block, cache_control: { type: 'ephemeral' as const } }] : []),
+      ],
       // Anthropic-hosted, read-only web research (no approval needed: nothing leaves Lume but a query/URL).
       tools: [...tools, ...WEB_TOOLS],
       messages: buildMessages(history, prompt),

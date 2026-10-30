@@ -127,6 +127,19 @@ describe('buildTools', () => {
     expect(createAction).not.toHaveBeenCalled()
   })
 
+  it('get_sop lists the client SOPs and returns one merged with the base (read tier, no fetch)', async () => {
+    const { tool, fetch } = setup()
+    const t = tool('get_sop')
+    expect(t.tier).toBe('read')
+    expect(await t.run({})).toMatchObject({ clients: expect.arrayContaining([expect.objectContaining({ client: 'kaspen', name: 'Kaspen' })]) })
+    const k = (await t.run({ client: 'Kaspen' })) as { client: string; sop: string }
+    expect(k.client).toBe('kaspen')
+    expect(k.sop).toMatch(/^Client SOP: Kaspen \(client id kaspen; applies to campaigns whose name contains "kaspen", "zenport"/)
+    expect(k.sop).toMatch(/## Do not repeat these mistakes/)
+    expect(await t.run({ client: 'nobody' })).toMatchObject({ status: 'not_found' })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it('assign_leads rejects a filter key the rule filter does not know', () => {
     const { tool } = setup()
     expect(tool('assign_leads').inputSchema.safeParse({ campaign_id: 'c1', filter: { state: 'TX' } }).success).toBe(false)
