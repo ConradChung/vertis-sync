@@ -17,6 +17,9 @@ interface Entry {
   /** Bytes inserted before this entry's local header (a sequential reader stops there). */
   junkBefore?: Uint8Array
   stored?: boolean
+  /** Extra-field bytes on the central-directory record / the local header. */
+  cdExtra?: number[]
+  localExtra?: number[]
 }
 
 const u16 = (n: number) => [n & 0xff, (n >>> 8) & 0xff]
@@ -45,9 +48,11 @@ function zip(entries: Entry[], t: Tamper = {}): Uint8Array {
     const method = e.stored ? 0 : 8
     const name = strToU8(e.name)
     const lname = strToU8(e.localName ?? e.name)
-    parts.push(...u32(0x04034b50), ...u16(20), ...u16(0), ...u16(method), ...u16(0), ...u16(0), ...u32(0), ...u32(body.length), ...u32(e.data.length), ...u16(lname.length), ...u16(0), ...lname)
+    const lx = e.localExtra ?? []
+    const cx = e.cdExtra ?? []
+    parts.push(...u32(0x04034b50), ...u16(20), ...u16(0), ...u16(method), ...u16(0), ...u16(0), ...u32(0), ...u32(body.length), ...u32(e.data.length), ...u16(lname.length), ...u16(lx.length), ...lname, ...lx)
     for (const b of body) parts.push(b)
-    cd.push(...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0), ...u16(method), ...u16(0), ...u16(0), ...u32(0), ...u32(body.length), ...u32(e.data.length), ...u16(name.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset), ...name)
+    cd.push(...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0), ...u16(method), ...u16(0), ...u16(0), ...u32(0), ...u32(body.length), ...u32(e.data.length), ...u16(name.length), ...u16(cx.length), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset), ...name, ...cx)
   }
   const cdOffset = parts.length
   parts.push(...cd)
@@ -56,6 +61,23 @@ function zip(entries: Entry[], t: Tamper = {}): Uint8Array {
   parts.push(...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(t.zip64 ? 0xffff : n), ...u16(t.zip64 ? 0xffff : n), ...u32(cd.length), ...u32(t.zip64 ? 0xffffffff : cdOffset), ...u16(0))
   if (t.trailing) parts.push(...t.trailing)
   return new Uint8Array(parts)
+}
+
+/** CRC-32 (what JSZip checks before it trusts a unicode path field). */
+const crcT = Array.from({ length: 256 }, (_, n) => {
+  let c = n
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+  return c >>> 0
+})
+const crc32 = (b: Uint8Array) => {
+  let c = 0xffffffff
+  for (const x of b) c = crcT[(c ^ x) & 255] ^ (c >>> 8)
+  return (c ^ 0xffffffff) >>> 0
+}
+/** Info-ZIP unicode path (0x7075) or comment (0x6375) extra field: JSZip renames the entry from it. */
+function unicodeExtra(id: 0x7075 | 0x6375, orig: string, path: string): number[] {
+  const body = [1, ...u32(crc32(strToU8(orig))), ...strToU8(path)]
+  return [...u16(id), ...u16(body.length), ...body]
 }
 
 const WORKBOOK = { name: 'xl/workbook.xml', data: strToU8('<workbook><sheets><sheet name="a"/></sheets></workbook>') }
@@ -122,6 +144,38 @@ describe('scanXlsxZip walks the central directory', () => {
     const { parseSpreadsheet } = await import('@/lib/sheets/parse')
     const bomb = zip([WORKBOOK, { name: 'xl/worksheets/sheet1.xml', data: cells(1) }, { name: 'docProps/custom.xml', data: new Uint8Array(5 * 1024 * 1024) }], { eocdCount: 2 })
     expect(await parseSpreadsheet(bomb, 'xlsx')).toEqual({ ok: false, error: 'not_xlsx' })
+  })
+
+  it('refuses the unicode-path directory alias: "pad/" that JSZip renames to docProps/custom.xml (a bomb), before inflating', async () => {
+    const bomb = zip([WORKBOOK, { name: 'pad/', data: new Uint8Array(5 * 1024 * 1024), cdExtra: unicodeExtra(0x7075, 'pad/', 'docProps/custom.xml') }])
+    expect(bomb.length).toBeLessThan(100_000)
+    const t = performance.now()
+    // Even with no uncompressed cap at all: refused on the header, never inflated.
+    expect(scanXlsxZip(bomb, { maxUncompressed: Number.MAX_SAFE_INTEGER })).toEqual({ ok: false, error: 'not_xlsx' })
+    expect(performance.now() - t).toBeLessThan(200)
+    const { parseSpreadsheet } = await import('@/lib/sheets/parse')
+    expect(await parseSpreadsheet(bomb, 'xlsx')).toEqual({ ok: false, error: 'not_xlsx' })
+  })
+
+  it('refuses the unicode-path sheet alias that would dodge the cell count, through parseSpreadsheet too', async () => {
+    const alias = zip([WORKBOOK, { name: 'docProps/s.xml', data: cells(200), cdExtra: unicodeExtra(0x7075, 'docProps/s.xml', 'xl/worksheets/sheet1.xml') }])
+    expect(scanXlsxZip(alias, { maxCells: 100 })).toEqual({ ok: false, error: 'not_xlsx' })
+    const { parseSpreadsheet } = await import('@/lib/sheets/parse')
+    expect(await parseSpreadsheet(alias, 'xlsx', { maxCells: 100 })).toEqual({ ok: false, error: 'not_xlsx' })
+  })
+
+  it('refuses unicode path / comment extra fields on the local header too, and a 0x6375 comment field', () => {
+    expect(scanXlsxZip(zip([WORKBOOK, { name: 'a.xml', data: cells(1), localExtra: unicodeExtra(0x7075, 'a.xml', 'b.xml') }]))).toEqual({ ok: false, error: 'not_xlsx' })
+    expect(scanXlsxZip(zip([WORKBOOK, { name: 'a.xml', data: cells(1), cdExtra: unicodeExtra(0x6375, 'a.xml', 'note') }]))).toEqual({ ok: false, error: 'not_xlsx' })
+  })
+
+  it('a name ending in "/" must be an empty directory entry; other extra fields are fine', () => {
+    expect(scanXlsxZip(zip([WORKBOOK, { name: 'pad/', data: new Uint8Array(5 * 1024 * 1024) }]), { maxUncompressed: Number.MAX_SAFE_INTEGER })).toEqual({ ok: false, error: 'not_xlsx' })
+    expect(scanXlsxZip(zip([WORKBOOK, { name: 'pad/', data: new Uint8Array(0), stored: true }]))).toMatchObject({ ok: true })
+    // An ordinary extended-timestamp field (0x5455) is what real zips carry.
+    expect(scanXlsxZip(zip([WORKBOOK, { name: 'xl/worksheets/sheet1.xml', data: cells(2), cdExtra: [...u16(0x5455), ...u16(5), 1, 0, 0, 0, 0] }]))).toEqual({ ok: true, sheets: 1, cells: 2 })
+    // A malformed extra block is refused.
+    expect(scanXlsxZip(zip([WORKBOOK, { name: 'a.xml', data: cells(1), cdExtra: [...u16(0x5455), ...u16(40), 1] }]))).toEqual({ ok: false, error: 'not_xlsx' })
   })
 
   it('caps the entry count from the central directory', () => {

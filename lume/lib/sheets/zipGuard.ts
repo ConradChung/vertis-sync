@@ -23,6 +23,14 @@ import { LIMITS } from '@/lib/sheets/model'
  * does) and their number must equal the EOCD's count, and the bytes right
  * after the last record must be the EOCD.
  *
+ * Names: JSZip renames an entry from an Info-ZIP unicode path field
+ * (0x7075, and reads 0x6375 comments) when the UTF-8 flag is off, so a
+ * record carrying either, central or local, is refused (Excel never writes
+ * them) and the name the guard sees is the name exceljs sees. A name ending
+ * in "/" must be an empty directory (both sizes 0), so nothing can hide as
+ * one. Every other entry is inflated and counted against the cap, whatever
+ * its name.
+ *
  * Names follow exceljs's rules (lib/xlsx/xlsx.js): one leading "/" is
  * stripped, `xl/workbook.xml` is the workbook, and any name MATCHING
  * /xl\/worksheets\/sheet(\d+)[.]xml/ (unanchored, so `/xl/…`,
@@ -73,6 +81,21 @@ function findEocd(b: Uint8Array): number {
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i])
 
+/** Extra fields JSZip would use to rename an entry (unicode path / comment). */
+const RENAMING_EXTRAS = new Set([0x7075, 0x6375])
+
+/** Throws unless the extra block is well formed and carries no renaming field. */
+function checkExtras(extra: Uint8Array) {
+  let i = 0
+  while (i < extra.length) {
+    if (i + 4 > extra.length) throw new Stop('not_xlsx')
+    const id = u16(extra, i)
+    const size = u16(extra, i + 2)
+    if (i + 4 + size > extra.length || RENAMING_EXTRAS.has(id)) throw new Stop('not_xlsx')
+    i += 4 + size
+  }
+}
+
 export function scanXlsxZip(
   bytes: Uint8Array,
   limits: { maxUncompressed?: number; maxSheets?: number; maxCells?: number; maxEntries?: number } = {}
@@ -100,7 +123,7 @@ export function scanXlsxZip(
 
     // Pass 1: the directory exactly as JSZip will read it. Nothing is inflated
     // until every record is known to be the ones it opens.
-    interface Rec { nameBytes: Uint8Array; method: number; flags: number; compSize: number; localOff: number }
+    interface Rec { nameBytes: Uint8Array; method: number; flags: number; compSize: number; uncompSize: number; localOff: number; dataStart?: number }
     const recs: Rec[] = []
     let p = cdOffset
     // Like JSZip: read records while the signature matches; the count must then agree with the EOCD.
@@ -109,36 +132,46 @@ export function scanXlsxZip(
       const nameLen = u16(b, p + 28)
       const extraLen = u16(b, p + 30)
       const commentLen = u16(b, p + 32)
-      recs.push({ flags: u16(b, p + 8), method: u16(b, p + 10), compSize: u32(b, p + 20), localOff: u32(b, p + 42), nameBytes: b.subarray(p + 46, p + 46 + nameLen) })
+      recs.push({ flags: u16(b, p + 8), method: u16(b, p + 10), compSize: u32(b, p + 20), uncompSize: u32(b, p + 24), localOff: u32(b, p + 42), nameBytes: b.subarray(p + 46, p + 46 + nameLen) })
+      checkExtras(b.subarray(p + 46 + nameLen, p + 46 + nameLen + extraLen))
       p += 46 + nameLen + extraLen + commentLen
       if (p > eocd) throw new Stop('not_xlsx')
     }
     // Every record JSZip would see is one the EOCD declared, and the EOCD follows the last one directly.
     if (recs.length !== entries || p !== eocd || u32(b, p) !== SIG_EOCD) throw new Stop('not_xlsx')
 
-    // Pass 2: each record's local header must agree with it; inflate under the caps.
+    // Pass 2: every record's local header must agree with it (and carry no
+    // renaming extra), names unique, directories empty — all before inflating anything.
+    const names = new Set<string>()
+    const utf8 = new TextDecoder('utf-8')
+    for (const r of recs) {
+      if (r.flags & 1) throw new Stop('not_xlsx') // encrypted entry
+      if (r.method !== 0 && r.method !== 8) throw new Stop('not_xlsx')
+      if (r.localOff + 30 > cdOffset || u32(b, r.localOff) !== SIG_LOCAL) throw new Stop('not_xlsx')
+      const lNameLen = u16(b, r.localOff + 26)
+      const lExtraLen = u16(b, r.localOff + 28)
+      if (u16(b, r.localOff + 8) !== r.method || !sameBytes(b.subarray(r.localOff + 30, r.localOff + 30 + lNameLen), r.nameBytes)) throw new Stop('not_xlsx')
+      checkExtras(b.subarray(r.localOff + 30 + lNameLen, r.localOff + 30 + lNameLen + lExtraLen))
+      r.dataStart = r.localOff + 30 + lNameLen + lExtraLen
+      if (r.dataStart + r.compSize > cdOffset) throw new Stop('not_xlsx')
+      const raw = utf8.decode(r.nameBytes)
+      const name = raw.startsWith('/') ? raw.slice(1) : raw
+      if (names.has(name)) throw new Stop('not_xlsx')
+      names.add(name)
+      // A "directory" holds nothing: never trust the name alone.
+      if (name.endsWith('/') && (r.compSize !== 0 || r.uncompSize !== 0)) throw new Stop('not_xlsx')
+    }
+
+    // Pass 3: inflate every non-empty entry under the caps, whatever its name.
     let total = 0
     let sheets = 0
     let cells = 0
     let workbook = false
-    const names = new Set<string>()
-    const utf8 = new TextDecoder('utf-8')
-    for (const { nameBytes, method, flags, compSize, localOff } of recs) {
-      if (flags & 1) throw new Stop('not_xlsx') // encrypted entry
-      if (method !== 0 && method !== 8) throw new Stop('not_xlsx')
-      if (localOff + 30 > cdOffset || u32(b, localOff) !== SIG_LOCAL) throw new Stop('not_xlsx')
-      const lNameLen = u16(b, localOff + 26)
-      const lExtraLen = u16(b, localOff + 28)
-      if (u16(b, localOff + 8) !== method || !sameBytes(b.subarray(localOff + 30, localOff + 30 + lNameLen), nameBytes)) throw new Stop('not_xlsx')
-      const dataStart = localOff + 30 + lNameLen + lExtraLen
-      const dataEnd = dataStart + compSize
-      if (dataEnd > cdOffset) throw new Stop('not_xlsx')
-
+    for (const { nameBytes, method, compSize, dataStart } of recs) {
       const raw = utf8.decode(nameBytes)
       const name = raw.startsWith('/') ? raw.slice(1) : raw
-      if (names.has(name)) throw new Stop('not_xlsx')
-      names.add(name)
-      if (name.endsWith('/')) continue // a directory
+      if (name.endsWith('/')) continue // an empty directory (checked above)
+      const dataEnd = dataStart! + compSize
       const isWorkbook = name === 'xl/workbook.xml'
       const isSheet = WORKSHEET_NAME.test(name)
       if (isWorkbook) workbook = true
@@ -154,7 +187,7 @@ export function scanXlsxZip(
         tail = s.slice(-TAIL)
         if (cells > maxCells) throw new Stop('too_many_cells')
       }
-      const data = b.subarray(dataStart, dataEnd)
+      const data = b.subarray(dataStart!, dataEnd)
       if (method === 0) {
         for (let k = 0; k < data.length; k += CHUNK) take(data.subarray(k, k + CHUNK))
       } else {
