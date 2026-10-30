@@ -231,3 +231,26 @@ describe('formatViolation', () => {
     expect(isBlocking(w)).toBe(false)
   })
 })
+
+describe('linear trims (no regex backtracking on hostile copy)', () => {
+  it('subject word trim and sign-off trim stay fast on long punctuation runs', () => {
+    const long = '-'.repeat(60_000)
+    const s: LintStep[] = [{ variants: [v(`a${long}a`, `Hi there friend, how are you doing today?\n\nFrank${'.,'.repeat(30_000)}x`)] }]
+    const r = { ...RULES, signoff: { '1': 'Frank' } }
+    const t = performance.now()
+    const out = lintSequence(s, r)
+    expect(performance.now() - t).toBeLessThan(500)
+    expect(out.map((x) => x.rule)).toContain('signoff')
+  })
+
+  it('still trims edge punctuation the same way', () => {
+    const s = clean()
+    s[0].variants[0].subject = '“after-hours” calls…'
+    expect(lintSequence(s, RULES)).toEqual([])
+    s[0].variants[0].subject = '“After-hours” calls'
+    expect(lintSequence(s, RULES)).toEqual([expect.objectContaining({ rule: 'subject_casing', message: expect.stringContaining('"After-hours"') })])
+    const t = clean()
+    t[2].variants[0].body = 'Should I close the loop on this, {{firstName}}?\n\nFrank —'
+    expect(lintSequence(t, { ...RULES, signoff: { '3': 'Frank' } })).toEqual([])
+  })
+})

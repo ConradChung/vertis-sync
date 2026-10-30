@@ -114,6 +114,20 @@ function phraseRe(phrase: string, plural = false): RegExp {
 
 const squash = (s: string) => s.replace(/\s+/g, ' ').trim()
 
+const WORD_CHAR = /[\p{L}\p{N}]/u
+const SIGNOFF_TAIL = new Set([' ', '\t', '\n', '.', ',', ';', ':', '!', '—', '–', '-'])
+/** Drop leading and trailing characters for which `drop` is true: one pass from each end (no regex backtracking). */
+function trimWhile(x: string, drop: (ch: string) => boolean, ends: 'both' | 'end' = 'both'): string {
+  const chars = Array.from(x)
+  let a = 0
+  let b = chars.length
+  if (ends === 'both') while (a < b && drop(chars[a])) a++
+  while (b > a && drop(chars[b - 1])) b--
+  return chars.slice(a, b).join('')
+}
+/** A word without its surrounding punctuation ("“after-hours”" → "after-hours"). */
+const trimNonWord = (w: string) => trimWhile(w, (ch) => !WORD_CHAR.test(ch))
+
 /** The match with up to 30 characters of context on each side, on one line. */
 function around(text: string, start: number, end: number): string {
   const a = Math.max(0, start - 30)
@@ -165,7 +179,7 @@ function lintSubject(subject: string, rules: SopRules): Finding[] {
   const plain = s
     .replace(VAR_RE, ' ')
     .split(/\s+/)
-    .map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''))
+    .map(trimNonWord)
     .filter(Boolean)
   const exempt = (w: string) => allowed.has(w.toLowerCase())
   if (casing === 'lowercase') {
@@ -186,7 +200,7 @@ function lintSubject(subject: string, rules: SopRules): Finding[] {
 function lintSignoff(body: string, want: string): Finding | null {
   const lines = body.split('\n').map((l) => l.trim()).filter(Boolean)
   const last = lines[lines.length - 1] ?? ''
-  const norm = (x: string) => squash(x).replace(/[\s.,;:!—–-]+$/u, '').toLowerCase()
+  const norm = (x: string) => trimWhile(squash(x), (ch) => SIGNOFF_TAIL.has(ch), 'end').toLowerCase()
   return norm(last) === norm(want) ? null : { rule: 'signoff', message: `must end with the sign-off "${want}"`, excerpt: last }
 }
 
