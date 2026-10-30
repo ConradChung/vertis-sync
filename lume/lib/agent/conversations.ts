@@ -2,6 +2,7 @@ import 'server-only'
 import { createServiceClient } from '@/lib/supabase/service'
 import { DbError } from '@/lib/db/service'
 import type { Json } from '@/lib/db/types'
+import type { ChatImageRef } from '@/lib/agent/images'
 import type { ConversationSummary, StoredApproval, StoredMessage, StoredToolEntry } from '@/lib/agent/history'
 import { maskOperatorKeys } from '@/lib/operators/mask'
 
@@ -61,7 +62,7 @@ export async function getMessages(conversationId: string): Promise<StoredMessage
   const sb = createServiceClient()
   const res = await sb
     .from('agent_messages')
-    .select('id, conversation_id, role, text, tools, approvals, error, run_id, auto, created_at')
+    .select('id, conversation_id, role, text, tools, approvals, error, run_id, auto, attachments, created_at')
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: true })
     .limit(500)
@@ -79,6 +80,8 @@ export interface NewMessage {
   run_id?: string | null
   /** An automatic follow-up turn (defaults to false). */
   auto?: boolean
+  /** Images on a user turn: references into `agent-chat-images`, never the bytes. */
+  attachments?: ChatImageRef[]
 }
 
 /** Insert a message and bump the conversation's `updated_at` (sidebar order). */
@@ -94,6 +97,7 @@ export async function insertMessage(m: NewMessage): Promise<void> {
     error: m.error ? maskOperatorKeys(m.error, AGENT_TEXT) : null,
     run_id: m.run_id ?? null,
     auto: m.auto ?? false,
+    attachments: (m.attachments ?? []) as unknown as Json,
   })
   if (res.error) throw new DbError('insertMessage', res.error)
   const touch = await sb.from('agent_conversations').update({ updated_at: new Date().toISOString() }).eq('id', m.conversation_id)

@@ -10,9 +10,11 @@ import { claimDecision, getAction } from '@/lib/actions/store'
 import { editMessage, sendMessage } from '@/lib/adapters/telegram'
 import { alert, alertLink, titleFrom } from '@/lib/alerts'
 import { routeItemForAction } from '@/lib/operators/route'
-import { buildMessages, MESSAGE_MAX, type ContextTurn } from '@/lib/agent/chat'
+import { buildMessages, MESSAGE_MAX, selectReplayImages, type ContextTurn, type LoadedImage } from '@/lib/agent/chat'
+import { loadChatImage } from '@/lib/agent/chatImages'
+import { IMAGE_PATH_RE, MAX_IMAGES, safeImageName, type ChatImageRef } from '@/lib/agent/images'
 import { createConversation, getConversation, getConversationOperator, getMessages, insertMessage } from '@/lib/agent/conversations'
-import { contextFromMessages, titleFromPrompt, type StoredApproval, type StoredToolEntry } from '@/lib/agent/history'
+import { contextFromMessages, titleFromMessage, type StoredApproval, type StoredToolEntry } from '@/lib/agent/history'
 import { SYSTEM_PROMPT } from '@/lib/agent/prompt'
 import { clientForContext, loadSopLibrary, sopPromptBlock } from '@/lib/copy/sop'
 import { loadKnowledge } from '@/lib/agent/memory'
@@ -95,6 +97,17 @@ import type { Operator } from '@/lib/operators/types'
  * same `canUseProject` rule as the project APIs), and a chat it
  * continues that is filed in another vertical's project gets no block.
  *
+ * Images: `images: [{ path, name }]` (≤ MAX_IMAGES) are objects the browser
+ * already uploaded, one per request, through `POST /api/agent/images` — so
+ * this body stays tiny and never meets Vercel's 4.5 MB request cap. Each is
+ * read back from the private bucket and re-sniffed (400 `image_not_found`
+ * before any write when one is missing or not an image), sent to Claude as a
+ * base64 `image` block ahead of the text, and stored on the user message as
+ * `{ path, name, media_type }` (`attachments`). The prompt may be empty when
+ * images are attached. Earlier images replay from the newest few owner turns
+ * (`selectReplayImages`); older or unreadable ones become
+ * "[image omitted: <name>]".
+ *
  * SSE events (`data: <json>\n\n`): run (`{ id, conversation_id, project_id? }`), text,
  * tool_start, tool_end, approval, done, error.
  *
@@ -107,8 +120,14 @@ export const runtime = 'nodejs'
 /** Sonnet 5.5 at low effort: fast enough for chat, strong at tool use. Override with LUME_AGENT_MODEL. */
 const MODEL = process.env.LUME_AGENT_MODEL?.trim() || 'claude-sonnet-5-5'
 
+const ImageInput = z.object({
+  path: z.string().regex(IMAGE_PATH_RE),
+  name: z.string().max(255),
+})
+
 const Body = z.object({
-  prompt: z.string().trim().min(1).max(MESSAGE_MAX),
+  prompt: z.string().trim().max(MESSAGE_MAX),
+  images: z.array(ImageInput).max(MAX_IMAGES).optional(),
   conversation_id: z.string().regex(UUID_RE).optional(),
   skill_id: z.string().regex(UUID_RE).optional(),
   skill_mode: z.enum(['run', 'reference']).optional(),
@@ -118,7 +137,7 @@ const Body = z.object({
   vertical_id: z.string().regex(UUID_RE).optional(),
   /** New conversations only: file the chat in this project ("New chat in project"). */
   project_id: z.string().regex(UUID_RE).optional(),
-})
+}).refine((b) => b.prompt.length > 0 || (b.images?.length ?? 0) > 0)
 
 type SseEvent = Record<string, unknown> & { type: string }
 
@@ -137,6 +156,8 @@ export async function POST(req: Request) {
   const body = await parseJsonBody(req, Body, 256 * 1024)
   if (!body.ok) return body.response
   const message = body.data.prompt
+  // Same path twice is one image.
+  const imageInputs = [...new Map((body.data.images ?? []).map((i) => [i.path, i])).values()]
 
   // Runs left `running` by a killed function: close them so the orb and the
   // run log stop showing them as live. Best effort.
@@ -163,7 +184,20 @@ export async function POST(req: Request) {
   let verticalName: string | null = null
   const skillMode = body.data.skill_mode ?? 'reference'
   let skill: Awaited<ReturnType<typeof getSkill>> = null
+  let currentImages: LoadedImage[] = []
+  const loadedHistory = new Map<string, LoadedImage>()
   try {
+    // Before any write, so a bad image leaves no empty conversation behind.
+    if (imageInputs.length) {
+      const loaded = await Promise.all(imageInputs.map((i) => loadChatImage(i.path)))
+      if (loaded.some((x) => !x)) return NextResponse.json({ error: 'image_not_found' }, { status: 400 })
+      currentImages = loaded.map((x, k) => ({
+        path: imageInputs[k].path,
+        name: safeImageName(imageInputs[k].name),
+        media_type: x!.media_type,
+        data: Buffer.from(x!.bytes).toString('base64'),
+      }))
+    }
     // Before any write, so a missing skill leaves no empty conversation behind.
     if (body.data.skill_id) {
       skill = await getSkill(body.data.skill_id.toLowerCase())
@@ -177,8 +211,9 @@ export async function POST(req: Request) {
       projectId = conversation.project_id ?? null
       chatOperatorId = await getConversationOperator(conversation.id)
       history = contextFromMessages(await getMessages(conversationId))
+      await loadHistoryImages(history, loadedHistory)
     } else {
-      const title = titleFromPrompt(message)
+      const title = titleFromMessage(message, currentImages)
       if (!operator && body.data.vertical_id) ownerVertical = await getVertical(body.data.vertical_id.toLowerCase())
       const origin = operator
         ? { vertical_id: operator.vertical_id, operator_id: operator.id }
@@ -218,8 +253,17 @@ export async function POST(req: Request) {
       verticalName = ownerVertical.name
       prompt = `${verticalPromptLine(ownerVertical)}\n\n${prompt}`
     }
-    runId = (await insertAgentRun(prompt, MODEL)).id
-    await insertMessage({ conversation_id: conversationId, role: 'user', text: message, run_id: runId, ...(body.data.auto ? { auto: true } : {}) })
+    const attachments: ChatImageRef[] = currentImages.map(({ path, name, media_type }) => ({ path, name, media_type }))
+    const imageNote = attachments.length ? `[${attachments.length} image${attachments.length > 1 ? 's' : ''}: ${attachments.map((a) => a.name).join(', ')}]` : ''
+    runId = (await insertAgentRun([prompt, imageNote].filter(Boolean).join('\n\n'), MODEL)).id
+    await insertMessage({
+      conversation_id: conversationId,
+      role: 'user',
+      text: message,
+      run_id: runId,
+      ...(attachments.length ? { attachments } : {}),
+      ...(body.data.auto ? { auto: true } : {}),
+    })
   } catch (err) {
     return dbErrorResponse(err, 'api/agent/run')
   }
@@ -252,7 +296,8 @@ export async function POST(req: Request) {
         runId,
         prompt: withKnowledge(knowledge, prompt),
         history,
-        title: message,
+        images: { current: currentImages, loaded: loadedHistory },
+        title: message || titleFromMessage(message, currentImages),
         origin,
         publicOrigin: requestOrigin(req),
         operator,
@@ -290,6 +335,24 @@ export async function POST(req: Request) {
 }
 
 const errText = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
+/**
+ * Read the history images worth replaying into `into` (by path). One that is
+ * gone, not an image, or fails to load is simply left out: buildMessages
+ * notes it as "[image omitted: <name>]" and the run goes on.
+ */
+async function loadHistoryImages(history: ContextTurn[], into: Map<string, LoadedImage>): Promise<void> {
+  await Promise.all(
+    selectReplayImages(history).map(async (ref) => {
+      try {
+        const img = await loadChatImage(ref.path)
+        if (img) into.set(ref.path, { ...ref, media_type: img.media_type, data: Buffer.from(img.bytes).toString('base64') })
+      } catch (err) {
+        console.error('[api/agent/run] history image load failed:', errText(err))
+      }
+    })
+  )
+}
 
 /**
  * The Project block for one project, or null when it is gone, out of the
@@ -401,6 +464,7 @@ async function executeRun({
   runId,
   prompt,
   history,
+  images,
   title,
   origin,
   publicOrigin,
@@ -415,6 +479,8 @@ async function executeRun({
   prompt: string
   /** The conversation's earlier stored turns (replayed in full by buildMessages). */
   history: ContextTurn[]
+  /** The current message's images, and the history images loaded for replay (by path). */
+  images: { current: LoadedImage[]; loaded: Map<string, LoadedImage> }
   /** The owner's own words (the prompt may carry knowledge / skill / vertical lines). */
   title: string
   origin: string
@@ -553,7 +619,7 @@ async function executeRun({
       ],
       // Anthropic-hosted, read-only web research (no approval needed: nothing leaves Lume but a query/URL).
       tools: [...tools, ...WEB_TOOLS],
-      messages: buildMessages(history, prompt),
+      messages: buildMessages(history, prompt, images),
       max_iterations: 20,
       stream: true,
       // Server-side fallback on a safety-classifier refusal (routes by category).

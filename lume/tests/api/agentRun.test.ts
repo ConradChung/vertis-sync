@@ -32,8 +32,10 @@ const h = vi.hoisted(() => ({
   getProject: vi.fn(),
   projectForVertical: vi.fn(),
   itemsForBlock: vi.fn(),
+  loadChatImage: vi.fn(),
 }))
 vi.mock('@/lib/agent/projects', () => ({ getProject: h.getProject, projectForVertical: h.projectForVertical, itemsForBlock: h.itemsForBlock }))
+vi.mock('@/lib/agent/chatImages', () => ({ loadChatImage: h.loadChatImage }))
 vi.mock('@/lib/operators/session', () => ({ currentOperator: h.currentOperator }))
 vi.mock('@/lib/operators/store', () => ({ getVertical: h.getVertical }))
 
@@ -883,5 +885,101 @@ describe('projects', () => {
     fakeRunner([{ text: 'ok' }])
     await events(await post('next', { conversation_id: CONV }))
     expect(system()).toHaveLength(2) // stable prompt + SOP, no project block
+  })
+})
+
+describe('POST /api/agent/run with images', () => {
+  const P1 = '0f3c2b1a-9d8e-4f7a-8b6c-000000000001.png'
+  const P2 = '0f3c2b1a-9d8e-4f7a-8b6c-000000000002.jpg'
+  const OLD = '0f3c2b1a-9d8e-4f7a-8b6c-000000000009.png'
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 4, 5])
+  const b64 = (b: Uint8Array) => Buffer.from(b).toString('base64')
+  type Block = { type: string; text?: string; source?: { type: string; media_type: string; data: string } }
+
+  beforeEach(() => {
+    h.loadChatImage.mockImplementation(async (p: string) => (p.endsWith('.jpg') ? { bytes: JPEG, media_type: 'image/jpeg' } : { bytes: PNG, media_type: 'image/png' }))
+  })
+
+  it('sends the images to Claude as base64 image blocks before the text, and stores the references', async () => {
+    fakeRunner([{ text: 'I see it.' }])
+    const res = await post('what is off here?', { images: [{ path: P1, name: 'a.png' }, { path: P2, name: 'b.jpg' }] })
+    expect(res.status).toBe(200)
+    await res.text()
+    const content = sentTurns().at(-1)!.content as Block[]
+    expect(content.map((b) => b.type)).toEqual(['image', 'image', 'text'])
+    expect(content[0].source).toEqual({ type: 'base64', media_type: 'image/png', data: b64(PNG) })
+    // The media type comes from the bytes, not the path or the client.
+    expect(content[1].source).toEqual({ type: 'base64', media_type: 'image/jpeg', data: b64(JPEG) })
+    expect(content[2].text).toMatch(/what is off here\?$/)
+    expect(h.insertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: 'user',
+        text: 'what is off here?',
+        attachments: [
+          { path: P1, name: 'a.png', media_type: 'image/png' },
+          { path: P2, name: 'b.jpg', media_type: 'image/jpeg' },
+        ],
+      })
+    )
+    // No base64 in what gets stored.
+    expect(JSON.stringify(h.insertMessage.mock.calls)).not.toContain(b64(PNG))
+    expect(JSON.stringify(h.insertAgentRun.mock.calls)).not.toContain(b64(PNG))
+  })
+
+  it('accepts an image-only message and titles the new chat after the image', async () => {
+    fakeRunner([{ text: 'A dashboard.' }])
+    const res = await post('', { images: [{ path: P1, name: 'dash.png' }] })
+    expect(res.status).toBe(200)
+    await res.text()
+    expect(h.createConversation.mock.calls[0][0]).toBe('Image: dash.png')
+    const content = sentTurns().at(-1)!.content as Block[]
+    expect(content[0].type).toBe('image')
+    expect(content.every((b) => b.type !== 'text' || (b.text ?? '').trim().length > 0)).toBe(true)
+  })
+
+  it('refuses an empty message with no images, more than 5 images, and a bad path', async () => {
+    expect((await post('   ')).status).toBe(400)
+    const six = Array.from({ length: 6 }, (_, i) => ({ path: `0f3c2b1a-9d8e-4f7a-8b6c-00000000001${i}.png`, name: 'x.png' }))
+    expect((await post('hi', { images: six })).status).toBe(400)
+    expect((await post('hi', { images: [{ path: '../secret.png', name: 'x' }] })).status).toBe(400)
+    expect(h.toolRunner).not.toHaveBeenCalled()
+    expect(h.insertMessage).not.toHaveBeenCalled()
+  })
+
+  it('400 image_not_found when an uploaded image is gone (or not an image), before anything is written', async () => {
+    h.loadChatImage.mockResolvedValue(null)
+    const res = await post('look', { images: [{ path: P1, name: 'a.png' }] })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('image_not_found')
+    expect(h.createConversation).not.toHaveBeenCalled()
+    expect(h.insertMessage).not.toHaveBeenCalled()
+  })
+
+  it('replays earlier images from the conversation and notes the ones it could not load', async () => {
+    h.getMessages.mockResolvedValue([
+      { role: 'user', text: 'first', attachments: [{ path: OLD, name: 'old.png', media_type: 'image/png' }] },
+      { role: 'assistant', text: 'ok' },
+    ])
+    h.loadChatImage.mockImplementation(async (p: string) => (p === OLD ? null : { bytes: PNG, media_type: 'image/png' }))
+    fakeRunner([{ text: 'ok' }])
+    await (await post('and now?', { conversation_id: CONV, images: [{ path: P1, name: 'new.png' }] })).text()
+    const turns = sentTurns()
+    expect(turns.map((t) => t.role)).toEqual(['user', 'assistant', 'user'])
+    expect(turnText(turns[0])).toContain('[image omitted: old.png]')
+    expect((turns[2].content as Block[])[0].type).toBe('image')
+    expect(h.loadChatImage).toHaveBeenCalledWith(OLD)
+  })
+
+  it('sends a replayed history image as an image block in its own turn', async () => {
+    h.getMessages.mockResolvedValue([
+      { role: 'user', text: 'first', attachments: [{ path: OLD, name: 'old.png', media_type: 'image/png' }] },
+      { role: 'assistant', text: 'ok' },
+    ])
+    fakeRunner([{ text: 'ok' }])
+    await (await post('compare with before', { conversation_id: CONV })).text()
+    const first = sentTurns()[0].content as Block[]
+    expect(first.map((b) => b.type)).toEqual(['image', 'text'])
+    expect(first[0].source?.data).toBe(b64(PNG))
   })
 })
