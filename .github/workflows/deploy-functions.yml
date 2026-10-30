@@ -36,4 +36,4 @@ jobs:
         run: supabase functions deploy telegram-inbox slack-inbox hnwi-pipeline-orchestrator --project-ref "$PROJECT_REF" --no-verify-jwt
       - name: Deploy the remaining functions
         if: steps.gate.outputs.skip != 'true'
-        run: supabase functions deploy instantly-rotate instantly-push email-validator contact-email-finder hnwi-email-finder operating-city-enricher pipeline-watchdog jobsearch-notify jobsearch-puller jobsearch-sheet-writer leadsfriday-order --project-ref "$PROJECT_REF"
+        run: supabase functions deploy instantly-rotate instantly-push email-validator contact-email-finder hnwi-email-finder operating-city-enricher pipeline-watchdog jobsearch-notify jobsearch-puller jobsearch-sheet-writer leadsfriday-order company-research --project-ref "$PROJECT_REF"
