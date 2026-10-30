@@ -261,6 +261,11 @@ reactors), `influencer_exports`.
   door retry. Both executors re-check live state before calling the function.
 - Every Apify start is gated by `lume_influencer_reserve_apify` on the same
   monthly cap as company research (`LUME_RESEARCH_APIFY_CAP_USD`, default 29).
+- Leaks are swept by `lume_influencer_sweep` on every invocation and every
+  5 minutes (pg_cron `influencer-sweep` → the function's `sweep` action, which
+  also aborts the Apify runs it closes): dead chains (30 min), never-started
+  (5 min) or hung (30 min) Apify rows, rows under a finished run, runs older
+  than 6 h, reactions bills unapproved for 72 h.
 - Output: `GET /api/influencers/exports/<id>` CSV (First Name, Last Name, Title,
   Company, Website = domain, Person Linkedin Url, City, State, Country, optional
   Door Count / Reacted To). Owner: import into an Apollo list, open it as a
