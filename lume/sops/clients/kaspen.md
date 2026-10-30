@@ -75,6 +75,16 @@ step1_cta:
 step_rules:
   "1":
     forbid: [show you, save you from]
+  "3": # proactive/compliance angle: no door count, no Miami
+    forbid_patterns:
+      - pattern: '\bMiami\b'
+        label: Miami
+      - pattern: '\$98k|\$?98,000'
+        label: $98k
+      - pattern: '\{\{\s*door_count\s*\}\}'
+        label: '{{door_count}}'
+      - pattern: '\b\d[\d,.]*k?\+?[- ]?(doors?|units?)\b'
+        label: a door or unit count
   "4":
     forbid: [program, apply, application]
     require:

@@ -94,7 +94,11 @@ describe('Kaspen SOP lint', () => {
   it('proof_point_repeat: a proof point from step 1 again in step 3', () => {
     const s = zenport()
     s[2].variants[0].body = s[2].variants[0].body.replace('schedules the fix before the tenant complains', 'runs the same way on my 1,000 doors')
-    expect(only(s)).toEqual([['proof_point_repeat', 3, 'A']])
+    // Step 3 also bans door counts outright.
+    expect(only(s)).toEqual([
+      ['proof_point_repeat', 3, 'A'],
+      ['step_forbid', 3, 'A'],
+    ])
   })
 
   it.each(['1,000 doors', '1000 doors', '1k doors', '1,000-door', '1000-door', 'a thousand doors'])(
@@ -161,6 +165,26 @@ describe('Kaspen SOP lint', () => {
     const t = zenport()
     t[3].variants[0].body = t[3].variants[0].body.replace('Reply "rules" and I\'ll send them over.', 'Let me know if you want them.')
     expect(only(t)).toEqual([['step_require', 4, 'A']])
+  })
+
+  it.each([
+    ['the Miami portfolio', 'Miami'],
+    ['a $98k payroll saving', '$98k'],
+    ['your {{door_count}} doors', '{{door_count}}'],
+    ['a 350-unit portfolio', 'a door or unit count'],
+    ['my 1,000 doors', 'a door or unit count'],
+    ['all 21,000 units we run', 'a door or unit count'],
+  ])('step 3 forbids a door count and Miami: "%s"', (phrase, label) => {
+    const s = zenport()
+    s[2].variants[0].body = s[2].variants[0].body.replace('one more angle.', `one more angle, seen across ${phrase}.`)
+    const out = lintSequence(s, RULES).filter((x) => x.rule === 'step_forbid')
+    expect(out).toEqual([expect.objectContaining({ rule: 'step_forbid', step: 3, variant: 'A', message: `step 3 may not use ${label}` })])
+  })
+
+  it('the step-3 ban leaves door counts alone elsewhere (21,000 units in step 4 passes)', () => {
+    const s = zenport()
+    s[3].variants[0].body = s[3].variants[0].body.replace('in my own portfolio', 'across the 21,000 units it runs on')
+    expect(lintSequence(s, RULES)).toEqual([])
   })
 
   it('step_rules: step 1 forbids "show you" even outside a question', () => {

@@ -40,8 +40,8 @@ import type { SopRules } from '@/lib/copy/sop'
  *   instead of a call") and questions without them ("who takes the 2am call
  *   on your side?") pass.
  * - step_forbid / step_require: `step_rules` per step: a forbidden phrase
- *   (whole words) in that step, or a required regex that no part of the email
- *   matches.
+ *   (whole words) or `forbid_patterns` regex in that step, or a required
+ *   regex that no part of the email matches.
  * - signoff: the body's last non-empty line is not the step's sign-off
  *   (case-insensitive, trailing punctuation ignored).
  * - sequence_structure (warning): step count, delays (in days) or the number
@@ -326,6 +326,10 @@ export function lintSequence(steps: LintStep[], rules: SopRules): SopViolation[]
         for (const p of stepRule.forbid) {
           const hit = firstMatch(email, phraseRe(p, true))
           if (hit) add({ rule: 'step_forbid', message: `step ${step} may not use "${p}"`, excerpt: around(email, hit.start, hit.end) })
+        }
+        for (const f of stepRule.forbid_patterns) {
+          const hit = firstMatch(email, new RegExp(f.pattern, 'iu'))
+          if (hit) add({ rule: 'step_forbid', message: `step ${step} may not use ${f.label}`, excerpt: around(email, hit.start, hit.end) })
         }
         for (const req of stepRule.require) {
           if (!new RegExp(req.pattern, 'iu').test(email)) add({ rule: 'step_require', message: `step ${step} must include ${req.label}`, excerpt: head(body) })

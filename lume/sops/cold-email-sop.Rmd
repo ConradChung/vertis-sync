@@ -28,7 +28,7 @@ read_sop <- function(path) {
 # Table cells. Regex patterns go in as raw LaTeX (\texttt with every special
 # character escaped), so "|", "$", "\" and "_" print literally: no table
 # split, no TeX math. The output is a PDF only, so raw LaTeX is safe here.
-esc <- function(x) as.character(x)
+esc <- function(x) gsub("$", "\\$", as.character(x), fixed = TRUE) # plain cells: no TeX math
 tex_lit <- function(x) {
   x <- gsub("\\", "\001", as.character(x), fixed = TRUE)
   x <- gsub("([{}$&#%_])", "\\\\\\1", x, perl = TRUE)
@@ -90,7 +90,10 @@ render_rules <- function(r) {
     sr <- r$step_rules
     table_md(data.frame(
       Step = names(sr),
-      Forbid = sapply(sr, function(x) flat(x$forbid)),
+      Forbid = sapply(sr, function(x) {
+        parts <- c(if (length(x[["forbid"]])) flat(x[["forbid"]]), vapply(x[["forbid_patterns"]], function(q) paste0(esc(q$label), ": ", code(q$pattern)), ""))
+        if (length(parts)) paste(parts, collapse = "; ") else "none"
+      }),
       Require = sapply(sr, function(x) if (length(x$require)) paste(sapply(x$require, function(q) paste0(esc(q$label), ": ", code(q$pattern))), collapse = "; ") else "none"),
       row.names = NULL
     ), "Step rules")

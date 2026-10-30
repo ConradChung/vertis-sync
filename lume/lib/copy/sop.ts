@@ -65,7 +65,10 @@ const proofPoints = z
 const fieldName = z.string().regex(/^[A-Za-z_][\w.]*$/, 'a {{variable}} name')
 const stepRule = z
   .object({
+    /** Phrases (whole words, case-insensitive). */
     forbid: z.array(text).default([]),
+    /** Regexes (case-insensitive), named by their label in messages. */
+    forbid_patterns: z.array(z.object({ pattern: regex, label: text }).strict()).default([]),
     require: z.array(z.object({ pattern: regex, label: text }).strict()).default([]),
   })
   .strict()
@@ -408,7 +411,13 @@ export function rulesSummary(r: SopRules): string {
       : []),
     ...stepRules.map(
       ([s, x]) =>
-        `- Step ${s}: ${[x.forbid.length ? `never ${quoted(x.forbid)}` : '', ...x.require.map((q) => `must include ${q.label}`)].filter(Boolean).join('; ')}.`
+        `- Step ${s}: ${[
+          x.forbid.length ? `never ${quoted(x.forbid)}` : '',
+          ...x.forbid_patterns.map((q) => `never ${q.label}`),
+          ...x.require.map((q) => `must include ${q.label}`),
+        ]
+          .filter(Boolean)
+          .join('; ')}.`
     ),
     ...(signoffs.length ? [`- Sign-off (last line): ${signoffs.map(([s, n]) => `step ${s} "${n}"`).join(', ')}.`] : []),
     ...(seq

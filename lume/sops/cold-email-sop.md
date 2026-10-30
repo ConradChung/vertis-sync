@@ -78,7 +78,8 @@ step1_cta:
 #   no_exclamation: true            no "!" in any subject or body
 #   subject: { min_words: 2, no_company: true, forbid: [phrase] }
 #   only_in_step: { Vancouver: [1] }  a phrase allowed only in those steps
-#   step_rules: { "4": { forbid: [program], require: [{ pattern: <regex>, label: <text> }] } }
+#   step_rules: { "4": { forbid: [program], forbid_patterns: [{ pattern: <regex>, label: <text> }],
+#                        require: [{ pattern: <regex>, label: <text> }] } }
 #   signoff: { "1": Full Name }       the body's last line, per step
 #   sequence: { steps: 4, delays_days: [0, 3, 4, 5], step1_variants: 5 }  warning only, never blocks
 
