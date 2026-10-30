@@ -1059,3 +1059,26 @@ describe('POST /api/agent/run: an image the API refuses', () => {
     expect(ev.find((x) => x.type === 'error').message).toMatch(/Claude API error 400/)
   })
 })
+
+describe('POST /api/agent/run: image bytes per run', () => {
+  it('drops the oldest replayed images past ~18 MB raw and notes them', async () => {
+    const OLDER = '0f3c2b1a-9d8e-4f7a-8b6c-000000000101.png'
+    const NEWER = '0f3c2b1a-9d8e-4f7a-8b6c-000000000102.png'
+    const big = new Uint8Array(10 * 1024 * 1024)
+    big.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    h.loadChatImage.mockResolvedValue({ bytes: big, media_type: 'image/png' })
+    h.getMessages.mockResolvedValue([
+      { role: 'user', text: 'one', attachments: [{ path: OLDER, name: 'older.png', media_type: 'image/png' }] },
+      { role: 'assistant', text: 'ok' },
+      { role: 'user', text: 'two', attachments: [{ path: NEWER, name: 'newer.png', media_type: 'image/png' }] },
+      { role: 'assistant', text: 'ok' },
+    ])
+    fakeRunner([{ text: 'ok' }])
+    await (await post('both?', { conversation_id: CONV })).text()
+    const turns = sentTurns()
+    const types = (i: number) => (turns[i].content as { type: string }[]).map((b) => b.type)
+    expect(types(0)).toEqual(['text'])
+    expect(turnText(turns[0])).toContain('[image omitted: older.png]')
+    expect(types(2)).toEqual(['image', 'text'])
+  })
+})

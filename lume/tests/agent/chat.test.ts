@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildMessages, HISTORY_IMAGE_MAX, HISTORY_IMAGE_TURNS, HISTORY_MAX_CHARS, MESSAGE_MAX, parseSseFrames, selectReplayImages, TURN_MAX_CHARS, type ContextTurn, type LoadedImage } from '@/lib/agent/chat'
+import { buildMessages, fitImageBudget, RUN_IMAGE_BYTES, HISTORY_IMAGE_MAX, HISTORY_IMAGE_TURNS, HISTORY_MAX_CHARS, MESSAGE_MAX, parseSseFrames, selectReplayImages, TURN_MAX_CHARS, type ContextTurn, type LoadedImage } from '@/lib/agent/chat'
 import type { ChatImageRef } from '@/lib/agent/images'
 import { applyAgentEvent, type ChatMessage } from '@/hooks/useAgentChat'
 
@@ -198,5 +198,34 @@ describe('applyAgentEvent', () => {
   })
   it('records run errors', () => {
     expect(applyAgentEvent(empty, { type: 'error', message: 'boom' }).error).toBe('boom')
+  })
+})
+
+describe('replay only what buildMessages keeps', () => {
+  const ref = (n: number): ChatImageRef => ({ path: `0f3c2b1a-9d8e-4f7a-8b6c-${String(n).padStart(12, '0')}.png`, name: `s${n}.png`, media_type: 'image/png' })
+  it('does not load images from a turn the char budget drops', () => {
+    const filler: ContextTurn[] = Array.from({ length: 12 }, (_, i) => ({ role: (i % 2 ? 'user' : 'assistant') as 'user' | 'assistant', text: 'y'.repeat(30_000) }))
+    const history: ContextTurn[] = [{ role: 'user', text: 'old', images: [ref(1)] }, ...filler, { role: 'user', text: 'new', images: [ref(2)] }, { role: 'assistant', text: 'ok' }]
+    expect(selectReplayImages(history).map((r) => r.name)).toEqual(['s2.png'])
+    // And buildMessages agrees: the dropped turn is gone, not noted.
+    const all = buildMessages(history, 'now').flatMap((m) => m.content as { text?: string }[])
+    expect(all.some((b) => b.text?.includes('s1.png'))).toBe(false)
+  })
+})
+
+describe('fitImageBudget', () => {
+  // `data` is base64: n raw bytes ≈ 4n/3 chars.
+  const img = (name: string, rawBytes: number): LoadedImage => ({ path: `${name}.png`, name, media_type: 'image/png', data: 'A'.repeat(Math.ceil((rawBytes * 4) / 3)) })
+  it('is about 18 MB raw per run', () => {
+    expect(RUN_IMAGE_BYTES).toBe(18 * 1024 * 1024)
+  })
+  it('keeps every replayed image that fits beside the current ones', () => {
+    const replay = [img('n1', 300), img('n2', 300)]
+    expect(fitImageBudget([img('c', 300)], replay, 1000)).toEqual(replay)
+  })
+  it('drops replayed images oldest first once the total would pass the cap; the current ones always stay', () => {
+    const replay = [img('newest', 400), img('middle', 400), img('oldest', 100)]
+    expect(fitImageBudget([img('c', 300)], replay, 1000).map((i) => i.name)).toEqual(['newest'])
+    expect(fitImageBudget([img('c', 1200)], replay, 1000)).toEqual([])
   })
 })

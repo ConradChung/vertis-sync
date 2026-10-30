@@ -10,7 +10,7 @@ import { claimDecision, getAction } from '@/lib/actions/store'
 import { editMessage, sendMessage } from '@/lib/adapters/telegram'
 import { alert, alertLink, titleFrom } from '@/lib/alerts'
 import { routeItemForAction } from '@/lib/operators/route'
-import { buildMessages, MESSAGE_MAX, selectReplayImages, type ContextTurn, type LoadedImage } from '@/lib/agent/chat'
+import { buildMessages, fitImageBudget, MESSAGE_MAX, selectReplayImages, type ContextTurn, type LoadedImage } from '@/lib/agent/chat'
 import { loadChatImage } from '@/lib/agent/chatImages'
 import { IMAGE_PATH_RE, MAX_IMAGES, safeImageName, type ChatImageRef } from '@/lib/agent/images'
 import { createConversation, getConversation, getConversationOperator, getMessages, insertMessage } from '@/lib/agent/conversations'
@@ -211,7 +211,7 @@ export async function POST(req: Request) {
       projectId = conversation.project_id ?? null
       chatOperatorId = await getConversationOperator(conversation.id)
       history = contextFromMessages(await getMessages(conversationId))
-      await loadHistoryImages(history, loadedHistory)
+      await loadHistoryImages(history, currentImages, loadedHistory)
     } else {
       const title = titleFromMessage(message, currentImages)
       if (!operator && body.data.vertical_id) ownerVertical = await getVertical(body.data.vertical_id.toLowerCase())
@@ -355,20 +355,24 @@ class ImageRejectedError extends Error {
 
 /**
  * Read the history images worth replaying into `into` (by path). One that is
- * gone, not an image, or fails to load is simply left out: buildMessages
- * notes it as "[image omitted: <name>]" and the run goes on.
+ * gone, not an image, or fails to load is simply left out, and so are the
+ * oldest once current + replayed pass RUN_IMAGE_BYTES (fitImageBudget):
+ * buildMessages notes each as "[image omitted: <name>]" and the run goes on.
  */
-async function loadHistoryImages(history: ContextTurn[], into: Map<string, LoadedImage>): Promise<void> {
-  await Promise.all(
-    selectReplayImages(history).map(async (ref) => {
+async function loadHistoryImages(history: ContextTurn[], current: LoadedImage[], into: Map<string, LoadedImage>): Promise<void> {
+  const loaded = await Promise.all(
+    selectReplayImages(history).map(async (ref): Promise<LoadedImage | null> => {
       try {
         const img = await loadChatImage(ref.path)
-        if (img) into.set(ref.path, { ...ref, media_type: img.media_type, data: Buffer.from(img.bytes).toString('base64') })
+        return img ? { ...ref, media_type: img.media_type, data: Buffer.from(img.bytes).toString('base64') } : null
       } catch (err) {
         console.error('[api/agent/run] history image load failed:', errText(err))
+        return null
       }
     })
   )
+  // Newest first, as selected; the budget drops from the oldest end.
+  for (const img of fitImageBudget(current, loaded.filter((x): x is LoadedImage => !!x))) into.set(img.path, img)
 }
 
 /**
