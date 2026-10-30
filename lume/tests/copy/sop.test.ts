@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  blockingRules,
   buildSopLibrary,
   clientForCampaign,
   clientForContext,
@@ -128,7 +129,7 @@ describe('client overlays', () => {
     expect(clientForCampaign(l, { name: 'ACME — fall push' })?.client).toBe('acme')
     expect(clientForCampaign(l, { name: 'Roadrunner 2' })?.client).toBe('acme')
     expect(clientForCampaign(l, { name: 'Other' })).toBeNull()
-    expect(sopForCampaign({ name: 'Other' }, l)).toEqual({ rules: l.base.rules, client: null })
+    expect(sopForCampaign({ name: 'Other' }, l)).toEqual({ rules: l.base.rules, client: null, blocking: l.base.rules })
     expect(sopForCampaign({ name: 'acme' }, l).client).toBe('acme')
     const byId = buildSopLibrary(doc(RULES), [{ file: 'acme.md', raw: OVERLAY().replace('campaign_names: [acme, roadrunner]', 'campaign_ids: [c-123]') }])
     expect(clientForCampaign(byId, { id: 'c-123', name: 'x' })?.client).toBe('acme')
@@ -214,5 +215,34 @@ describe('the committed SOPs (lume/sops)', () => {
     expect(block).toMatch(/Fallback sentences/)
     expect(block).toContain(lib.base.prose)
     expect(block).toMatch(/- kaspen: Kaspen/)
+  })
+})
+
+describe('blockingRules: what may refuse an edit', () => {
+  const PLACEHOLDER_RULES = RULES.replace('placeholder: false', 'placeholder: true')
+  const lib = (base: string) => buildSopLibrary(doc(base), [{ file: 'acme.md', raw: OVERLAY() }])
+
+  it('a real base blocks with its own rules, or merged with the client', () => {
+    const l = lib(RULES)
+    expect(blockingRules(l, null)).toBe(l.base.rules)
+    expect(blockingRules(l, findClient(l, 'acme'))).toBe(findClient(l, 'acme')!.rules)
+  })
+
+  it('a placeholder base blocks nothing on its own', () => {
+    expect(blockingRules(lib(PLACEHOLDER_RULES), null)).toBeNull()
+  })
+
+  it("with a client, only the keys the overlay sets block; the placeholder base's are neutral", () => {
+    const l = lib(PLACEHOLDER_RULES)
+    const r = blockingRules(l, findClient(l, 'acme'))!
+    expect(r.banned_phrases).toEqual(['synergy', 'Just Checking In'])
+    expect(r.no_exclamation).toBe(true)
+    expect(r.word_count.followup).toEqual({ min: 1, max: 40 })
+    expect(r.word_count.step1.min).toBe(0)
+    expect(r.subject).toMatchObject({ casing: 'any', max_words: 3, min_words: 0, no_company: false, forbid: [] })
+    expect(r.proof_points.map((p) => p.id)).toEqual(['acme_case'])
+    expect(r.step1_cta.forbid_yes_no_meeting).toBe(false)
+    expect(r.max_personalization_fields_per_email).toBeGreaterThan(1000)
+    expect(r.signoff).toEqual({ '1': 'Wile E' })
   })
 })

@@ -10,6 +10,8 @@
 # (unknown key, wrong type, min > max, duplicate id) fails the tests, the
 # build and every sequence edit loudly; linting is never skipped.
 version: 1
+# While true, these base rules only WARN (they never block an edit); a client
+# overlay's own rules still block its campaigns.
 placeholder: true # PLACEHOLDER: set to false once the owner's rules are in
 
 # Case-insensitive, whole-word/phrase matches in subjects and bodies.

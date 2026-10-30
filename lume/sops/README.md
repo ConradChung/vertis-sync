@@ -20,6 +20,11 @@ machine rules, followed by prose.
   again in the executor before anything is written to Instantly. A blocking
   violation refuses the edit and names the rule, step and variant. The
   sequence-shape rule (`sequence`) is a warning only.
+- **Placeholder base.** While the base has `placeholder: true`, its rules
+  only warn. A campaign that no client SOP covers is never refused; it gets
+  warnings in the tool log, the editor and `/actions/<id>`. A client
+  campaign is refused only by the rules its overlay sets. Once the base is
+  `placeholder: false`, its rules block too.
 - **Overlay selection.** An overlay applies to a campaign when the campaign's
   name contains one of `match.campaign_names` (case-insensitive) or its id is
   in `match.campaign_ids`. If two overlays match one campaign, that is an

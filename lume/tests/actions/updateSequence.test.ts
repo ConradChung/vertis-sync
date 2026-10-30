@@ -78,9 +78,9 @@ function row(payload: Record<string, unknown>): PendingActionRow {
   }
 }
 
-const BASE = (banned = '[leverage]') => `---
+const BASE = (banned = '[leverage]', placeholder = false) => `---
 version: 1
-placeholder: false
+placeholder: ${placeholder}
 banned_phrases: ${banned}
 word_count:
   step1: { min: 1, max: 500 }
@@ -110,8 +110,8 @@ sequence:
 ---
 ## Zen
 `
-const useSop = (banned?: string) => {
-  sopLib.current = buildSopLibrary(BASE(banned), [{ file: 'zen.md', raw: ZEN }])
+const useSop = (banned?: string, placeholder = false) => {
+  sopLib.current = buildSopLibrary(BASE(banned, placeholder), [{ file: 'zen.md', raw: ZEN }])
 }
 
 function edited() {
@@ -226,6 +226,58 @@ describe('update_sequence: SOP gate', () => {
     const out = await executeAction(ID)
     expect(out).toMatchObject({ ran: true, status: 'failed', result: { sop_invalid: true } })
     expect(seq.patchSequence).not.toHaveBeenCalled()
+  })
+})
+
+describe('update_sequence: a placeholder base SOP only warns', () => {
+  const leveraged = () => {
+    const steps = edited()
+    steps[1].variants[0].body = 'Bump. We leverage AI.'
+    return steps
+  }
+
+  it('a campaign no client SOP covers goes through, the base violations kept as warnings', async () => {
+    useSop(undefined, true)
+    const b = await buildActionRequest({ kind: 'update_sequence', payload: { campaign_id: CAMP, steps: leveraged() } })
+    expect(b.ok).toBe(true)
+    if (!b.ok) return
+    expect(b.payload.sop_client).toBeNull()
+    expect(b.payload.sop_warnings).toEqual([expect.stringMatching(/^Step 2, variant A — banned_phrase \(warning\): body uses the banned phrase "leverage"/)])
+    svc.insertPendingAction.mockResolvedValueOnce({ ...row(b.payload), status: 'awaiting' })
+    await expect(createAction('update_sequence', b.payload, 'user')).resolves.toMatchObject({ kind: 'update_sequence' })
+    store.claimExecution.mockResolvedValueOnce(row(b.payload))
+    const out = await executeAction(ID)
+    expect(out).toMatchObject({ ran: true, status: 'executed' })
+    expect(seq.patchSequence).toHaveBeenCalledTimes(1)
+  })
+
+  it("a client SOP's own rules still block; the placeholder base's stay warnings", async () => {
+    useSop(undefined, true)
+    seq.getSequenceFresh.mockResolvedValue({ ...fresh(LIVE), name: 'Zenport - Oct' })
+    const loud = leveraged()
+    loud[1].variants[0].body = 'Bump! We leverage AI.'
+    const b = await buildActionRequest({ kind: 'update_sequence', payload: { campaign_id: CAMP, steps: loud } })
+    expect(b).toMatchObject({ ok: false, status: 422, error: 'sop_violations' })
+    if (b.ok) return
+    expect(b.violations?.filter((v) => v.severity !== 'warning').map((v) => v.rule)).toEqual(['no_exclamation'])
+    expect(b.violations?.filter((v) => v.severity === 'warning').map((v) => v.rule).sort()).toEqual(['banned_phrase', 'sequence_structure'])
+    // Without the overlay's violation it goes through, warnings attached.
+    const ok = await buildActionRequest({ kind: 'update_sequence', payload: { campaign_id: CAMP, steps: leveraged() } })
+    expect(ok).toMatchObject({ ok: true, payload: { sop_client: 'zen', sop_warnings: [expect.stringMatching(/banned_phrase \(warning\)/), expect.stringMatching(/sequence_structure/)] } })
+  })
+
+  it('once the base is not a placeholder its rules block (no client SOP needed)', async () => {
+    useSop(undefined, false)
+    const b = await buildActionRequest({ kind: 'update_sequence', payload: { campaign_id: CAMP, steps: leveraged() } })
+    expect(b).toMatchObject({ ok: false, status: 422, error: 'sop_violations', violations: [expect.objectContaining({ rule: 'banned_phrase', step: 2 })] })
+  })
+
+  it('the executor applies the same downgrade', async () => {
+    const p = await built()
+    useSop('[bump]', true)
+    store.claimExecution.mockResolvedValueOnce(row(p))
+    expect(await executeAction(ID)).toMatchObject({ ran: true, status: 'executed' })
+    expect(seq.patchSequence).toHaveBeenCalledTimes(1)
   })
 })
 

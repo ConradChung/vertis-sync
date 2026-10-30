@@ -26,3 +26,15 @@ describe('ToolLog', () => {
     )
   })
 })
+
+describe('ToolLog warnings', () => {
+  it('lists non-blocking warnings (SOP lint) under a call that went through', () => {
+    render(
+      <ToolLog
+        entries={[{ id: 't2', name: 'update_campaign_sequence', tier: 'high', status: 'awaiting', warnings: ['Step 2, variant A — banned_phrase (warning): body uses the banned phrase "leverage"'] }]}
+      />
+    )
+    expect(screen.getByText(/needs approval/)).toBeTruthy()
+    expect(screen.getByRole('list', { name: 'Warnings' }).textContent).toMatch(/banned_phrase \(warning\)/)
+  })
+})

@@ -21,6 +21,8 @@ export interface StoredToolEntry {
   status: 'running' | 'ok' | 'error' | 'awaiting'
   ms?: number
   error?: string
+  /** Non-blocking notes on the call's result (e.g. SOP lint warnings), one per line. */
+  warnings?: string[]
 }
 
 export interface StoredApproval {

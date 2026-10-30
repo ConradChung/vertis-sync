@@ -32,6 +32,8 @@ export interface ToolCallEntry {
   status: 'running' | 'ok' | 'error'
   ms?: number
   error?: string
+  /** Non-blocking notes on the call's result (e.g. SOP lint warnings), one per line. */
+  warnings?: string[]
   action_id?: string
 }
 

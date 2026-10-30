@@ -24,7 +24,7 @@ export function useSequenceEdit(campaignId: string | null) {
 }
 
 export type SequenceSaveResult =
-  | { ok: true; id: string; summary: string }
+  | { ok: true; id: string; summary: string; warnings?: string[] }
   | { ok: false; error: string; existingId?: string | null; problems?: string[] }
 
 /** `POST /api/actions` kind `update_sequence`: files the edit for approval; nothing is written to Instantly here. */
@@ -45,7 +45,8 @@ export async function requestSequenceUpdate(campaignId: string, steps: EditStep[
     error?: string
     existing_id?: string | null
     problems?: string[]
+    sop_warnings?: string[]
   }
-  if (res.ok && body.action) return { ok: true, id: body.action.id, summary: body.action.summary }
+  if (res.ok && body.action) return { ok: true, id: body.action.id, summary: body.action.summary, ...(body.sop_warnings?.length ? { warnings: body.sop_warnings } : {}) }
   return { ok: false, error: body.error ?? `HTTP ${res.status}`, existingId: body.existing_id, problems: body.problems }
 }

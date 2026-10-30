@@ -170,3 +170,12 @@ describe('skip permissions', () => {
     expect(result.current.skipPermissions).toBe(false)
   })
 })
+
+describe('applyAgentEvent: tool warnings', () => {
+  it('keeps the SOP lint warnings a tool_end carries on its chip', () => {
+    const m0: ChatMessage = { id: 'a', role: 'assistant', text: '', approvals: [], tools: [] }
+    const m1 = applyAgentEvent(m0, { type: 'tool_start', id: 't1', name: 'update_campaign_sequence', tier: 'high' })
+    const m2 = applyAgentEvent(m1, { type: 'tool_end', id: 't1', name: 'update_campaign_sequence', tier: 'high', ok: true, ms: 3, warnings: ['Step 1 — sequence_structure (warning): x'] })
+    expect(m2.tools[0]).toMatchObject({ status: 'awaiting', warnings: ['Step 1 — sequence_structure (warning): x'] })
+  })
+})

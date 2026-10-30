@@ -22,10 +22,30 @@ export interface SopGate {
   warnings: SopViolation[]
 }
 
+const key = (v: SopViolation) => JSON.stringify([v.rule, v.step, v.variant, v.message, v.excerpt])
+
+/**
+ * Lint with the full rules (base + overlay), then decide what blocks with
+ * `blockingRules`: a violation blocks only when the blocking rules flag it
+ * too. While the base SOP is a placeholder its rules are warnings: a campaign
+ * no client SOP covers is never refused, and a client campaign is refused
+ * only by the client's own rules.
+ */
 export function sopGate(campaign: { id?: string | null; name?: string | null }, steps: LintStep[]): SopGate {
-  const { rules, client } = sopForCampaign(campaign, loadSopLibrary())
+  const { rules, client, blocking: strict } = sopForCampaign(campaign, loadSopLibrary())
   const all = lintSequence(steps, rules)
-  return { client, blocking: all.filter(isBlocking), warnings: all.filter((v) => !isBlocking(v)) }
+  const strictKeys = new Map<string, number>()
+  for (const v of strict ? lintSequence(steps, strict).filter(isBlocking) : []) strictKeys.set(key(v), (strictKeys.get(key(v)) ?? 0) + 1)
+  const blocking: SopViolation[] = []
+  const warnings: SopViolation[] = []
+  for (const v of all) {
+    const n = strictKeys.get(key(v)) ?? 0
+    if (isBlocking(v) && n > 0) {
+      strictKeys.set(key(v), n - 1)
+      blocking.push(v)
+    } else warnings.push({ ...v, severity: 'warning' })
+  }
+  return { client, blocking, warnings }
 }
 
 /** "SOP lint (Kaspen SOP) refused this sequence:\n- Step 1, variant A — rule: …" */

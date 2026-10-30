@@ -472,8 +472,10 @@ async function executeRun({
     },
     onEnd: async ({ id, name, tier, ok, result, error, ms }) => {
       const entry = toolCalls.find((c) => c.id === id)
-      if (entry) Object.assign(entry, { status: ok ? 'ok' : 'error', ms, ...(error ? { error } : {}) })
-      send({ type: 'tool_end', id, name, tier, ok, ms, ...(error ? { error } : {}) })
+      // Non-blocking SOP lint warnings on a filed sequence edit ride along to the tool log.
+      const warnings = ok && Array.isArray(result?.sop_warnings) ? (result.sop_warnings as unknown[]).map(String).filter(Boolean) : []
+      if (entry) Object.assign(entry, { status: ok ? 'ok' : 'error', ms, ...(error ? { error } : {}), ...(warnings.length ? { warnings } : {}) })
+      send({ type: 'tool_end', id, name, tier, ok, ms, ...(error ? { error } : {}), ...(warnings.length ? { warnings } : {}) })
       if (ok && result?.status === 'auto_approved' && typeof result.action_id === 'string' && result.action_id) {
         // Skip mode already ran it: show the card, but the run does not wait.
         if (entry) entry.action_id = result.action_id
@@ -626,6 +628,7 @@ async function executeRun({
     status: autoRan.get(c.id) ?? (c.status === 'ok' && c.tier === 'high' ? 'awaiting' : c.status),
     ...(c.ms !== undefined ? { ms: c.ms } : {}),
     ...(c.error ? { error: c.error } : {}),
+    ...(c.warnings?.length ? { warnings: c.warnings } : {}),
   }))
   if (status === 'failed' && !reply.error && !reply.text) reply.error = outcome || 'The run failed.'
   return reply

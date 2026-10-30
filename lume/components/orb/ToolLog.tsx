@@ -9,6 +9,8 @@ export interface ToolLogEntry {
   status: 'running' | 'ok' | 'error' | 'awaiting'
   ms?: number
   error?: string
+  /** Non-blocking notes on the call's result (e.g. SOP lint warnings), one per line. */
+  warnings?: string[]
 }
 
 const errorHead = (error?: string) => (error ?? '').split('\n')[0]
@@ -50,6 +52,14 @@ export function ToolLog({ entries }: { entries: ToolLogEntry[] }) {
               <ul className="ml-5 mt-0.5 list-disc whitespace-normal break-words text-red/90">
                 {errorLines(e.error).map((l, i) => (
                   <li key={i}>{l}</li>
+                ))}
+              </ul>
+            )}
+            {e.warnings && e.warnings.length > 0 && (
+              // e.g. SOP lint warnings on a filed sequence edit: shown, never blocking.
+              <ul aria-label="Warnings" className="ml-5 mt-0.5 list-disc whitespace-normal break-words text-amber">
+                {e.warnings.map((w, i) => (
+                  <li key={i}>{w}</li>
                 ))}
               </ul>
             )}

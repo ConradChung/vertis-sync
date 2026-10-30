@@ -100,7 +100,13 @@ export function applyAgentEvent(m: ChatMessage, e: AgentEvent): ChatMessage {
         ...m,
         tools: m.tools.map((x) =>
           x.id === e.id
-            ? { ...x, status: e.ok ? (x.tier === 'high' ? 'awaiting' : 'ok') : 'error', ms: Number(e.ms), error: e.error as string | undefined }
+            ? {
+                ...x,
+                status: e.ok ? (x.tier === 'high' ? 'awaiting' : 'ok') : 'error',
+                ms: Number(e.ms),
+                error: e.error as string | undefined,
+                ...(Array.isArray(e.warnings) && e.warnings.length ? { warnings: e.warnings.map(String) } : {}),
+              }
             : x
         ),
       }

@@ -58,7 +58,11 @@ export async function POST(req: Request) {
     const action = await createAction(built.kind, built.payload, requestedBy, { ruleId: built.ruleId ?? null })
     return answer(
       NextResponse.json(
-        { ok: true, action: { id: action.id, kind: action.kind, summary: action.payload?.summary ?? built.payload.summary } },
+        {
+          ok: true,
+          action: { id: action.id, kind: action.kind, summary: action.payload?.summary ?? built.payload.summary },
+          ...(Array.isArray(built.payload.sop_warnings) && built.payload.sop_warnings.length ? { sop_warnings: built.payload.sop_warnings } : {}),
+        },
         { status: 201 }
       )
     )

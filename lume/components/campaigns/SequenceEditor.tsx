@@ -53,6 +53,8 @@ export function SequenceEditor({ campaignId }: { campaignId: string }) {
   const [problems, setProblems] = useState<string[]>([])
   /** Set when the server's SOP lint refused the edit (each problem names rule, step and variant). */
   const [sopBlocked, setSopBlocked] = useState(false)
+  /** SOP lint warnings on an edit that was filed anyway (never blocking). */
+  const [sopWarnings, setSopWarnings] = useState<string[]>([])
 
   const loaded = data?.configured ? data.steps : null
   const steps = useMemo(() => draft ?? loaded ?? [], [draft, loaded])
@@ -68,6 +70,7 @@ export function SequenceEditor({ campaignId }: { campaignId: string }) {
     setNotice(null)
     setProblems([])
     setSopBlocked(false)
+    setSopWarnings([])
   }
   const setVariant = (i: number, j: number, patch: Partial<EditVariant>) =>
     update((s) => {
@@ -83,6 +86,7 @@ export function SequenceEditor({ campaignId }: { campaignId: string }) {
     setBusy(false)
     if (r.ok) {
       setNotice({ kind: 'created', id: r.id, summary: r.summary })
+      setSopWarnings(r.warnings ?? [])
       void mutate()
     } else if (r.error === 'duplicate') setNotice({ kind: 'duplicate', existingId: r.existingId ?? null })
     else if (r.problems?.length) {
@@ -96,6 +100,7 @@ export function SequenceEditor({ campaignId }: { campaignId: string }) {
     setNotice(null)
     setProblems([])
     setSopBlocked(false)
+    setSopWarnings([])
     await mutate()
   }
 
@@ -251,6 +256,16 @@ export function SequenceEditor({ campaignId }: { campaignId: string }) {
           <ul className="list-inside list-disc">
             {problems.map((p) => (
               <li key={p}>{p}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {sopWarnings.length > 0 && (
+        <div role="status" className="rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-[12px] text-fg">
+          <p className="mb-1 font-medium">Cold-email SOP warnings (not blocking):</p>
+          <ul className="list-inside list-disc">
+            {sopWarnings.map((w) => (
+              <li key={w}>{w}</li>
             ))}
           </ul>
         </div>

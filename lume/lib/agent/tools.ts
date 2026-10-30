@@ -185,6 +185,8 @@ async function requestApproval(
   if (built.kind === 'send_reply' && deps.draftedByOperator) built.payload.drafted_by_operator = deps.draftedByOperator
   // A reply shows the owner its card in the chat (components/agent/ApprovalCard.tsx).
   const card = built.kind === 'send_reply' ? { reply: replyCardOf(built.payload) } : {}
+  // SOP lint warnings (never blocking) on a sequence edit: the model and the tool log see them.
+  const sopWarnings = Array.isArray(built.payload.sop_warnings) && built.payload.sop_warnings.length ? { sop_warnings: built.payload.sop_warnings } : {}
   try {
     const meta = built.ruleId ? { agentRunId: deps.agentRunId, ruleId: built.ruleId } : { agentRunId: deps.agentRunId }
     const action = await deps.createAction(built.kind, built.payload, 'agent', meta)
@@ -200,6 +202,7 @@ async function requestApproval(
           summary: built.payload.summary,
           note: 'Skip mode could not auto-approve; it awaits the owner.',
           ...card,
+        ...sopWarnings,
         }
       }
       return {
@@ -211,6 +214,7 @@ async function requestApproval(
         result: done.result,
         ...(done.error ? { error: done.error } : {}),
         ...card,
+        ...sopWarnings,
       }
     }
     if (built.kind === 'send_reply' && action.decided_via === 'grant') {
@@ -221,6 +225,7 @@ async function requestApproval(
         summary: built.payload.summary,
         note: 'The campaign is in Auto reply mode: the reply was approved by its grant and is sent after the live thread re-check (it may still be refused, e.g. newer_inbound). Check /actions for the outcome.',
         ...card,
+        ...sopWarnings,
       }
     }
     return {
@@ -229,6 +234,7 @@ async function requestApproval(
       deep_link: `/actions/${action.id}`,
       summary: built.payload.summary,
       ...card,
+      ...sopWarnings,
     }
   } catch (err) {
     // Same action already waiting (same job / rule / campaign / reply): point at it rather than fail.

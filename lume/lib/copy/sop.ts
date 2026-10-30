@@ -312,9 +312,55 @@ export function clientForCampaign(lib: SopLibrary, campaign: { id?: string | nul
 }
 
 /** The rules the `update_sequence` lint applies to a campaign: base + its overlay. Throws `SopError`. */
-export function sopForCampaign(campaign: { id?: string | null; name?: string | null }, lib = loadSopLibrary()): { rules: SopRules; client: string | null } {
+export function sopForCampaign(
+  campaign: { id?: string | null; name?: string | null },
+  lib = loadSopLibrary()
+): { rules: SopRules; client: string | null; blocking: SopRules | null } {
   const c = clientForCampaign(lib, campaign)
-  return { rules: c ? c.rules : lib.base.rules, client: c?.client ?? null }
+  return { rules: c ? c.rules : lib.base.rules, client: c?.client ?? null, blocking: blockingRules(lib, c) }
+}
+
+const NEVER = 1_000_000
+
+/**
+ * The rules whose violations may REFUSE an edit (everything else the merged
+ * rules flag is only a warning):
+ * - base not a placeholder: all of it (base, or base + client merged);
+ * - base still a placeholder, no client SOP: nothing (null): made-up rules
+ *   never block edits to campaigns no client SOP covers;
+ * - base a placeholder, client SOP matches: only what the overlay itself
+ *   sets. Keys it leaves to the base are neutral (no limits, empty lists,
+ *   checks off); lists it needs to count with (personalization fields,
+ *   meeting words, allowed capitals) stay merged.
+ */
+export function blockingRules(lib: SopLibrary, client: ClientSop | null): SopRules | null {
+  if (!lib.base.rules.placeholder) return client ? client.rules : lib.base.rules
+  if (!client) return null
+  const o = client.overlay
+  const r = client.rules
+  const open = { min: 0, max: NEVER }
+  return {
+    ...r,
+    banned_phrases: o.banned_phrases ?? [],
+    no_exclamation: o.no_exclamation ?? false,
+    word_count: { step1: o.word_count?.step1 ?? open, followup: o.word_count?.followup ?? open },
+    subject: {
+      casing: o.subject?.casing ?? 'any',
+      min_words: o.subject?.min_words ?? 0,
+      max_words: o.subject?.max_words ?? NEVER,
+      allowed_capitalized: r.subject.allowed_capitalized,
+      no_company: o.subject?.no_company ?? false,
+      forbid: o.subject?.forbid ?? [],
+    },
+    proof_points: o.proof_points ?? [],
+    max_proof_points_per_email: o.max_proof_points_per_email ?? null,
+    only_in_step: o.only_in_step ?? {},
+    max_personalization_fields_per_email: o.max_personalization_fields_per_email ?? NEVER,
+    step1_cta: { ...r.step1_cta, forbid_yes_no_meeting: o.step1_cta?.forbid_yes_no_meeting ?? false },
+    step_rules: o.step_rules ?? {},
+    signoff: o.signoff ?? {},
+    sequence: o.sequence ?? null,
+  }
 }
 
 /**
@@ -408,7 +454,9 @@ export function sopPromptBlock(lib: SopLibrary, client: ClientSop | null = null)
   const b = lib.base
   const lines = [
     "Cold-email SOP (Conrad's). Follow it for every email you draft or edit. update_campaign_sequence is linted against the base rules plus the client SOP matching the campaign; a violation refuses the request.",
-    ...(b.rules.placeholder ? ['Note: the base SOP still holds placeholder values; follow them until Conrad replaces them.'] : []),
+    ...(b.rules.placeholder
+      ? ["Note: the base SOP still holds placeholder values. Follow them, but the lint only warns on them: they never block an edit (a client SOP's own rules still do)."]
+      : []),
     '',
     'Base rules (enforced unless a client SOP overrides them):',
     rulesSummary(b.rules),

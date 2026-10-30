@@ -127,6 +127,19 @@ describe('buildTools', () => {
     expect(createAction).not.toHaveBeenCalled()
   })
 
+  it('a filed sequence edit hands its SOP warnings to the model (never blocking)', async () => {
+    const { tool, prepare, createAction } = setup()
+    prepare.mockResolvedValueOnce({
+      ok: true,
+      kind: 'update_sequence',
+      payload: { summary: 'Update', campaign_id: 'c1', sop_client: null, sop_warnings: ['Step 2, variant A — banned_phrase (warning): body uses the banned phrase "leverage"'] },
+    } as never)
+    createAction.mockResolvedValueOnce({ id: 'act-1' } as never)
+    const t = tool('update_campaign_sequence')
+    const r = await t.run(t.inputSchema.parse({ campaign_id: 'c1', steps: [{ delay: 0, variants: [{ subject: 'hi', body: 'x' }] }] }))
+    expect(r).toMatchObject({ status: 'awaiting_approval', action_id: 'act-1', sop_warnings: [expect.stringMatching(/banned_phrase \(warning\)/)] })
+  })
+
   it('get_sop lists the client SOPs and returns one merged with the base (read tier, no fetch)', async () => {
     const { tool, fetch } = setup()
     const t = tool('get_sop')
