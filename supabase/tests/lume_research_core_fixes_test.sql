@@ -17,7 +17,7 @@ insert into public.companies(id, domain) values
 
 -- A finished run (billed: Apify's account usage already includes it) and one in flight.
 insert into public.company_crawls(company_id, status, start_url, estimate_usd, cost_usd, finished_at)
-  values ('00000000-0000-0000-0000-00000000c101', 'succeeded', 'https://pgtap-fix-a.com/', 0.02, 5, now());
+  values ('00000000-0000-0000-0000-00000000c101', 'succeeded', 'https://pgtap-fix-a.com/', 0.02, 5, now() - interval '11 minutes');
 insert into public.company_crawls(id, company_id, status, start_url, estimate_usd, cost_usd)
   values ('00000000-0000-0000-0000-0000000cc102', '00000000-0000-0000-0000-00000000c102', 'running', 'https://pgtap-fix-b.com/', 0.02, 0.02);
 
@@ -27,8 +27,9 @@ create temp table base as select public.lume_research_reserved_usd() as reserved
 select ok((select reserved from base) >= 0.02, 'reserved_usd counts the in-flight crawl''s estimate');
 select is(
   public.lume_research_reserved_usd(),
-  (select coalesce(sum(estimate_usd), 0) from public.company_crawls where status in ('pending', 'running')),
-  'reserved_usd is the estimates of pending/running crawls only (finished runs excluded)');
+  (select coalesce(sum(case when status in ('pending', 'running') then estimate_usd else cost_usd end), 0) from public.company_crawls
+    where status in ('pending', 'running') or finished_at > now() - interval '10 minutes'),
+  'reserved_usd is pending/running estimates + crawls finished in the last 10 minutes at actual cost');
 
 -- account readable, runs in flight -------------------------------------------
 -- committed = 10 (account) + reserved; + 0.02 estimate
@@ -45,7 +46,7 @@ select is(
   'account', 'the reply names the basis it used');
 
 -- account readable, all of ours finished ---------------------------------------
-update public.company_crawls set status = 'succeeded', cost_usd = 0.01, finished_at = now()
+update public.company_crawls set status = 'succeeded', cost_usd = 0.01, finished_at = now() - interval '11 minutes'
  where company_id in ('00000000-0000-0000-0000-00000000c102', '00000000-0000-0000-0000-00000000c103', '00000000-0000-0000-0000-00000000c104')
    and status in ('pending', 'running');
 create temp table base2 as select public.lume_research_reserved_usd() as reserved, public.lume_research_month_spend() as spend;

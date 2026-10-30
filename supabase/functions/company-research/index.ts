@@ -13,8 +13,9 @@
 //   2. budget gate BEFORE any spend. The cap (LUME_RESEARCH_APIFY_CAP_USD,
 //      default 29) is the Apify plan's account-wide monthly cap.
 //      lume_research_reserve_crawl() computes committed = Apify account usage
-//      (already includes our finished runs) + estimates of our crawls still
-//      pending/running; when account usage is unreadable we send null and it
+//      (includes our finished runs, but lags) + reservations: estimates of our
+//      crawls still pending/running, plus the actual cost of crawls finished in
+//      the last 10 minutes; when account usage is unreadable we send null and it
 //      falls back to our own month-to-date sum (finished + reserved), never $0.
 //      Refused with budget_exceeded when committed + this run's estimate > cap;
 //      otherwise it inserts the pending crawl carrying the estimate.
