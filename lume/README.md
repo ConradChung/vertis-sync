@@ -246,42 +246,66 @@ Environment variable names are listed in `.env.example`.
   through a function: `POST /api/agent/files/sign` checks the name and size
   and returns a one-time signed Storage upload URL for `<uuid>.<xlsx|csv>` in
   the private `agent-chat-files` bucket (service role only, no Storage
-  policies; 20 MB limit; MIME allowlist xlsx / text/csv / gzip) plus an
-  `upload_ticket` (HMAC, purpose `agent-chat-file-upload`, 15 min); the
+  policies; ~11 MB limit; MIME allowlist xlsx / text/csv / gzip) plus an
+  `upload_ticket` (HMAC, purpose `agent-chat-file-upload`, 15 min), and
+  records the path in `agent_chat_file_uploads`; the
   browser uploads with `uploadToSignedUrl` (raw ArrayBuffer, so the
-  Content-Type is ours); `POST /api/agent/files` then reads the object back
+  Content-Type is ours); `POST /api/agent/files` first CLAIMS the upload
+  (`claimed_at is null → now()`: a concurrent finalize gets 409 and never
+  deletes the winner's objects), then reads the object back
   and **validates it after upload, before any use**: magic bytes decide the
   type (zip with `xl/workbook.xml` → xlsx, text → CSV; OLE / other binary →
   415), never the name. Parsing (`lib/sheets/`): exceljs 4.4.0 (MIT; its
-  `uuid` is overridden to 11.1.1 for GHSA-w5hq-g745-h8pq) behind an fflate
-  streaming zip-bomb guard that inflates and counts before exceljs runs
-  (≤ 50 MB uncompressed, ≤ 20 sheets, ≤ 500k cells; cell text capped at
-  50M chars so shared strings cannot fan out); header row detected (title
-  rows skipped), formulas → cached values, dates → ISO, merged-overflow and
-  empty columns dropped, hidden sheets noted. CSV: UTF-8 (BOM or not),
-  UTF-16 by BOM, else latin1; delimiter `, ; tab |` detected. The parsed
-  tables go to `<uuid>.json.gz`, an `agent_chat_files` row holds the
-  per-sheet counts and the summary; a refused upload is deleted.
-  `/api/agent/run` takes `files: [{ id }]`; each file's summary (sheets with
+  `uuid` is overridden to 11.1.1 for GHSA-w5hq-g745-h8pq) behind a zip-bomb
+  guard that walks the CENTRAL DIRECTORY (the entries JSZip opens), refuses
+  a zip whose local headers disagree, inflates each entry with fflate and
+  names entries the way exceljs does (one leading `/` stripped, unanchored
+  `xl/worksheets/sheetN.xml`), all before exceljs runs (≤ 50 MB
+  uncompressed, ≤ 20 sheets, ≤ 500k cells; cell text capped at 50M chars so
+  shared strings cannot fan out). **Width:** a sheet wider than 1,000
+  columns is refused (`too_many_columns`; never silently cut) — the CSV
+  reader stops at the first over-wide row while streaming, the xlsx reader
+  at the first far cell — and rows × width is capped at 2M before anything
+  is densified (rows are kept compact). Header row detected (title rows
+  skipped), formulas → cached values (none saved → the formula text, noted),
+  dates → ISO, time-only cells → `HH:MM:SS`, merged-overflow and empty
+  columns dropped, hidden sheets noted. CSV: UTF-8 (BOM or not), UTF-16 by
+  BOM, else latin1; delimiter `, ; tab |` detected. The parsed tables go to
+  `<uuid>.json.gz` (refused if even gzipped they pass the bucket limit), an
+  `agent_chat_files` row holds the per-sheet counts, the summary and a short
+  brief; a refused upload is deleted. Uploads never finalized (a crashed
+  finalize included) are swept after 3 h by the hourly
+  `lume-project-upload-sweep` (→ `/api/cron/project-uploads`, Storage API
+  deletes; signed upload URLs live 2 h, hence 3 h like project files).
+  `/api/agent/run` takes `files: [{ id }]` — only files not sent anywhere
+  yet (bound to this chat on send, `agent_chat_files.conversation_id`) or
+  already this chat's; each file's summary (sheets with
   counts, header, first 50 rows as CSV, ≤ 20k chars, cuts named) is its own
   text block in an `<attachment>` tag marked as data; the message stores
   `{ kind: 'file', id, name, file_kind, size_bytes, sheets }` in
-  `attachments` beside the image refs (chips on reload). Replay: summaries
-  of the newest 3 owner turns with files (≤ 3 files); older ones become
+  `attachments` beside the image refs (chips on reload). Replay: the BRIEF
+  (sheets with counts and headers, no rows, ≤ 4k chars) of the newest 3
+  owner turns with files (≤ 3 files); older ones become
   `[file: <name> — use read_attachment(file_id: …)]`; the char budget
   charges a file as its note, like images. Tools: `read_attachment` (read;
-  `GET /api/agent/files/<id>/rows`, ≤ 500 rows / 20k chars per page, only
-  files attached in that chat), `load_attachment_as_leads` (low; a sheet →
+  `GET /api/agent/files/<id>/rows`, ≤ 500 rows and ≤ 20k chars per page
+  header included, cells clipped at 500 chars, only this chat's files),
+  `load_attachment_as_leads` (low; a sheet →
   lead review set with the column mapping shown and overridable, every
-  column kept in raw, same `normaliseLead`; `lead_review_sets.source_kind
-  'attachment'`), `stage_attachment_for_validation` (high, always asks:
-  pending kind `stage_attachment`; the build refuses a sheet with no single
-  email column, the executor re-checks rows and email column, then
+  column kept in raw, same `normaliseLead`, a column of linkedin.com URLs
+  sniffed as LinkedIn; `lead_review_sets.source_kind 'attachment'`),
+  `stage_attachment_for_validation` (high, always asks: pending kind
+  `stage_attachment`, scoped to the chat; the build refuses a sheet with no
+  single email column, the executor re-checks scope, rows and email column, then
   `createIngest` — the Import CSV intake, which stops at the ingest gate;
   telegram-inbox creates the validation job after the owner approves).
   Import card: `.xlsx` goes through the same upload + parse, asks which
   sheet when several have rows, then `POST /api/import/xlsx` puts that
-  sheet into the CSV intake. Project files accept `.xlsx` (each sheet
+  sheet into the CSV intake. One ingest per file + sheet through either
+  door: its `raw-uploads` path is derived from (file, sheet), so a repeat is
+  409 `already_ingested` and the exclusive upload catches a race. Exported
+  CSVs (Apollo, influencer, attachment ingest) go through `lib/csv/cell.ts`:
+  a leading `= + - @` / tab / CR is prefixed with `'`. Project files accept `.xlsx` (each sheet
   extracted as CSV for `read_project_file`). An attachment removed before
   sending stays in the bucket (orphan, harmless; no cleanup job yet).
 
