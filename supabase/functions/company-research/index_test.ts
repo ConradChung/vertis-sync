@@ -388,3 +388,21 @@ Deno.test('wall clock: the clock starts at the request, so time spent in start()
     assert(!extracted(f.calls))
   } finally { f.restore() }
 })
+
+Deno.test('hand-off: each attempt is time-boxed (AbortSignal), so a hung invoke cannot eat the wall clock', async () => {
+  const f = stubFetch(continueRoutes({ id: 'run1', status: 'RUNNING', defaultDatasetId: 'ds1' }))
+  const stubbed = globalThis.fetch
+  const signals: (AbortSignal | null | undefined)[] = []
+  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+    if (String(input) === 'https://db.test/functions/v1/company-research') signals.push(init?.signal)
+    return stubbed(input, init)
+  }) as typeof fetch
+  try {
+    await continueCrawl(CRAWL, { startedAt: Date.now() - 200_000, sleep: () => Promise.resolve() })
+    assertEquals(signals.length, 1)
+    assert(signals[0] instanceof AbortSignal, 'the hand-off fetch carries a timeout signal')
+  } finally {
+    globalThis.fetch = stubbed
+    f.restore()
+  }
+})

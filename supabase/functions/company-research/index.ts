@@ -150,6 +150,8 @@ async function handOff(crawlId: string): Promise<boolean> {
         method: 'POST',
         headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ crawl_id: crawlId }),
+        // The callee answers 202 at once; a hung invoke must not eat this invocation's wall clock.
+        signal: AbortSignal.timeout(HANDOFF_MS),
       })
       await res.body?.cancel()
       if (res.ok) return true
