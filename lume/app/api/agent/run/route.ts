@@ -16,7 +16,7 @@ import type { ChatFileRef } from '@/lib/agent/files'
 import { MAX_SHEET_FILES } from '@/lib/sheets/model'
 import { loadChatImage } from '@/lib/agent/chatImages'
 import { IMAGE_PATH_RE, MAX_IMAGES, safeImageName, type ChatImageRef } from '@/lib/agent/images'
-import { createConversation, getConversation, getConversationOperator, getMessages, insertMessage } from '@/lib/agent/conversations'
+import { createConversation, deleteEmptyConversation, getConversation, getConversationOperator, getMessages, insertMessage } from '@/lib/agent/conversations'
 import { contextFromMessages, titleFromMessage, type StoredApproval, type StoredToolEntry } from '@/lib/agent/history'
 import { SYSTEM_PROMPT } from '@/lib/agent/prompt'
 import { clientForContext, loadSopLibrary, sopPromptBlock } from '@/lib/copy/sop'
@@ -286,7 +286,13 @@ export async function POST(req: Request) {
       verticalName = ownerVertical.name
       prompt = `${verticalPromptLine(ownerVertical)}\n\n${prompt}`
     }
-    if (fileIds.length && !(await bindChatFiles(fileIds, conversationId))) return NextResponse.json({ error: 'file_not_found' }, { status: 400 })
+    if (fileIds.length && !(await bindChatFiles(fileIds, conversationId))) {
+      // Another chat bound a file first (a race): undo the empty chat this request just created.
+      if (!body.data.conversation_id) {
+        await deleteEmptyConversation(conversationId).catch((err) => console.error('[api/agent/run] empty chat cleanup failed:', errText(err)))
+      }
+      return NextResponse.json({ error: 'file_not_found' }, { status: 400 })
+    }
     const imageRefs: ChatImageRef[] = currentImages.map(({ path, name, media_type }) => ({ path, name, media_type }))
     const fileRefs: ChatFileRef[] = currentFiles.map(({ kind, id, name, file_kind, size_bytes, sheets }) => ({ kind, id, name, file_kind, size_bytes, sheets }))
     const attachments: (ChatImageRef | ChatFileRef)[] = [...imageRefs, ...fileRefs]

@@ -105,6 +105,21 @@ export async function insertMessage(m: NewMessage): Promise<void> {
   if (touch.error) throw new DbError('insertMessage.touch', touch.error)
 }
 
+/**
+ * Hard-delete a conversation that has no messages: the run route undoes a
+ * chat it created a moment ago when the request is refused after all (a
+ * spreadsheet another chat bound first). A conversation with messages is
+ * never touched.
+ */
+export async function deleteEmptyConversation(id: string): Promise<void> {
+  const sb = createServiceClient()
+  const msgs = await sb.from('agent_messages').select('id').eq('conversation_id', id).limit(1)
+  if (msgs.error) throw new DbError('deleteEmptyConversation.messages', msgs.error)
+  if ((msgs.data ?? []).length) return
+  const res = await sb.from('agent_conversations').delete().eq('id', id)
+  if (res.error) throw new DbError('deleteEmptyConversation', res.error)
+}
+
 /** Rename; false when the conversation does not exist or is archived. */
 export async function renameConversation(id: string, title: string): Promise<boolean> {
   const sb = createServiceClient()

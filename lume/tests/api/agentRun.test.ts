@@ -35,6 +35,7 @@ const h = vi.hoisted(() => ({
   loadChatImage: vi.fn(),
   getChatFiles: vi.fn(),
   bindChatFiles: vi.fn(),
+  deleteEmptyConversation: vi.fn(),
 }))
 vi.mock('@/lib/agent/projects', () => ({ getProject: h.getProject, projectForVertical: h.projectForVertical, itemsForBlock: h.itemsForBlock }))
 vi.mock('@/lib/agent/chatImages', () => ({ loadChatImage: h.loadChatImage }))
@@ -45,6 +46,7 @@ vi.mock('@/lib/operators/store', () => ({ getVertical: h.getVertical }))
 vi.mock('@/lib/auth/guards', () => ({ requireOwner: h.requireOwner }))
 vi.mock('@/lib/agent/runs', () => ({ insertAgentRun: h.insertAgentRun, updateAgentRun: h.updateAgentRun, failStaleRuns: h.failStaleRuns }))
 vi.mock('@/lib/agent/conversations', () => ({
+  deleteEmptyConversation: h.deleteEmptyConversation,
   createConversation: h.createConversation,
   getConversation: h.getConversation,
   getConversationOperator: h.getConversationOperator,
@@ -1094,6 +1096,7 @@ describe('POST /api/agent/run with spreadsheets', () => {
   beforeEach(() => {
     h.getChatFiles.mockImplementation(async (ids: string[]) => [row(F1, 'leads.xlsx'), row(F2, 'old.xlsx')].filter((r) => ids.includes(r.id)))
     h.bindChatFiles.mockResolvedValue(true)
+    h.deleteEmptyConversation.mockResolvedValue(undefined)
   })
 
   it('binds an unbound file to the chat it is sent in, before the message is stored', async () => {
@@ -1124,6 +1127,18 @@ describe('POST /api/agent/run with spreadsheets', () => {
     const res = await post('look', { files: [{ id: F1 }], conversation_id: CONV })
     expect(res.status).toBe(400)
     expect(h.insertMessage).not.toHaveBeenCalled()
+    // An existing chat is never deleted.
+    expect(h.deleteEmptyConversation).not.toHaveBeenCalled()
+  })
+
+  it('a bind that fails on a NEW chat deletes the empty conversation it just created', async () => {
+    h.bindChatFiles.mockResolvedValue(false)
+    const res = await post('look', { files: [{ id: F1 }] })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('file_not_found')
+    expect(h.deleteEmptyConversation).toHaveBeenCalledWith('conv-new')
+    expect(h.insertMessage).not.toHaveBeenCalled()
+    expect(h.insertAgentRun).not.toHaveBeenCalled()
   })
 
   it('sends each file summary as a text block before the text and stores the file ref (no summary) on the message', async () => {
