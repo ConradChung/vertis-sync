@@ -21,7 +21,7 @@ import {
 export interface ReviewSet {
   id: string
   title: string
-  source_kind: ApolloSource['kind']
+  source_kind: ApolloSource['kind'] | 'attachment'
   source_id: string
   source_conversation_id: string | null
   item_count: number
@@ -46,6 +46,19 @@ const SET_COLS = 'id,title,source_kind,source_id,source_conversation_id,item_cou
 
 export async function createReviewSet(source: ApolloSource, opts: { conversationId?: string | null; title?: string } = {}) {
   const { rows, label } = await loadSourceRows(source)
+  return createReviewSetFromRows({ kind: source.kind, id: source.id, label, rows }, opts)
+}
+
+/**
+ * A review set from rows already in hand (an attached spreadsheet's sheet).
+ * `normalisable(raw)` is the record normaliseLead reads (the sheet's mapped
+ * columns); `raw` is stored as-is, every original column kept.
+ */
+export async function createReviewSetFromRows(
+  source: { kind: ReviewSet['source_kind']; id: string; label: string; rows: Record<string, unknown>[]; normalisable?: (raw: Record<string, unknown>) => Record<string, unknown> },
+  opts: { conversationId?: string | null; title?: string } = {}
+) {
+  const { rows, label } = source
   const capped = rows.slice(0, REVIEW_MAX_ITEMS)
   const sb = db()
   const { data: set, error } = await sb
@@ -64,7 +77,7 @@ export async function createReviewSet(source: ApolloSource, opts: { conversation
     const batch = capped.slice(i, i + 500).map((raw, k) => ({
       set_id: set.id,
       idx: i + k,
-      item: normaliseLead(raw) as unknown as Json,
+      item: normaliseLead(source.normalisable ? source.normalisable(raw) : raw) as unknown as Json,
       raw: raw as Json,
     }))
     const { error: e } = await sb.from('lead_review_items').insert(batch)

@@ -10,6 +10,9 @@ const h = vi.hoisted(() => ({
   applyFilter: vi.fn(),
   restore: vi.fn(),
   setRowsByHand: vi.fn(),
+  createReviewSetFromRows: vi.fn(),
+  loadAttachmentLeads: vi.fn(),
+  fileInConversation: vi.fn(),
 }))
 vi.mock('server-only', () => ({}))
 vi.mock('@/lib/auth/guards', () => ({ requireOwner: h.requireOwner }))
@@ -21,7 +24,10 @@ vi.mock('@/lib/review/store', () => ({
   applyFilter: h.applyFilter,
   restore: h.restore,
   setRowsByHand: h.setRowsByHand,
+  createReviewSetFromRows: h.createReviewSetFromRows,
 }))
+vi.mock('@/lib/review/attachmentSource', () => ({ loadAttachmentLeads: h.loadAttachmentLeads }))
+vi.mock('@/lib/agent/chatFiles', () => ({ fileInConversation: h.fileInConversation }))
 vi.mock('@/lib/apollo/source', () => {
   class SourceError extends Error {
     constructor(
@@ -120,5 +126,32 @@ describe('/api/review-sets/[id]', () => {
   it('export refuses when nothing is kept', async () => {
     h.loadRows.mockResolvedValue([{ ...rows[0], status: 'excluded' }])
     expect((await exportGET(req(`/api/review-sets/${ID}/export`), ctx)).status).toBe(422)
+  })
+})
+
+describe('POST /api/review-sets from an attached spreadsheet', () => {
+  const FILE = '1f3c2b1a-9d8e-4f7a-8b6c-5d4e3f2a1b0c'
+  const CONV = '2f3c2b1a-9d8e-4f7a-8b6c-5d4e3f2a1b0c'
+  beforeEach(() => {
+    h.requireOwner.mockResolvedValue({ ok: true, via: 'internal' })
+    h.fileInConversation.mockResolvedValue(true)
+    h.loadAttachmentLeads.mockResolvedValue({ kind: 'attachment', id: FILE, label: 'leads.xlsx · Leads', sheet: 'Leads', rows: [], mapping: { email: 'Work Email' }, unmapped: ['Notes'] })
+    h.createReviewSetFromRows.mockResolvedValue({ set: { ...set, id: ID, source_kind: 'attachment' }, truncated: false, source_rows: 2 })
+    h.loadRows.mockResolvedValue(rows)
+  })
+  it('loads the sheet with the column overrides and returns the mapping', async () => {
+    const res = await createPOST(req('/api/review-sets', 'POST', { source: { kind: 'attachment', id: FILE, sheet: 'Leads', columns: { email: 'Work Email' } }, conversation_id: CONV }))
+    expect(res.status).toBe(201)
+    const body = await res.json()
+    expect(body).toMatchObject({ sheet: 'Leads', column_mapping: { email: 'Work Email' }, unmapped_columns: ['Notes'] })
+    expect(h.fileInConversation).toHaveBeenCalledWith(FILE, CONV)
+    expect(h.loadAttachmentLeads).toHaveBeenCalledWith(FILE, 'Leads', { email: 'Work Email' })
+    expect(h.createReviewSetFromRows.mock.calls[0][1]).toEqual({ conversationId: CONV, title: undefined })
+  })
+  it('404 when the file is not attached in that conversation; 400 on an unknown field', async () => {
+    h.fileInConversation.mockResolvedValue(false)
+    expect((await createPOST(req('/api/review-sets', 'POST', { source: { kind: 'attachment', id: FILE }, conversation_id: CONV }))).status).toBe(404)
+    expect(h.loadAttachmentLeads).not.toHaveBeenCalled()
+    expect((await createPOST(req('/api/review-sets', 'POST', { source: { kind: 'attachment', id: FILE, columns: { salary: 'X' } } }))).status).toBe(400)
   })
 })
