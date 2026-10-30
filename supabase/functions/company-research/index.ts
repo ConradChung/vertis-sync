@@ -205,18 +205,24 @@ async function start(target: { domain: string; startUrl: string }, waitUntil: (p
 
   // Spend starts here.
   let runId: string
+  // true once Apify has answered: a refusal there is definitive ($0). A thrown
+  // fetch (timeout, network) leaves the outcome unknown: a run may exist, so
+  // the crawl keeps its reserved estimate as its cost.
+  let answered = false
   try {
     const res = await apify(`/acts/${CRAWL_ACTOR_ID}/runs?timeout=${CRAWL_TIMEOUT_SECS}&memory=${CRAWL_MEMORY_MB}`, {
       method: 'POST',
       body: JSON.stringify(buildCrawlInput(target.startUrl, target.domain)),
     })
+    answered = true
     const body = await res.json().catch(() => null) as { data?: { id?: string }; error?: { message?: string } } | null
     if (!res.ok || !body?.data?.id) throw new Error(`Apify start failed (${res.status}): ${body?.error?.message ?? 'no run id'}`)
     runId = body.data.id
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const raw = err instanceof Error ? err.message : String(err)
+    const message = answered ? raw : `Apify start outcome unknown (${raw}); the estimate stays as the cost`
     await rest('PATCH', `company_crawls?id=eq.${crawlId}`, {
-      status: 'failed', cost_usd: 0, error: message.slice(0, 2000), finished_at: new Date().toISOString(),
+      status: 'failed', ...(answered ? { cost_usd: 0 } : {}), error: message.slice(0, 2000), finished_at: new Date().toISOString(),
     })
     await notifyFailure(crawlId, target.domain, message)
     return reply({ ok: false, error: 'apify_start_failed', detail: message.slice(0, 300), crawl_id: crawlId }, 502)

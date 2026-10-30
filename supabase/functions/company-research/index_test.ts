@@ -406,3 +406,17 @@ Deno.test('hand-off: each attempt is time-boxed (AbortSignal), so a hung invoke 
     f.restore()
   }
 })
+
+Deno.test('start: an Apify start that times out (outcome unknown) keeps the estimate as the cost, not $0', async () => {
+  const routes = startRoutes()
+  routes.unshift([(u, m) => u.includes('/acts/') && m === 'POST', () => { throw new DOMException('Signal timed out.', 'TimeoutError') }])
+  const f = stubFetch(routes)
+  try {
+    const res = await handle(post({ domain: 'acme-pm.com' }), () => {})
+    assertEquals(res.status, 502)
+    const [patch] = bodyOf(f.calls, (u, m) => u.startsWith('https://db.test/rest/v1/company_crawls?id=eq.') && m === 'PATCH')
+    assertEquals(patch.status, 'failed')
+    assert(!('cost_usd' in patch), 'cost stays at the reserved estimate')
+    assert(String(patch.error).includes('unknown'), 'the error says the outcome is unknown')
+  } finally { f.restore() }
+})
