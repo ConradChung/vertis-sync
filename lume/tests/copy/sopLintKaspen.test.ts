@@ -191,6 +191,7 @@ describe('Kaspen SOP lint', () => {
     ['5 days late', ''],
     ['198k in rent', ''],
     ['2 thousand calls', ''],
+    ['answering 24/7 for your units', ''],
   ])('step 3 leaves non-counts alone: "%s"', (phrase) => {
     const s = zenport()
     s[2].variants[0].body = s[2].variants[0].body.replace('one more angle.', `one more angle, ${phrase}.`)

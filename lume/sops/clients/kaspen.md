@@ -90,8 +90,8 @@ step_rules:
       - pattern: '\{\{\s*door_count\s*\}\}'
         label: '{{door_count}}'
       # a number, then up to two words, then doors/units: "350-unit", "350 rental units",
-      # "1,000+ residential doors". Bounded quantifiers keep it linear on hostile input.
-      - pattern: '\b\d[\d,.]{0,12}k?\+?(?:[- ]\w{1,24}){0,2}?[- ](?:doors?|units?)\b'
+      # "1,000+ residential doors" (not the 7 in "24/7"). Bounded quantifiers keep it linear on hostile input.
+      - pattern: '(?<![\d/])\b\d[\d,.]{0,12}k?\+?(?:[- ]\w{1,24}){0,2}?[- ](?:doors?|units?)\b'
         label: a door or unit count
       - pattern: '\b(?:a|one) thousand[- ](?:doors?|units?)\b'
         label: a door or unit count
