@@ -5,6 +5,7 @@ import { DbError } from '@/lib/db/service'
 import type { Json, PendingActionRow } from '@/lib/db/types'
 import { applyFilter, type RuleFilter, type RuleFilterQuery } from '@/lib/rules/filter'
 import { maskOperatorKeys } from '@/lib/operators/mask'
+import { leadGeo } from '@/lib/copy/jurisdiction'
 
 /**
  * The `pending_actions` state machine, as conditional PATCHes. Each transition
@@ -268,6 +269,12 @@ export interface LeadBankInsert {
   personalization?: string | null
   company_domain?: string | null
   timezone?: string | null
+  /** ISO2, only when the country is certain (lib/copy/jurisdiction.ts). */
+  country?: string | null
+  /** Canonical region name, only alongside a certain country. */
+  region?: string | null
+  /** An explicit {{jurisdiction_line}}; null lets instantly-rotate resolve it at push time. */
+  jurisdiction_line?: string | null
 }
 
 /** `on conflict (campaign_id, email) do nothing`; returns how many were new. */
@@ -300,9 +307,13 @@ interface LeadBankViewRow {
   company_name: string | null
   city: string | null
   campaign_id: string | null
+  /** Raw Apollo Country / Company Country on validation rows; ISO2 on lead_bank rows. */
+  country: string | null
+  region: string | null
+  jurisdiction_line: string | null
 }
 
-const VIEW_COLS = 'origin,id,email,first_name,last_name,company_name,city,campaign_id'
+const VIEW_COLS = 'origin,id,email,first_name,last_name,company_name,city,campaign_id,country,region,jurisdiction_line'
 /** PostgREST's default max-rows; filter reads page at this size. */
 const PAGE = 1000
 /** Ids per `.in()` lookup: 100 uuids keep the GET URL well under proxy limits. */
@@ -318,6 +329,8 @@ const toInsert = (campaignId: string) => (r: LeadBankViewRow): LeadBankInsert | 
     last_name: r.last_name,
     company_name: r.company_name,
     location: r.city,
+    ...leadGeo(r.country, r.region),
+    jurisdiction_line: r.jurisdiction_line?.trim() || null,
   }
 }
 
