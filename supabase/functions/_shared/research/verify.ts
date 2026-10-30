@@ -14,9 +14,11 @@
 //                   words after or before it, in the same sentence (. ! ? |
 //                   end the window), so "Since 1998", "a team of 25" or
 //                   "Founded in 1998. Units available" never count
-//       after_hours a boolean, and the snippet carries an after-hours keyword
-//                   (after-hours, 24/7, 24 hours, emergency, night, on-call,
-//                   answering service)
+//       after_hours a boolean, and the snippet carries after-hours-specific
+//                   phrasing: after-hours, 24/7, 24 hours, emergency
+//                   maintenance/line/repairs, on-call, answering service, or
+//                   "evenings and weekends" together with maintenance/repairs
+//                   (bare "nights" or "emergency" do not count)
 //       city        a short string named in the snippet (whole word, case-insensitive,
 //                   not the tail of a longer place: "York" is not in "New York")
 //       region      a 2-letter code only as a standalone upper-case token not next
@@ -115,7 +117,18 @@ const UNIT_WORD = /^(doors?|units?|homes?|rentals?|apartments?)$/i
 /** Sentence / separator punctuation ends a unit window ("Founded in 1998. Units available"). */
 const SENTENCE_END = /^[.!?|]$/
 const UNIT_WINDOW = 3
-const AFTER_HOURS = /\bafter[\s-]?hours\b|\b24\s*\/\s*7\b|\b24[\s-]*(hours?|hrs?)\b|\bemergenc(y|ies)\b|\bnights?\b|\bovernight\b|\bon[\s-]?call\b|\banswering service\b/i
+// After-hours-specific phrasing only: bare "nights", "overnight" or "emergency"
+// also appear in showing hours, parking and fire-exit text.
+const AFTER_HOURS = [
+  /\bafter[\s-]?hours\b/i,
+  /\b24\s*\/\s*7\b/,
+  /\b24[\s-]*(hours?|hrs?)\b/i,
+  /\bemergency\s+(maintenance|line|repairs?|service|number|hotline|calls?|requests?)\b/i,
+  /\bon[\s-]?call\b/i,
+  /\banswering service\b/i,
+]
+const EVENINGS_WEEKENDS = /\bevenings?\s+(and|&)\s+weekends?\b/i
+const MAINTENANCE = /\b(maintenance|repairs?|emergenc(y|ies))\b/i
 
 /**
  * True when `n` is written in the snippet with a unit word next to it: within
@@ -150,7 +163,9 @@ export function doorCountHasUnit(snippet: string, n: number): boolean {
 }
 
 export function hasAfterHoursKeyword(snippet: string): boolean {
-  return AFTER_HOURS.test(snippet)
+  if (AFTER_HOURS.some((re) => re.test(snippet))) return true
+  // "evenings and weekends" only counts for maintenance, not office or showing hours.
+  return EVENINGS_WEEKENDS.test(snippet) && MAINTENANCE.test(snippet)
 }
 
 function pageKey(url: string): string {

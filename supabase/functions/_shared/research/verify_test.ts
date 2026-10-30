@@ -280,3 +280,15 @@ Deno.test('door_count: the unit window stops at sentence punctuation', () => {
   assertEquals(one('Our 25 property managers', [{ field: 'door_count', value: 25 }]), [])
 })
 
+Deno.test('after_hours: bare "nights" is not after-hours coverage; specific phrasing is', () => {
+  const ah = (t: string) => one(t, [{ field: 'after_hours', value: true }])
+  assertEquals(ah('Open Saturday nights for showings'), [])
+  assertEquals(ah('Overnight parking available'), [])
+  assertEquals(ah('Emergency exits are marked'), [])
+  assertEquals(ah('24/7 maintenance'), ['after_hours=true'])
+  assertEquals(ah('Maintenance available 24 hours a day'), ['after_hours=true'])
+  assertEquals(ah('Call our emergency maintenance line'), ['after_hours=true'])
+  assertEquals(ah('An on-call technician handles urgent repairs'), ['after_hours=true'])
+  assertEquals(ah('Maintenance requests answered evenings and weekends'), ['after_hours=true'])
+  assertEquals(ah('Our office is open evenings and weekends'), [])
+})
