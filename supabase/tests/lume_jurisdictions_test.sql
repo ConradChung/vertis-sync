@@ -1,8 +1,9 @@
 -- pgTAP: jurisdiction seed + lead_bank country/region/jurisdiction_line
--- (migrations lume_jurisdictions_seed, lume_lead_bank_jurisdiction).
+-- (migrations lume_jurisdictions_seed, lume_jurisdictions_seed_fixes,
+-- lume_lead_bank_jurisdiction).
 -- Everything rolls back.
 begin;
-select plan(16);
+select plan(18);
 
 -- seed -----------------------------------------------------------------------
 select is((select count(*)::int from public.jurisdictions where country = 'US' and city_match is null), 51, 'US: 50 states + DC');
@@ -10,8 +11,9 @@ select is((select count(*)::int from public.jurisdictions where country = 'CA' a
 select is((select count(*)::int from public.jurisdictions where country = 'AU' and city_match is null), 8, 'Australia: 8 states and territories');
 select is((select count(*)::int from public.jurisdictions where country = 'SG'), 0, 'Singapore: no row (fallback)');
 select ok(
-  exists(select 1 from public.jurisdictions where country = 'GB' and region is null and jurisdiction = 'England and Wales' and verified_at is not null),
-  'UK: one country-wide England and Wales row, verified');
+  exists(select 1 from public.jurisdictions where country = 'GB' and region = 'England' and jurisdiction = 'England' and verified_at is not null),
+  'UK: the row is England only (the Act does not cover Scotland, Wales or NI), verified');
+select is((select count(*)::int from public.jurisdictions where country = 'GB' and region is null), 0, 'UK: no country-wide row');
 select ok(
   exists(select 1 from public.jurisdictions where country = 'AE' and region = 'Dubai' and authority = 'RERA'
            and compliance_name = 'Ejari tenancy registration'),
@@ -27,8 +29,12 @@ select ok(
 select is((select count(*)::int from public.jurisdictions where active), 0, 'every seeded row ships inactive');
 select is(
   (select array_agg(jurisdiction order by jurisdiction) from public.jurisdictions where copy_hook is not null),
-  array['British Columbia', 'Dubai', 'England and Wales', 'Ontario'],
+  array['British Columbia', 'Dubai', 'England', 'Ontario'],
   'hooks only on the four verified rows');
+select is(
+  (select copy_hook from public.jurisdictions where country = 'AE' and region = 'Dubai'),
+  'In Dubai, the Rental Disputes Centre expects an Ejari-registered lease before it hears a case.',
+  'Dubai hook without the unsourced renewals claim');
 select ok(
   not exists(select 1 from public.jurisdictions where copy_hook is not null
                and (verified_at is null or copy_hook like '%!%'
