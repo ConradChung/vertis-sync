@@ -24,7 +24,7 @@ import { useSpeechRecognition, VoiceInput } from '@/components/orb/VoiceInput'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useAgentChat, type ChatMessage } from '@/hooks/useAgentChat'
+import { useAgentChat, type ChatMessage, type SkillRef } from '@/hooks/useAgentChat'
 import type { Skill, SkillMode } from '@/lib/agent/skillModel'
 import { cn } from '@/lib/utils'
 
@@ -214,34 +214,59 @@ export function AgentChat() {
     setAttach(null)
   }, [])
 
+  /**
+   * Send with the attached images. The chips leave the composer at once and
+   * come back if the request fails; their previews are freed once it went
+   * through. Returns false when nothing was sent.
+   */
+  const sendWith = useCallback(
+    (text: string, skill?: SkillRef): boolean => {
+      const refs = images.refs
+      const taken = refs.length ? images.take() : []
+      const sent = send(text, skill, refs.length ? { images: refs } : undefined)
+      if (taken.length) void sent.then((ok) => (ok ? images.release(taken) : images.restore(taken)))
+      return true
+    },
+    [send, images]
+  )
+
   const submit = useCallback(
-    (text: string) => {
+    (text: string, opts: { withImages?: boolean } = {}): boolean => {
+      const withImages = opts.withImages !== false
       // Images still uploading hold the send; an image-only message is fine.
-      if ((!text.trim() && !images.refs.length) || busy || chat.loading || images.pending) return
+      if ((!text.trim() && !(withImages && images.refs.length)) || busy || chat.loading || (withImages && images.pending)) return false
       setDraft('')
-      const opts = images.refs.length ? { images: images.refs } : undefined
-      images.clear()
+      if (!withImages) {
+        void send(text)
+        return true
+      }
       // A skill attached as reference rides along with this one message.
       if (picked && attach === 'reference') {
-        void send(text, { id: picked.id, name: picked.name, mode: 'reference' }, opts)
+        sendWith(text, { id: picked.id, name: picked.name, mode: 'reference' })
         clearSkill()
-        return
+        return true
       }
-      void send(text, undefined, opts)
+      return sendWith(text)
     },
-    [busy, chat.loading, send, picked, attach, clearSkill, images]
+    [busy, chat.loading, send, sendWith, picked, attach, clearSkill, images]
+  )
+
+  /** A finished voice transcript: sent when it can be, else kept in the draft (never dropped). */
+  const onVoice = useCallback(
+    (text: string) => {
+      if (submit(text)) return
+      setDraft((d) => (d.trim() ? `${d.trimEnd()} ${text}` : text))
+    },
+    [submit]
   )
 
   const runSkill = useCallback(() => {
-    if (!picked || busy || chat.loading) return
-    if (images.pending) return
+    if (!picked || busy || chat.loading || images.pending) return
     const extra = draft.trim()
     setDraft('')
-    const opts = images.refs.length ? { images: images.refs } : undefined
-    images.clear()
-    void send(`Run the skill "${picked.name}".${extra ? `\n\n${extra}` : ''}`, { id: picked.id, name: picked.name, mode: 'run' }, opts)
+    sendWith(`Run the skill "${picked.name}".${extra ? `\n\n${extra}` : ''}`, { id: picked.id, name: picked.name, mode: 'run' })
     clearSkill()
-  }, [picked, busy, chat.loading, draft, send, clearSkill, images])
+  }, [picked, busy, chat.loading, draft, sendWith, clearSkill, images.pending])
 
   // Drop a picked skill that was deleted in Manage.
   useEffect(() => {
@@ -450,7 +475,7 @@ export function AgentChat() {
                   setPicked(s)
                   setAttach(null)
                 }}
-                onSave={() => submit(SAVE_SKILL_PROMPT)}
+                onSave={() => submit(SAVE_SKILL_PROMPT, { withImages: false })}
                 onManage={() => setManageOpen(true)}
               />
             </div>
@@ -520,7 +545,7 @@ export function AgentChat() {
                 className="max-h-[220px] min-h-10 flex-1 resize-none bg-transparent py-2 focus-visible:outline-none! text-[15px] leading-6 text-fg outline-none placeholder:text-fg-24 disabled:opacity-60"
               />
               <AttachButton onFiles={images.add} disabled={busy} />
-              <VoiceInput speech={speech} onFinal={submit} />
+              <VoiceInput speech={speech} onFinal={onVoice} />
               <button
                 type="submit"
                 disabled={busy || images.pending || (!draft.trim() && !images.refs.length)}

@@ -30,23 +30,44 @@ export interface ImageAttachments {
   pending: boolean
   error: string | null
   add: (files: File[]) => void
+  /** Remove one chip (and only the errors about it). */
   remove: (id: string) => void
   clear: () => void
+  /** Hand every chip to a send: they leave the composer but keep their previews until released. */
+  take: () => Attachment[]
+  /** The send failed: put taken chips back in front (within the per-message cap). */
+  restore: (taken: Attachment[]) => void
+  /** The send went through: free the taken chips' previews. */
+  release: (taken: Attachment[]) => void
 }
 
 let seq = 0
 
+/** An inline error, tied to the chip it is about (none: about the whole add, e.g. too many). */
+interface AttachError {
+  id?: string
+  text: string
+}
+
 export function useImageAttachments(codec?: ImageCodec): ImageAttachments {
   const [items, setItems] = useState<Attachment[]>([])
-  const [error, setError] = useState<string | null>(null)
+  const [errors, setErrors] = useState<AttachError[]>([])
   const itemsRef = useRef<Attachment[]>([])
+  // Chips handed to a send that has not settled yet: their previews stay alive for a restore.
+  const inFlightRef = useRef<Attachment[]>([])
   const commit = useCallback((fn: (xs: Attachment[]) => Attachment[]) => {
     itemsRef.current = fn(itemsRef.current)
     setItems(itemsRef.current)
   }, [])
 
   // Object URLs are released when a chip goes away and on unmount.
-  useEffect(() => () => itemsRef.current.forEach((a) => URL.revokeObjectURL(a.preview)), [])
+  useEffect(
+    () => () => {
+      itemsRef.current.forEach((a) => URL.revokeObjectURL(a.preview))
+      inFlightRef.current.forEach((a) => URL.revokeObjectURL(a.preview))
+    },
+    []
+  )
 
   const drop = useCallback(
     (id: string) => {
@@ -61,15 +82,14 @@ export function useImageAttachments(codec?: ImageCodec): ImageAttachments {
     (files: File[]) => {
       if (!files.length) return
       const room = MAX_IMAGES - itemsRef.current.length
-      const errors: string[] = []
-      if (files.length > room) errors.push(`${IMAGE_ERRORS.too_many}.`)
       const taken = files.slice(0, Math.max(0, room))
       const fresh = taken.map((f) => ({ id: `img${Date.now().toString(36)}${(seq++).toString(36)}`, name: f.name || 'image', preview: URL.createObjectURL(f), status: 'working' as const }))
       commit((xs) => [...xs, ...fresh])
-      setError(errors.length ? errors.join(' ') : null)
+      // A new add starts a fresh set of errors.
+      setErrors(files.length > room ? [{ text: `${IMAGE_ERRORS.too_many}.` }] : [])
       const fail = (a: Attachment, why: string) => {
         drop(a.id)
-        setError((e) => [e, `${a.name} ${why}.`].filter(Boolean).join(' '))
+        setErrors((es) => [...es, { id: a.id, text: `${a.name} ${why}.` }])
       }
       taken.forEach(async (file, i) => {
         const a = fresh[i]
@@ -87,7 +107,7 @@ export function useImageAttachments(codec?: ImageCodec): ImageAttachments {
   const remove = useCallback(
     (id: string) => {
       drop(id)
-      setError(null)
+      setErrors((es) => es.filter((e) => e.id !== id))
     },
     [drop]
   )
@@ -95,17 +115,48 @@ export function useImageAttachments(codec?: ImageCodec): ImageAttachments {
   const clear = useCallback(() => {
     itemsRef.current.forEach((a) => URL.revokeObjectURL(a.preview))
     commit(() => [])
-    setError(null)
+    setErrors([])
   }, [commit])
+
+  const take = useCallback(() => {
+    const taken = itemsRef.current
+    inFlightRef.current = [...inFlightRef.current, ...taken]
+    commit(() => [])
+    setErrors([])
+    return taken
+  }, [commit])
+
+  const settle = (taken: Attachment[]) => {
+    const ids = new Set(taken.map((a) => a.id))
+    inFlightRef.current = inFlightRef.current.filter((a) => !ids.has(a.id))
+  }
+
+  const restore = useCallback(
+    (taken: Attachment[]) => {
+      settle(taken)
+      const back = taken.slice(0, Math.max(0, MAX_IMAGES - itemsRef.current.length))
+      taken.slice(back.length).forEach((a) => URL.revokeObjectURL(a.preview))
+      commit((xs) => [...back, ...xs])
+    },
+    [commit]
+  )
+
+  const release = useCallback((taken: Attachment[]) => {
+    settle(taken)
+    taken.forEach((a) => URL.revokeObjectURL(a.preview))
+  }, [])
 
   return {
     items,
     refs: items.flatMap((a) => (a.status === 'ready' && a.ref ? [a.ref] : [])),
     pending: items.some((a) => a.status === 'working'),
-    error,
+    error: errors.length ? errors.map((e) => e.text).join(' ') : null,
     add,
     remove,
     clear,
+    take,
+    restore,
+    release,
   }
 }
 

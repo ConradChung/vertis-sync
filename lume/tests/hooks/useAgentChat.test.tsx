@@ -72,7 +72,7 @@ describe('useAgentChat', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
     const { result } = renderHook(() => useAgentChat())
-    let first!: Promise<void>
+    let first!: Promise<boolean>
     act(() => {
       first = result.current.send('pause A')
     })
@@ -210,5 +210,32 @@ describe('images', () => {
       attachments: [IMG, { path: '../x', name: 'bad', media_type: 'image/png' }], created_at: '',
     } as unknown as StoredMessage
     expect(storedToChat(stored).images).toEqual([{ url: `/api/agent/images/${IMG.path}`, name: 'shot.png' }])
+  })
+})
+
+describe('send result', () => {
+  it('resolves true once the run is accepted, false when the request fails or nothing is sent', async () => {
+    let status = 500
+    vi.stubGlobal('fetch', vi.fn(async () => (status === 200 ? sse([{ type: 'done' }]) : Response.json({ error: 'internal' }, { status }))))
+    const { result } = renderHook(() => useAgentChat())
+    let r: boolean | undefined
+    await act(async () => {
+      r = await result.current.send('hi')
+    })
+    expect(r).toBe(false)
+    status = 200
+    await act(async () => {
+      r = await result.current.send('again')
+    })
+    expect(r).toBe(true)
+    await act(async () => {
+      r = await result.current.send('  ')
+    })
+    expect(r).toBe(false)
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline') }))
+    await act(async () => {
+      r = await result.current.send('offline')
+    })
+    expect(r).toBe(false)
   })
 })

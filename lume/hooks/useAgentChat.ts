@@ -61,7 +61,11 @@ export interface AgentChat {
   liveStatus: string | null
   /** Assistant text is arriving for the live run. */
   streaming: boolean
-  send: (text: string, skill?: SkillRef, opts?: SendOptions) => Promise<void>
+  /**
+   * Resolves true once the server accepted the run (it has stored the
+   * message), false when nothing was sent or the request failed.
+   */
+  send: (text: string, skill?: SkillRef, opts?: SendOptions) => Promise<boolean>
   /**
    * Skip-permissions mode for this conversation: skippable high-risk tools run
    * without asking. In memory only; a new chat or another conversation turns it off.
@@ -250,7 +254,8 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
     async (raw: string, skill?: SkillRef, sendOpts: SendOptions = {}) => {
       const text = raw.trim()
       const images = sendOpts.images ?? []
-      if ((!text && !images.length) || busyRef.current) return
+      if ((!text && !images.length) || busyRef.current) return false
+      let accepted = false
       busyRef.current = true
       setBusy(true)
       const userMsg: ChatMessage = {
@@ -297,8 +302,9 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
           } else {
             patch(aid, (m) => ({ ...m, error: `Request failed (${res.status}${body.error ? `: ${body.error}` : ''})` }))
           }
-          return
+          return false
         }
+        accepted = true
         const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
         let buffer = ''
         for (;;) {
@@ -322,6 +328,7 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
         setBusy(false)
         optsRef.current.onSettled?.()
       }
+      return accepted
     },
     [patch]
   )
