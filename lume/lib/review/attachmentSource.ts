@@ -22,7 +22,7 @@ export async function loadAttachmentLeads(fileId: string, sheetName: string | un
   if (!sheet.rows.length) throw new SourceError(422, 'empty_sheet')
   let detected
   try {
-    detected = leadColumnMapping(sheet.header, overrides)
+    detected = leadColumnMapping(sheet.header, overrides, sheet.rows.slice(0, 50))
   } catch (err) {
     if (err instanceof UnknownColumnError) throw new SourceError(400, 'unknown_column')
     throw err

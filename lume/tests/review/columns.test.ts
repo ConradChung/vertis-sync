@@ -24,9 +24,23 @@ describe('leadColumnMapping', () => {
     expect(leadColumnMapping(['first_name', 'LAST NAME', 'Company Domain']).mapping).toEqual({ first_name: 'first_name', last_name: 'LAST NAME', website: 'Company Domain' })
   })
   it('overrides win (case-insensitive header match) and an unknown header throws', () => {
-    const { mapping } = leadColumnMapping(['Contact', 'Addr'], { email: 'addr' })
-    expect(mapping).toEqual({ email: 'Addr', full_name: 'Contact' })
+    const { mapping } = leadColumnMapping(['Contact Name', 'Addr'], { email: 'addr' })
+    expect(mapping).toEqual({ email: 'Addr', full_name: 'Contact Name' })
     expect(() => leadColumnMapping(['A'], { email: 'Nope' })).toThrow(UnknownColumnError)
+  })
+})
+
+describe('content sniffing and tighter aliases', () => {
+  it('a column of linkedin.com URLs is the LinkedIn field, even when it is called URL or Website', () => {
+    const rows = [['Ann', 'Acme', 'https://www.linkedin.com/in/ann', 'acme.com'], ['Bo', 'B Co', 'linkedin.com/in/bo', 'b.co'], ['Cy', 'C', '', 'c.io']]
+    expect(leadColumnMapping(['Name', 'Company', 'URL', 'Site'], {}, rows).mapping).toMatchObject({ linkedin_url: 'URL', website: 'Site' })
+    expect(leadColumnMapping(['Name', 'Website'], {}, [['Ann', 'https://linkedin.com/in/ann']]).mapping).toEqual({ full_name: 'Name', linkedin_url: 'Website' })
+    // Without LinkedIn values, URL stays the website.
+    expect(leadColumnMapping(['URL'], {}, [['acme.com']]).mapping).toEqual({ website: 'URL' })
+  })
+  it('a bare "Contact" column is not taken as a name (it is often an email or phone)', () => {
+    expect(leadColumnMapping(['Contact']).mapping).toEqual({})
+    expect(leadColumnMapping(['Contact Person']).mapping).toEqual({ full_name: 'Contact Person' })
   })
 })
 

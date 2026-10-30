@@ -99,7 +99,16 @@ describe('cell values', () => {
     expect(isoDate(serialToDate(44575, true))).toBe('2026-01-15')
     expect(cellText({ value: { formula: 'A1+1', result: 46037 }, numFmt: 'dd/mm/yyyy' })).toBe('2026-01-15')
     expect(cellText({ value: { sharedFormula: 'A1', result: 0.1 + 0.2 } })).toBe('0.3')
-    expect(cellText({ value: { formula: 'X()' } })).toBe('')
+    // No cached value: the formula text, so the data is not silently blank.
+    expect(cellText({ value: { formula: 'X()' } })).toBe('=X()')
+  })
+  it('time-only cells are HH:MM:SS', () => {
+    expect(cellText({ value: new Date(Date.UTC(1899, 11, 30, 13, 30, 5)), numFmt: 'h:mm:ss' })).toBe('13:30:05')
+    expect(cellText({ value: 0.5, numFmt: 'hh:mm' })).toBe('12:00:00')
+    expect(cellText({ value: { formula: 'A1', result: 0.75 }, numFmt: '[h]:mm:ss' })).toBe('18:00:00')
+    // A Date before 1900 can only be a time of day (Excel's day 0).
+    expect(cellText({ value: new Date(Date.UTC(1899, 11, 30, 9, 5, 0)) })).toBe('09:05:00')
+    expect(cellText({ value: new Date(Date.UTC(2026, 0, 15, 9, 5, 0)), numFmt: 'yyyy-mm-dd h:mm' })).toBe('2026-01-15T09:05:00')
   })
 })
 

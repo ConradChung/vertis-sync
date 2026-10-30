@@ -25,7 +25,8 @@ export type LeadField = (typeof LEAD_FIELDS)[number]
 
 /** Header aliases (lowercase, no spaces / _ . -), most specific first. */
 const ALIASES: Record<LeadField, string[]> = {
-  full_name: ['fullname', 'name', 'personname', 'contactname', 'contact'],
+  // Not a bare "contact": that column is as often an email or a phone.
+  full_name: ['fullname', 'name', 'personname', 'contactname', 'contactperson'],
   first_name: ['firstname', 'first', 'givenname', 'fname'],
   last_name: ['lastname', 'last', 'surname', 'familyname', 'lname'],
   title: ['jobtitle', 'persontitle', 'position', 'role', 'title'],
@@ -59,13 +60,30 @@ const norm = (h: string) => h.toLowerCase().replace(/[\s_.\-/()]/g, '')
 
 export type ColumnMapping = Partial<Record<LeadField, string>>
 
+/** First rows looked at to sniff a column's content, and the share that must be LinkedIn URLs. */
+const SNIFF_ROWS = 20
+const SNIFF_SHARE = 0.6
+
+/** The first column (not yet used) whose filled values are mostly linkedin.com URLs, or null. */
+function linkedinColumn(header: readonly string[], sample: readonly (readonly string[])[], used: Set<string>): string | null {
+  for (let c = 0; c < header.length; c++) {
+    if (used.has(header[c])) continue
+    const values = sample.map((r) => (r[c] ?? '').trim()).filter(Boolean).slice(0, SNIFF_ROWS)
+    if (values.length && values.filter((v) => /linkedin\.com\//i.test(v)).length >= Math.ceil(values.length * SNIFF_SHARE)) return header[c]
+  }
+  return null
+}
+
 /**
  * Field → header, detected from aliases, with `overrides` (field → header
  * name, as the agent passes them) winning. A header feeds one field at most.
- * "Title" counts as the job title (a lead list), never the company.
+ * "Title" counts as the job title (a lead list), never the company. With
+ * `sample` rows, a column whose values are mostly linkedin.com URLs is the
+ * LinkedIn field before any alias is tried (a "URL" or "Website" column of
+ * profile links is not the company site).
  * Throws `UnknownColumnError` for an override naming a header that is not there.
  */
-export function leadColumnMapping(header: readonly string[], overrides: ColumnMapping = {}): { mapping: ColumnMapping; unmapped: string[] } {
+export function leadColumnMapping(header: readonly string[], overrides: ColumnMapping = {}, sample: readonly (readonly string[])[] = []): { mapping: ColumnMapping; unmapped: string[] } {
   const used = new Set<string>()
   const mapping: ColumnMapping = {}
   for (const [field, h] of Object.entries(overrides) as [LeadField, string][]) {
@@ -74,6 +92,13 @@ export function leadColumnMapping(header: readonly string[], overrides: ColumnMa
     if (!found) throw new UnknownColumnError(field, h)
     mapping[field] = found
     used.add(found)
+  }
+  if (!mapping.linkedin_url) {
+    const li = linkedinColumn(header, sample, used)
+    if (li) {
+      mapping.linkedin_url = li
+      used.add(li)
+    }
   }
   for (const field of LEAD_FIELDS) {
     if (mapping[field]) continue

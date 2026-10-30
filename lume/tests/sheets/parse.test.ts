@@ -124,6 +124,24 @@ describe('parseSpreadsheet (xlsx)', () => {
   })
 })
 
+describe('formulas without a saved value', () => {
+  it('keep their formula text and are noted on the sheet and in the summary', async () => {
+    const { fileSummary } = await import('@/lib/sheets/model')
+    const book = await xlsx((wb) => {
+      const s = wb.addWorksheet('S')
+      s.addRow(['Price', 'Double'])
+      s.addRow([2, { formula: 'A2*2' }])
+      s.addRow([3, { formula: 'A3*2', result: 6 }])
+    })
+    const r = await parseSpreadsheet(book, 'xlsx')
+    if (!r.ok) throw new Error(r.error)
+    const sh = r.workbook.sheets[0]
+    expect(sh.rows).toEqual([['2', '=A2*2'], ['3', '6']])
+    expect(sh.uncached_formulas).toBe(1)
+    expect(fileSummary({ id: 'i', name: 'n.xlsx', kind: 'xlsx', size_bytes: 1 }, r.workbook)).toContain('1 formula with no saved value, shown as its formula')
+  })
+})
+
 describe('zip-bomb guard', () => {
   it('stops at the uncompressed cap without inflating the whole archive', () => {
     // 5 MB of zeros compresses to a few KB.

@@ -51,6 +51,8 @@ export interface ParsedSheet {
   skipped_rows: number
   /** Cells cut at CELL_MAX_CHARS. */
   truncated_cells: number
+  /** Formulas with no value saved in the file: shown as their formula text. */
+  uncached_formulas?: number
 }
 
 export interface ParsedWorkbook {
@@ -273,6 +275,7 @@ function summaryHead(file: FileHead, wb: ParsedWorkbook): string[] {
       s.skipped_rows ? `${plural(s.skipped_rows, 'title row')} above it skipped` : null,
       s.dropped_columns ? `${plural(s.dropped_columns, 'empty column')} dropped` : null,
       s.truncated_cells ? `${plural(s.truncated_cells, 'long cell')} cut at ${fmt.format(CELL_MAX_CHARS)} chars` : null,
+      s.uncached_formulas ? `${plural(s.uncached_formulas, 'formula')} with no saved value, shown as ${s.uncached_formulas === 1 ? 'its formula' : 'their formulas'}` : null,
     ].filter(Boolean)
     head.push(`- "${s.name}": ${plural(s.rows.length, 'row')} × ${plural(s.header.length, 'column')} (${notes.join('; ')})`)
   }

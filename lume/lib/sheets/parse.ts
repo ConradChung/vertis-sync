@@ -97,6 +97,7 @@ async function readXlsx(bytes: Uint8Array, L: typeof LIMITS, budget: Budget): Pr
     const rowNumbers: number[] = []
     let width = 0
     let truncated = 0
+    let uncached = 0
     ws.eachRow({ includeEmpty: false }, (row, r) => {
       const out: string[] = []
       row.eachCell({ includeEmpty: false }, (cell, c) => {
@@ -107,7 +108,9 @@ async function readXlsx(bytes: Uint8Array, L: typeof LIMITS, budget: Budget): Pr
           out[c - 1] = ''
           return
         }
-        let text = cellText(cell, date1904)
+        const val = cellValue(cell, date1904)
+        if (val.uncached) uncached++
+        let text = val.text
         if (text.length > CELL_MAX_CHARS) {
           text = text.slice(0, CELL_MAX_CHARS)
           truncated++
@@ -120,7 +123,8 @@ async function readXlsx(bytes: Uint8Array, L: typeof LIMITS, budget: Budget): Pr
       grid.push(Array.from(out, (v) => v ?? ''))
       rowNumbers.push(r)
     })
-    sheets.push(buildSheet(ws.name, ws.state !== 'visible', grid, truncated, rowNumbers))
+    const built = buildSheet(ws.name, ws.state !== 'visible', grid, truncated, rowNumbers)
+    sheets.push(uncached ? { ...built, uncached_formulas: uncached } : built)
   }
   return { ok: true, sheets }
 }
@@ -143,6 +147,26 @@ export function isDateFormat(fmt: string | undefined): boolean {
   return DATE_FMT.test(bare)
 }
 
+/** A number format that shows only a time of day or a duration (h / s, no d / y). */
+export function isTimeFormat(fmt: string | undefined): boolean {
+  if (!fmt || fmt === 'General') return false
+  const bare = fmt.replace(/"[^"]*"/g, '').replace(/\[(?!h\]|m\]|s\])[^\]]*\]/gi, '')
+  return /[hs]/i.test(bare) && !/[dy]/i.test(bare)
+}
+
+/** `HH:MM:SS` of a Date (UTC, rounded to the second). */
+const timeText = (d: Date) => new Date(Math.round(d.getTime() / 1000) * 1000).toISOString().slice(11, 19)
+
+/**
+ * A date-time cell as text: a time-only cell (a time format on Excel's day 0,
+ * or any value before 1900, which can only be day 0) is `HH:MM:SS`; else ISO.
+ */
+function dateText(d: Date, numFmt: string | undefined): string {
+  if (Number.isNaN(d.getTime())) return ''
+  if (d.getUTCFullYear() < 1900 || (isTimeFormat(numFmt) && d.getTime() < Date.UTC(1904, 0, 2))) return timeText(d)
+  return isoDate(d)
+}
+
 /** Excel serial → Date (UTC), 1900 system (with its 1900-02-29 bug) or 1904. */
 export function serialToDate(serial: number, date1904 = false): Date {
   const base = date1904 ? Date.UTC(1904, 0, 1) : Date.UTC(1899, 11, 30)
@@ -160,12 +184,13 @@ export function isoDate(d: Date): string {
 /** Excel shows 15 significant digits; 0.1 + 0.2 reads 0.3. */
 const numText = (n: number) => (Number.isFinite(n) ? String(Number(n.toPrecision(15))) : '')
 
-type CellLike = { value: unknown; numFmt?: string }
+/** An exceljs cell, or what a test passes: the value, its number format, and (formula cells) the formula text. */
+type CellLike = { value: unknown; numFmt?: string; formula?: string }
 
 function valueText(v: unknown, numFmt: string | undefined, date1904: boolean): string {
   if (v === null || v === undefined) return ''
-  if (v instanceof Date) return isoDate(v)
-  if (typeof v === 'number') return isDateFormat(numFmt) ? isoDate(serialToDate(v, date1904)) : numText(v)
+  if (v instanceof Date) return dateText(v, numFmt)
+  if (typeof v === 'number') return isDateFormat(numFmt) ? dateText(serialToDate(v, date1904), numFmt) : numText(v)
   if (typeof v === 'string') return v
   if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE'
   if (typeof v === 'object') {
@@ -182,4 +207,22 @@ function valueText(v: unknown, numFmt: string | undefined, date1904: boolean): s
   return ''
 }
 
-export const cellText = (cell: CellLike, date1904 = false) => valueText(cell.value, cell.numFmt, date1904)
+/**
+ * One cell as text, and whether it is a formula Excel saved no value for
+ * (never recalculated here): that one reads as its formula, `=A2*2`, so the
+ * data is not silently blank, and the sheet notes how many there were. A
+ * shared formula's own text comes from exceljs's `cell.formula`.
+ */
+export function cellValue(cell: CellLike, date1904 = false): { text: string; uncached: boolean } {
+  const v = cell.value
+  if (v && typeof v === 'object' && !(v instanceof Date) && ('formula' in v || 'sharedFormula' in v)) {
+    const o = v as Record<string, unknown>
+    if (o.result === undefined || o.result === null) {
+      const f = [cell.formula, o.formula].find((x): x is string => typeof x === 'string' && x.length > 0)
+      return { text: f ? `=${f}` : '', uncached: true }
+    }
+  }
+  return { text: valueText(v, cell.numFmt, date1904), uncached: false }
+}
+
+export const cellText = (cell: CellLike, date1904 = false) => cellValue(cell, date1904).text
