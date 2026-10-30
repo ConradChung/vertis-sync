@@ -27,7 +27,8 @@ const REGIONS: [string, string][] = [
   ['US', 'TX'], ['US', 'Texas'], ['US', 'CA'], ['US', 'DC'], ['US', 'Washington DC'], ['US', 'D.C.'], ['US', 'Washington'],
   ['US', 'BC'], ['US', 'Atlantis'], ['CA', 'BC'], ['CA', 'british columbia'], ['CA', 'ON'], ['CA', 'Québec'], ['CA', 'PEI'],
   ['CA', 'TX'], ['CA', 'Newfoundland'], ['AU', 'NSW'], ['AU', 'Victoria'], ['AU', 'ACT'], ['AU', 'WA'], ['AE', 'dubai'],
-  ['AE', 'Abu Dhabi'], ['GB', 'England'], ['GB', 'Wales'], ['SG', 'Central'], ['', 'Texas'], ['US', ''],
+  ['AE', 'Abu Dhabi'], ['GB', 'England'], ['GB', 'Wales'], ['GB', 'Scotland'], ['GB', 'Northern Ireland'], ['GB', 'Greater London'],
+  ['GB', 'London'], ['GB', 'Kent'], ['GB', 'Midlothian'], ['SG', 'Central'], ['', 'Texas'], ['US', ''], ['US', 'London'],
 ]
 
 describe('jurisdiction normalisation (Lume mirror)', () => {
@@ -42,6 +43,8 @@ describe('jurisdiction normalisation (Lume mirror)', () => {
     expect(normalizeRegion('US', 'CA')).toBe('California')
     expect(normalizeRegion('CA', 'TX')).toBeNull()
     expect(normalizeRegion(null, 'Texas')).toBeNull()
+    expect(normalizeRegion('GB', 'Greater London')).toBe('England')
+    expect(normalizeRegion('GB', 'Scotland')).toBe('Scotland')
   })
 
   it('agrees with the edge resolver on every input', async () => {

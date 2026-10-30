@@ -114,3 +114,28 @@ Deno.test('fallbackJurisdictionLine: Kaspen campaigns get the Kaspen SOP line, a
   assertEquals(fallbackJurisdictionLine(null), BASE_FALLBACK_JURISDICTION_LINE)
   assertEquals(BASE_FALLBACK_JURISDICTION_LINE, 'Most owners end up as the middle manager of their own portfolio.')
 })
+
+// The seeded UK row after lume_jurisdictions_seed_fixes: England only.
+const UK_ROWS: JurisdictionRow[] = [
+  row({ country: 'GB', region: 'England', jurisdiction: 'England', copy_hook: 'England hook.' }),
+]
+
+Deno.test('normalizeRegion: English counties and cities are England; the other nations stay themselves', () => {
+  for (const v of ['England', 'england', 'Greater London', 'London', 'City of London', 'Greater Manchester', 'West Yorkshire', 'Kent', 'Bristol']) {
+    assertEquals(normalizeRegion('GB', v), 'England', v)
+  }
+  assertEquals(normalizeRegion('GB', 'Scotland'), 'Scotland')
+  assertEquals(normalizeRegion('GB', 'Wales'), 'Wales')
+  assertEquals(normalizeRegion('GB', 'Northern Ireland'), 'Northern Ireland')
+  assertEquals(normalizeRegion('GB', 'Midlothian'), null)
+  assertEquals(normalizeRegion('US', 'London'), null)
+})
+
+Deno.test('resolveJurisdiction (UK): England and English regions match; Scotland, Wales, NI, unknown or none fall back', () => {
+  for (const r of ['England', 'Greater London', 'London', 'Greater Manchester']) {
+    assertEquals(resolveJurisdiction('United Kingdom', r, UK_ROWS)?.jurisdiction, 'England', r)
+  }
+  for (const r of ['Scotland', 'Wales', 'Northern Ireland', 'Midlothian', 'Cardiff', '', null]) {
+    assertEquals(resolveJurisdiction('UK', r, UK_ROWS), null, String(r))
+  }
+})

@@ -48,7 +48,21 @@ const REGIONS: Record<string, Record<string, string[]>> = {
     'New South Wales': ['NSW'], 'Victoria': ['VIC'], 'Queensland': ['QLD'], 'Western Australia': ['WA'],
     'South Australia': ['SA'], 'Tasmania': ['TAS'], 'Australian Capital Territory': ['ACT'], 'Northern Territory': ['NT'],
   },
-  GB: { 'England': [], 'Scotland': [], 'Wales': [], 'Northern Ireland': [] },
+  // Apollo's State for UK leads is usually "England", sometimes a county or city.
+  // Exact matches only; anything not listed falls back.
+  GB: {
+    'England': [
+      'Greater London', 'London', 'City of London', 'Greater Manchester', 'Manchester', 'West Midlands', 'Birmingham',
+      'West Yorkshire', 'Leeds', 'South Yorkshire', 'Sheffield', 'North Yorkshire', 'East Riding of Yorkshire', 'Merseyside',
+      'Liverpool', 'Tyne and Wear', 'Newcastle upon Tyne', 'Bristol', 'City of Bristol', 'Kent', 'Essex', 'Surrey', 'Hampshire',
+      'Hertfordshire', 'Berkshire', 'Buckinghamshire', 'Oxfordshire', 'Cambridgeshire', 'Bedfordshire', 'Northamptonshire',
+      'Lancashire', 'Cheshire', 'Cumbria', 'Durham', 'County Durham', 'Northumberland', 'Lincolnshire', 'Nottinghamshire',
+      'Nottingham', 'Leicestershire', 'Leicester', 'Derbyshire', 'Staffordshire', 'Warwickshire', 'Worcestershire',
+      'Shropshire', 'Herefordshire', 'Gloucestershire', 'Wiltshire', 'Somerset', 'Dorset', 'Devon', 'Cornwall', 'Norfolk',
+      'Suffolk', 'East Sussex', 'West Sussex', 'Sussex', 'Isle of Wight', 'Rutland',
+    ],
+    'Scotland': [], 'Wales': [], 'Northern Ireland': [],
+  },
   AE: {
     'Dubai': [], 'Abu Dhabi': [], 'Sharjah': [], 'Ajman': [], 'Umm Al Quwain': [], 'Ras Al Khaimah': [], 'Fujairah': [],
   },
