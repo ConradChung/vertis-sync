@@ -10,7 +10,7 @@ import { claimDecision, getAction } from '@/lib/actions/store'
 import { editMessage, sendMessage } from '@/lib/adapters/telegram'
 import { alert, alertLink, titleFrom } from '@/lib/alerts'
 import { routeItemForAction } from '@/lib/operators/route'
-import { buildPrompt } from '@/lib/agent/chat'
+import { buildMessages, MESSAGE_MAX, type ContextTurn } from '@/lib/agent/chat'
 import { createConversation, getConversation, getConversationOperator, getMessages, insertMessage } from '@/lib/agent/conversations'
 import { contextFromMessages, titleFromPrompt, type StoredApproval, type StoredToolEntry } from '@/lib/agent/history'
 import { SYSTEM_PROMPT } from '@/lib/agent/prompt'
@@ -43,8 +43,9 @@ import type { Operator } from '@/lib/operators/types'
  *
  * Chat history: without `conversation_id` a new `agent_conversations` row is
  * created (titled from the prompt); with one (404 when missing or deleted),
- * that conversation's stored turns are packed ahead of the prompt as context
- * (`buildPrompt`) — the client never supplies history. The user message is
+ * that conversation's stored turns are replayed as real user/assistant turns
+ * ahead of the prompt (`buildMessages`, newest ~300k chars) — the client never
+ * supplies history. The user message is
  * stored before the run, the assistant message (text, tools, approvals,
  * error) when it ends, server side, so a closed tab loses nothing.
  *
@@ -99,7 +100,7 @@ export const runtime = 'nodejs'
 const MODEL = process.env.LUME_AGENT_MODEL?.trim() || 'claude-sonnet-5-5'
 
 const Body = z.object({
-  prompt: z.string().trim().min(1).max(4000),
+  prompt: z.string().trim().min(1).max(MESSAGE_MAX),
   conversation_id: z.string().regex(UUID_RE).optional(),
   skill_id: z.string().regex(UUID_RE).optional(),
   skill_mode: z.enum(['run', 'reference']).optional(),
@@ -124,7 +125,8 @@ export async function POST(req: Request) {
     )
   }
 
-  const body = await parseJsonBody(req, Body, 16 * 1024)
+  // MESSAGE_MAX chars of UTF-8 (up to 4 bytes each) plus JSON escaping.
+  const body = await parseJsonBody(req, Body, 256 * 1024)
   if (!body.ok) return body.response
   const message = body.data.prompt
 
@@ -147,6 +149,7 @@ export async function POST(req: Request) {
   let chatOperatorId: string | null = null
   let projectId: string | null = null
   let prompt = message
+  let history: ContextTurn[] = []
   let ownerVertical: Awaited<ReturnType<typeof getVertical>> = null
   const skillMode = body.data.skill_mode ?? 'reference'
   let skill: Awaited<ReturnType<typeof getSkill>> = null
@@ -163,7 +166,7 @@ export async function POST(req: Request) {
       conversationId = conversation.id
       projectId = conversation.project_id ?? null
       chatOperatorId = await getConversationOperator(conversation.id)
-      prompt = buildPrompt(contextFromMessages(await getMessages(conversationId)), message)
+      history = contextFromMessages(await getMessages(conversationId))
     } else {
       const title = titleFromPrompt(message)
       if (!operator && body.data.vertical_id) ownerVertical = await getVertical(body.data.vertical_id.toLowerCase())
@@ -236,6 +239,7 @@ export async function POST(req: Request) {
       const reply = await executeRun({
         runId,
         prompt: withKnowledge(knowledge, prompt),
+        history,
         title: message,
         origin,
         publicOrigin: requestOrigin(req),
@@ -383,6 +387,7 @@ async function executeRun({
   draftedByOperator,
   runId,
   prompt,
+  history,
   title,
   origin,
   publicOrigin,
@@ -394,7 +399,9 @@ async function executeRun({
 }: {
   runId: string
   prompt: string
-  /** The owner's own words (the prompt may carry packed history). */
+  /** The conversation's earlier stored turns (replayed in full by buildMessages). */
+  history: ContextTurn[]
+  /** The owner's own words (the prompt may carry knowledge / skill / vertical lines). */
   title: string
   origin: string
   /** The public origin (LUME_URL or the request's) for links shown to the user. */
@@ -523,7 +530,7 @@ async function executeRun({
         : SYSTEM_PROMPT,
       // Anthropic-hosted, read-only web research (no approval needed: nothing leaves Lume but a query/URL).
       tools: [...tools, ...WEB_TOOLS],
-      messages: [{ role: 'user', content: prompt }],
+      messages: buildMessages(history, prompt),
       max_iterations: 20,
       stream: true,
       // Server-side fallback on a safety-classifier refusal (routes by category).

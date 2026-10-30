@@ -1,6 +1,6 @@
 /**
  * Pure helpers for the Agent tab: SSE frame parsing for `/api/agent/run` and
- * packing earlier turns into the single `prompt` the route accepts.
+ * replaying earlier turns as real turns for `/api/agent/run`.
  */
 
 export type AgentEvent = Record<string, unknown> & { type: string }
@@ -30,32 +30,57 @@ export interface ContextTurn {
   text: string
 }
 
-/** `/api/agent/run` caps `prompt` at 4000 chars. */
-export const PROMPT_MAX = 4000
-const TURN_MAX = 600
+/** `/api/agent/run` caps one owner message (pasted drafts, threads) at this many chars. */
+export const MESSAGE_MAX = 50_000
+/** Earlier turns sent with each run (~75k tokens); newest kept, oldest dropped. */
+export const HISTORY_MAX_CHARS = 300_000
+/** One stored turn longer than this is cut (so one giant paste can't push out the rest). */
+export const TURN_MAX_CHARS = 40_000
+
+export interface ChatTurnParam {
+  role: 'user' | 'assistant'
+  content: { type: 'text'; text: string }[]
+}
+
+const OMITTED = '[Earlier turns of this conversation were omitted for length.]'
 
 /**
- * The route is stateless (one run per prompt), so earlier turns ride along as
- * clearly-labelled context ahead of the new message. Newest turns win when the
- * budget is tight; with no history the message is sent as-is.
+ * The route is stateless (one run per prompt), so the conversation's stored
+ * turns are replayed as real user/assistant turns ahead of the current
+ * message, in full up to TURN_MAX_CHARS each and HISTORY_MAX_CHARS in total
+ * (newest win). Roles strictly alternate and start with the owner: same-role
+ * neighbours merge, a leading assistant turn is dropped, and an unanswered
+ * owner turn folds into the current message.
  */
-export function buildPrompt(history: ContextTurn[], message: string, max = PROMPT_MAX): string {
-  const msg = message.trim().slice(0, max)
-  const head = 'Earlier in this conversation (context only — do not repeat actions from it):\n'
-  const tail = `\n\nCurrent request:\n${msg}`
-  let budget = max - head.length - tail.length
-  if (!history.length || budget < 80) return msg
-  const lines: string[] = []
+export function buildMessages(history: ContextTurn[], message: string): ChatTurnParam[] {
+  const current = message.trim()
+  const kept: ContextTurn[] = []
+  let budget = HISTORY_MAX_CHARS
+  let omitted = false
   for (let i = history.length - 1; i >= 0; i--) {
-    const t = history[i]
-    const text = t.text.trim().replace(/\s+/g, ' ')
-    if (!text) continue
-    const clipped = text.length > TURN_MAX ? `${text.slice(0, TURN_MAX)}…` : text
-    const line = `${t.role === 'user' ? 'Owner' : 'Lume'}: ${clipped}`
-    if (line.length + 1 > budget) break
-    lines.unshift(line)
-    budget -= line.length + 1
+    const raw = history[i].text.trim()
+    if (!raw) continue
+    const text = raw.length > TURN_MAX_CHARS ? `${raw.slice(0, TURN_MAX_CHARS)}\n… [truncated ${raw.length - TURN_MAX_CHARS} chars]` : raw
+    if (text.length > budget) {
+      omitted = true
+      break
+    }
+    kept.unshift({ role: history[i].role, text })
+    budget -= text.length
   }
-  if (!lines.length) return msg
-  return `${head}${lines.join('\n')}${tail}`
+  const merged: ContextTurn[] = []
+  for (const t of kept) {
+    const last = merged[merged.length - 1]
+    if (last && last.role === t.role) last.text = `${last.text}\n\n${t.text}`
+    else merged.push({ ...t })
+  }
+  while (merged.length && merged[0].role === 'assistant') {
+    merged.shift()
+    omitted = true
+  }
+  let tail = current
+  if (merged.length && merged[merged.length - 1].role === 'user') tail = `${merged.pop()!.text}\n\n${current}`
+  const turns: ContextTurn[] = [...merged, { role: 'user', text: tail }]
+  if (omitted) turns[0] = { role: 'user', text: `${OMITTED}\n\n${turns[0].text}` }
+  return turns.map((t) => ({ role: t.role, content: [{ type: 'text', text: t.text }] }))
 }

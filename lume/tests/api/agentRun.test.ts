@@ -146,6 +146,11 @@ afterEach(() => {
   delete process.env.ANTHROPIC_API_KEY
 })
 
+/** Text of a model turn (string or text blocks). */
+const turnText = (m: { content: unknown }) => (typeof m.content === 'string' ? m.content : (m.content as { text: string }[]).map((b) => b.text).join(''))
+const sentTurns = (i = 0) => (h.toolRunner.mock.calls[i][0] as { messages: { role: string; content: unknown }[] }).messages
+const lastSent = (i = 0) => turnText(sentTurns(i).at(-1)!)
+
 describe('POST /api/agent/run', () => {
   it('is owner-gated', async () => {
     const { NextResponse } = await import('next/server')
@@ -168,7 +173,7 @@ describe('POST /api/agent/run', () => {
     fakeRunner([{ text: 'ok' }])
     await (await post('plan Kaspen')).text()
     const params = h.toolRunner.mock.calls.at(-1)![0]
-    expect(params.messages[0].content).toMatch(/^What Lume knows[\s\S]*Kaspen sells PM growth[\s\S]*plan Kaspen$/)
+    expect(turnText(params.messages.at(-1))).toMatch(/^What Lume knows[\s\S]*Kaspen sells PM growth[\s\S]*plan Kaspen$/)
     expect(String(params.system)).not.toContain('Kaspen sells')
     expect(h.insertAgentRun.mock.calls.at(-1)![0]).not.toContain('What Lume knows')
   })
@@ -291,13 +296,28 @@ describe('POST /api/agent/run', () => {
       expect(h.insertMessage.mock.invocationCallOrder[0]).toBeLessThan(h.toolRunner.mock.invocationCallOrder[0])
     })
 
+    it('accepts a long pasted message and replays a long earlier draft in full', async () => {
+      const draft = 'Variant A: ' + 'd'.repeat(9000)
+      h.getMessages.mockResolvedValue([
+        { role: 'user', text: 'draft step 1' },
+        { role: 'assistant', text: draft },
+      ])
+      fakeRunner([{ text: 'ok' }])
+      const pasted = 'mix these: ' + 'p'.repeat(20000)
+      const res = await post(pasted, { conversation_id: CONV })
+      expect(res.status).toBe(200)
+      await events(res)
+      expect(turnText(sentTurns()[1])).toBe(draft)
+      expect(lastSent()).toBe(pasted)
+    })
+
     it('a Grok Bot operator: the new conversation stores its vertical + operator; the prompt names the bot', async () => {
       h.currentOperator.mockResolvedValue({ id: 'op-1', vertical_id: 'v-roof', is_master: false, label: 'Roofers bot', revoked_at: null })
       h.getVertical.mockResolvedValue({ id: 'v-roof', name: 'Roofers', campaign_ids: ['camp-r1'] })
       fakeRunner([{ text: 'On it.' }])
       await events(await post('What needs me?'))
       expect(h.createConversation).toHaveBeenCalledWith('What needs me?', { vertical_id: 'v-roof', operator_id: 'op-1' })
-      const sent = h.toolRunner.mock.calls[0][0].messages[0].content as string
+      const sent = lastSent()
       expect(sent).toMatch(/^You are being operated by the Roofers Grok Bot \(operator\)\. Its campaigns: camp-r1\. It has the owner’s full authority\.\n\nWhat needs me\?$/)
       // The stored user turn stays the bot's own words.
       expect(h.insertMessage).toHaveBeenNthCalledWith(1, expect.objectContaining({ text: 'What needs me?' }))
@@ -309,7 +329,7 @@ describe('POST /api/agent/run', () => {
       await events(await post('Stand up a dentists vertical'))
       expect(h.createConversation).toHaveBeenCalledWith('Stand up a dentists vertical', { vertical_id: null, operator_id: 'op-m' })
       expect(h.getVertical).not.toHaveBeenCalled()
-      expect(h.toolRunner.mock.calls[0][0].messages[0].content).toMatch(/^You are being operated by the master Grok Bot.*oversees all verticals/)
+      expect(lastSent()).toMatch(/^You are being operated by the master Grok Bot.*oversees all verticals/)
     })
 
     it('an existing conversation keeps its tags; the operator line still leads the prompt', async () => {
@@ -318,7 +338,7 @@ describe('POST /api/agent/run', () => {
       fakeRunner([{ text: 'ok' }])
       await events(await post('next', { conversation_id: CONV }))
       expect(h.createConversation).not.toHaveBeenCalled()
-      expect(h.toolRunner.mock.calls[0][0].messages[0].content).toMatch(/^You are being operated by the Roofers Grok Bot[^\n]*Its campaigns: none\./)
+      expect(lastSent()).toMatch(/^You are being operated by the Roofers Grok Bot[^\n]*Its campaigns: none\./)
     })
 
     it('the owner opening a vertical (from /operator): the new chat is tagged with it and the prompt names it', async () => {
@@ -328,7 +348,7 @@ describe('POST /api/agent/run', () => {
       await events(await post('How are we doing?', { vertical_id: VID }))
       expect(h.getVertical).toHaveBeenCalledWith(VID)
       expect(h.createConversation).toHaveBeenCalledWith('How are we doing?', { vertical_id: VID, operator_id: null })
-      expect(h.toolRunner.mock.calls[0][0].messages[0].content).toMatch(/^This conversation is about the Roofers vertical\. Its campaigns: camp-r1\.\n\nHow are we doing\?$/)
+      expect(lastSent()).toMatch(/^This conversation is about the Roofers vertical\. Its campaigns: camp-r1\.\n\nHow are we doing\?$/)
     })
 
     it('an operator ignores a requested vertical_id (its own vertical wins)', async () => {
@@ -347,7 +367,7 @@ describe('POST /api/agent/run', () => {
       expect(h.createConversation).toHaveBeenCalledWith('hi')
     })
 
-    it('with conversation_id: packs the stored turns ahead of the new message (never client-supplied)', async () => {
+    it('with conversation_id: replays the stored turns as real turns ahead of the new message (never client-supplied)', async () => {
       h.getMessages.mockResolvedValue([
         { role: 'user', text: 'pause campaign A' },
         { role: 'assistant', text: 'Filed it for approval.' },
@@ -356,11 +376,13 @@ describe('POST /api/agent/run', () => {
       const ev = await events(await post('and B?', { conversation_id: CONV.toUpperCase() }))
       expect(h.getConversation).toHaveBeenCalledWith(CONV)
       expect(h.createConversation).not.toHaveBeenCalled()
-      const sent = h.toolRunner.mock.calls[0][0].messages[0].content as string
-      expect(sent).toContain('Owner: pause campaign A')
-      expect(sent).toContain('Lume: Filed it for approval.')
-      expect(sent.endsWith('Current request:\nand B?')).toBe(true)
-      expect(h.insertAgentRun).toHaveBeenCalledWith(sent, 'claude-sonnet-5-5')
+      // Real turns, full text, ahead of the new message.
+      expect(sentTurns().map((m) => [m.role, turnText(m)])).toEqual([
+        ['user', 'pause campaign A'],
+        ['assistant', 'Filed it for approval.'],
+        ['user', 'and B?'],
+      ])
+      expect(h.insertAgentRun).toHaveBeenCalledWith('and B?', 'claude-sonnet-5-5')
       expect(h.insertMessage.mock.calls[0][0]).toMatchObject({ conversation_id: CONV, role: 'user', text: 'and B?' })
       expect(ev[0]).toMatchObject({ conversation_id: CONV })
       expect(h.logEvent.mock.calls[0][0]).toMatchObject({ title: 'and B?' })
@@ -590,7 +612,7 @@ describe('POST /api/agent/run in skip-permissions mode', () => {
 describe('POST /api/agent/run with a saved skill', () => {
   const SKILL = '11111111-2222-4333-8444-555555555555'
   const skill = { id: SKILL, name: 'Roofers', description: '', steps: [{ type: 'launch' }], variables: [], source_conversation_id: null, created_at: '', updated_at: '', last_run_at: null, run_count: 0 }
-  const promptSent = () => (h.toolRunner.mock.calls[0][0] as { messages: { content: string }[] }).messages[0].content
+  const promptSent = () => lastSent()
 
   it('run: injects the RUN block ahead of the message and bumps the run count', async () => {
     h.getSkill.mockResolvedValue(skill)
@@ -713,7 +735,7 @@ describe('projects', () => {
     expect(blocks[1].text).toContain('Never order more than 2k.')
     expect(blocks[1].text).toContain('casual')
     // The per-run user turn carries no project text (it stays in the cached prefix).
-    expect(h.toolRunner.mock.calls[0][0].messages[0].content).not.toContain('Roofers Austin')
+    expect(lastSent()).not.toContain('Roofers Austin')
     expect(ev[0]).toMatchObject({ type: 'run', conversation_id: CONV, project_id: PID })
   })
 

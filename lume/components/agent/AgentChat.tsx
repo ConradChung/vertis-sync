@@ -17,6 +17,7 @@ import { AgentSidePanel, type ReviewSetRef, type SideTab } from '@/components/ag
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { chatDiagrams, REVIEW_TOOLS } from '@/lib/agent/chatDiagrams'
 import { htmlLinksToMarkdown } from '@/lib/agent/linkify'
+import { MESSAGE_MAX } from '@/lib/agent/chat'
 import { ToolLog, type ToolLogEntry } from '@/components/orb/ToolLog'
 import { useSpeechRecognition, VoiceInput } from '@/components/orb/VoiceInput'
 import { Button } from '@/components/ui/button'
@@ -469,7 +470,7 @@ export function AgentChat() {
                   }
                 }}
                 rows={1}
-                maxLength={4000}
+                maxLength={MESSAGE_MAX}
                 disabled={busy}
                 placeholder={
                   busy

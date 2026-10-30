@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildPrompt, parseSseFrames, PROMPT_MAX } from '@/lib/agent/chat'
+import { buildMessages, HISTORY_MAX_CHARS, MESSAGE_MAX, parseSseFrames, TURN_MAX_CHARS } from '@/lib/agent/chat'
 import { applyAgentEvent, type ChatMessage } from '@/hooks/useAgentChat'
 
 describe('parseSseFrames', () => {
@@ -16,18 +16,61 @@ describe('parseSseFrames', () => {
   })
 })
 
-describe('buildPrompt', () => {
-  it('sends the message as-is with no history', () => {
-    expect(buildPrompt([], '  hi  ')).toBe('hi')
+describe('buildMessages', () => {
+  const text = (m: { content: unknown }) => (m.content as { text: string }[])[0].text
+  it('sends the message alone with no history', () => {
+    const m = buildMessages([], '  hi  ')
+    expect(m).toHaveLength(1)
+    expect(m[0].role).toBe('user')
+    expect(text(m[0])).toBe('hi')
   })
-  it('prefixes labelled context and stays under the route cap', () => {
-    const history = Array.from({ length: 40 }, (_, i) => ({ role: (i % 2 ? 'assistant' : 'user') as 'user' | 'assistant', text: `turn ${i} ${'x'.repeat(500)}` }))
-    const p = buildPrompt(history, 'what now?')
-    expect(p.length).toBeLessThanOrEqual(PROMPT_MAX)
-    expect(p).toMatch(/^Earlier in this conversation/)
-    expect(p.endsWith('Current request:\nwhat now?')).toBe(true)
-    expect(p).toContain('turn 39') // newest kept
-    expect(p).not.toContain('turn 0 ') // oldest dropped
+  it('keeps earlier turns as real alternating turns, full text', () => {
+    const long = 'Variant A: ' + 'x'.repeat(5000)
+    const m = buildMessages([{ role: 'user', text: 'draft step 1' }, { role: 'assistant', text: long }], 'mix A with the pain points')
+    expect(m.map((x) => x.role)).toEqual(['user', 'assistant', 'user'])
+    expect(text(m[1])).toBe(long) // not clipped to a snippet
+    expect(text(m[2])).toBe('mix A with the pain points')
+  })
+  it('merges consecutive same-role turns and starts with the owner', () => {
+    const m = buildMessages(
+      [
+        { role: 'assistant', text: 'orphan' },
+        { role: 'user', text: 'a' },
+        { role: 'user', text: 'b' },
+        { role: 'assistant', text: 'c' },
+      ],
+      'd'
+    )
+    expect(m.map((x) => x.role)).toEqual(['user', 'assistant', 'user'])
+    expect(text(m[0])).toContain('a')
+    expect(text(m[0])).toContain('b')
+    expect(text(m[0])).not.toContain('orphan')
+  })
+  it('folds a trailing owner turn into the current message so roles alternate', () => {
+    const m = buildMessages([{ role: 'user', text: 'unanswered' }], 'again')
+    expect(m.map((x) => x.role)).toEqual(['user'])
+    expect(text(m[0])).toContain('unanswered')
+    expect(text(m[0]).endsWith('again')).toBe(true)
+  })
+  it('drops the oldest turns past the budget and says so', () => {
+    const history = Array.from({ length: 200 }, (_, i) => ({ role: (i % 2 ? 'assistant' : 'user') as 'user' | 'assistant', text: `turn ${i} ${'x'.repeat(5000)}` }))
+    const m = buildMessages(history, 'now')
+    const all = m.map(text).join('\n')
+    expect(all.length).toBeLessThanOrEqual(HISTORY_MAX_CHARS + 2000)
+    expect(all).toContain('turn 199')
+    expect(all).not.toContain('turn 0 ')
+    expect(text(m[0])).toMatch(/earlier turns .*omitted/i)
+    expect(m[0].role).toBe('user')
+  })
+  it('caps one huge turn instead of dropping everything', () => {
+    const m = buildMessages([{ role: 'user', text: 'q' }, { role: 'assistant', text: 'y'.repeat(TURN_MAX_CHARS * 3) }], 'next')
+    expect(text(m[1]).length).toBeLessThanOrEqual(TURN_MAX_CHARS + 100)
+    expect(text(m[1])).toMatch(/truncated/)
+  })
+  it('allows long pasted messages', () => {
+    expect(MESSAGE_MAX).toBeGreaterThanOrEqual(50000)
+    const big = 'p'.repeat(MESSAGE_MAX)
+    expect(text(buildMessages([], big)[0])).toHaveLength(MESSAGE_MAX)
   })
 })
 
