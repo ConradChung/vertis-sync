@@ -219,15 +219,23 @@ Environment variable names are listed in `.env.example`.
   (`lib/agent/imageClient.ts`: long edge ≤ 1568 px, re-encoded to ≤ ~1.5 MB)
   and uploads it alone to `POST /api/agent/images` (raw body, ≤ 2 MB,
   `requireOwner`), which sniffs the magic bytes (the client's type is never
-  trusted) and stores it in the private `agent-chat-images` bucket
+  trusted), parses the PNG / JPEG / GIF / WebP header and refuses an
+  unreadable one or one over 8000 px on a side (422; the API would 400 every
+  run that replays it), and stores it in the private `agent-chat-images` bucket
   (service role only: no Storage policies; bucket limit 2 MB and the four
   image types) at `<uuid>.<ext>`. `/api/agent/run` then gets only
   `images: [{ path, name }]`, reads each object back, re-sniffs it, and sends it
   to Claude as a base64 `image` block before the text; the user message stores
   `{ path, name, media_type }` in `agent_messages.attachments` (no base64 in
   rows). Later runs replay the images of the newest 3 owner turns that have
-  any (≤ 5 images, `selectReplayImages`); older or unreadable ones become
-  "[image omitted: <name>]". Bubbles show images through
+  any, among the turns the char budget keeps (≤ 5 images,
+  `selectReplayImages`), within 18 MB raw per run together with the current
+  ones (`fitImageBudget`, oldest dropped first); the rest become
+  "[image omitted: <name>]". If the API still 400s on an image before any
+  output, the run retries once with every replayed image as a note; if the
+  current message's own image is refused, the error says so. A paste that
+  carries text (Excel, Numbers, Word add a picture of the cells) pastes the
+  text only; Safari's empty `files` falls back to `items`. Bubbles show images through
   `GET /api/agent/images/<path>` (owner session, `private` cache, `nosniff`),
   never a signed URL. An image removed from the composer before sending stays
   in the bucket (orphan, harmless; no cleanup job yet).
