@@ -19,6 +19,11 @@
 //      falls back to our own month-to-date sum (finished + reserved), never $0.
 //      Refused with budget_exceeded when committed + this run's estimate > cap;
 //      otherwise it inserts the pending crawl carrying the estimate.
+//      Two "months": Apify's account usage covers Apify's BILLING CYCLE (from
+//      the plan's renewal day; /users/me/usage/monthly usageCycle), while the
+//      ledger fallback (lume_research_month_spend) sums the CALENDAR MONTH in
+//      UTC. They differ by the offset of the renewal day, so near a boundary
+//      the two bases can disagree.
 //   3. start apify/website-content-crawler (cheerio, <= 8 pages, 1 GB, 180 s)
 //   4. answer 202; polling continues in the background
 // Continue (self-reinvoked before the 150 s wall clock, like operating-city-enricher;
