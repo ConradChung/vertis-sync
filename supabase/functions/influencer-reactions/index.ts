@@ -13,7 +13,7 @@
 // POST { action: 'sweep' }           the 5-minute pg_cron sweep (lume_influencer_sweep_tick).
 // POST { run_id, prev }               internal: the hand-off chain.
 //
-// Caller: service role only (constant-time compare with SUPABASE_SERVICE_ROLE_KEY);
+// Caller: service role only (constant-time compare with SUPABASE_SERVICE_ROLE_KEY or any SUPABASE_SECRET_KEYS key);
 // this function spends money. Lume calls it from the executor of an approved
 // pending action (influencer_run / influencer_reactions), never on its own.
 //
@@ -45,7 +45,7 @@
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 import { alert, gateKey, lumeLink } from '../_shared/alert.ts'
-import { secretsMatch } from '../_shared/lume/action.ts'
+import { isServiceCaller } from '../_shared/lume/serviceAuth.ts'
 import { parseCap, parseMonthlyUsage } from '../_shared/research/crawl.ts'
 import {
   apifyActualUsd,
@@ -1027,9 +1027,8 @@ export async function handle(
 ): Promise<Response> {
   if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
   deps = { ...deps, startedAt: deps.startedAt ?? (deps.now ?? Date.now)() }
-  const auth = req.headers.get('Authorization') ?? ''
-  const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
-  if (!(await secretsMatch(token, SUPABASE_SERVICE_ROLE_KEY))) return reply({ error: 'unauthorized' }, 401)
+  // The legacy service-role JWT or any new sb_secret_ key (Lume and the cron send the new one).
+  if (!(await isServiceCaller(req))) return reply({ error: 'unauthorized' }, 401)
 
   let body: Record<string, unknown>
   try {

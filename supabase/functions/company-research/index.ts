@@ -4,7 +4,7 @@
 // POST { domain } | { url }   start research on one company
 // POST { crawl_id }           internal: continue polling a running crawl
 //
-// Caller: service role only. The bearer must equal SUPABASE_SERVICE_ROLE_KEY
+// Caller: service role only. The bearer (or apikey) must be SUPABASE_SERVICE_ROLE_KEY or a key in SUPABASE_SECRET_KEYS
 // (constant-time compare). The gateway's JWT check alone would also admit the
 // anon key, and this function spends money.
 //
@@ -35,7 +35,7 @@
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 import { alert, gateKey } from '../_shared/alert.ts'
-import { secretsMatch } from '../_shared/lume/action.ts'
+import { isServiceCaller } from '../_shared/lume/serviceAuth.ts'
 import {
   buildCrawlInput,
   CRAWL_ACTOR_ID,
@@ -461,9 +461,8 @@ export async function handle(
   if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
   // The wall clock runs from here, through start() and into the background poll.
   deps = { ...deps, startedAt: deps.startedAt ?? (deps.now ?? Date.now)() }
-  const auth = req.headers.get('Authorization') ?? ''
-  const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
-  if (!(await secretsMatch(token, SUPABASE_SERVICE_ROLE_KEY))) return reply({ error: 'unauthorized' }, 401)
+  // The legacy service-role JWT or any new sb_secret_ key (Lume and the cron send the new one).
+  if (!(await isServiceCaller(req))) return reply({ error: 'unauthorized' }, 401)
 
   let body: Record<string, unknown>
   try {
