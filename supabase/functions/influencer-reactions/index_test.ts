@@ -45,8 +45,8 @@ function claimed(stage: string, extra: Record<string, unknown> = {}) {
   }
 }
 
-const clock = () => {
-  let t = 0
+const clock = (start = 0) => {
+  let t = start
   return { now: () => t, sleep: (ms: number) => { t += ms; return Promise.resolve() }, tick: (ms: number) => { t += ms } }
 }
 
@@ -565,9 +565,10 @@ Deno.test('minor: a transient Haiku error inside verify does not burn an attempt
 })
 
 Deno.test('minor: a running row near the sweep limit is aborted first, then what its dataset holds is ingested', async () => {
-  const c = clock()
+  // The age check uses the injected clock, not Date.now().
+  const c = clock(Date.parse('2026-10-30T12:00:00Z'))
   let reads = 0
-  const old = new Date(Date.now() - 26 * 60_000).toISOString()
+  const old = '2026-10-30T11:34:00Z'
   const f = stubFetch([
     [db('rpc/lume_influencer_claim_run'), () => json([claimed('posts')])],
     [is('influencers', 'GET'), () => json([influencer])],
@@ -579,11 +580,57 @@ Deno.test('minor: a running row near the sweep limit is aborted first, then what
     [is('influencer_apify_runs', 'PATCH'), () => json([])],
   ])
   try {
-    await advance(RUN, null, { now: c.now, sleep: c.sleep, startedAt: 0, handOff: () => Promise.resolve(true) })
+    await advance(RUN, null, { now: c.now, sleep: c.sleep, startedAt: c.now(), handOff: () => Promise.resolve(true) })
     assert(f.calls.some((x) => x.url.endsWith('/actor-runs/runLLLLLLLL3/abort')), 'aborted')
     assertEquals(bodies(f.calls, is('influencer_posts', 'POST'))[0].length, 1, 'partial results ingested')
     const done = bodies(f.calls, is('influencer_apify_runs', 'PATCH'))[0]
     assertEquals([done.status, done.item_count], ['succeeded', 1])
     assert(String(done.error).includes('partial'))
+  } finally { f.restore() }
+})
+
+Deno.test('a record PATCH that landed but lost its response: the retry finds the row running with this run id and keeps the run', async () => {
+  const c = clock()
+  let rowsGet = 0
+  let patches = 0
+  const f = stubFetch([
+    [db('rpc/lume_influencer_claim_run'), () => json([claimed('posts')])],
+    [is('influencers', 'GET'), () => json([influencer])],
+    [(u, m) => m === 'GET' && u.startsWith(`https://db.test/rest/v1/influencer_apify_runs?id=eq.${APROW}`), () =>
+      json([{ id: APROW, status: 'running', apify_run_id: 'runMMMMMMMM4' }])],
+    [is('influencer_apify_runs', 'GET'), () => json(rowsGet++ === 0 ? [] : [{ id: APROW, influencer_id: INF, kind: 'posts', status: 'running', apify_run_id: 'runMMMMMMMM4', estimate_usd: 1, cost_usd: 1 }])],
+    [(u) => u === 'https://api.apify.com/v2/users/me/usage/monthly', () => json({ data: { totalUsageCreditsUsdAfterVolumeDiscount: 1 } })],
+    [db('rpc/lume_influencer_reserve_apify'), () => json({ ok: true, existing: false, id: APROW })],
+    [(u, m) => u.includes('/acts/harvestapi~linkedin-profile-posts/runs') && m === 'POST', () => json({ data: { id: 'runMMMMMMMM4', defaultDatasetId: 'dsMMMMMMMM4' } }, 201)],
+    // 1st PATCH lands but its response is a 502; the retry no longer matches status=pending
+    [(u, m) => m === 'PATCH' && u.includes('influencer_apify_runs'), () => (patches++ === 0 ? json({ message: 'bad gateway' }, 502) : json([]))],
+    [(u) => u === 'https://api.apify.com/v2/actor-runs/runMMMMMMMM4', () => json({ data: { status: 'RUNNING' } })],
+  ])
+  try {
+    await advance(RUN, null, { now: c.now, sleep: c.sleep, startedAt: 0, handOff: () => Promise.resolve(true) })
+    assert(!f.calls.some((x) => x.url.includes('/abort')), 'the healthy run is not aborted')
+    assertEquals(patches, 2, 'no error PATCH after the re-read')
+    assert(f.calls.some((x) => x.url === 'https://api.apify.com/v2/actor-runs/runMMMMMMMM4'), 'the step went on to poll it')
+  } finally { f.restore() }
+})
+
+Deno.test('the re-read aborts when the row carries a different run id', async () => {
+  const c = clock()
+  let rowsGet = 0
+  const f = stubFetch([
+    [db('rpc/lume_influencer_claim_run'), () => json([claimed('posts')])],
+    [is('influencers', 'GET'), () => json([influencer])],
+    [(u, m) => m === 'GET' && u.startsWith(`https://db.test/rest/v1/influencer_apify_runs?id=eq.${APROW}`), () =>
+      json([{ id: APROW, status: 'running', apify_run_id: 'runOTHERRRR9' }])],
+    [is('influencer_apify_runs', 'GET'), () => json(rowsGet++ === 0 ? [] : [])],
+    [(u) => u === 'https://api.apify.com/v2/users/me/usage/monthly', () => json({})],
+    [db('rpc/lume_influencer_reserve_apify'), () => json({ ok: true, existing: false, id: APROW })],
+    [(u, m) => u.includes('/acts/') && m === 'POST', () => json({ data: { id: 'runNNNNNNNN5' } }, 201)],
+    [(u, m) => m === 'PATCH' && u.includes('influencer_apify_runs'), () => json([])],
+    abortRoute(['runNNNNNNNN5']),
+  ])
+  try {
+    await advance(RUN, null, { now: c.now, sleep: c.sleep, startedAt: 0, handOff: () => { throw new Error('stopped') } })
+    assert(f.calls.some((x) => x.url.endsWith('/actor-runs/runNNNNNNNN5/abort')))
   } finally { f.restore() }
 })

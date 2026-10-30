@@ -408,7 +408,7 @@ async function startApify(ctx: Ctx, inf: Influencer, kind: 'posts' | 'reactions'
     await fail({ error: `Apify run ${runId} started but could not be recorded; aborted. The reservation stays as the cost.` }).catch(() => undefined)
     return 'ok'
   }
-  if (!Array.isArray(recorded) || recorded.length === 0) {
+  if ((!Array.isArray(recorded) || recorded.length === 0) && !(await recordedAlready(rowId, runId))) {
     // The row was closed (cancelled, failed, swept) while the start was in flight: never revive it.
     console.warn(`[${FN}] ${ctx.run.id}: Apify run ${runId} started after its row was closed; aborting it`)
     await abortApify([runId])
@@ -419,6 +419,21 @@ async function startApify(ctx: Ctx, inf: Influencer, kind: 'posts' | 'reactions'
     return 'stopped'
   }
   return 'ok'
+}
+
+/**
+ * The record PATCH may have landed on an attempt whose response was lost (5xx,
+ * network), so the retry no longer matches status=pending. Re-read the row:
+ * running with this run id means it was recorded. Anything else (closed, or a
+ * different run id) is not ours to keep.
+ */
+async function recordedAlready(rowId: string, runId: string): Promise<boolean> {
+  try {
+    const rows = (await rest('GET', `influencer_apify_runs?id=eq.${rowId}&select=id,status,apify_run_id`)) as { status: string; apify_run_id: string | null }[]
+    return rows?.[0]?.status === 'running' && rows[0].apify_run_id === runId
+  } catch {
+    return false
+  }
 }
 
 /** A state write that must land: 3 attempts with a short backoff. */
@@ -469,7 +484,7 @@ async function pollApify(ctx: Ctx, rows: ApifyRow[], ingest: (row: ApifyRow, ite
       // Before the sweep's 30-minute cut (which closes the row without reading it),
       // abort the run ourselves: the next poll ingests what its dataset already holds.
       const started = Date.parse(row.started_at ?? '')
-      if (Number.isFinite(started) && Date.now() - started > RUN_ABORT_AFTER_MS) await abortApify([row.apify_run_id])
+      if (Number.isFinite(started) && ctx.deps.now() - started > RUN_ABORT_AFTER_MS) await abortApify([row.apify_run_id])
       continue
     }
     const now = new Date().toISOString()
