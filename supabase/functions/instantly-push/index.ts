@@ -23,6 +23,14 @@
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 import { alert, type AlertInput, gateKey, lumeLink, titleFrom } from '../_shared/alert.ts'
+import {
+  fallbackJurisdictionLine,
+  type JurisdictionRow,
+  jurisdictionLine,
+  normalizeCountry,
+  normalizeRegion,
+  resolveJurisdiction,
+} from '../_shared/research/jurisdiction.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -272,13 +280,41 @@ interface Lead {
   website: string
   location: string
   operatingCities: string
+  // Apollo's Country / Company Country as ISO2 and State / Company State as
+  // the canonical name, set only when the country is certain; '' otherwise.
+  country: string
+  region: string
+  // {{jurisdiction_line}}: the active jurisdiction's copy_hook, else the
+  // campaign's SOP fallback sentence. Never blank (Instantly can't fall back).
+  jurisdictionLine: string
+}
+
+// Active jurisdictions rows (loaded once per push) and the fallback sentence
+// for the job's campaign (_shared/research/jurisdiction.ts).
+export interface JurisdictionContext {
+  rows: JurisdictionRow[]
+  fallback: string
+}
+
+/** Country from Country, else Company Country; region from State, else Company State, within that country. */
+function leadGeo(data: Record<string, unknown>): { country: string; region: string } {
+  const str = (k: string) => String(data[k] ?? '').trim()
+  const country = normalizeCountry(str('Country')) ?? normalizeCountry(str('Company Country'))
+  if (!country) return { country: '', region: '' }
+  const region = normalizeRegion(country, str('State')) ?? normalizeRegion(country, str('Company State'))
+  return { country, region: region ?? '' }
 }
 
 type Decision =
   | { keep: true; lead: Lead; originalCompany: string }
   | { keep: false; reason: string }
 
-function decideRow(row: ValidationRow, cols: Columns, job: ValidationJob): Decision {
+export function decideRow(
+  row: ValidationRow,
+  cols: Columns,
+  job: ValidationJob,
+  ctx: JurisdictionContext = { rows: [], fallback: fallbackJurisdictionLine(job.instantly_campaign_id) },
+): Decision {
   const data = row.row_data ?? {}
   const get = (col: string | null): string => (col ? String(data[col] ?? '').trim() : '')
 
@@ -313,6 +349,9 @@ function decideRow(row: ValidationRow, cols: Columns, job: ValidationJob): Decis
     return { keep: false, reason: 'junk company name' }
   }
 
+  const geo = leadGeo(data)
+  const line = jurisdictionLine(resolveJurisdiction(geo.country, geo.region, ctx.rows), ctx.fallback)
+
   return {
     keep: true,
     originalCompany: rawCompany,
@@ -324,7 +363,28 @@ function decideRow(row: ValidationRow, cols: Columns, job: ValidationJob): Decis
       website: get(cols.website),
       location,
       operatingCities,
+      country: geo.country,
+      region: geo.region,
+      jurisdictionLine: line,
     },
+  }
+}
+
+/**
+ * The active jurisdictions, one REST select per push. A failed read is
+ * logged and treated as no rows: every lead then gets the fallback sentence,
+ * which is what an unreviewed table means anyway.
+ */
+export async function loadActiveJurisdictions(): Promise<JurisdictionRow[]> {
+  try {
+    const rows = (await supabaseRequest(
+      'GET',
+      'jurisdictions?active=eq.true&select=country,region,city_match,jurisdiction,copy_hook,active',
+    )) as JurisdictionRow[] | null
+    return Array.isArray(rows) ? rows : []
+  } catch (err) {
+    console.error('[instantly-push] jurisdictions read failed, using the fallback line:', err instanceof Error ? err.message : err)
+    return []
   }
 }
 
@@ -429,12 +489,15 @@ async function buildPreview(jobId: string): Promise<PreviewResult> {
 
 // ---- Instantly ----
 
-async function createLead(campaignId: string, lead: Lead): Promise<Record<string, unknown>> {
+export async function createLead(campaignId: string, lead: Lead): Promise<Record<string, unknown>> {
   const custom: Record<string, string> = {}
   // Only set variables we actually resolved — an empty custom variable is
   // better left absent than written as an empty string.
   if (lead.location) custom['location'] = lead.location
   if (lead.operatingCities) custom['Operating Cities Copied'] = lead.operatingCities
+  // Always set: a hook or the target campaign's fallback sentence, so a
+  // {{jurisdiction_line}} in the sequence never renders blank.
+  custom['jurisdiction_line'] = lead.jurisdictionLine.trim() || fallbackJurisdictionLine(campaignId)
 
   const body: Record<string, unknown> = {
     campaign: campaignId,
@@ -475,6 +538,7 @@ async function verifyFirstLead(campaignId: string, lead: Lead): Promise<string |
   const expected = [
     lead.location ? 'location' : null,
     lead.operatingCities ? 'Operating Cities Copied' : null,
+    'jurisdiction_line',
   ].filter(Boolean) as string[]
   if (expected.length === 0) return null
 
@@ -513,6 +577,10 @@ async function processJob(jobId: string): Promise<void> {
   await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { instantly_status: 'pushing' })
 
   const cols = await resolveColumns(job)
+  const jurisdictionCtx: JurisdictionContext = {
+    rows: await loadActiveJurisdictions(),
+    fallback: fallbackJurisdictionLine(campaignId),
+  }
   // A lead with no resolved city must never land in a campaign whose subject
   // line interpolates {{location}}. Instantly rotates A/B variants by its own
   // algorithm, so there is no per-lead variant targeting — a separate campaign
@@ -533,7 +601,7 @@ async function processJob(jobId: string): Promise<void> {
     if (!rows || rows.length === 0) break
 
     for (const row of rows) {
-      const decision = decideRow(row, cols, job)
+      const decision = decideRow(row, cols, job, jurisdictionCtx)
 
       if (!decision.keep) {
         await supabaseRequest('PATCH', `validation_rows?id=eq.${row.id}`, {
