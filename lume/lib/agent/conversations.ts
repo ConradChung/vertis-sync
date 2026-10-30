@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { DbError } from '@/lib/db/service'
 import type { Json } from '@/lib/db/types'
 import type { ChatImageRef } from '@/lib/agent/images'
+import type { ChatFileRef } from '@/lib/agent/files'
 import type { ConversationSummary, StoredApproval, StoredMessage, StoredToolEntry } from '@/lib/agent/history'
 import { maskOperatorKeys } from '@/lib/operators/mask'
 
@@ -80,8 +81,8 @@ export interface NewMessage {
   run_id?: string | null
   /** An automatic follow-up turn (defaults to false). */
   auto?: boolean
-  /** Images on a user turn: references into `agent-chat-images`, never the bytes. */
-  attachments?: ChatImageRef[]
+  /** Images and spreadsheets on a user turn: references only, never the bytes. */
+  attachments?: (ChatImageRef | ChatFileRef)[]
 }
 
 /** Insert a message and bump the conversation's `updated_at` (sidebar order). */

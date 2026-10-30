@@ -70,4 +70,11 @@ describe('images in history', () => {
     expect(titleFromMessage('', [good])).toBe('Image: shot.png')
     expect(titleFromMessage('  ', [good, good])).toBe('Image: shot.png +1')
   })
+  const file = { kind: 'file' as const, id: '0f3c2b1a-9d8e-4f7a-8b6c-5d4e3f2a1b0d', name: 'leads.xlsx', file_kind: 'xlsx' as const, size_bytes: 9, sheets: [{ name: 'A', rows: 1, cols: 1 }] }
+  it('splits mixed attachments into images and files; a file-only turn is titled after the file', () => {
+    expect(contextFromMessages([{ role: 'user', text: 'x', attachments: [good, file] }])).toEqual([{ role: 'user', text: 'x', images: [good], files: [file] }])
+    expect(attachmentsOf([good, file])).toEqual([good])
+    expect(titleFromMessage('', [], [file])).toBe('File: leads.xlsx')
+    expect(titleFromMessage('', [good], [file])).toBe('File: leads.xlsx +1')
+  })
 })

@@ -5,6 +5,7 @@ import type { ReplyCard } from '@/lib/inbox/model'
  */
 import type { ContextTurn } from '@/lib/agent/chat'
 import { ACCEPTED_IMAGE_TYPES, IMAGE_PATH_RE, type ChatImageRef } from '@/lib/agent/images'
+import { fileRefsOf, type ChatFileRef } from '@/lib/agent/files'
 
 export interface ConversationSummary {
   id: string
@@ -53,8 +54,11 @@ export interface StoredMessage {
   run_id: string | null
   /** An automatic follow-up turn (an approval outcome), shown as a compact line, not a bubble. */
   auto: boolean
-  /** Images the owner attached (user turns only; references into `agent-chat-images`). */
-  attachments?: ChatImageRef[]
+  /**
+   * What the owner attached (user turns only): image refs (no `kind`; bytes in
+   * `agent-chat-images`) and spreadsheet refs (`kind: 'file'`; agent_chat_files).
+   */
+  attachments?: (ChatImageRef | ChatFileRef)[]
   created_at: string
 }
 
@@ -113,12 +117,15 @@ export function contextFromMessages(messages: (Pick<StoredMessage, 'role' | 'tex
     .filter((m) => m.role === 'user' || m.text.trim())
     .map((m) => {
       const images = m.role === 'user' ? attachmentsOf(m.attachments) : []
-      return images.length ? { role: m.role, text: m.text, images } : { role: m.role, text: m.text }
+      const files = m.role === 'user' ? fileRefsOf(m.attachments) : []
+      return { role: m.role, text: m.text, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}) }
     })
 }
 
-/** A new chat's title: the text's first line, else its first image's name. */
-export function titleFromMessage(text: string, images: Pick<ChatImageRef, 'name'>[]): string {
-  if (text.trim() || !images.length) return titleFromPrompt(text)
-  return titleFromPrompt(`Image: ${images[0].name}${images.length > 1 ? ` +${images.length - 1}` : ''}`)
+/** A new chat's title: the text's first line, else its first spreadsheet's or image's name. */
+export function titleFromMessage(text: string, images: Pick<ChatImageRef, 'name'>[], files: Pick<ChatFileRef, 'name'>[] = []): string {
+  if (text.trim() || (!images.length && !files.length)) return titleFromPrompt(text)
+  const more = images.length + files.length - 1
+  const first = files.length ? `File: ${files[0].name}` : `Image: ${images[0].name}`
+  return titleFromPrompt(`${first}${more > 0 ? ` +${more}` : ''}`)
 }

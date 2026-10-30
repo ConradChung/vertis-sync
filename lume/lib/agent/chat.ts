@@ -4,6 +4,7 @@
  */
 
 import type { ChatImageRef, ImageMediaType } from '@/lib/agent/images'
+import { fileBlockText, fileNote, type ChatFileRef } from '@/lib/agent/files'
 
 export type AgentEvent = Record<string, unknown> & { type: string }
 
@@ -32,6 +33,8 @@ export interface ContextTurn {
   text: string
   /** Images the owner attached to this turn (references; the bytes live in Storage). */
   images?: ChatImageRef[]
+  /** Spreadsheets the owner attached to this turn (references; the parsed tables live in Storage). */
+  files?: ChatFileRef[]
 }
 
 /** `/api/agent/run` caps one owner message (pasted drafts, threads) at this many chars. */
@@ -46,12 +49,22 @@ export const HISTORY_IMAGE_TURNS = 3
 /** ...and at most this many in all (older ones become "[image omitted: <name>]"). */
 export const HISTORY_IMAGE_MAX = 5
 
+/** Earlier spreadsheet summaries replayed: those of the newest few owner turns that carry any... */
+export const HISTORY_FILE_TURNS = 3
+/** ...and at most this many (older ones become "[file: <name> — use read_attachment(…)]"). */
+export const HISTORY_FILE_MAX = 3
+
 /** Raw image bytes per run (current + replayed), well under the API's 32 MB request cap once base64'd. */
 export const RUN_IMAGE_BYTES = 18 * 1024 * 1024
 
 /** An image ready for Claude: its reference plus the base64 bytes. */
 export interface LoadedImage extends ChatImageRef {
   data: string
+}
+
+/** A spreadsheet ready for Claude: its reference plus the summary text (agent_chat_files.summary). */
+export interface LoadedFile extends ChatFileRef {
+  summary: string
 }
 
 type TextBlock = { type: 'text'; text: string }
@@ -81,6 +94,28 @@ export function selectReplayImages(history: ContextTurn[]): ChatImageRef[] {
     for (const img of t.images) {
       if (out.length >= HISTORY_IMAGE_MAX) return out
       out.push(img)
+    }
+  }
+  return out
+}
+
+/**
+ * The history files whose summaries are worth replaying: newest first, from
+ * the last HISTORY_FILE_TURNS owner turns that have any, at most
+ * HISTORY_FILE_MAX, among the turns the char budget keeps. buildMessages
+ * notes every other one as "[file: <name> — use read_attachment(…)]".
+ */
+export function selectReplayFiles(history: ContextTurn[]): ChatFileRef[] {
+  const out: ChatFileRef[] = []
+  let turns = 0
+  const { from } = keptTurns(history)
+  for (let i = history.length - 1; i >= from && turns < HISTORY_FILE_TURNS; i--) {
+    const t = history[i]
+    if (t.role !== 'user' || !t.files?.length) continue
+    turns++
+    for (const f of t.files) {
+      if (out.length >= HISTORY_FILE_MAX) return out
+      out.push(f)
     }
   }
   return out
@@ -118,9 +153,10 @@ function keptTurns(history: ContextTurn[]): { from: number; omitted: boolean } {
   for (let i = history.length - 1; i >= 0; i--) {
     const turn = history[i]
     const refs = turn.role === 'user' ? (turn.images ?? []) : []
+    const files = turn.role === 'user' ? (turn.files ?? []) : []
     const raw = turn.text.trim()
-    if (!raw && !refs.length) continue
-    const cost = joinText(refs.map(omittedNote).join('\n'), truncate(raw)).length
+    if (!raw && !refs.length && !files.length) continue
+    const cost = joinText([...refs.map(omittedNote), ...files.map(fileNote)].join('\n'), truncate(raw)).length
     if (cost > budget) return { from: i + 1, omitted: true }
     budget -= cost
   }
@@ -132,15 +168,21 @@ export interface BuildOptions {
   current?: LoadedImage[]
   /** History images that were loaded, by path (from selectReplayImages); any other is noted, not sent. */
   loaded?: Map<string, LoadedImage>
+  /** The spreadsheets attached to the current message, in order. */
+  currentFiles?: LoadedFile[]
+  /** History files whose summaries were loaded, by id (from selectReplayFiles); any other is noted. */
+  loadedFiles?: Map<string, LoadedFile>
 }
 
 interface Turn {
   role: 'user' | 'assistant'
   text: string
   images: LoadedImage[]
+  files: LoadedFile[]
 }
 
 const imageBlock = (img: LoadedImage): ImageBlock => ({ type: 'image', source: { type: 'base64', media_type: img.media_type, data: img.data } })
+const fileBlock = (f: LoadedFile): TextBlock => ({ type: 'text', text: fileBlockText(f, f.summary) })
 const joinText = (a: string, b: string) => (a && b ? `${a}\n\n${b}` : a || b)
 
 /**
@@ -156,26 +198,41 @@ const joinText = (a: string, b: string) => (a && b ? `${a}\n\n${b}` : a || b)
  * when `loaded` has it, otherwise the turn's text opens with
  * "[image omitted: <name>]". Images do not count toward the char budget, but
  * a turn dropped for length takes its images with it.
+ *
+ * Spreadsheets: each file is its own text block (its summary in an
+ * <attachment> tag marked as data), after the images and before the text.
+ * The current message's files always go; a history file's summary only when
+ * `loadedFiles` has it, otherwise the turn opens with
+ * "[file: <name> — use read_attachment(file_id: …)]". Like images, the
+ * budget charges a file as its note, never its summary.
  */
 export function buildMessages(history: ContextTurn[], message: string, opts: BuildOptions = {}): ChatTurnParam[] {
   const current = message.trim()
   const loaded = opts.loaded ?? new Map<string, LoadedImage>()
+  const loadedFiles = opts.loadedFiles ?? new Map<string, LoadedFile>()
   const kept: Turn[] = []
   const { from, omitted: dropped } = keptTurns(history)
   let omitted = dropped
   for (let i = from; i < history.length; i++) {
     const turn = history[i]
     const refs = turn.role === 'user' ? (turn.images ?? []) : []
+    const fileRefs = turn.role === 'user' ? (turn.files ?? []) : []
     const raw = turn.text.trim()
-    if (!raw && !refs.length) continue
+    if (!raw && !refs.length && !fileRefs.length) continue
     const images: LoadedImage[] = []
+    const files: LoadedFile[] = []
     const notes: string[] = []
     for (const r of refs) {
       const img = loaded.get(r.path)
       if (img) images.push(img)
       else notes.push(omittedNote(r))
     }
-    kept.push({ role: turn.role, text: joinText(notes.join('\n'), truncate(raw)), images })
+    for (const r of fileRefs) {
+      const f = loadedFiles.get(r.id)
+      if (f) files.push(f)
+      else notes.push(fileNote(r))
+    }
+    kept.push({ role: turn.role, text: joinText(notes.join('\n'), truncate(raw)), images, files })
   }
   const merged: Turn[] = []
   for (const t of kept) {
@@ -183,21 +240,22 @@ export function buildMessages(history: ContextTurn[], message: string, opts: Bui
     if (last && last.role === t.role) {
       last.text = joinText(last.text, t.text)
       last.images = [...last.images, ...t.images]
-    } else merged.push({ ...t, images: [...t.images] })
+      last.files = [...last.files, ...t.files]
+    } else merged.push({ ...t, images: [...t.images], files: [...t.files] })
   }
   while (merged.length && merged[0].role === 'assistant') {
     merged.shift()
     omitted = true
   }
-  let tail: Turn = { role: 'user', text: current, images: opts.current ?? [] }
+  let tail: Turn = { role: 'user', text: current, images: opts.current ?? [], files: opts.currentFiles ?? [] }
   if (merged.length && merged[merged.length - 1].role === 'user') {
     const prev = merged.pop()!
-    tail = { role: 'user', text: joinText(prev.text, current), images: [...prev.images, ...tail.images] }
+    tail = { role: 'user', text: joinText(prev.text, current), images: [...prev.images, ...tail.images], files: [...prev.files, ...tail.files] }
   }
   const turns: Turn[] = [...merged, tail]
   if (omitted) turns[0] = { ...turns[0], text: joinText(OMITTED, turns[0].text) }
   return turns.map((t) => ({
     role: t.role,
-    content: [...t.images.map(imageBlock), ...(t.text ? [{ type: 'text' as const, text: t.text }] : [])],
+    content: [...t.images.map(imageBlock), ...t.files.map(fileBlock), ...(t.text ? [{ type: 'text' as const, text: t.text }] : [])],
   }))
 }
