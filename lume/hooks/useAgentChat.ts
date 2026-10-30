@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ApprovalDecision, ChatApproval } from '@/components/agent/ApprovalCard'
 import type { ToolLogEntry } from '@/components/orb/ToolLog'
 import { parseSseFrames, type AgentEvent } from '@/lib/agent/chat'
-import type { StoredMessage } from '@/lib/agent/history'
+import { attachmentsOf, type StoredMessage } from '@/lib/agent/history'
+import { imageUrl, type ChatImageRef } from '@/lib/agent/images'
 import type { SkillMode } from '@/lib/agent/skillModel'
 
 export interface ChatMessage {
@@ -23,12 +24,18 @@ export interface ChatMessage {
   skill?: { name: string; mode: SkillMode }
   /** An automatic follow-up turn (an approval outcome): a muted line, not a bubble. */
   auto?: boolean
+  /** Images the owner attached (shown through the authed proxy). */
+  images?: { url: string; name: string }[]
 }
 
 export interface SendOptions {
   /** Sent by Lume itself (an approval outcome), not typed by the owner. */
   auto?: boolean
+  /** Images already uploaded through `POST /api/agent/images`. */
+  images?: ChatImageRef[]
 }
+
+const shownImages = (refs: ChatImageRef[]) => refs.map((r) => ({ url: imageUrl(r.path), name: r.name }))
 
 /** A saved skill to send with the next message: run it, or attach it as reference. */
 export interface SkillRef {
@@ -167,6 +174,7 @@ export function storedToChat(m: StoredMessage): ChatMessage {
     approvals: (m.approvals ?? []) as ChatApproval[],
     ...(m.error ? { error: m.error } : {}),
     ...(m.auto ? { auto: true } : {}),
+    ...(attachmentsOf(m.attachments).length ? { images: shownImages(attachmentsOf(m.attachments)) } : {}),
   }
 }
 
@@ -241,7 +249,8 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
   const send = useCallback(
     async (raw: string, skill?: SkillRef, sendOpts: SendOptions = {}) => {
       const text = raw.trim()
-      if (!text || busyRef.current) return
+      const images = sendOpts.images ?? []
+      if ((!text && !images.length) || busyRef.current) return
       busyRef.current = true
       setBusy(true)
       const userMsg: ChatMessage = {
@@ -252,6 +261,7 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
         approvals: [],
         ...(skill ? { skill: { name: skill.name, mode: skill.mode } } : {}),
         ...(sendOpts.auto ? { auto: true } : {}),
+        ...(images.length ? { images: shownImages(images) } : {}),
       }
       const aid = nextId()
       setMessages((ms) => [...ms, userMsg, { id: aid, role: 'assistant', text: '', tools: [], approvals: [], streaming: true }])
@@ -262,6 +272,7 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prompt: text,
+            ...(images.length ? { images: images.map(({ path, name }) => ({ path, name })) } : {}),
             ...(currentRef.current
               ? { conversation_id: currentRef.current }
               : {
@@ -277,6 +288,8 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
           const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string }
           if (res.status === 503 || body.error === 'agent_not_configured') {
             patch(aid, (m) => ({ ...m, notConfigured: true, error: body.message ?? 'The agent is not configured yet.' }))
+          } else if (body.error === 'image_not_found') {
+            patch(aid, (m) => ({ ...m, error: 'An attached image could not be read. Attach it again and resend.' }))
           } else if (body.error === 'skill_not_found') {
             patch(aid, (m) => ({ ...m, error: 'That skill was deleted. Pick another one.' }))
           } else if (res.status === 404) {

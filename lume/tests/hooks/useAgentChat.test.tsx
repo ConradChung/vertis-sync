@@ -179,3 +179,36 @@ describe('applyAgentEvent: tool warnings', () => {
     expect(m2.tools[0]).toMatchObject({ status: 'awaiting', warnings: ['Step 1 — sequence_structure (warning): x'] })
   })
 })
+
+describe('images', () => {
+  const IMG = { path: '0f3c2b1a-9d8e-4f7a-8b6c-5d4e3f2a1b0c.png', name: 'shot.png', media_type: 'image/png' as const }
+
+  it('sends uploaded image paths with the prompt (image-only allowed) and shows them on the bubble', async () => {
+    const fetchMock = vi.fn(async () => sse([{ type: 'done' }]))
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useAgentChat())
+    await act(() => result.current.send('', undefined, { images: [IMG] }))
+    expect(runBodies(fetchMock)[0]).toEqual({ prompt: '', images: [{ path: IMG.path, name: 'shot.png' }] })
+    expect(result.current.messages[0]).toMatchObject({
+      role: 'user',
+      text: '',
+      images: [{ url: `/api/agent/images/${IMG.path}`, name: 'shot.png' }],
+    })
+  })
+
+  it('an empty message with no images is not sent', async () => {
+    const fetchMock = vi.fn(async () => sse([{ type: 'done' }]))
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useAgentChat())
+    await act(() => result.current.send('   '))
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('a reloaded message shows its stored images through the authed proxy', () => {
+    const stored = {
+      id: 'm1', conversation_id: 'c', role: 'user', text: 'see', tools: [], approvals: [], error: null, run_id: null, auto: false,
+      attachments: [IMG, { path: '../x', name: 'bad', media_type: 'image/png' }], created_at: '',
+    } as unknown as StoredMessage
+    expect(storedToChat(stored).images).toEqual([{ url: `/api/agent/images/${IMG.path}`, name: 'shot.png' }])
+  })
+})
