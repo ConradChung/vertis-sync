@@ -7,7 +7,7 @@ import { AgentHistory, useConversationList, useMoveChat } from '@/components/age
 import { ProjectChip } from '@/components/agent/ProjectChip'
 import { useProjectList } from '@/hooks/useProjectList'
 import { useFileDropGuard } from '@/hooks/useFileDropGuard'
-import { AttachButton, filesFrom, ImageChips, useImageAttachments } from '@/components/agent/ImageAttachments'
+import { AttachButton, filesFrom, ImageChips, pastedImages, useImageAttachments } from '@/components/agent/ImageAttachments'
 import { ApprovalCard, type ApprovalDecision } from '@/components/agent/ApprovalCard'
 import { ManageSkills, SkillCard, SkillMenu, useSkillList } from '@/components/agent/AgentSkills'
 import { Markdown } from '@/components/agent/Markdown'
@@ -492,11 +492,11 @@ export function AgentChat() {
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onPaste={(e) => {
-                  // A copied screenshot arrives as a file; text in the same paste still goes in as usual.
-                  const files = filesFrom(e.clipboardData)
+                  // A copied screenshot arrives as a file; a paste with any text pastes the text only.
+                  const files = pastedImages(e.clipboardData)
                   if (!files.length) return
+                  e.preventDefault()
                   images.add(files)
-                  if (!Array.from(e.clipboardData.types ?? []).includes('text/plain')) e.preventDefault()
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {

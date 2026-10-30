@@ -109,9 +109,31 @@ export function useImageAttachments(codec?: ImageCodec): ImageAttachments {
   }
 }
 
-/** The files in a paste or drop (non-images too, so they get a clear refusal). */
+/**
+ * The files in a paste or drop (non-images too, so they get a clear refusal).
+ * Falls back to `items` (kind 'file') when `files` is empty, as Safari leaves
+ * it for some pastes.
+ */
 export function filesFrom(data: DataTransfer | null): File[] {
-  return data ? Array.from(data.files ?? []) : []
+  if (!data) return []
+  const files = Array.from(data.files ?? [])
+  if (files.length) return files
+  return Array.from(data.items ?? [])
+    .filter((it) => it.kind === 'file')
+    .map((it) => it.getAsFile())
+    .filter((f): f is File => !!f)
+}
+
+/**
+ * A paste's images, or none when it carries text: Excel, Numbers and Word put
+ * a rendered picture of the copied cells next to the text, and the owner meant
+ * the text. Only a paste with no text type (a screenshot, a copied image) attaches.
+ */
+export function pastedImages(data: DataTransfer | null): File[] {
+  if (!data) return []
+  const types = Array.from(data.types ?? [])
+  if (types.includes('text/plain') || types.includes('text/html')) return []
+  return filesFrom(data)
 }
 
 export function ImageChips({ items, onRemove, disabled }: { items: Attachment[]; onRemove: (id: string) => void; disabled?: boolean }) {

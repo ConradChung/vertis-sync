@@ -365,6 +365,27 @@ describe('AgentChat images', () => {
     expect(textPaste).toBe(true) // not prevented: the browser inserts the text
   })
 
+  it('a paste from Excel / Numbers / Word (text plus a rendered picture) pastes the text only', async () => {
+    const { fetchMock, box } = setup()
+    for (const types of [['text/plain', 'text/html', 'Files'], ['text/html', 'Files']]) {
+      const notPrevented = fireEvent.paste(box, { clipboardData: { files: [png('table.png')], types, getData: () => 'a\tb' } })
+      expect(notPrevented).toBe(true)
+    }
+    await new Promise((r) => setTimeout(r, 0))
+    expect(screen.queryByRole('button', { name: 'Remove table.png' })).toBeNull()
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).startsWith('/api/agent/images'))).toBe(false)
+  })
+
+  it('falls back to clipboardData.items when .files is empty (Safari)', async () => {
+    const { box } = setup()
+    const f = png('safari.png')
+    const prevented = !fireEvent.paste(box, {
+      clipboardData: { files: [], types: ['Files'], items: [{ kind: 'string', getAsFile: () => null }, { kind: 'file', getAsFile: () => f }] },
+    })
+    expect(prevented).toBe(true)
+    await screen.findByRole('button', { name: 'Remove safari.png' })
+  })
+
   it('dropped images become chips; × removes one', async () => {
     const { box } = setup()
     const form = box.closest('form')!
