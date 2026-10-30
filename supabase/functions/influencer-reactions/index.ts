@@ -10,6 +10,7 @@
 //        only after the owner approved that bill in Lume: continues with
 //        reactions, triage, verify, doors, output.
 // POST { action: 'cancel', run_id }   cancels and aborts the run's live Apify runs.
+// POST { action: 'sweep' }           the 5-minute pg_cron sweep (lume_influencer_sweep_tick).
 // POST { run_id, prev }               internal: the hand-off chain.
 //
 // Caller: service role only (constant-time compare with SUPABASE_SERVICE_ROLE_KEY);
@@ -100,6 +101,8 @@ export const POLL_SLEEP_MS = 10_000
 export const STALE_MINUTES = 30
 /** Transient errors in a row before a run is failed (each invocation retries the step once with backoff). */
 export const MAX_TRANSIENT_STREAK = 8
+/** A running Apify row is aborted (then ingested) after this, ahead of the sweep's 30-minute cut. */
+export const RUN_ABORT_AFTER_MS = 25 * 60_000
 const TRANSIENT_PAUSE_MS = 15_000
 const HANDOFF_MS = 10_000
 const PPLX_TIMEOUT_MS = 40_000
@@ -275,6 +278,7 @@ interface ApifyRow {
   cost_usd: number | string
   item_count: number | null
   ingested_at: string | null
+  started_at?: string | null
 }
 
 export interface Deps {
@@ -390,25 +394,38 @@ async function startApify(ctx: Ctx, inf: Influencer, kind: 'posts' | 'reactions'
     await fail({ error: `Apify answered ${res.status} without a run id; the reservation stays as the cost` })
     return 'ok'
   }
+  let recorded: unknown
   try {
-    await restRetry(ctx, 'PATCH', `influencer_apify_runs?id=eq.${rowId}`, {
+    // Only a still-pending row: a cancel (or the sweep) may have closed it while the start was in flight.
+    recorded = await restRetry(ctx, 'PATCH', `influencer_apify_runs?id=eq.${rowId}&status=eq.pending`, {
       status: 'running', apify_run_id: runId, dataset_id: body?.data?.defaultDatasetId ?? null, started_at: new Date().toISOString(),
-    })
+    }, 3, 'return=representation')
   } catch (err) {
     console.error(`[${FN}] ${ctx.run.id}: could not record Apify run ${runId}; aborting it:`, err)
     await abortApify([runId])
     // Best effort: the run id goes in the error. If this write fails too, the sweep
     // fails the pending row after 5 minutes (reservation kept as the cost).
     await fail({ error: `Apify run ${runId} started but could not be recorded; aborted. The reservation stays as the cost.` }).catch(() => undefined)
+    return 'ok'
+  }
+  if (!Array.isArray(recorded) || recorded.length === 0) {
+    // The row was closed (cancelled, failed, swept) while the start was in flight: never revive it.
+    console.warn(`[${FN}] ${ctx.run.id}: Apify run ${runId} started after its row was closed; aborting it`)
+    await abortApify([runId])
+    await restRetry(ctx, 'PATCH', `influencer_apify_runs?id=eq.${rowId}`, {
+      apify_run_id: runId,
+      error: `Apify run ${runId} started after the row was closed (cancelled or failed meanwhile); aborted at once. The reservation stays as the cost.`,
+    }).catch(() => undefined)
+    return 'stopped'
   }
   return 'ok'
 }
 
 /** A state write that must land: 3 attempts with a short backoff. */
-async function restRetry(ctx: Ctx, method: string, path: string, body: unknown, attempts = 3): Promise<unknown> {
+async function restRetry(ctx: Ctx, method: string, path: string, body: unknown, attempts = 3, prefer?: string): Promise<unknown> {
   for (let i = 1; ; i++) {
     try {
-      return await rest(method, path, body)
+      return await rest(method, path, body, prefer)
     } catch (err) {
       if (i >= attempts) throw err
       await ctx.deps.sleep(500 * i)
@@ -449,15 +466,22 @@ async function pollApify(ctx: Ctx, rows: ApifyRow[], ingest: (row: ApifyRow, ite
     const run = await readRun(ctx, row.apify_run_id)
     if (!TERMINAL.has(run.status ?? '')) {
       live = true
+      // Before the sweep's 30-minute cut (which closes the row without reading it),
+      // abort the run ourselves: the next poll ingests what its dataset already holds.
+      const started = Date.parse(row.started_at ?? '')
+      if (Number.isFinite(started) && Date.now() - started > RUN_ABORT_AFTER_MS) await abortApify([row.apify_run_id])
       continue
     }
     const now = new Date().toISOString()
-    if (run.status === 'SUCCEEDED' || run.status === 'TIMED-OUT') {
+    // ABORTED here is our own abort near the time limit (a cancel closes the row first): its items are paid for.
+    if (run.status === 'SUCCEEDED' || run.status === 'TIMED-OUT' || run.status === 'ABORTED') {
       const items = await readItems(ctx, run.defaultDatasetId ?? row.dataset_id ?? '')
       await ingest(row, items)
       await rest('PATCH', `influencer_apify_runs?id=eq.${row.id}&status=eq.running`, {
         status: 'succeeded', cost_usd: apifyActualUsd(run, items.length, pricePer1k), item_count: items.length,
-        ingested_at: now, finished_at: now, ...(run.status === 'TIMED-OUT' ? { error: 'timed out: partial results' } : {}),
+        ingested_at: now, finished_at: now,
+        ...(run.status === 'TIMED-OUT' ? { error: 'timed out: partial results' } : {}),
+        ...(run.status === 'ABORTED' ? { error: `aborted after ${RUN_ABORT_AFTER_MS / 60_000} minutes: partial results` } : {}),
       })
     } else {
       const usage = typeof run.usageTotalUsd === 'number' && run.usageTotalUsd >= 0 ? run.usageTotalUsd : num(row.estimate_usd)
@@ -636,7 +660,8 @@ async function askPerplexity(ctx: Ctx, question: string): Promise<PplxAnswer> {
     const wait = RETRY_BACKOFF_MS[attempt]
     const left = WALL_CLOCK_MS - (ctx.deps.now() - ctx.startedAt)
     if (!retryable(res.status) || wait === undefined || left < wait + PPLX_TIMEOUT_MS + HAIKU_TIMEOUT_MS + 10_000) {
-      throw new Error(`Perplexity ${res.status}: ${text}`)
+      const msg = `Perplexity ${res.status}: ${text}`
+      throw retryable(res.status) ? new TransientError(msg) : new Error(msg)
     }
     await ctx.deps.sleep(wait)
   }
@@ -646,7 +671,12 @@ function budgetLeft(ctx: Ctx): number {
   return num(ctx.run.max_verify_usd) - num(ctx.run.cost?.perplexity)
 }
 
-async function verifyOne(ctx: Ctx, r: VerifyRow): Promise<number> {
+/** What one verify / door retry spent, and a transient error to re-raise after the step's bookkeeping. */
+interface WorkOut { spent: number; transient?: TransientError }
+
+const isTransient = (err: unknown): err is TransientError => err instanceof TransientError
+
+async function verifyOne(ctx: Ctx, r: VerifyRow): Promise<WorkOut> {
   const now = () => new Date().toISOString()
   let spent = 0
   try {
@@ -664,16 +694,21 @@ async function verifyOne(ctx: Ctx, r: VerifyRow): Promise<number> {
       pplx_cost_usd: r4(num(r.pplx_cost_usd) + spent), updated_at: now(),
     })
   } catch (err) {
+    if (isTransient(err)) {
+      // Not this reactor's fault: no attempt used, no verdict; it stays pending for the next step. Keep what was paid.
+      if (spent > 0) await rest('PATCH', `influencer_reactors?id=eq.${r.id}`, { pplx_cost_usd: r4(num(r.pplx_cost_usd) + spent), updated_at: now() })
+      return { spent, transient: err }
+    }
     const message = err instanceof Error ? err.message : String(err)
     await rest('PATCH', `influencer_reactors?id=eq.${r.id}`, {
       verdict: 'error', verify_attempts: r.verify_attempts + 1, verify_reason: message.slice(0, 2000),
       verified_run: ctx.run.id, pplx_cost_usd: r4(num(r.pplx_cost_usd) + spent), updated_at: now(),
     })
   }
-  return spent
+  return { spent }
 }
 
-async function doorOne(ctx: Ctx, r: VerifyRow): Promise<number> {
+async function doorOne(ctx: Ctx, r: VerifyRow): Promise<WorkOut> {
   let spent = 0
   const patch: Record<string, unknown> = { door_retried: true, updated_at: new Date().toISOString() }
   try {
@@ -686,11 +721,16 @@ async function doorOne(ctx: Ctx, r: VerifyRow): Promise<number> {
       Object.assign(patch, { door_count: p.door_count, door_count_source: p.door_count_source, door_count_confidence: p.door_count_confidence })
     }
   } catch (err) {
+    if (isTransient(err)) {
+      // Retried on a later step: not marked door_retried. Keep what was paid.
+      if (spent > 0) await rest('PATCH', `influencer_reactors?id=eq.${r.id}`, { pplx_cost_usd: r4(num(r.pplx_cost_usd) + spent), updated_at: new Date().toISOString() })
+      return { spent, transient: err }
+    }
     console.warn(`[${FN}] door retry ${r.id}:`, err instanceof Error ? err.message : err)
   }
   patch.pplx_cost_usd = r4(num(r.pplx_cost_usd) + spent)
   await rest('PATCH', `influencer_reactors?id=eq.${r.id}`, patch)
-  return spent
+  return { spent }
 }
 
 const VERIFY_COLS = 'id,name,headline,triage,verdict,verify_attempts,company_name,location,door_count,door_retried,pplx_cost_usd'
@@ -713,10 +753,12 @@ async function stageVerify(ctx: Ctx, doors: boolean): Promise<StepResult> {
     ctx.run.stage = next
     return 'continue'
   }
-  const spent = await Promise.all(rows.map((r) => (doors ? doorOne(ctx, r) : verifyOne(ctx, r))))
-  addCost(ctx, 'perplexity', spent.reduce((s, x) => s + x, 0))
-  addCount(ctx, doors ? 'door_retries' : 'verify_calls', rows.length)
+  const outs = await Promise.all(rows.map((r) => (doors ? doorOne(ctx, r) : verifyOne(ctx, r))))
+  addCost(ctx, 'perplexity', outs.reduce((s, o) => s + o.spent, 0))
+  addCount(ctx, doors ? 'door_retries' : 'verify_calls', outs.filter((o) => !o.transient).length)
   await patchRun(ctx, { cost: ctx.run.cost, counts: ctx.run.counts })
+  const transient = outs.find((o) => o.transient)?.transient
+  if (transient) throw transient
   return 'continue'
 }
 
@@ -836,7 +878,7 @@ export async function advance(runId: string, prev: string | null, deps: Deps = {
     if (d.now() - startedAt + TRANSIENT_PAUSE_MS < WALL_CLOCK_MS - HANDOFF_MS * 2) await d.sleep(TRANSIENT_PAUSE_MS)
   }
   const handed = await (deps.handOff ?? selfInvoke)(runId, token)
-  if (!handed) await notify(runId, 'influencer_run_handoff', 'warn', 'PM influencer run: could not start the next chunk after 4 attempts; the stale sweep will fail it in 30 minutes.')
+  if (!handed) await notify(runId, 'influencer_run_handoff', 'warn', 'PM influencer run: could not start the next chunk after 4 attempts. The sweep (every 5 minutes) fails it about 30 minutes after its last progress and aborts its Apify runs; cancel it sooner if you want.')
 }
 
 /**
@@ -869,13 +911,22 @@ async function abortApify(ids: (string | null)[]): Promise<void> {
   }))
 }
 
-async function sweepStale(): Promise<void> {
+/**
+ * Stale chains, hung or never-started Apify rows, rows under a finished run,
+ * max run age, expired approvals (lume_influencer_sweep), then abort the
+ * closed rows' Apify runs. Runs on every invocation and every 5 minutes from
+ * pg_cron (action 'sweep', lume_influencer_sweep_tick).
+ */
+async function sweepStale(): Promise<{ closed: number; aborted: number }> {
   try {
-    // Stale chains, hung or never-started Apify rows, rows under a finished run, max run age, expired approvals.
     const rows = (await rpc('lume_influencer_sweep', { p_stale_minutes: STALE_MINUTES })) as { run_id: string; apify_run_id: string | null }[]
-    if (Array.isArray(rows) && rows.length) await abortApify(rows.map((r) => r.apify_run_id))
+    const list = Array.isArray(rows) ? rows : []
+    const ids = list.map((r) => r.apify_run_id).filter((x): x is string => !!x)
+    if (ids.length) await abortApify(ids)
+    return { closed: list.length, aborted: ids.length }
   } catch (err) {
     console.error(`[${FN}] stale sweep failed:`, err)
+    return { closed: 0, aborted: 0 }
   }
 }
 
@@ -974,6 +1025,8 @@ export async function handle(
     return reply({ error: 'invalid_json' }, 400)
   }
 
+  // The cron's sweep action runs it in the foreground (and only once).
+  if (body.action === 'sweep') return reply({ ok: true, ...(await sweepStale()) }, 200)
   waitUntil(sweepStale())
   try {
     switch (body.action) {
