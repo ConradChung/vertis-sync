@@ -7,6 +7,7 @@ import { AgentHistory, useConversationList, useMoveChat } from '@/components/age
 import { ProjectChip } from '@/components/agent/ProjectChip'
 import { useProjectList } from '@/hooks/useProjectList'
 import { useFileDropGuard } from '@/hooks/useFileDropGuard'
+import { AttachButton, filesFrom, ImageChips, useImageAttachments } from '@/components/agent/ImageAttachments'
 import { ApprovalCard, type ApprovalDecision } from '@/components/agent/ApprovalCard'
 import { ManageSkills, SkillCard, SkillMenu, useSkillList } from '@/components/agent/AgentSkills'
 import { Markdown } from '@/components/agent/Markdown'
@@ -98,6 +99,8 @@ export function AgentChat() {
   })
   const speech = useSpeechRecognition()
   const [draft, setDraft] = useState('')
+  const images = useImageAttachments()
+  const [dragging, setDragging] = useState(false)
   const [hello, setHello] = useState('Hello')
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
@@ -213,26 +216,32 @@ export function AgentChat() {
 
   const submit = useCallback(
     (text: string) => {
-      if (!text.trim() || busy || chat.loading) return
+      // Images still uploading hold the send; an image-only message is fine.
+      if ((!text.trim() && !images.refs.length) || busy || chat.loading || images.pending) return
       setDraft('')
+      const opts = images.refs.length ? { images: images.refs } : undefined
+      images.clear()
       // A skill attached as reference rides along with this one message.
       if (picked && attach === 'reference') {
-        void send(text, { id: picked.id, name: picked.name, mode: 'reference' })
+        void send(text, { id: picked.id, name: picked.name, mode: 'reference' }, opts)
         clearSkill()
         return
       }
-      void send(text)
+      void send(text, undefined, opts)
     },
-    [busy, chat.loading, send, picked, attach, clearSkill]
+    [busy, chat.loading, send, picked, attach, clearSkill, images]
   )
 
   const runSkill = useCallback(() => {
     if (!picked || busy || chat.loading) return
+    if (images.pending) return
     const extra = draft.trim()
     setDraft('')
-    void send(`Run the skill "${picked.name}".${extra ? `\n\n${extra}` : ''}`, { id: picked.id, name: picked.name, mode: 'run' })
+    const opts = images.refs.length ? { images: images.refs } : undefined
+    images.clear()
+    void send(`Run the skill "${picked.name}".${extra ? `\n\n${extra}` : ''}`, { id: picked.id, name: picked.name, mode: 'run' }, opts)
     clearSkill()
-  }, [picked, busy, chat.loading, draft, send, clearSkill])
+  }, [picked, busy, chat.loading, draft, send, clearSkill, images])
 
   // Drop a picked skill that was deleted in Manage.
   useEffect(() => {
@@ -445,14 +454,33 @@ export function AgentChat() {
                 onManage={() => setManageOpen(true)}
               />
             </div>
+            <ImageChips items={images.items} onRemove={images.remove} disabled={busy} />
             <form
               className={cn(
                 'glass flex items-end gap-2 rounded-2xl p-2 pl-4 transition-colors focus-within:border-primary/60',
-                speech.listening && 'border-primary/60'
+                (speech.listening || dragging) && 'border-primary/60',
+                dragging && 'bg-accent'
               )}
               onSubmit={(e) => {
                 e.preventDefault()
                 submit(draft)
+              }}
+              onDragOver={(e) => {
+                if (busy || !Array.from(e.dataTransfer.types ?? []).includes('Files')) return
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'copy'
+                setDragging(true)
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false)
+              }}
+              onDrop={(e) => {
+                setDragging(false)
+                const files = filesFrom(e.dataTransfer)
+                if (busy || !files.length) return
+                e.preventDefault()
+                images.add(files)
+                inputRef.current?.focus()
               }}
             >
               <label htmlFor="agent-composer" className="sr-only">
@@ -463,6 +491,13 @@ export function AgentChat() {
                 ref={inputRef}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
+                onPaste={(e) => {
+                  // A copied screenshot arrives as a file; text in the same paste still goes in as usual.
+                  const files = filesFrom(e.clipboardData)
+                  if (!files.length) return
+                  images.add(files)
+                  if (!Array.from(e.clipboardData.types ?? []).includes('text/plain')) e.preventDefault()
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault()
@@ -484,16 +519,22 @@ export function AgentChat() {
                 aria-describedby="agent-composer-hint"
                 className="max-h-[220px] min-h-10 flex-1 resize-none bg-transparent py-2 focus-visible:outline-none! text-[15px] leading-6 text-fg outline-none placeholder:text-fg-24 disabled:opacity-60"
               />
+              <AttachButton onFiles={images.add} disabled={busy} />
               <VoiceInput speech={speech} onFinal={submit} />
               <button
                 type="submit"
-                disabled={busy || !draft.trim()}
+                disabled={busy || images.pending || (!draft.trim() && !images.refs.length)}
                 aria-label="Send message"
                 className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-[opacity,background-color] outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-35 dark:shadow-(--primary-glow)"
               >
                 <ArrowUp className="size-4" />
               </button>
             </form>
+            {images.error && (
+              <p className="mt-2 text-center text-[12px] text-red" role="alert">
+                {images.error}
+              </p>
+            )}
             <p id="agent-composer-hint" className="mt-2 flex items-center justify-center gap-3 text-[11px] text-fg-24 max-sm:sr-only">
               <span>Enter to send · Shift+Enter for a new line</span>
               <span aria-hidden>·</span>
@@ -669,7 +710,17 @@ function Message({
               {m.skill.mode === 'run' ? 'Running skill' : 'Skill as reference'}: {m.skill.name}
             </span>
           )}
-          <div className="rounded-2xl bg-white/8 px-4 py-2.5 text-[15px] leading-6 whitespace-pre-wrap text-fg">{m.text}</div>
+          {m.images && m.images.length > 0 && (
+            <div className="flex flex-wrap justify-end gap-2">
+              {m.images.map((img, i) => (
+                <a key={`${img.url}-${i}`} href={img.url} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-xl border border-line bg-white/4">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- served by the owner-only proxy; next/image would fetch it without the session */}
+                  <img src={img.url} alt={img.name} title={img.name} loading="lazy" className="max-h-48 max-w-[16rem] object-cover" />
+                </a>
+              ))}
+            </div>
+          )}
+          {m.text && <div className="rounded-2xl bg-white/8 px-4 py-2.5 text-[15px] leading-6 whitespace-pre-wrap text-fg">{m.text}</div>}
         </div>
       </div>
     )

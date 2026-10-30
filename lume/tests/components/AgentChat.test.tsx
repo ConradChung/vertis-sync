@@ -313,3 +313,81 @@ describe('Markdown', () => {
     expect(links.map((a) => a.getAttribute('href'))).toEqual(['/actions/1'])
   })
 })
+
+describe('AgentChat images', () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
+  const REF = { path: '0f3c2b1a-9d8e-4f7a-8b6c-5d4e3f2a1b0c.png', name: 'shot.png', media_type: 'image/png' }
+  const png = (name = 'shot.png') => new File([PNG], name, { type: 'image/png' })
+
+  beforeEach(() => {
+    vi.stubGlobal('createImageBitmap', async () => ({ width: 10, height: 10, close() {} }))
+    URL.createObjectURL = vi.fn(() => 'blob:preview')
+    URL.revokeObjectURL = vi.fn()
+  })
+
+  function setup() {
+    const fetchMock = router({
+      run: () => sseResponse([{ type: 'run', id: 'r1', conversation_id: CONV }, { type: 'text', delta: 'A login screen.' }, { type: 'done' }]),
+      other: (url) =>
+        url.startsWith('/api/agent/images?')
+          ? Response.json({ ...REF, name: new URL(url, 'https://lume.test').searchParams.get('name') })
+          : Response.json({ ok: true }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<AgentChat />)
+    return { fetchMock, box: screen.getByLabelText('Message Lume') }
+  }
+
+  it('a pasted screenshot becomes a chip, uploads, and can be sent on its own', async () => {
+    const { fetchMock, box } = setup()
+    fireEvent.paste(box, { clipboardData: { files: [png()], types: ['Files'] } })
+    await screen.findByRole('img', { name: 'shot.png' })
+    await waitFor(() => expect(screen.queryByRole('status', { name: /Uploading/ })).toBeNull())
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).startsWith('/api/agent/images?name=shot.png'))).toBe(true)
+    const send = screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement
+    expect(send.disabled).toBe(false)
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await screen.findByText('A login screen.')
+    const runCall = fetchMock.mock.calls.find((c) => c[0] === '/api/agent/run')!
+    expect(JSON.parse(runCall[1]!.body as string)).toEqual({ prompt: '', images: [{ path: REF.path, name: 'shot.png' }] })
+    // The chip is gone; the bubble shows the image through the authed proxy.
+    expect(screen.queryByRole('button', { name: 'Remove shot.png' })).toBeNull()
+    expect(screen.getByRole('img', { name: 'shot.png' }).getAttribute('src')).toBe(`/api/agent/images/${REF.path}`)
+  })
+
+  it('a non-image paste gets an inline error and no chip; plain text pastes as usual', async () => {
+    const { fetchMock, box } = setup()
+    fireEvent.paste(box, { clipboardData: { files: [new File(['%PDF-1.7'], 'notes.pdf', { type: 'application/pdf' })], types: ['Files'] } })
+    expect((await screen.findByRole('alert')).textContent).toMatch(/notes\.pdf is not a PNG, JPEG, GIF or WebP image/)
+    expect(screen.queryByRole('img', { name: 'notes.pdf' })).toBeNull()
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).startsWith('/api/agent/images'))).toBe(false)
+    const textPaste = fireEvent.paste(box, { clipboardData: { files: [], types: ['text/plain'], getData: () => 'hello' } })
+    expect(textPaste).toBe(true) // not prevented: the browser inserts the text
+  })
+
+  it('dropped images become chips; × removes one', async () => {
+    const { box } = setup()
+    const form = box.closest('form')!
+    fireEvent.dragOver(form, { dataTransfer: { files: [], types: ['Files'] } })
+    fireEvent.drop(form, { dataTransfer: { files: [png('a.png'), png('b.png')], types: ['Files'] } })
+    await screen.findByRole('button', { name: 'Remove a.png' })
+    fireEvent.click(screen.getByRole('button', { name: 'Remove a.png' }))
+    expect(screen.queryByRole('button', { name: 'Remove a.png' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Remove b.png' })).toBeTruthy()
+  })
+
+  it('caps a message at 5 images and says so', async () => {
+    const { box } = setup()
+    fireEvent.paste(box, { clipboardData: { files: Array.from({ length: 6 }, (_, i) => png(`s${i}.png`)), types: ['Files'] } })
+    expect((await screen.findByRole('alert')).textContent).toMatch(/Up to 5 images per message/)
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /^Remove s\d\.png$/ })).toHaveLength(5))
+  })
+
+  it('the paperclip opens a picker limited to the accepted types', () => {
+    setup()
+    expect(screen.getByRole('button', { name: 'Attach images' })).toBeTruthy()
+    const input = screen.getByTestId('agent-attach-input') as HTMLInputElement
+    expect(input.accept).toBe('image/png,image/jpeg,image/gif,image/webp')
+    expect(input.multiple).toBe(true)
+  })
+})

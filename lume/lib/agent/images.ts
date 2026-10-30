@@ -72,7 +72,6 @@ export function validateImageUpload(b: Uint8Array): ImageUploadCheck {
 /** A display name: the base name only, no control characters, ≤ 120 chars. */
 export function safeImageName(raw: string): string {
   const base = raw.split(/[\\/]/).pop() ?? ''
-  // eslint-disable-next-line no-control-regex
   const clean = base.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim()
   return (clean || 'image').slice(0, 120)
 }
