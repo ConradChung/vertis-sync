@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, Loader2, Maximize2, Table2, Workflow, X } from 'lucide-react'
 import { useOpenInPlayground } from '@/components/agent/DiagramCard'
+import { DiagramBoundary } from '@/components/agent/DiagramBoundary'
 import { LeadsPanel } from '@/components/agent/LeadsPanel'
 import { PlaygroundCanvas } from '@/components/playground/PlaygroundCanvas'
 import { Button } from '@/components/ui/button'
@@ -156,7 +157,9 @@ export function AgentSidePanel({
             {active.diagram.title && (
               <p className="pointer-events-none absolute top-3 left-4 z-10 text-[12px] font-medium tracking-wide text-fg-46 uppercase max-sm:hidden">{active.diagram.title}</p>
             )}
-            <PlaygroundCanvas key={`${active.key}:${dir}`} diagram={active.diagram} direction={dir} className="h-full rounded-none border-0 bg-transparent shadow-none" />
+            <DiagramBoundary resetKey={active.key}>
+              <PlaygroundCanvas key={`${active.key}:${dir}`} diagram={active.diagram} direction={dir} className="h-full rounded-none border-0 bg-transparent shadow-none" />
+            </DiagramBoundary>
           </>
         ) : (
           <div className="flex h-full items-center justify-center" role="status">

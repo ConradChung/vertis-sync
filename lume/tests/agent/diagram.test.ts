@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { canonicalJson, DIAGRAM_MAX_NODES, layoutDiagram, parseDiagram, placeDiagram } from '@/lib/agent/diagram'
+import { chatDiagrams } from '@/lib/agent/chatDiagrams'
 
 const sample = {
   title: 'Kaspen',
@@ -152,5 +153,22 @@ describe('feeder chains', () => {
     expect(new Set(['import', 'validate', 'enrich', 'push'].map((id) => p[id].row)).size).toBe(1)
     expect(p.bank.row).toBe(p.cron.row)
     expect(p.bank.row).not.toBe(p.enrich.row)
+  })
+})
+
+describe('parseDiagram identity (streaming re-renders)', () => {
+  const text = JSON.stringify({ title: 't', nodes: [{ id: 'a', label: 'A', kind: 'step', state: 'planned' }, { id: 'b', label: 'B', kind: 'step', state: 'planned' }], edges: [{ from: 'a', to: 'b' }] })
+
+  it('returns the same diagram object for the same text, so React Flow keeps its node measurements', () => {
+    const a = parseDiagram(text)
+    const b = parseDiagram(`${text}`.slice(0))
+    expect(a.ok && b.ok).toBe(true)
+    if (a.ok && b.ok) expect(b.diagram).toBe(a.diagram)
+  })
+
+  it('chatDiagrams keeps a finished diagram stable while the reply keeps streaming after it', () => {
+    const before = chatDiagrams([{ id: 'm', role: 'assistant', text: '```flow\n' + text + '\n```\nNext I will' }])
+    const after = chatDiagrams([{ id: 'm', role: 'assistant', text: '```flow\n' + text + '\n```\nNext I will check the queue' }])
+    expect(after[0].diagram).toBe(before[0].diagram)
   })
 })

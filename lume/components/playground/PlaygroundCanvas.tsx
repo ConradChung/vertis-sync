@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from 'next-themes'
-import { ReactFlow, ReactFlowProvider, useReactFlow, type NodeMouseHandler } from '@xyflow/react'
+import { ReactFlow, ReactFlowProvider, useNodesInitialized, useReactFlow, useStore, type FitViewOptions, type NodeMouseHandler } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Maximize, Minimize, Minus, Plus, RotateCcw, Scan } from 'lucide-react'
 import { NodeDetails } from '@/components/agent/NodeDetails'
@@ -87,6 +87,29 @@ function FocusSelected({ id, boxWidth }: { id: string | null; boxWidth: number }
     const h = n.measured?.height ?? 80
     void rf.setCenter(n.position.x + NODE_W / 2 + offset, n.position.y + h / 2, { zoom, duration: 350 })
   }, [id, boxWidth, rf])
+  return null
+}
+
+/**
+ * Fits the view again once the canvas has a real size and its nodes are
+ * measured. `fitView` on mount runs only once; a canvas mounted while its
+ * panel had no size (opening, resizing) would otherwise stay empty until Fit.
+ */
+function RefitWhenShown({ fit }: { fit: FitViewOptions }) {
+  const rf = useReactFlow()
+  const initialized = useNodesInitialized()
+  const sized = useStore((s) => s.width > 40 && s.height > 40)
+  const shown = useRef(false)
+  useEffect(() => {
+    if (!sized) {
+      shown.current = false
+      return
+    }
+    if (!initialized || shown.current) return
+    shown.current = true
+    const id = requestAnimationFrame(() => void rf.fitView(fit))
+    return () => cancelAnimationFrame(id)
+  }, [sized, initialized, rf, fit])
   return null
 }
 
@@ -189,6 +212,7 @@ export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { dia
         >
           <Controls fullscreen={fullscreen} onFullscreen={toggleFullscreen} />
           <FocusSelected id={selected} boxWidth={boxWidth} />
+          <RefitWhenShown fit={initialFit} />
         </ReactFlow>
       </ReactFlowProvider>
       {/* Phones: the legend moves to the top so it never collides with the zoom controls. */}

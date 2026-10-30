@@ -116,7 +116,28 @@ export function flowOrder(d: Pick<Diagram, 'nodes' | 'edges'>): string[] {
     .map((p) => p.id)
 }
 
-export function parseDiagram(text: string): { ok: true; diagram: Diagram } | { ok: false; error: string } {
+type ParseResult = { ok: true; diagram: Diagram } | { ok: false; error: string }
+
+/**
+ * Recent results by text. A reply re-renders on every streamed token, and a
+ * fresh diagram object each time gives React Flow new node objects, which drop
+ * their measurements and hide the nodes until re-measured (the panel flickers
+ * or stays blank while the agent keeps writing). Same text → same object.
+ * Callers must treat the result as read-only.
+ */
+const PARSE_CACHE = new Map<string, ParseResult>()
+const PARSE_CACHE_MAX = 64
+
+export function parseDiagram(text: string): ParseResult {
+  const hit = PARSE_CACHE.get(text)
+  if (hit) return hit
+  const r = parseDiagramUncached(text)
+  if (PARSE_CACHE.size >= PARSE_CACHE_MAX) PARSE_CACHE.delete(PARSE_CACHE.keys().next().value!)
+  PARSE_CACHE.set(text, r)
+  return r
+}
+
+function parseDiagramUncached(text: string): ParseResult {
   if (text.length > DIAGRAM_MAX_CHARS * 1.5) return { ok: false, error: 'diagram too large' }
   let raw: unknown
   try {

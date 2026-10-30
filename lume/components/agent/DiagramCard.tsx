@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronDown, Loader2, Maximize2, Workflow } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { DiagramBoundary } from '@/components/agent/DiagramBoundary'
 import { DiagramLegend, PipelineDiagram } from '@/components/agent/PipelineDiagram'
 import type { Diagram } from '@/lib/agent/diagram'
 import { cn } from '@/lib/utils'
@@ -75,7 +76,9 @@ export function DiagramCard({ diagram }: { diagram: Diagram }) {
       </header>
       {open && (
         <div className="px-3 pt-2 pb-3">
-          <PipelineDiagram diagram={diagram} direction="TB" animate />
+          <DiagramBoundary>
+            <PipelineDiagram diagram={diagram} direction="TB" animate />
+          </DiagramBoundary>
           <DiagramLegend className="mt-2 px-1" />
         </div>
       )}
