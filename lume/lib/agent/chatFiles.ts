@@ -186,16 +186,31 @@ export async function getChatFiles(ids: string[]): Promise<ChatFileRow[]> {
   return (res.data ?? []) as ChatFileRow[]
 }
 
-/** Is this file attached to a message of this conversation? (read_attachment and lead tools are scoped to the chat.) */
+/**
+ * Does this file belong to this conversation (bound when it was first sent
+ * there)? read_attachment, load_attachment_as_leads and the staging approval
+ * are scoped to the chat with it.
+ */
 export async function fileInConversation(fileId: string, conversationId: string): Promise<boolean> {
-  const res = await createServiceClient()
-    .from('agent_messages')
-    .select('id')
-    .eq('conversation_id', conversationId)
-    .contains('attachments', [{ kind: 'file', id: fileId }])
-    .limit(1)
+  const res = await createServiceClient().from('agent_chat_files').select('id').eq('id', fileId).eq('conversation_id', conversationId).limit(1)
   if (res.error) throw new DbError('fileInConversation', res.error)
   return (res.data ?? []).length > 0
+}
+
+/**
+ * Bind unbound files to the chat they are sent in (`conversation_id is null
+ * → conversationId`), then confirm every one belongs to it: false when one
+ * was bound to another chat first (a race), so the run refuses it.
+ */
+export async function bindChatFiles(ids: string[], conversationId: string): Promise<boolean> {
+  if (!ids.length) return true
+  const sb = createServiceClient()
+  const upd = await sb.from('agent_chat_files').update({ conversation_id: conversationId }).in('id', ids).is('conversation_id', null)
+  if (upd.error) throw new DbError('bindChatFiles', upd.error)
+  const res = await sb.from('agent_chat_files').select('id, conversation_id').in('id', ids)
+  if (res.error) throw new DbError('bindChatFiles.read', res.error)
+  const rows = (res.data ?? []) as { id: string; conversation_id: string | null }[]
+  return rows.length === ids.length && rows.every((r) => r.conversation_id === conversationId)
 }
 
 /** A row → the reference stored on a message. */

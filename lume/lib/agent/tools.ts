@@ -133,8 +133,12 @@ interface HighSpec<S extends z.ZodType> {
   name: ToolName
   description: string
   inputSchema: S
-  /** The request payload (as POST /api/actions takes it); the server builds the snapshot and summary. */
-  payload: (input: z.infer<S>) => Record<string, Json>
+  /**
+   * The request payload (as POST /api/actions takes it); the server builds the
+   * snapshot and summary. `deps` carries server-set context (the conversation)
+   * the model never chooses.
+   */
+  payload: (input: z.infer<S>, deps: ToolDeps) => Record<string, Json>
 }
 
 type Built = (deps: ToolDeps, call: RouteCall) => AgentTool
@@ -161,7 +165,7 @@ export function tiered<S extends z.ZodType>(spec: RunSpec<S> | HighSpec<S>, tier
         `${spec.description} Needs the owner's approval: this only creates a pending action and returns awaiting_approval; it does not run.` +
         (skippable(kind) ? ' If the owner has skip permissions on for this chat it may instead return auto_approved with the outcome (it ran).' : ''),
       inputSchema: spec.inputSchema,
-      run: async (input) => requestApproval(deps, kind, spec.payload(input)),
+      run: async (input) => requestApproval(deps, kind, spec.payload(input, deps)),
     })
   }
   if (!('run' in spec)) throw new Error(`tool ${spec.name} needs a run function`)
@@ -1083,7 +1087,8 @@ const SPECS: Built[] = [
         "Send one sheet of a spreadsheet the owner attached in this chat to validation, through the Import CSV path: the approval shows the sheet, its row count and the email column; once approved the sheet becomes a CSV import waiting at the usual Approve / Deny ingest gate (nothing is validated or spent before that gate). " +
         'Only when the owner asked to validate / import this list. Refused when the sheet has no single email column.',
       inputSchema: z.object({ file_id: uuid, sheet: z.string().min(1).max(200).optional().describe('sheet name or 1-based index') }).strict(),
-      payload: ({ file_id, sheet }) => ({ file_id: file_id.toLowerCase(), ...(sheet ? { sheet } : {}) }),
+      // Scoped to this chat like read_attachment: the builder refuses a file not attached here.
+      payload: ({ file_id, sheet }, deps) => ({ file_id: file_id.toLowerCase(), ...(sheet ? { sheet } : {}), conversation_id: deps.conversationId ?? null }),
     },
     'high'
   ),

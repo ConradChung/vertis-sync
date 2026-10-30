@@ -4,8 +4,8 @@ import { buildSheet } from '@/lib/sheets/model'
 /** stage_attachment: build snapshot, executor re-checks, and the Import CSV path it ends in. */
 
 const h = vi.hoisted(() => ({ getChatFile: vi.fn(), loadParsed: vi.fn(), createIngest: vi.fn(), findIngestByStoragePath: vi.fn(), fileInConversation: vi.fn() }))
-vi.mock('@/lib/agent/chatFiles', () => ({ getChatFile: h.getChatFile, loadParsed: h.loadParsed }))
 vi.mock('@/lib/import/ingest', () => ({ createIngest: h.createIngest }))
+vi.mock('@/lib/agent/chatFiles', () => ({ getChatFile: h.getChatFile, loadParsed: h.loadParsed, fileInConversation: h.fileInConversation }))
 vi.mock('@/lib/db/service', () => ({ findIngestByStoragePath: h.findIngestByStoragePath }))
 
 import { buildStageAttachment, executeStageAttachment } from '@/lib/agent/attachmentAction'
@@ -22,29 +22,43 @@ beforeEach(() => {
   h.loadParsed.mockResolvedValue({ kind: 'xlsx', sheets: [leads, noEmail] })
   h.createIngest.mockResolvedValue({ ingest: { id: 'ing1' }, rowCount: 2, detectedColumn: 'Work Email', telegram: 'sent' })
   h.findIngestByStoragePath.mockResolvedValue(null)
+  h.fileInConversation.mockResolvedValue(true)
 })
+
+const CONV = '1a2b3c4d-1111-4222-8333-444455556666'
 
 describe('buildStageAttachment', () => {
   it('snapshots the sheet: rows, the email column telegram-inbox will use, a key per file + sheet', async () => {
-    const b = await buildStageAttachment({ file_id: FILE.toUpperCase(), sheet: 'leads' })
+    const b = await buildStageAttachment({ file_id: FILE.toUpperCase(), sheet: 'leads', conversation_id: CONV })
     if (!b.ok) throw new Error(b.error)
     expect(b.kind).toBe('stage_attachment')
-    expect(b.payload).toMatchObject({ file_id: FILE, file_name: 'Q3 leads.xlsx', sheet: 'Leads', rows: 2, email_column: 'Work Email', filename: 'Q3 leads - Leads.csv', attachment_key: `${FILE}:Leads` })
+    expect(b.payload).toMatchObject({ conversation_id: CONV, file_id: FILE, file_name: 'Q3 leads.xlsx', sheet: 'Leads', rows: 2, email_column: 'Work Email', filename: 'Q3 leads - Leads.csv', attachment_key: `${FILE}:Leads` })
     expect(b.payload.summary).toMatch(/Stage 2 rows from Q3 leads\.xlsx · "Leads" for validation \(email column "Work Email"\)/)
     expect(b.payload.summary).toMatch(/Approve \/ Deny ingest gate/)
     expect(stageAttachmentPayloadError(b.payload)).toBeNull()
   })
   it('refuses a sheet without an email column, a missing file or sheet', async () => {
-    expect(await buildStageAttachment({ file_id: FILE, sheet: 'Other' })).toMatchObject({ ok: false, status: 422, error: expect.stringMatching(/^no_email_column/) })
-    expect(await buildStageAttachment({ file_id: FILE, sheet: 'Nope' })).toEqual({ ok: false, status: 404, error: 'sheet_not_found' })
+    expect(await buildStageAttachment({ file_id: FILE, sheet: 'Other', conversation_id: CONV })).toMatchObject({ ok: false, status: 422, error: expect.stringMatching(/^no_email_column/) })
+    expect(await buildStageAttachment({ file_id: FILE, sheet: 'Nope', conversation_id: CONV })).toEqual({ ok: false, status: 404, error: 'sheet_not_found' })
     h.getChatFile.mockResolvedValue(null)
-    expect(await buildStageAttachment({ file_id: FILE })).toEqual({ ok: false, status: 404, error: 'file_not_found' })
-    expect(await buildStageAttachment({ file_id: 'nope' })).toEqual({ ok: false, status: 400, error: 'invalid_payload' })
+    expect(await buildStageAttachment({ file_id: FILE, conversation_id: CONV })).toEqual({ ok: false, status: 404, error: 'file_not_found' })
+    expect(await buildStageAttachment({ file_id: 'nope', conversation_id: CONV })).toEqual({ ok: false, status: 400, error: 'invalid_payload' })
+  })
+  it('is scoped to the chat: a conversation is required and the file must be attached in it', async () => {
+    expect(await buildStageAttachment({ file_id: FILE, sheet: 'Leads' })).toEqual({ ok: false, status: 400, error: 'invalid_payload' })
+    h.fileInConversation.mockResolvedValue(false)
+    expect(await buildStageAttachment({ file_id: FILE, sheet: 'Leads', conversation_id: CONV })).toEqual({ ok: false, status: 404, error: 'file_not_found' })
+    expect(h.fileInConversation).toHaveBeenCalledWith(FILE, CONV)
   })
 })
 
 describe('executeStageAttachment', () => {
-  const approved = { file_id: FILE, sheet: 'Leads', rows: 2, email_column: 'Work Email', attachment_key: attachmentKey(FILE, 'Leads'), summary: 's' }
+  const approved = { conversation_id: CONV, file_id: FILE, sheet: 'Leads', rows: 2, email_column: 'Work Email', attachment_key: attachmentKey(FILE, 'Leads'), summary: 's' }
+  it('re-checks the chat scope at execute', async () => {
+    h.fileInConversation.mockResolvedValue(false)
+    expect(await executeStageAttachment(approved)).toMatchObject({ ok: false, error: 're-check failed: file_not_found' })
+    expect(h.createIngest).not.toHaveBeenCalled()
+  })
 
   it('re-checks, then hands the sheet as CSV to the Import CSV intake (ingest gate); never a validation job', async () => {
     const out = await executeStageAttachment(approved)
@@ -56,7 +70,7 @@ describe('executeStageAttachment', () => {
   })
   it('the same sheet already sent (by Import or an earlier staging) is refused at build and at execute', async () => {
     h.findIngestByStoragePath.mockResolvedValue({ id: 'ing0' })
-    expect(await buildStageAttachment({ file_id: FILE, sheet: 'Leads' })).toEqual({ ok: false, status: 409, error: 'already_ingested' })
+    expect(await buildStageAttachment({ file_id: FILE, sheet: 'Leads', conversation_id: CONV })).toEqual({ ok: false, status: 409, error: 'already_ingested' })
     expect(await executeStageAttachment(approved)).toMatchObject({ ok: false, error: 're-check failed: already_ingested' })
     expect(h.createIngest).not.toHaveBeenCalled()
   })
@@ -72,10 +86,12 @@ describe('executeStageAttachment', () => {
 
 describe('payload check and names', () => {
   it('createAction refuses a payload the executor could not re-check', () => {
-    expect(stageAttachmentPayloadError({ file_id: FILE, sheet: 'L', rows: 1, attachment_key: `${FILE}:L` })).toBeNull()
-    expect(stageAttachmentPayloadError({ file_id: FILE.toUpperCase(), sheet: 'L', rows: 1, attachment_key: 'x' })).toMatch(/file_id/)
-    expect(stageAttachmentPayloadError({ file_id: FILE, sheet: 'L', rows: 0, attachment_key: `${FILE}:L` })).toMatch(/rows/)
-    expect(stageAttachmentPayloadError({ file_id: FILE, sheet: 'L', rows: 1, attachment_key: 'other' })).toMatch(/attachment_key/)
+    const ok = { conversation_id: CONV, file_id: FILE, sheet: 'L', rows: 1, attachment_key: `${FILE}:L` }
+    expect(stageAttachmentPayloadError(ok)).toBeNull()
+    expect(stageAttachmentPayloadError({ ...ok, file_id: FILE.toUpperCase(), attachment_key: 'x' })).toMatch(/file_id/)
+    expect(stageAttachmentPayloadError({ ...ok, rows: 0 })).toMatch(/rows/)
+    expect(stageAttachmentPayloadError({ ...ok, attachment_key: 'other' })).toMatch(/attachment_key/)
+    expect(stageAttachmentPayloadError({ ...ok, conversation_id: null })).toMatch(/conversation_id/)
   })
   it('ingest file names', () => {
     expect(ingestFilename('export.csv', 'csv', 'Sheet1')).toBe('export.csv')

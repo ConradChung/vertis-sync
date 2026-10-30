@@ -72,7 +72,8 @@ describe('stage_attachment_for_validation', () => {
   it('only files an approval (never runs), even in skip-permissions mode', async () => {
     const { run, prepare, createAction, autoApprove, fetch } = setup({}, { skipPermissions: true })
     const r = await run('stage_attachment_for_validation', { file_id: FILE, sheet: 'Leads' })
-    expect(prepare).toHaveBeenCalledWith({ kind: 'stage_attachment', payload: { file_id: file, sheet: 'Leads' } })
+    // Scoped like the other two tools: the snapshot names this chat, the builder checks the file is attached in it.
+    expect(prepare).toHaveBeenCalledWith({ kind: 'stage_attachment', payload: { file_id: file, sheet: 'Leads', conversation_id: CONV } })
     expect(createAction.mock.calls[0][0]).toBe('stage_attachment')
     expect(r).toMatchObject({ status: 'awaiting_approval', action_id: 'a1' })
     expect(autoApprove).not.toHaveBeenCalled()

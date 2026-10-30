@@ -10,6 +10,7 @@ export const attachmentKey = (fileId: string, sheet: string) => `${fileId}:${she
 
 /** null when the snapshot carries what the executor re-checks and the card shows. */
 export function stageAttachmentPayloadError(p: Record<string, Json>): string | null {
+  if (typeof p.conversation_id !== 'string' || !LOWER_UUID.test(p.conversation_id)) return 'payload.conversation_id must be a lowercase uuid'
   if (typeof p.file_id !== 'string' || !LOWER_UUID.test(p.file_id)) return 'payload.file_id must be a lowercase uuid'
   if (typeof p.sheet !== 'string' || !p.sheet) return 'payload.sheet is required'
   if (typeof p.rows !== 'number' || !Number.isInteger(p.rows) || p.rows < 1) return 'payload.rows must be a positive integer'

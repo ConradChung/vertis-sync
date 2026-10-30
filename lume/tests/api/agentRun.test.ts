@@ -34,10 +34,11 @@ const h = vi.hoisted(() => ({
   itemsForBlock: vi.fn(),
   loadChatImage: vi.fn(),
   getChatFiles: vi.fn(),
+  bindChatFiles: vi.fn(),
 }))
 vi.mock('@/lib/agent/projects', () => ({ getProject: h.getProject, projectForVertical: h.projectForVertical, itemsForBlock: h.itemsForBlock }))
 vi.mock('@/lib/agent/chatImages', () => ({ loadChatImage: h.loadChatImage }))
-vi.mock('@/lib/agent/chatFiles', async () => ({ ...(await vi.importActual<object>('@/lib/agent/chatFiles')), getChatFiles: h.getChatFiles }))
+vi.mock('@/lib/agent/chatFiles', async () => ({ ...(await vi.importActual<object>('@/lib/agent/chatFiles')), getChatFiles: h.getChatFiles, bindChatFiles: h.bindChatFiles }))
 vi.mock('@/lib/operators/session', () => ({ currentOperator: h.currentOperator }))
 vi.mock('@/lib/operators/store', () => ({ getVertical: h.getVertical }))
 
@@ -1088,10 +1089,41 @@ describe('POST /api/agent/run: image bytes per run', () => {
 describe('POST /api/agent/run with spreadsheets', () => {
   const F1 = '0f3c2b1a-9d8e-4f7a-8b6c-0000000000f1'
   const F2 = '0f3c2b1a-9d8e-4f7a-8b6c-0000000000f2'
-  const row = (id: string, name: string) => ({ id, name, kind: 'xlsx', size_bytes: 1234, storage_path: `${id}.xlsx`, parsed_path: `${id}.json.gz`, sheets: [{ name: 'Leads', rows: 2, cols: 2 }], summary: `SUMMARY of ${name}\nName,Email`, created_at: 'now' })
+  const row = (id: string, name: string, conversation_id: string | null = null) => ({ id, name, kind: 'xlsx', size_bytes: 1234, storage_path: `${id}.xlsx`, parsed_path: `${id}.json.gz`, sheets: [{ name: 'Leads', rows: 2, cols: 2 }], summary: `SUMMARY of ${name}\nName,Email`, brief: `BRIEF of ${name}`, conversation_id, created_at: 'now' })
   type Block = { type: string; text?: string }
   beforeEach(() => {
     h.getChatFiles.mockImplementation(async (ids: string[]) => [row(F1, 'leads.xlsx'), row(F2, 'old.xlsx')].filter((r) => ids.includes(r.id)))
+    h.bindChatFiles.mockResolvedValue(true)
+  })
+
+  it('binds an unbound file to the chat it is sent in, before the message is stored', async () => {
+    fakeRunner([{ text: 'ok' }])
+    await (await post('x', { files: [{ id: F1 }] })).text()
+    const conv = (await h.createConversation.mock.results[0].value).id
+    expect(h.bindChatFiles).toHaveBeenCalledWith([F1], conv)
+    expect(h.bindChatFiles.mock.invocationCallOrder[0]).toBeLessThan(h.insertMessage.mock.invocationCallOrder[0])
+  })
+
+  it("refuses another chat's file (400 file_not_found, nothing written); its own chat's file is fine", async () => {
+    const OTHER = '0f3c2b1a-9d8e-4f7a-8b6c-0000000000aa'
+    h.getChatFiles.mockResolvedValue([row(F1, 'leads.xlsx', OTHER)])
+    const res = await post('look', { files: [{ id: F1 }] })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('file_not_found')
+    expect((await post('look', { files: [{ id: F1 }], conversation_id: CONV })).status).toBe(400)
+    expect(h.insertMessage).not.toHaveBeenCalled()
+    h.getChatFiles.mockResolvedValue([row(F1, 'leads.xlsx', CONV)])
+    fakeRunner([{ text: 'ok' }])
+    const ok = await post('look', { files: [{ id: F1 }], conversation_id: CONV })
+    expect(ok.status).toBe(200)
+    await ok.text()
+  })
+
+  it('a file bound elsewhere in a race (bind fails) is 400 file_not_found before the message is stored', async () => {
+    h.bindChatFiles.mockResolvedValue(false)
+    const res = await post('look', { files: [{ id: F1 }], conversation_id: CONV })
+    expect(res.status).toBe(400)
+    expect(h.insertMessage).not.toHaveBeenCalled()
   })
 
   it('sends each file summary as a text block before the text and stores the file ref (no summary) on the message', async () => {

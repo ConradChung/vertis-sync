@@ -11,7 +11,7 @@ import { editMessage, sendMessage } from '@/lib/adapters/telegram'
 import { alert, alertLink, titleFrom } from '@/lib/alerts'
 import { routeItemForAction } from '@/lib/operators/route'
 import { buildMessages, fitImageBudget, MESSAGE_MAX, selectReplayFiles, selectReplayImages, type ContextTurn, type LoadedFile, type LoadedImage } from '@/lib/agent/chat'
-import { getChatFiles, refOf } from '@/lib/agent/chatFiles'
+import { bindChatFiles, getChatFiles, refOf } from '@/lib/agent/chatFiles'
 import type { ChatFileRef } from '@/lib/agent/files'
 import { MAX_SHEET_FILES } from '@/lib/sheets/model'
 import { loadChatImage } from '@/lib/agent/chatImages'
@@ -115,7 +115,9 @@ import type { Operator } from '@/lib/operators/types'
  * Spreadsheets: `files: [{ id }]` (≤ MAX_SHEET_FILES = 3) are files the
  * browser already uploaded and `POST /api/agent/files` parsed (an
  * `agent_chat_files` row each; 400 `file_not_found` before any write when one
- * is missing). Each one's stored summary (sheets, counts, header, the first
+ * is missing or belongs to another chat). A file not sent anywhere yet is
+ * bound to this chat before the message is stored (`bindChatFiles`); a
+ * file another chat bound first is refused the same way. Each one's stored summary (sheets, counts, header, the first
  * rows as CSV, ≤ 20k chars) goes to Claude as its own text block, and the
  * user message stores the reference (`kind: 'file'`) beside the images in
  * `attachments`. The newest few earlier files replay their summary
@@ -210,7 +212,10 @@ export async function POST(req: Request) {
     // Before any write, so a missing file leaves no empty conversation behind.
     if (fileIds.length) {
       const rows = new Map((await getChatFiles(fileIds)).map((r) => [r.id, r]))
-      if (fileIds.some((id) => !rows.has(id))) return NextResponse.json({ error: 'file_not_found' }, { status: 400 })
+      const chat = body.data.conversation_id?.toLowerCase() ?? null
+      // Only this chat's files, or files not sent anywhere yet.
+      const foreign = (id: string) => { const c = rows.get(id)?.conversation_id ?? null; return c !== null && c !== chat }
+      if (fileIds.some((id) => !rows.has(id) || foreign(id))) return NextResponse.json({ error: 'file_not_found' }, { status: 400 })
       currentFiles = fileIds.map((id) => ({ ...refOf(rows.get(id)!), summary: rows.get(id)!.summary }))
     }
     // Before any write, so a bad image leaves no empty conversation behind.
@@ -281,6 +286,7 @@ export async function POST(req: Request) {
       verticalName = ownerVertical.name
       prompt = `${verticalPromptLine(ownerVertical)}\n\n${prompt}`
     }
+    if (fileIds.length && !(await bindChatFiles(fileIds, conversationId))) return NextResponse.json({ error: 'file_not_found' }, { status: 400 })
     const imageRefs: ChatImageRef[] = currentImages.map(({ path, name, media_type }) => ({ path, name, media_type }))
     const fileRefs: ChatFileRef[] = currentFiles.map(({ kind, id, name, file_kind, size_bytes, sheets }) => ({ kind, id, name, file_kind, size_bytes, sheets }))
     const attachments: (ChatImageRef | ChatFileRef)[] = [...imageRefs, ...fileRefs]

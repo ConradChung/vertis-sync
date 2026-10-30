@@ -3,16 +3,19 @@ import { z } from 'zod'
 import type { Json, PendingActionKind } from '@/lib/db/types'
 import { AttachmentSheetError, assertNotIngested, ingestSheet, sheetForIngest } from '@/lib/agent/attachmentIngest'
 import { attachmentKey } from '@/lib/agent/attachmentActionPayload'
+import { fileInConversation } from '@/lib/agent/chatFiles'
 
 /**
  * `stage_attachment`: the agent's stage_attachment_for_validation. High risk,
  * always asks (it puts leads in front of the validation pipeline, which
  * spends money once the ingest is approved).
  *
- *  build    { file_id, sheet? } → the sheet as it is now: row count, the
+ *  build    { conversation_id, file_id, sheet? } → the file must belong to
+ *           that chat (the agent's tool fills it in; 404 otherwise); the
+ *           sheet as it is now: row count, the
  *           email column telegram-inbox will use (none → refused: the
  *           ingest gate could only deny it), and the summary the owner taps.
- *  execute  re-reads the file and the sheet; the row count and email column
+ *  execute  re-checks the chat scope, re-reads the file and the sheet; the row count and email column
  *           must still match what was approved; then the Import CSV path
  *           (`createIngest`), which stops at the usual Approve / Deny ingest
  *           gate. Lume never creates `validation_jobs` or writes pipeline
@@ -21,16 +24,19 @@ import { attachmentKey } from '@/lib/agent/attachmentActionPayload'
 
 const fmt = new Intl.NumberFormat('en-US')
 
-const Body = z.object({ file_id: z.string().uuid(), sheet: z.string().min(1).max(200).optional() })
+const Body = z.object({ conversation_id: z.string().uuid(), file_id: z.string().uuid(), sheet: z.string().min(1).max(200).optional() })
 
 type Build = { ok: true; kind: PendingActionKind; payload: Record<string, Json> & { summary: string } } | { ok: false; status: number; error: string }
 
 export async function buildStageAttachment(raw: Record<string, unknown>): Promise<Build> {
   const body = Body.safeParse(raw)
   if (!body.success) return { ok: false, status: 400, error: 'invalid_payload' }
+  const conversationId = body.data.conversation_id.toLowerCase()
+  const fileId = body.data.file_id.toLowerCase()
+  if (!(await fileInConversation(fileId, conversationId))) return { ok: false, status: 404, error: 'file_not_found' }
   let s
   try {
-    s = await sheetForIngest(body.data.file_id.toLowerCase(), body.data.sheet ?? null)
+    s = await sheetForIngest(fileId, body.data.sheet ?? null)
     await assertNotIngested(s)
   } catch (err) {
     if (err instanceof AttachmentSheetError) return { ok: false, status: err.status, error: err.code }
@@ -41,6 +47,7 @@ export async function buildStageAttachment(raw: Record<string, unknown>): Promis
     ok: true,
     kind: 'stage_attachment',
     payload: {
+      conversation_id: conversationId,
       file_id: s.file_id,
       file_name: s.file_name,
       sheet: s.sheet,
@@ -58,6 +65,8 @@ export async function buildStageAttachment(raw: Record<string, unknown>): Promis
 export async function executeStageAttachment(p: Record<string, Json>): Promise<{ ok: true; result: Record<string, Json> } | { ok: false; error: string; result: Record<string, Json> }> {
   const fileId = typeof p.file_id === 'string' ? p.file_id : ''
   const sheetName = typeof p.sheet === 'string' ? p.sheet : ''
+  const conversationId = typeof p.conversation_id === 'string' ? p.conversation_id : ''
+  if (!conversationId || !(await fileInConversation(fileId, conversationId))) return { ok: false, error: 're-check failed: file_not_found', result: { file_id: fileId, sheet: sheetName } }
   let s
   try {
     s = await sheetForIngest(fileId, sheetName)
