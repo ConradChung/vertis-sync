@@ -40,7 +40,7 @@ function sseResponse(frames: object[]) {
 const file = (name: string) => new File([png(10, 10)], name, { type: 'image/png' })
 
 function setup(opts: { run?: () => Response; uploadGate?: Promise<void> } = {}) {
-  const f = vi.fn(async (url: string, _init?: RequestInit) => {
+  const f = vi.fn(async (url: string) => {
     if (url === '/api/agent/conversations') return Response.json({ conversations: [] })
     if (url === '/api/agent/run') return opts.run?.() ?? sseResponse([{ type: 'run', id: 'r1', conversation_id: CONV }, { type: 'text', delta: 'Okay.' }, { type: 'done' }])
     if (url.startsWith('/api/agent/images?')) {
@@ -53,7 +53,7 @@ function setup(opts: { run?: () => Response; uploadGate?: Promise<void> } = {}) 
   vi.stubGlobal('fetch', f)
   render(<AgentChat />)
   const box = screen.getByLabelText('Message Lume') as HTMLTextAreaElement
-  const runBodies = () => f.mock.calls.filter((c) => c[0] === '/api/agent/run').map((c) => JSON.parse(c[1]!.body as string))
+  const runBodies = () => f.mock.calls.filter((c) => c[0] === '/api/agent/run').map((c) => JSON.parse((c as unknown as [string, RequestInit])[1].body as string))
   return { f, box, runBodies }
 }
 
