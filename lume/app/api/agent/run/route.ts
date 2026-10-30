@@ -10,7 +10,10 @@ import { claimDecision, getAction } from '@/lib/actions/store'
 import { editMessage, sendMessage } from '@/lib/adapters/telegram'
 import { alert, alertLink, titleFrom } from '@/lib/alerts'
 import { routeItemForAction } from '@/lib/operators/route'
-import { buildMessages, fitImageBudget, MESSAGE_MAX, selectReplayImages, type ContextTurn, type LoadedImage } from '@/lib/agent/chat'
+import { buildMessages, fitImageBudget, MESSAGE_MAX, selectReplayFiles, selectReplayImages, type ContextTurn, type LoadedFile, type LoadedImage } from '@/lib/agent/chat'
+import { getChatFiles, refOf } from '@/lib/agent/chatFiles'
+import type { ChatFileRef } from '@/lib/agent/files'
+import { MAX_SHEET_FILES } from '@/lib/sheets/model'
 import { loadChatImage } from '@/lib/agent/chatImages'
 import { IMAGE_PATH_RE, MAX_IMAGES, safeImageName, type ChatImageRef } from '@/lib/agent/images'
 import { createConversation, getConversation, getConversationOperator, getMessages, insertMessage } from '@/lib/agent/conversations'
@@ -109,6 +112,16 @@ import type { Operator } from '@/lib/operators/types'
  * (`selectReplayImages`); older or unreadable ones become
  * "[image omitted: <name>]".
  *
+ * Spreadsheets: `files: [{ id }]` (≤ MAX_SHEET_FILES = 3) are files the
+ * browser already uploaded and `POST /api/agent/files` parsed (an
+ * `agent_chat_files` row each; 400 `file_not_found` before any write when one
+ * is missing). Each one's stored summary (sheets, counts, header, the first
+ * rows as CSV, ≤ 20k chars) goes to Claude as its own text block, and the
+ * user message stores the reference (`kind: 'file'`) beside the images in
+ * `attachments`. The newest few earlier files replay their summary
+ * (`selectReplayFiles`); older ones become a read_attachment note. A
+ * file-only message is allowed.
+ *
  * SSE events (`data: <json>\n\n`): run (`{ id, conversation_id, project_id? }`), text,
  * tool_start, tool_end, approval, done, error.
  *
@@ -126,9 +139,12 @@ const ImageInput = z.object({
   name: z.string().max(255),
 })
 
+const FileInput = z.object({ id: z.string().regex(UUID_RE) })
+
 const Body = z.object({
   prompt: z.string().trim().max(MESSAGE_MAX),
   images: z.array(ImageInput).max(MAX_IMAGES).optional(),
+  files: z.array(FileInput).max(MAX_SHEET_FILES).optional(),
   conversation_id: z.string().regex(UUID_RE).optional(),
   skill_id: z.string().regex(UUID_RE).optional(),
   skill_mode: z.enum(['run', 'reference']).optional(),
@@ -138,7 +154,7 @@ const Body = z.object({
   vertical_id: z.string().regex(UUID_RE).optional(),
   /** New conversations only: file the chat in this project ("New chat in project"). */
   project_id: z.string().regex(UUID_RE).optional(),
-}).refine((b) => b.prompt.length > 0 || (b.images?.length ?? 0) > 0)
+}).refine((b) => b.prompt.length > 0 || (b.images?.length ?? 0) > 0 || (b.files?.length ?? 0) > 0)
 
 type SseEvent = Record<string, unknown> & { type: string }
 
@@ -159,6 +175,7 @@ export async function POST(req: Request) {
   const message = body.data.prompt
   // Same path twice is one image.
   const imageInputs = [...new Map((body.data.images ?? []).map((i) => [i.path, i])).values()]
+  const fileIds = [...new Set((body.data.files ?? []).map((f) => f.id.toLowerCase()))]
 
   // Runs left `running` by a killed function: close them so the orb and the
   // run log stop showing them as live. Best effort.
@@ -187,7 +204,15 @@ export async function POST(req: Request) {
   let skill: Awaited<ReturnType<typeof getSkill>> = null
   let currentImages: LoadedImage[] = []
   const loadedHistory = new Map<string, LoadedImage>()
+  let currentFiles: LoadedFile[] = []
+  const loadedFiles = new Map<string, LoadedFile>()
   try {
+    // Before any write, so a missing file leaves no empty conversation behind.
+    if (fileIds.length) {
+      const rows = new Map((await getChatFiles(fileIds)).map((r) => [r.id, r]))
+      if (fileIds.some((id) => !rows.has(id))) return NextResponse.json({ error: 'file_not_found' }, { status: 400 })
+      currentFiles = fileIds.map((id) => ({ ...refOf(rows.get(id)!), summary: rows.get(id)!.summary }))
+    }
     // Before any write, so a bad image leaves no empty conversation behind.
     if (imageInputs.length) {
       const loaded = await Promise.all(imageInputs.map((i) => loadChatImage(i.path)))
@@ -214,8 +239,9 @@ export async function POST(req: Request) {
       chatOperatorId = await getConversationOperator(conversation.id)
       history = contextFromMessages(await getMessages(conversationId))
       await loadHistoryImages(history, currentImages, loadedHistory)
+      await loadHistoryFiles(history, loadedFiles)
     } else {
-      const title = titleFromMessage(message, currentImages)
+      const title = titleFromMessage(message, currentImages, currentFiles)
       if (!operator && body.data.vertical_id) ownerVertical = await getVertical(body.data.vertical_id.toLowerCase())
       const origin = operator
         ? { vertical_id: operator.vertical_id, operator_id: operator.id }
@@ -255,9 +281,12 @@ export async function POST(req: Request) {
       verticalName = ownerVertical.name
       prompt = `${verticalPromptLine(ownerVertical)}\n\n${prompt}`
     }
-    const attachments: ChatImageRef[] = currentImages.map(({ path, name, media_type }) => ({ path, name, media_type }))
-    const imageNote = attachments.length ? `[${attachments.length} image${attachments.length > 1 ? 's' : ''}: ${attachments.map((a) => a.name).join(', ')}]` : ''
-    runId = (await insertAgentRun([prompt, imageNote].filter(Boolean).join('\n\n'), MODEL)).id
+    const imageRefs: ChatImageRef[] = currentImages.map(({ path, name, media_type }) => ({ path, name, media_type }))
+    const fileRefs: ChatFileRef[] = currentFiles.map(({ kind, id, name, file_kind, size_bytes, sheets }) => ({ kind, id, name, file_kind, size_bytes, sheets }))
+    const attachments: (ChatImageRef | ChatFileRef)[] = [...imageRefs, ...fileRefs]
+    const imageNote = imageRefs.length ? `[${imageRefs.length} image${imageRefs.length > 1 ? 's' : ''}: ${imageRefs.map((a) => a.name).join(', ')}]` : ''
+    const fileNoteLine = fileRefs.length ? `[${fileRefs.length} spreadsheet${fileRefs.length > 1 ? 's' : ''}: ${fileRefs.map((a) => a.name).join(', ')}]` : ''
+    runId = (await insertAgentRun([prompt, imageNote, fileNoteLine].filter(Boolean).join('\n\n'), MODEL)).id
     await insertMessage({
       conversation_id: conversationId,
       role: 'user',
@@ -298,8 +327,8 @@ export async function POST(req: Request) {
         runId,
         prompt: withKnowledge(knowledge, prompt),
         history,
-        images: { current: currentImages, loaded: loadedHistory },
-        title: message || titleFromMessage(message, currentImages),
+        images: { current: currentImages, loaded: loadedHistory, currentFiles, loadedFiles },
+        title: message || titleFromMessage(message, currentImages, currentFiles),
         origin,
         publicOrigin: requestOrigin(req),
         operator,
@@ -375,6 +404,25 @@ async function loadHistoryImages(history: ContextTurn[], current: LoadedImage[],
   )
   // Newest first, as selected; the budget drops from the oldest end.
   for (const img of fitImageBudget(current, loaded.filter((x): x is LoadedImage => !!x))) into.set(img.path, img)
+}
+
+/**
+ * The summaries of the history files worth replaying (selectReplayFiles),
+ * by id. A file whose row is gone, or a failed read, is left out: the turn
+ * keeps a read_attachment note and the run goes on.
+ */
+async function loadHistoryFiles(history: ContextTurn[], into: Map<string, LoadedFile>): Promise<void> {
+  const refs = selectReplayFiles(history)
+  if (!refs.length) return
+  try {
+    const rows = new Map((await getChatFiles(refs.map((r) => r.id))).map((r) => [r.id, r]))
+    for (const r of refs) {
+      const row = rows.get(r.id)
+      if (row) into.set(r.id, { ...r, summary: row.summary })
+    }
+  } catch (err) {
+    console.error('[api/agent/run] history file load failed:', errText(err))
+  }
 }
 
 /**
@@ -502,8 +550,8 @@ async function executeRun({
   prompt: string
   /** The conversation's earlier stored turns (replayed in full by buildMessages). */
   history: ContextTurn[]
-  /** The current message's images, and the history images loaded for replay (by path). */
-  images: { current: LoadedImage[]; loaded: Map<string, LoadedImage> }
+  /** The current message's images and files, and the history ones loaded for replay (images by path, files by id). */
+  images: { current: LoadedImage[]; loaded: Map<string, LoadedImage>; currentFiles: LoadedFile[]; loadedFiles: Map<string, LoadedFile> }
   /** The owner's own words (the prompt may carry knowledge / skill / vertical lines). */
   title: string
   origin: string
@@ -703,7 +751,7 @@ async function executeRun({
       if (!images.loaded.size) throw images.current.length ? new ImageRejectedError(err) : err
       console.error('[api/agent/run] an image was refused; retrying without the replayed history images:', errText(err))
       try {
-        result = await drive(buildMessages(history, prompt, { current: images.current }))
+        result = await drive(buildMessages(history, prompt, { current: images.current, currentFiles: images.currentFiles, loadedFiles: images.loadedFiles }))
       } catch (again) {
         if (!started && isImageRejection(again) && images.current.length) throw new ImageRejectedError(again)
         throw again

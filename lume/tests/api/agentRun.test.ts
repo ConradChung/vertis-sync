@@ -33,9 +33,11 @@ const h = vi.hoisted(() => ({
   projectForVertical: vi.fn(),
   itemsForBlock: vi.fn(),
   loadChatImage: vi.fn(),
+  getChatFiles: vi.fn(),
 }))
 vi.mock('@/lib/agent/projects', () => ({ getProject: h.getProject, projectForVertical: h.projectForVertical, itemsForBlock: h.itemsForBlock }))
 vi.mock('@/lib/agent/chatImages', () => ({ loadChatImage: h.loadChatImage }))
+vi.mock('@/lib/agent/chatFiles', async () => ({ ...(await vi.importActual<object>('@/lib/agent/chatFiles')), getChatFiles: h.getChatFiles }))
 vi.mock('@/lib/operators/session', () => ({ currentOperator: h.currentOperator }))
 vi.mock('@/lib/operators/store', () => ({ getVertical: h.getVertical }))
 
@@ -1080,5 +1082,63 @@ describe('POST /api/agent/run: image bytes per run', () => {
     expect(types(0)).toEqual(['text'])
     expect(turnText(turns[0])).toContain('[image omitted: older.png]')
     expect(types(2)).toEqual(['image', 'text'])
+  })
+})
+
+describe('POST /api/agent/run with spreadsheets', () => {
+  const F1 = '0f3c2b1a-9d8e-4f7a-8b6c-0000000000f1'
+  const F2 = '0f3c2b1a-9d8e-4f7a-8b6c-0000000000f2'
+  const row = (id: string, name: string) => ({ id, name, kind: 'xlsx', size_bytes: 1234, storage_path: `${id}.xlsx`, parsed_path: `${id}.json.gz`, sheets: [{ name: 'Leads', rows: 2, cols: 2 }], summary: `SUMMARY of ${name}\nName,Email`, created_at: 'now' })
+  type Block = { type: string; text?: string }
+  beforeEach(() => {
+    h.getChatFiles.mockImplementation(async (ids: string[]) => [row(F1, 'leads.xlsx'), row(F2, 'old.xlsx')].filter((r) => ids.includes(r.id)))
+  })
+
+  it('sends each file summary as a text block before the text and stores the file ref (no summary) on the message', async () => {
+    fakeRunner([{ text: 'Got it.' }])
+    const res = await post('clean this', { files: [{ id: F1 }] })
+    expect(res.status).toBe(200)
+    await res.text()
+    const content = sentTurns().at(-1)!.content as Block[]
+    expect(content.map((b) => b.type)).toEqual(['text', 'text'])
+    expect(content[0].text).toContain(`<attachment file_id="${F1}" name="leads.xlsx">`)
+    expect(content[0].text).toContain('SUMMARY of leads.xlsx')
+    expect(content[1].text).toMatch(/clean this$/)
+    const stored = h.insertMessage.mock.calls.find((c) => c[0].role === 'user')![0]
+    expect(stored.attachments).toEqual([{ kind: 'file', id: F1, name: 'leads.xlsx', file_kind: 'xlsx', size_bytes: 1234, sheets: [{ name: 'Leads', rows: 2, cols: 2 }] }])
+    expect(JSON.stringify(stored)).not.toContain('SUMMARY')
+  })
+
+  it('accepts a file-only message and titles the chat after the file', async () => {
+    fakeRunner([{ text: 'ok' }])
+    await (await post('', { files: [{ id: F1 }] })).text()
+    expect(h.createConversation.mock.calls[0][0]).toBe('File: leads.xlsx')
+  })
+
+  it('400 file_not_found before any write; refuses more than 3 files', async () => {
+    const res = await post('look', { files: [{ id: '0f3c2b1a-9d8e-4f7a-8b6c-0000000000ff' }] })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('file_not_found')
+    const four = Array.from({ length: 4 }, (_, i) => ({ id: `0f3c2b1a-9d8e-4f7a-8b6c-00000000010${i}` }))
+    expect((await post('x', { files: four })).status).toBe(400)
+    expect(h.createConversation).not.toHaveBeenCalled()
+    expect(h.insertMessage).not.toHaveBeenCalled()
+  })
+
+  it('replays the newest earlier file summaries and notes the rest', async () => {
+    const ref = (id: string, name: string) => ({ kind: 'file', id, name, file_kind: 'xlsx', size_bytes: 1, sheets: [{ name: 'Leads', rows: 2, cols: 2 }] })
+    h.getMessages.mockResolvedValue([
+      { role: 'user', text: 'first', attachments: [ref(F2, 'old.xlsx')], tools: [], approvals: [] },
+      { role: 'assistant', text: 'ok', tools: [], approvals: [] },
+    ])
+    h.getChatFiles.mockImplementation(async () => [])
+    fakeRunner([{ text: 'ok' }])
+    await (await post('again', { conversation_id: CONV })).text()
+    const first = sentTurns()[0].content as Block[]
+    expect(first[0].text).toBe(`[file: old.xlsx — use read_attachment(file_id: "${F2}")]\n\nfirst`)
+    h.getChatFiles.mockImplementation(async (ids: string[]) => [row(F2, 'old.xlsx')].filter((r) => ids.includes(r.id)))
+    fakeRunner([{ text: 'ok' }])
+    await (await post('again', { conversation_id: CONV })).text()
+    expect((sentTurns(1)[0].content as Block[])[0].text).toContain('SUMMARY of old.xlsx')
   })
 })
