@@ -45,6 +45,12 @@ export interface IngestMeta {
   detail?: string
   /** The route's shared deadline (covers the upload). */
   signal?: AbortSignal
+  /**
+   * A fixed `lume/<uuid>.csv` instead of a random one (an attached sheet's,
+   * derived from file + sheet): the upload is exclusive, so a second ingest
+   * of the same sheet fails at Storage instead of creating a duplicate.
+   */
+  storagePath?: string
 }
 
 export interface IngestResult {
@@ -74,7 +80,7 @@ async function feed(type: string, title: string, sourceId: string, payload: Reco
  * ingest row that cannot be written removes the upload again.
  */
 export async function createIngest(csvBytes: Uint8Array, filename: string, meta: IngestMeta): Promise<IngestResult> {
-  const storagePath = `lume/${crypto.randomUUID()}.csv`
+  const storagePath = meta.storagePath ?? `lume/${crypto.randomUUID()}.csv`
   await uploadCsv(storagePath, csvBytes, meta.signal)
   try {
     return await createIngestForStoredObject(storagePath, filename, csvBytes, countDataRows(csvBytes), meta)

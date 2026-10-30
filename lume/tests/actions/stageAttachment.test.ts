@@ -3,9 +3,10 @@ import { buildSheet } from '@/lib/sheets/model'
 
 /** stage_attachment: build snapshot, executor re-checks, and the Import CSV path it ends in. */
 
-const h = vi.hoisted(() => ({ getChatFile: vi.fn(), loadParsed: vi.fn(), createIngest: vi.fn() }))
+const h = vi.hoisted(() => ({ getChatFile: vi.fn(), loadParsed: vi.fn(), createIngest: vi.fn(), findIngestByStoragePath: vi.fn(), fileInConversation: vi.fn() }))
 vi.mock('@/lib/agent/chatFiles', () => ({ getChatFile: h.getChatFile, loadParsed: h.loadParsed }))
 vi.mock('@/lib/import/ingest', () => ({ createIngest: h.createIngest }))
+vi.mock('@/lib/db/service', () => ({ findIngestByStoragePath: h.findIngestByStoragePath }))
 
 import { buildStageAttachment, executeStageAttachment } from '@/lib/agent/attachmentAction'
 import { attachmentKey, stageAttachmentPayloadError } from '@/lib/agent/attachmentActionPayload'
@@ -20,6 +21,7 @@ beforeEach(() => {
   h.getChatFile.mockResolvedValue({ id: FILE, name: 'Q3 leads.xlsx', kind: 'xlsx' })
   h.loadParsed.mockResolvedValue({ kind: 'xlsx', sheets: [leads, noEmail] })
   h.createIngest.mockResolvedValue({ ingest: { id: 'ing1' }, rowCount: 2, detectedColumn: 'Work Email', telegram: 'sent' })
+  h.findIngestByStoragePath.mockResolvedValue(null)
 })
 
 describe('buildStageAttachment', () => {
@@ -50,7 +52,13 @@ describe('executeStageAttachment', () => {
     const [bytes, filename, meta] = h.createIngest.mock.calls[0]
     expect(new TextDecoder().decode(bytes)).toBe('Name,Work Email,Note\nAnn,ann@acme.com,two lines\nBo,bo@b.co,\n')
     expect(filename).toBe('Q3 leads - Leads.csv')
-    expect(meta).toEqual({ source: 'csv', detail: 'chat attachment Q3 leads.xlsx · Leads' })
+    expect(meta).toMatchObject({ source: 'csv', detail: 'chat attachment Q3 leads.xlsx · Leads', storagePath: expect.stringMatching(/^lume\/[0-9a-f-]{36}\.csv$/) })
+  })
+  it('the same sheet already sent (by Import or an earlier staging) is refused at build and at execute', async () => {
+    h.findIngestByStoragePath.mockResolvedValue({ id: 'ing0' })
+    expect(await buildStageAttachment({ file_id: FILE, sheet: 'Leads' })).toEqual({ ok: false, status: 409, error: 'already_ingested' })
+    expect(await executeStageAttachment(approved)).toMatchObject({ ok: false, error: 're-check failed: already_ingested' })
+    expect(h.createIngest).not.toHaveBeenCalled()
   })
   it('fails without ingesting when the file is gone, the sheet moved, or rows / email column changed', async () => {
     h.getChatFile.mockResolvedValueOnce(null)

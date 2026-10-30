@@ -1,7 +1,7 @@
 import 'server-only'
 import { z } from 'zod'
 import type { Json, PendingActionKind } from '@/lib/db/types'
-import { AttachmentSheetError, ingestSheet, sheetForIngest } from '@/lib/agent/attachmentIngest'
+import { AttachmentSheetError, assertNotIngested, ingestSheet, sheetForIngest } from '@/lib/agent/attachmentIngest'
 import { attachmentKey } from '@/lib/agent/attachmentActionPayload'
 
 /**
@@ -31,6 +31,7 @@ export async function buildStageAttachment(raw: Record<string, unknown>): Promis
   let s
   try {
     s = await sheetForIngest(body.data.file_id.toLowerCase(), body.data.sheet ?? null)
+    await assertNotIngested(s)
   } catch (err) {
     if (err instanceof AttachmentSheetError) return { ok: false, status: err.status, error: err.code }
     throw err
@@ -72,7 +73,13 @@ export async function executeStageAttachment(p: Record<string, Json>): Promise<{
       result: { file_id: fileId, sheet: sheetName, rows: s.rows, email_column: s.email_column },
     }
   }
-  const r = await ingestSheet(s, `chat attachment ${s.file_name} · ${s.sheet}`)
+  let r
+  try {
+    r = await ingestSheet(s, `chat attachment ${s.file_name} · ${s.sheet}`)
+  } catch (err) {
+    if (err instanceof AttachmentSheetError) return { ok: false, error: `re-check failed: ${err.code}`, result: { file_id: fileId, sheet: sheetName } }
+    throw err
+  }
   return {
     ok: true,
     result: {

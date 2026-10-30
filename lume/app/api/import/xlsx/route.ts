@@ -14,7 +14,9 @@ import { ingestBody, intakeErrorResponse } from '@/lib/import/errors'
  * `telegram_ingests` row `awaiting_approval`, telegram-inbox's own Approve /
  * Deny prompt) → the same answer as `POST /api/import/csv`. Approval and the
  * validation job stay in telegram-inbox. 404 file_not_found /
- * sheet_not_found (with `sheets`), 422 empty_sheet, 413 too_large.
+ * sheet_not_found (with `sheets`), 422 empty_sheet, 413 too_large, 409
+ * already_ingested when this file + sheet already has an ingest (from here or
+ * from the agent's stage_attachment_for_validation), like the CSV route.
  */
 
 export const maxDuration = 60
