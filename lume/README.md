@@ -240,6 +240,34 @@ Environment variable names are listed in `.env.example`.
   never a signed URL. An image removed from the composer before sending stays
   in the bucket (orphan, harmless; no cleanup job yet).
 
+## PM influencer reactions → Apollo CSV (built-in skill)
+
+The agent always knows this skill (static prompt section in `lib/agent/prompt.ts`;
+`list_skills` and the Skills menu show it as built-in, `lib/agent/builtinSkills.ts`).
+Pipeline: edge function `influencer-reactions` (port of
+`~/Downloads/pm-reactions-pipeline`); tables `influencers` (26 seeded with the
+2026-10-08 run's yield and cost), `influencer_runs`, `influencer_apify_runs`,
+`influencer_posts`, `influencer_reactors` (the old run's 7,638 reactors imported
+with their triage / verify verdicts, so a re-run pays Perplexity only for new
+reactors), `influencer_exports`.
+
+- Tools: `list_influencers`, `estimate_influencer_run`, `get_influencer_run` (read);
+  `export_influencer_csv`, `add_influencer`, `update_influencer`,
+  `cancel_influencer_run` (low); `start_influencer_run` → `influencer_run` and
+  `approve_reactions` → `influencer_reactions` (high, always ask, never skippable).
+- Approval 1 runs posts + Haiku top-10 ranking, then the run stops at
+  `awaiting_approval` with the exact reactions bill. Approval 2 runs reactions,
+  triage, Perplexity verify (capped by `max_verify_usd`, default $10) and the
+  door retry. Both executors re-check live state before calling the function.
+- Every Apify start is gated by `lume_influencer_reserve_apify` on the same
+  monthly cap as company research (`LUME_RESEARCH_APIFY_CAP_USD`, default 29).
+- Output: `GET /api/influencers/exports/<id>` CSV (First Name, Last Name, Title,
+  Company, Website = domain, Person Linkedin Url, City, State, Country, optional
+  Door Count / Reacted To). Owner: import into an Apollo list, open it as a
+  people search, paste the URL to Lume → `create_order`. Lume never calls Apollo.
+- Edge secrets used: `APIFY_API_TOKEN`, `ANTHROPIC_API_KEY`, `PERPLEXITY_API_KEY`,
+  optional `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`, `LUME_URL`.
+
 ## Design system notes
 
 - shadcn CLI 4 `base-nova` preset = **Base UI primitives**, not Radix. Compose
