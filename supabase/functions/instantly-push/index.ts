@@ -371,6 +371,15 @@ export function decideRow(
 }
 
 /**
+ * {{jurisdiction_line}} for the campaign the lead is actually pushed to: the
+ * matching active hook, else THAT campaign's fallback (a no-location lead
+ * routed to the separate campaign gets its fallback, not the main one's).
+ */
+export function jurisdictionLineFor(lead: Lead, campaignId: string, rows: JurisdictionRow[]): string {
+  return jurisdictionLine(resolveJurisdiction(lead.country, lead.region, rows), fallbackJurisdictionLine(campaignId))
+}
+
+/**
  * The active jurisdictions, one REST select per push. A failed read is
  * logged and treated as no rows: every lead then gets the fallback sentence,
  * which is what an unreviewed table means anyway.
@@ -534,13 +543,23 @@ export async function createLead(campaignId: string, lead: Lead): Promise<Record
 // The smoke test from the manual run, automated: after the first lead lands,
 // read it back and confirm the custom variables actually rendered into the
 // payload before committing the other few hundred.
-async function verifyFirstLead(campaignId: string, lead: Lead): Promise<string | null> {
+//
+// problem: location / Operating Cities Copied missing -> the push halts (as
+// before). warning: jurisdiction_line missing -> logged and recorded, never a
+// halt. An unreadable echo is unverifiable, not proven broken: neither.
+export interface FirstLeadCheck {
+  problem: string | null
+  warning: string | null
+}
+
+const JURISDICTION_ECHO_WARNING = 'jurisdiction_line missing on the first lead (Instantly did not echo it); push continued'
+
+export async function verifyFirstLead(campaignId: string, lead: Lead): Promise<FirstLeadCheck> {
+  const ok: FirstLeadCheck = { problem: null, warning: null }
   const expected = [
     lead.location ? 'location' : null,
     lead.operatingCities ? 'Operating Cities Copied' : null,
-    'jurisdiction_line',
   ].filter(Boolean) as string[]
-  if (expected.length === 0) return null
 
   try {
     const res = await fetch(`${INSTANTLY_BASE_URL}/leads/list`, {
@@ -551,21 +570,22 @@ async function verifyFirstLead(campaignId: string, lead: Lead): Promise<string |
       },
       body: JSON.stringify({ limit: 2, campaign: campaignId, search: lead.email }),
     })
-    if (!res.ok) return null // Unverifiable, not proven broken — don't block.
+    if (!res.ok) return ok // Unverifiable, not proven broken — don't block.
     const data = await res.json() as { items?: { email?: string; payload?: Record<string, unknown> }[] }
     const match = (data.items ?? []).find(i => (i.email ?? '').toLowerCase() === lead.email.toLowerCase())
-    if (!match || !match.payload) return null
+    if (!match || !match.payload) return ok
     const missing = expected.filter(k => !(k in match.payload!))
-    if (missing.length > 0) return `custom variables missing on the first lead: ${missing.join(', ')}`
-    return null
+    if (missing.length > 0) return { problem: `custom variables missing on the first lead: ${missing.join(', ')}`, warning: null }
+    if (!('jurisdiction_line' in match.payload)) return { problem: null, warning: JURISDICTION_ECHO_WARNING }
+    return ok
   } catch {
-    return null
+    return ok
   }
 }
 
 // ---- Push ----
 
-async function processJob(jobId: string): Promise<void> {
+export async function processJob(jobId: string): Promise<void> {
   const startTime = Date.now()
   const CHUNK_LIMIT_MS = 110_000
 
@@ -592,6 +612,9 @@ async function processJob(jobId: string): Promise<void> {
   let filtered = job.instantly_filtered
   let errors = job.instantly_errors
   let verified = pushed > 0 // A resumed run already cleared the smoke test.
+  // A non-fatal first-lead note: on that row's instantly_result and in the
+  // completion report (validation_jobs has no notes column).
+  let firstLeadWarning: string | null = null
 
   while (true) {
     const rows = (await supabaseRequest(
@@ -615,12 +638,22 @@ async function processJob(jobId: string): Promise<void> {
       const targetCampaign = (!decision.lead.location && noLocationCampaignId)
         ? noLocationCampaignId
         : campaignId
+      const lead: Lead = {
+        ...decision.lead,
+        jurisdictionLine: jurisdictionLineFor(decision.lead, targetCampaign, jurisdictionCtx.rows),
+      }
+      let rowWarning: string | null = null
 
       try {
-        const created = await createLead(targetCampaign, decision.lead)
+        const created = await createLead(targetCampaign, lead)
 
         if (!verified) {
-          const problem = await verifyFirstLead(targetCampaign, decision.lead)
+          const check = await verifyFirstLead(targetCampaign, lead)
+          const problem = check.problem
+          if (check.warning) {
+            console.warn(`[instantly-push] job ${jobId}: ${check.warning}`)
+            rowWarning = firstLeadWarning = check.warning
+          }
           if (problem) {
             await supabaseRequest('PATCH', `validation_rows?id=eq.${row.id}`, {
               instantly_status: 'pushed',
@@ -644,7 +677,7 @@ async function processJob(jobId: string): Promise<void> {
 
         await supabaseRequest('PATCH', `validation_rows?id=eq.${row.id}`, {
           instantly_status: 'pushed',
-          instantly_result: { ...created, routed_to: targetCampaign },
+          instantly_result: { ...created, routed_to: targetCampaign, ...(rowWarning ? { warning: rowWarning } : {}) },
         })
         if (targetCampaign === noLocationCampaignId) pushedNoLocation++
         else pushed++
@@ -706,6 +739,7 @@ async function processJob(jobId: string): Promise<void> {
       `Errors: ${errors}`,
       ``,
       `Barriers — location: ${job.location_barrier ? 'ON' : 'OFF'}, company: ${job.company_barrier ? 'ON' : 'OFF'}${job.company_strict ? ' (strict names)' : ''}`,
+      ...(firstLeadWarning ? [`Note: ${firstLeadWarning}`] : []),
       ``,
       `Ready to launch when your sequence is written.`,
     ].join('\n'),
