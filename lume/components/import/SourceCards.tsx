@@ -7,7 +7,11 @@ import { Button } from '@/components/ui/button'
 import { GlassCard } from '@/components/ui/glass-card'
 import { Input } from '@/components/ui/input'
 import type { OrderKind } from '@/lib/db/types'
-import { errorMessage, promptLine, pullApify, sendApolloLink, uploadCsvFile } from '@/lib/import/client'
+import { errorMessage, importXlsxSheet, promptLine, pullApify, sendApolloLink, uploadCsvFile, type IngestAnswer } from '@/lib/import/client'
+import type { ApiAnswer } from '@/lib/validate/client'
+import { uploadChatFile } from '@/lib/agent/fileClient'
+import type { ChatFileRef } from '@/lib/agent/files'
+import { MAX_SHEET_FILE_BYTES, SHEET_ERRORS, sheetExt, type SheetMeta } from '@/lib/sheets/model'
 import { MAX_CSV_BYTES } from '@/lib/import/csv'
 import { parseApolloUrl } from '@/lib/import/messages'
 import { cn } from '@/lib/utils'
@@ -211,31 +215,73 @@ function ApolloCard({ onCreated }: SourceCardsProps) {
 
 const mb = (n: number) => `${(n / 1024 / 1024).toFixed(n < 1024 * 1024 ? 2 : 1)} MB`
 
+/** A workbook with several sheets that have rows: the owner picks one. */
+interface SheetChoice {
+  ref: ChatFileRef
+  sheets: SheetMeta[]
+  picked: string
+}
+
+const sheetLabel = (s: SheetMeta) => `${s.name} · ${s.rows.toLocaleString('en-US')} row${s.rows === 1 ? '' : 's'}${s.hidden ? ' (hidden)' : ''}`
+
 function CsvCard({ onCreated }: SourceCardsProps) {
   const [status, setStatus] = useState<Status>({ state: 'idle' })
   const [over, setOver] = useState(false)
   const [file, setFile] = useState<File | null>(null)
+  const [choice, setChoice] = useState<SheetChoice | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const busy = status.state === 'busy'
 
-  async function send(f: File) {
-    if (busy) return
-    setFile(f)
-    if (!f.name.toLowerCase().endsWith('.csv')) {
-      setStatus({ state: 'error', text: 'Only .csv files.' })
-      return
-    }
-    if (f.size > MAX_CSV_BYTES) {
-      setStatus({ state: 'error', text: `${mb(f.size)} — over the 20 MB limit.` })
-      return
-    }
-    setStatus({ state: 'busy' })
-    const a = await uploadCsvFile(f)
+  const done = (a: ApiAnswer<IngestAnswer>) => {
     if (a.status === 200 && a.body?.ok) {
       setStatus({ state: 'done', text: `${a.body.row_count.toLocaleString('en-US')} rows. ${promptLine(a.body.telegram)}`, gate: a.body.gate })
       onCreated?.({ kind: 'ingest', id: a.body.ingest_id })
     } else {
       setStatus({ state: 'error', text: errorMessage(a) })
+    }
+  }
+
+  async function importSheet(ref: ChatFileRef, sheet: string) {
+    setChoice(null)
+    setStatus({ state: 'busy' })
+    done(await importXlsxSheet(ref.id, sheet))
+  }
+
+  async function send(f: File) {
+    if (busy) return
+    setFile(f)
+    setChoice(null)
+    const ext = sheetExt(f.name)
+    if (ext === 'xls') {
+      setStatus({ state: 'error', text: 'Old .xls workbook — open it in Excel or Numbers and save as .xlsx.' })
+      return
+    }
+    if (ext !== 'csv' && ext !== 'xlsx') {
+      setStatus({ state: 'error', text: 'Only .csv or .xlsx files.' })
+      return
+    }
+    const cap = ext === 'xlsx' ? MAX_SHEET_FILE_BYTES : MAX_CSV_BYTES
+    if (f.size > cap) {
+      setStatus({ state: 'error', text: `${mb(f.size)} — over the ${ext === 'xlsx' ? '10' : '20'} MB limit.` })
+      return
+    }
+    setStatus({ state: 'busy' })
+    if (ext === 'csv') {
+      done(await uploadCsvFile(f))
+    } else {
+      // Parsed server side (magic bytes, zip-bomb caps); then the chosen sheet goes in as CSV.
+      const up = await uploadChatFile(f)
+      if (!up.ok) {
+        setStatus({ state: 'error', text: `${f.name} ${SHEET_ERRORS[up.error] ?? SHEET_ERRORS.upload}.` })
+      } else {
+        const usable = up.ref.sheets.filter((s) => s.rows > 0)
+        if (!usable.length) setStatus({ state: 'error', text: 'No sheet in that workbook has data rows.' })
+        else if (usable.length === 1) await importSheet(up.ref, usable[0].name)
+        else {
+          setChoice({ ref: up.ref, sheets: usable, picked: (usable.find((s) => !s.hidden) ?? usable[0]).name })
+          setStatus({ state: 'idle' })
+        }
+      }
     }
     if (inputRef.current) inputRef.current.value = ''
   }
@@ -248,7 +294,12 @@ function CsvCard({ onCreated }: SourceCardsProps) {
   }
 
   return (
-    <CardShell icon={<FileUp className="size-4" />} title="CSV" sub="Up to 20 MB. Goes to the same Approve / Deny prompt as a file sent to the bot." label="CSV intake">
+    <CardShell
+      icon={<FileUp className="size-4" />}
+      title="CSV / Excel"
+      sub="A .csv (up to 20 MB) or .xlsx (up to 10 MB, pick a sheet). Goes to the same Approve / Deny prompt as a file sent to the bot."
+      label="CSV intake"
+    >
       <div
         onDragOver={(e) => {
           e.preventDefault()
@@ -272,13 +323,46 @@ function CsvCard({ onCreated }: SourceCardsProps) {
           <span className="flex items-center gap-2 text-fg-70">
             <Spinner /> Uploading {file?.name}…
           </span>
+        ) : choice ? (
+          <form
+            className="flex w-full flex-col items-stretch gap-2 text-left"
+            aria-label="Pick a sheet"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void importSheet(choice.ref, choice.picked)
+            }}
+          >
+            <label htmlFor="xlsx-sheet" className="text-[12px] text-fg-70">
+              {choice.ref.name} has {choice.sheets.length} sheets with rows. Which one?
+            </label>
+            <select
+              id="xlsx-sheet"
+              value={choice.picked}
+              onChange={(e) => setChoice({ ...choice, picked: e.target.value })}
+              className="h-8 rounded-control border border-line bg-background px-2 text-[12.5px] text-fg outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {choice.sheets.map((s) => (
+                <option key={s.name} value={s.name}>
+                  {sheetLabel(s)}
+                </option>
+              ))}
+            </select>
+            <div className="flex items-center gap-2">
+              <Button type="submit" size="sm">
+                Import sheet
+              </Button>
+              <button type="button" onClick={() => setChoice(null)} className="text-[12px] text-fg-46 hover:text-fg">
+                Cancel
+              </button>
+            </div>
+          </form>
         ) : (
           <>
-            <span>Drop a .csv here</span>
+            <span>Drop a .csv or .xlsx here</span>
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
-              aria-label="Browse for a CSV file"
+              aria-label="Browse for a CSV or Excel file"
               className="text-violet-soft underline-offset-2 hover:text-fg hover:underline"
             >
               or browse
@@ -293,7 +377,7 @@ function CsvCard({ onCreated }: SourceCardsProps) {
         <input
           ref={inputRef}
           type="file"
-          accept=".csv,text/csv"
+          accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           className="sr-only"
           tabIndex={-1}
           aria-hidden

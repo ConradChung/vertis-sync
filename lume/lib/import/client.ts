@@ -58,6 +58,15 @@ export async function uploadCsvFile(file: File): Promise<ApiAnswer<IngestAnswer>
   return sendJson<IngestAnswer>('/api/import/csv', { storage_path: path, filename: file.name, upload_ticket }, { timeoutMs: 90_000 })
 }
 
+/**
+ * Import card, .xlsx: the workbook was uploaded and parsed through the chat
+ * file routes (`uploadChatFile`); this sends the chosen sheet to the same
+ * intake as a CSV upload.
+ */
+export function importXlsxSheet(fileId: string, sheet: string): Promise<ApiAnswer<IngestAnswer>> {
+  return sendJson<IngestAnswer>('/api/import/xlsx', { file_id: fileId, sheet }, { timeoutMs: 90_000 })
+}
+
 const MESSAGES: Record<string, string> = {
   invalid_body: 'Enter a valid id.',
   invalid_json: 'Enter a valid id.',
@@ -67,7 +76,10 @@ const MESSAGES: Record<string, string> = {
   empty_dataset: 'That dataset is empty.',
   apify_error: 'Apify did not answer — try again.',
   too_large: 'Over the 20 MB limit.',
-  unsupported_media_type: 'Only .csv files.',
+  unsupported_media_type: 'Only .csv or .xlsx files.',
+  sheet_not_found: 'That sheet is no longer in the file — upload it again.',
+  empty_sheet: 'That sheet has a header but no rows.',
+  file_not_found: 'The workbook upload expired — upload it again.',
   not_csv: "That file doesn't read as a CSV.",
   empty_csv: 'The file has a header but no rows.',
   missing_file: 'Choose a file first.',

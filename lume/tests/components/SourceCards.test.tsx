@@ -103,19 +103,23 @@ const SIGNED = { path: 'lume/0b6f6c1e-8a51-4c43-9d0e-6e7a1f3b2c4d.csv', token: '
 const fileInput = () => document.querySelector('[data-testid="csv-input"]') as HTMLInputElement
 
 describe('SourceCards — CSV', () => {
-  it('refuses non-.csv files without uploading', async () => {
+  it('refuses files that are not .csv / .xlsx, and asks for .xlsx instead of .xls, without uploading', async () => {
     render(<SourceCards />)
     const card = within(region(/CSV intake/))
     await act(async () => {
-      fireEvent.change(fileInput(), { target: { files: [new File(['x'], 'a.xlsx')] } })
+      fireEvent.change(fileInput(), { target: { files: [new File(['x'], 'a.pdf')] } })
     })
+    expect(card.getByRole('status').textContent).toBe('Only .csv or .xlsx files.')
+    await act(async () => {
+      fireEvent.change(fileInput(), { target: { files: [new File(['x'], 'old.xls')] } })
+    })
+    expect(card.getByRole('status').textContent).toBe('Old .xls workbook — open it in Excel or Numbers and save as .xlsx.')
     expect(fetchMock).not.toHaveBeenCalled()
-    expect(card.getByRole('status').textContent).toBe('Only .csv files.')
   })
 
   it('the browse control is named for screen readers', () => {
     render(<SourceCards />)
-    expect(within(region(/CSV intake/)).getByRole('button', { name: 'Browse for a CSV file' })).toBeTruthy()
+    expect(within(region(/CSV intake/)).getByRole('button', { name: 'Browse for a CSV or Excel file' })).toBeTruthy()
   })
 
   it('a dropped .csv: sign → upload straight to Storage → ingest the stored object', async () => {
@@ -126,7 +130,7 @@ describe('SourceCards — CSV', () => {
       .mockResolvedValueOnce(ok(SIGNED))
       .mockResolvedValueOnce(ok({ ok: true, ingest_id: ID, row_count: 2, email_column: null, telegram: 'skipped', gate: `ingest_approval:${ID}` }))
     const file = new File(['email\na\nb\n'], 'leads.csv', { type: 'text/csv' })
-    const zone = card.getByText('Drop a .csv here').parentElement!
+    const zone = card.getByText('Drop a .csv or .xlsx here').parentElement!
     await act(async () => {
       fireEvent.drop(zone, { dataTransfer: { files: [file] } })
     })
@@ -169,5 +173,58 @@ describe('SourceCards — CSV', () => {
       fireEvent.change(fileInput(), { target: { files: [big] } })
     })
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('SourceCards — Excel', () => {
+  const FILE = '0f3c2b1a-9d8e-4f7a-8b6c-5d4e3f2a1b0c'
+  const XSIGN = { path: `${FILE}.xlsx`, token: 'xt', signedUrl: 'https://s', upload_ticket: 'k' }
+  const xfile = () => new File([new Uint8Array(100)], 'book.xlsx')
+  const ref = (sheets: { name: string; rows: number; cols: number; hidden?: boolean }[]) => ({ file: { kind: 'file', id: FILE, name: 'book.xlsx', file_kind: 'xlsx', size_bytes: 100, sheets } })
+  const INGEST = { ok: true, ingest_id: ID, row_count: 3, email_column: 'Email', telegram: 'sent', gate: `ingest_approval:${ID}` }
+
+  it('a one-sheet workbook: upload + parse through the chat file routes, then that sheet goes to the CSV intake', async () => {
+    const onCreated = vi.fn()
+    render(<SourceCards onCreated={onCreated} />)
+    const card = within(region(/CSV intake/))
+    fetchMock.mockResolvedValueOnce(ok(XSIGN)).mockResolvedValueOnce(ok(ref([{ name: 'Leads', rows: 3, cols: 2 }, { name: 'Empty', rows: 0, cols: 0 }]), 201)).mockResolvedValueOnce(ok(INGEST))
+    await act(async () => {
+      fireEvent.change(fileInput(), { target: { files: [xfile()] } })
+    })
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/agent/files/sign', '/api/agent/files', '/api/import/xlsx'])
+    expect(from).toHaveBeenCalledWith('agent-chat-files')
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1].body))).toEqual({ file_id: FILE, sheet: 'Leads' })
+    expect(card.getByRole('status').textContent).toMatch(/3 rows\. Prompt sent to Telegram/)
+    expect(onCreated).toHaveBeenCalledWith({ kind: 'ingest', id: ID })
+  })
+
+  it('several sheets with rows: asks which one, then imports the pick', async () => {
+    render(<SourceCards />)
+    const card = within(region(/CSV intake/))
+    fetchMock.mockResolvedValueOnce(ok(XSIGN)).mockResolvedValueOnce(ok(ref([{ name: 'Old', rows: 9, cols: 2, hidden: true }, { name: 'Q3', rows: 1204, cols: 8 }, { name: 'Q4', rows: 2, cols: 8 }]), 201))
+    await act(async () => {
+      fireEvent.change(fileInput(), { target: { files: [xfile()] } })
+    })
+    const select = card.getByLabelText(/book\.xlsx has 3 sheets with rows/) as HTMLSelectElement
+    expect(select.value).toBe('Q3')
+    expect([...select.options].map((o) => o.textContent)).toEqual(['Old · 9 rows (hidden)', 'Q3 · 1,204 rows', 'Q4 · 2 rows'])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    fireEvent.change(select, { target: { value: 'Q4' } })
+    fetchMock.mockResolvedValueOnce(ok(INGEST))
+    await act(async () => {
+      fireEvent.click(card.getByRole('button', { name: 'Import sheet' }))
+    })
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1].body))).toEqual({ file_id: FILE, sheet: 'Q4' })
+  })
+
+  it('a parse refusal names the file and the reason; nothing is ingested', async () => {
+    render(<SourceCards />)
+    const card = within(region(/CSV intake/))
+    fetchMock.mockResolvedValueOnce(ok(XSIGN)).mockResolvedValueOnce(ok({ error: 'legacy_or_encrypted' }, 415))
+    await act(async () => {
+      fireEvent.change(fileInput(), { target: { files: [xfile()] } })
+    })
+    expect(card.getByRole('status').textContent).toBe('book.xlsx is an old .xls or a password-protected workbook — save it as .xlsx without a password.')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })
