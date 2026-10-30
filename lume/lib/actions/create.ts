@@ -10,6 +10,7 @@ import { CRM_CLOSE_KIND, parseCrmClosePayload } from '@/lib/crm/actions'
 import { updateSequencePayloadError } from '@/lib/campaigns/sequenceAction'
 import { removeLeadsPayloadError } from '@/lib/actions/removeLeadsPayload'
 import { INFLUENCER_ACTION_KEY, influencerPayloadError } from '@/lib/influencers/actionPayload'
+import { STAGE_ATTACHMENT_KEY, stageAttachmentPayloadError } from '@/lib/agent/attachmentActionPayload'
 import { tryGrantSend } from '@/lib/actions/grant'
 import { pushForItem } from '@/lib/webhooks/deliver'
 import { pushSummary } from '@/lib/webhooks/push'
@@ -149,6 +150,11 @@ export async function createAction(
     if (err) throw new InvalidActionPayloadError(err)
     const field = INFLUENCER_ACTION_KEY[kind]
     campaignKey = { field, value: String(payload[field]) }
+  } else if (kind === 'stage_attachment') {
+    // One awaiting staging per file + sheet (pending_actions_one_awaiting_stage_attachment_idx).
+    const err = stageAttachmentPayloadError(payload)
+    if (err) throw new InvalidActionPayloadError(err)
+    campaignKey = { field: STAGE_ATTACHMENT_KEY, value: String(payload[STAGE_ATTACHMENT_KEY]) }
   } else if (kind === 'update_sequence') {
     const err = updateSequencePayloadError(payload)
     if (err) throw new InvalidActionPayloadError(err)

@@ -83,6 +83,7 @@ describe('scopes', () => {
       delete_rule: 'campaign', pause_campaign: 'campaign', resume_campaign: 'campaign', create_campaign: 'campaign',
       update_sequence: 'campaign', send_reply: 'replies', crm_close_deal: 'replies', run_actor: 'orders', decide_gate: null,
       issue_operator_key: null, remove_leads: 'campaign', label_reply: 'replies', influencer_run: 'orders', influencer_reactions: 'orders',
+      stage_attachment: 'validation',
     }
     for (const [kind, scope] of Object.entries(expected)) expect(scopeForPendingKind(kind)).toBe(scope)
     expect(scopeForPendingKind('nope')).toBeNull()

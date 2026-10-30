@@ -98,6 +98,8 @@ const KIND_SCOPE: Record<PendingActionKind, VerticalScope | null> = {
   // The PM influencer reactions pipeline (Apify + Perplexity): a paid data order.
   influencer_run: 'orders',
   influencer_reactions: 'orders',
+  // A chat spreadsheet sent to the ingest gate: a validation intake.
+  stage_attachment: 'validation',
   decide_gate: null,
   // Owner / master-bot business: never a vertical's item.
   issue_operator_key: null,

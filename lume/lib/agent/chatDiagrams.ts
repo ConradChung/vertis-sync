@@ -41,4 +41,4 @@ export function chatDiagrams(messages: readonly { id: string; role: string; text
 }
 
 /** Tool names whose completion changes the lead review set shown in the Leads tab. */
-export const REVIEW_TOOLS = new Set(['load_actor_results', 'filter_leads', 'restore_leads'])
+export const REVIEW_TOOLS = new Set(['load_actor_results', 'load_attachment_as_leads', 'filter_leads', 'restore_leads'])

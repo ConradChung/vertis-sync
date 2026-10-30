@@ -108,6 +108,7 @@ const ACTION_LABEL: Record<string, string> = {
   label_reply: 'Label a reply (blocklists the lead)',
   influencer_run: 'Start a PM influencer reactions run (spends money)',
   influencer_reactions: 'Approve the influencer reactions bill (spends money)',
+  stage_attachment: 'Send a chat spreadsheet to the ingest gate',
 }
 
 function priorityOf(gate: GateRow): Priority {

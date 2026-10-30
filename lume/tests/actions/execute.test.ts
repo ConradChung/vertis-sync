@@ -138,7 +138,7 @@ describe('executeAction dispatch table', () => {
     expect(EXECUTABLE_KINDS.sort()).toEqual([
       'activate_rule', 'assign_leads', 'create_campaign', 'crm_close_deal', 'decide_gate', 'delete_rule', 'influencer_reactions', 'influencer_run',
       'issue_operator_key', 'label_reply', 'launch_campaign', 'pause_campaign', 'push_to_instantly', 'remove_leads', 'resume_campaign', 'run_actor', 'send_reply',
-      'update_sequence',
+      'stage_attachment', 'update_sequence',
     ])
   })
 

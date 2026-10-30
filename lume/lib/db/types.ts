@@ -182,6 +182,7 @@ export type PendingActionKind =
   | 'remove_leads'
   | 'influencer_run'
   | 'influencer_reactions'
+  | 'stage_attachment'
 
 export type PendingActionStatus =
   | 'awaiting'

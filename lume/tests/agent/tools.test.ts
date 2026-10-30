@@ -54,6 +54,7 @@ describe('buildTools', () => {
       remove_leads: { campaign_id: 'c1', state: 'bounced', reason: 'free the cap' },
       start_influencer_run: { slugs: ['peter-lohmann'], estimate_shown_to_owner: true },
       approve_reactions: { run_id: JOB },
+      stage_attachment_for_validation: { file_id: JOB, sheet: 'Leads' },
     }
     const { fetch, createAction, tool } = setup()
     for (const [name, tier] of Object.entries(TOOL_TIERS)) {
