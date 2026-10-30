@@ -420,3 +420,74 @@ Deno.test('start: an Apify start that times out (outcome unknown) keeps the esti
     assert(String(patch.error).includes('unknown'), 'the error says the outcome is unknown')
   } finally { f.restore() }
 })
+
+// --- state write after the Apify start (review minor) -------------------------------
+
+const crawlPatches = (calls: { url: string; method: string; body: string | null }[]) =>
+  calls.filter((c) => c.method === 'PATCH' && c.url.startsWith('https://db.test/rest/v1/company_crawls?id=eq.'))
+
+Deno.test('start: a failed "running" write is retried', async () => {
+  let n = 0
+  const routes = startRoutes()
+  routes.unshift([(u, m) => u.startsWith('https://db.test/rest/v1/company_crawls?id=eq.') && m === 'PATCH', () =>
+    ++n < 3 ? new Response('flaky', { status: 503 }) : json([{ id: CRAWL }])])
+  const f = stubFetch(routes)
+  try {
+    const res = await handle(post({ domain: 'acme-pm.com' }), () => {}, { sleep: () => Promise.resolve() })
+    assertEquals(res.status, 202)
+    assertEquals(crawlPatches(f.calls).length, 3)
+    assertEquals(JSON.parse(crawlPatches(f.calls)[2].body!).apify_run_id, 'run1')
+  } finally { f.restore() }
+})
+
+Deno.test('start: if the write never lands, the run id is handed to the poll in memory and the poll records it', async () => {
+  let failing = true
+  const pendingRow = { ...crawlRow, status: 'pending', apify_run_id: null }
+  const routes: Route[] = [
+    [(u, m) => u.startsWith('https://db.test/rest/v1/company_crawls?id=eq.') && m === 'PATCH', () =>
+      failing ? new Response('down', { status: 503 }) : json([{ id: CRAWL }])],
+    [(u, m) => u.startsWith('https://db.test/rest/v1/company_crawls?id=eq.') && m === 'GET', () => json([pendingRow])],
+    ...continueRoutes({ id: 'run1', status: 'RUNNING', defaultDatasetId: 'ds1' }),
+    ...startRoutes(),
+  ]
+  const f = stubFetch(routes)
+  const bg: Promise<unknown>[] = []
+  try {
+    const res = await handle(post({ domain: 'acme-pm.com' }), (p) => {
+      failing = false // the database comes back before the background poll runs
+      bg.push(p)
+    }, { sleep: () => Promise.resolve(), now: (() => { let t = 0; return () => (t += 60_000) })() })
+    assertEquals(res.status, 202)
+    await Promise.all(bg)
+    const recorded = crawlPatches(f.calls).map((c) => JSON.parse(c.body!)).find((b) => b.apify_run_id === 'run1' && b.status === 'running' && !failing)
+    assert(recorded, 'the poll wrote the run id it was handed')
+    assert(f.calls.some((c) => c.url.startsWith('https://api.apify.com/v2/actor-runs/run1')), 'the run is polled')
+  } finally { f.restore() }
+})
+
+Deno.test('continue: a crawl that has an apify_run_id but is still pending is promoted to running and polled', async () => {
+  const f = stubFetch(continueRoutes(succeeded, [
+    [(u, m) => u.startsWith('https://db.test/rest/v1/company_crawls?id=eq.') && m === 'GET', () => json([{ ...crawlRow, status: 'pending' }])],
+  ]))
+  try {
+    await continueCrawl(CRAWL, { startedAt: Date.now(), sleep: () => Promise.resolve() })
+    const first = crawlPatches(f.calls)[0]
+    assert(first.url.includes('status=in.(pending,running)'))
+    assertEquals(JSON.parse(first.body!).status, 'running')
+    assert(extracted(f.calls), 'then it finishes as usual')
+  } finally { f.restore() }
+})
+
+Deno.test('continue: a background failure marks a pending or running crawl failed', async () => {
+  const f = stubFetch(continueRoutes(succeeded, [
+    [(u) => u.startsWith('https://api.apify.com/v2/actor-runs/run1'), () => new Response('gone', { status: 500 })],
+  ]))
+  const bg: Promise<unknown>[] = []
+  try {
+    await handle(post({ crawl_id: CRAWL }), (p) => { bg.push(p) }, { sleep: () => Promise.resolve() })
+    await Promise.all(bg)
+    const last = crawlPatches(f.calls).at(-1)!
+    assert(last.url.includes('status=in.(pending,running)'))
+    assertEquals(JSON.parse(last.body!).status, 'failed')
+  } finally { f.restore() }
+})

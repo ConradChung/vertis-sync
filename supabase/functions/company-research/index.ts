@@ -141,6 +141,23 @@ export interface ContinueDeps {
   startedAt?: number
   sleep?: (ms: number) => Promise<void>
   now?: () => number
+  /** The Apify run id, when start() could not write it to the crawl row. */
+  runId?: string
+}
+
+const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+/** A state write that must land: retried with a short backoff. */
+async function restRetry(method: string, path: string, body: unknown, sleep: (ms: number) => Promise<void>, prefer?: string, attempts = 3): Promise<unknown> {
+  for (let i = 1; ; i++) {
+    try {
+      return await rest(method, path, body, prefer)
+    } catch (err) {
+      if (i >= attempts) throw err
+      console.warn(`[${FN}] ${method} ${path.split('?')[0]} attempt ${i} failed, retrying:`, err)
+      await sleep(500 * i)
+    }
+  }
 }
 
 async function handOff(crawlId: string): Promise<boolean> {
@@ -228,10 +245,17 @@ async function start(target: { domain: string; startUrl: string }, waitUntil: (p
     return reply({ ok: false, error: 'apify_start_failed', detail: message.slice(0, 300), crawl_id: crawlId }, 502)
   }
 
-  await rest('PATCH', `company_crawls?id=eq.${crawlId}`, {
-    status: 'running', apify_run_id: runId, actor_id: CRAWL_ACTOR_ID, started_at: new Date().toISOString(),
-  })
-  waitUntil(runContinue(crawlId, deps))
+  try {
+    await restRetry('PATCH', `company_crawls?id=eq.${crawlId}`, {
+      status: 'running', apify_run_id: runId, actor_id: CRAWL_ACTOR_ID, started_at: new Date().toISOString(),
+    }, deps.sleep ?? defaultSleep)
+  } catch (err) {
+    // The run is live and billing: hand its id to the poll in memory, which
+    // records it before polling. If that fails too, the stale sweep fails the
+    // crawl (its estimate stays as the cost).
+    console.error(`[${FN}] crawl ${crawlId}: could not record run ${runId}; the poll will retry:`, err)
+  }
+  waitUntil(runContinue(crawlId, { ...deps, runId }))
   return reply({
     ok: true, crawl_id: crawlId, company_id: companyId, domain: target.domain,
     estimate_usd: estimate, basis: gate.basis, account_usd: gate.account_usd, reserved_usd: gate.reserved_usd,
@@ -265,7 +289,7 @@ function runContinue(crawlId: string, deps: ContinueDeps): Promise<void> {
     console.error(`[${FN}] crawl ${crawlId} failed:`, message)
     try {
       // Cost stays at the reserved estimate: the conservative figure when the actual is unknown.
-      await rest('PATCH', `company_crawls?id=eq.${crawlId}&status=eq.running`, {
+      await rest('PATCH', `company_crawls?id=eq.${crawlId}&status=in.(pending,running)`, {
         status: 'failed', error: message.slice(0, 2000), finished_at: new Date().toISOString(),
       })
     } catch (patchErr) {
@@ -278,19 +302,29 @@ function runContinue(crawlId: string, deps: ContinueDeps): Promise<void> {
 export async function continueCrawl(crawlId: string, deps: ContinueDeps = {}): Promise<void> {
   const clock = deps.now ?? Date.now
   const startedAt = deps.startedAt ?? clock()
-  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const sleep = deps.sleep ?? defaultSleep
 
   const rows = (await rest('GET',
     `company_crawls?id=eq.${crawlId}&select=id,company_id,status,apify_run_id,estimate_usd,start_url,extraction`)) as CrawlRow[]
   const crawl = rows?.[0]
-  if (!crawl || crawl.status !== 'running' || crawl.extraction !== null || !crawl.apify_run_id) {
+  const runId = crawl?.apify_run_id ?? deps.runId ?? null
+  if (!crawl || !['pending', 'running'].includes(crawl.status) || crawl.extraction !== null || !runId) {
     console.log(`[${FN}] crawl ${crawlId} is not running — nothing to do`)
     return
+  }
+  // A run that started but whose state write did not land (pending, or no run
+  // id on the row): record it before polling.
+  if (crawl.status !== 'running' || !crawl.apify_run_id) {
+    await restRetry('PATCH', `company_crawls?id=eq.${crawlId}&status=in.(pending,running)`, {
+      status: 'running', apify_run_id: runId, actor_id: CRAWL_ACTOR_ID,
+    }, sleep)
+    crawl.status = 'running'
+    crawl.apify_run_id = runId
   }
 
   let run: RunData
   while (true) {
-    const res = await apify(`/actor-runs/${encodeURIComponent(crawl.apify_run_id)}`)
+    const res = await apify(`/actor-runs/${encodeURIComponent(runId)}`)
     if (!res.ok) throw new Error(`Apify run read failed (${res.status}): ${(await res.text()).slice(0, 200)}`)
     run = ((await res.json()) as { data?: RunData }).data ?? {}
     const elapsed = clock() - startedAt
