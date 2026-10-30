@@ -25,6 +25,7 @@ const bodyOf = (calls: { url: string; method: string; body: string | null }[], m
 
 function startRoutes(opts: { reserve?: unknown; usage?: Response } = {}): Route[] {
   return [
+    [(u) => u === 'https://db.test/rest/v1/rpc/lume_research_fail_stale_crawls', () => json(0)],
     [(u, m) => u.startsWith('https://db.test/rest/v1/companies') && m === 'POST', () => json([{ id: COMPANY }], 201)],
     [(u) => u === 'https://api.apify.com/v2/users/me/usage/monthly', () => opts.usage ?? json({ data: { totalUsageCreditsUsdAfterVolumeDiscount: 3.5 } })],
     [(u) => u === 'https://db.test/rest/v1/rpc/lume_research_reserve_crawl', () =>
@@ -139,7 +140,7 @@ Deno.test('start: upserts the company, starts a capped cheerio run, marks the cr
 
 Deno.test('start: Apify refuses the run -> crawl failed at $0, 502', async () => {
   const routes = startRoutes()
-  routes.splice(3, 1, [(u, m) => u.includes('/acts/') && m === 'POST', () => json({ error: { message: 'Not enough credit' } }, 402)])
+  routes.unshift([(u, m) => u.includes('/acts/') && m === 'POST', () => json({ error: { message: 'Not enough credit' } }, 402)])
   const f = stubFetch(routes)
   try {
     const res = await handle(post({ domain: 'acme-pm.com' }), () => {})
@@ -185,6 +186,7 @@ const haiku = {
 function continueRoutes(run: Record<string, unknown>, extra: Route[] = []): Route[] {
   return [
     ...extra,
+    [(u) => u === 'https://db.test/rest/v1/rpc/lume_research_fail_stale_crawls', () => json(0)],
     [(u, m) => u.startsWith('https://db.test/rest/v1/company_crawls?id=eq.') && m === 'GET', () => json([crawlRow])],
     [(u) => u.startsWith('https://api.apify.com/v2/actor-runs/run1'), () => json({ data: run })],
     [(u) => u.startsWith('https://api.apify.com/v2/datasets/ds1/items'), () => json(items)],
@@ -288,4 +290,50 @@ Deno.test('handle {crawl_id}: authorized continuation is accepted and runs in th
   } finally {
     f.restore()
   }
+})
+
+// --- stale sweep ----------------------------------------------------------------
+
+const sweepCalls = <T extends { url: string; body: string | null }>(calls: T[]) => calls.filter((c) => c.url === 'https://db.test/rest/v1/rpc/lume_research_fail_stale_crawls')
+
+Deno.test('sweep: every start first fails crawls stuck > 15 minutes, before the budget gate', async () => {
+  const f = stubFetch(startRoutes({ reserve: { ok: false, error: 'budget_exceeded' } }))
+  try {
+    await handle(post({ domain: 'acme-pm.com' }), () => {})
+    const sweeps = sweepCalls(f.calls)
+    assertEquals(sweeps.length, 1)
+    assertEquals(JSON.parse(sweeps[0].body!), { p_minutes: 15 })
+    const iSweep = f.calls.findIndex((c) => c.url.endsWith('/rpc/lume_research_fail_stale_crawls'))
+    const iGate = f.calls.findIndex((c) => c.url.endsWith('/rpc/lume_research_reserve_crawl'))
+    assert(iSweep < iGate, 'sweep runs before the reservation, so a stuck crawl frees its company and its reservation')
+  } finally { f.restore() }
+})
+
+Deno.test('sweep: a continuation invocation sweeps too', async () => {
+  const f = stubFetch(continueRoutes({ id: 'run1', status: 'RUNNING', defaultDatasetId: 'ds1' }))
+  const bg: Promise<unknown>[] = []
+  try {
+    await handle(post({ crawl_id: CRAWL }), (p) => { bg.push(p.catch(() => {})) }, { startedAt: Date.now() - 200_000, sleep: () => Promise.resolve() })
+    await Promise.all(bg)
+    assertEquals(sweepCalls(f.calls).length, 1)
+  } finally { f.restore() }
+})
+
+Deno.test('sweep: a failing sweep is logged and never blocks the request', async () => {
+  const routes = startRoutes()
+  routes.unshift([(u) => u.endsWith('/rpc/lume_research_fail_stale_crawls'), () => new Response('boom', { status: 500 })])
+  const f = stubFetch(routes)
+  try {
+    const res = await handle(post({ domain: 'acme-pm.com' }), () => {})
+    assertEquals(res.status, 202)
+  } finally { f.restore() }
+})
+
+Deno.test('sweep: unauthorized or invalid requests do not touch the database', async () => {
+  const f = stubFetch(startRoutes())
+  try {
+    await handle(post({ domain: 'acme-pm.com' }, 'Bearer nope'), () => {})
+    await handle(post({ domain: 'localhost' }), () => {})
+    assertEquals(sweepCalls(f.calls).length, 0)
+  } finally { f.restore() }
 })

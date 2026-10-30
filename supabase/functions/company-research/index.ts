@@ -53,6 +53,8 @@ const APIFY = 'https://api.apify.com/v2'
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const FN = 'company-research'
 
+/** Crawls pending/running longer than this are failed on every invocation (the run itself times out at 180 s). */
+export const STALE_MINUTES = 15
 /** Re-invoke past this, to stay inside the edge wall clock. */
 const CHUNK_LIMIT_MS = 110_000
 /** Only start extraction (Haiku can take ~30 s) with this much of the chunk used at most. */
@@ -141,6 +143,20 @@ async function handOff(crawlId: string): Promise<boolean> {
     await new Promise((r) => setTimeout(r, 1_500 * (attempt + 1)))
   }
   return false
+}
+
+/**
+ * Fail crawls stuck pending/running for > STALE_MINUTES (a dead hand-off chain
+ * would otherwise block the company and keep its reservation forever). Runs on
+ * every invocation, like Lume's failStaleRuns; never blocks the request.
+ */
+async function sweepStale(): Promise<void> {
+  try {
+    const n = await rest('POST', 'rpc/lume_research_fail_stale_crawls', { p_minutes: STALE_MINUTES }, 'return=representation')
+    if (typeof n === 'number' && n > 0) console.log(`[${FN}] failed ${n} stale crawl(s)`)
+  } catch (err) {
+    console.error(`[${FN}] stale sweep failed:`, err)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -380,12 +396,14 @@ export async function handle(
 
   if (body.crawl_id !== undefined) {
     if (typeof body.crawl_id !== 'string' || !UUID_RE.test(body.crawl_id)) return reply({ error: 'bad_crawl_id' }, 400)
+    await sweepStale()
     waitUntil(runContinue(body.crawl_id, deps))
     return reply({ ok: true, crawl_id: body.crawl_id }, 202)
   }
 
   const target = normalizeTarget({ domain: body.domain, url: body.url })
   if ('error' in target) return reply({ error: target.error }, 400)
+  await sweepStale()
   try {
     return await start(target, waitUntil, deps)
   } catch (err) {
