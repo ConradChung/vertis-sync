@@ -98,6 +98,9 @@ export const WALL_CLOCK_MS = 150_000
 export const STEP_CUTOFF_MS = 60_000
 export const POLL_SLEEP_MS = 10_000
 export const STALE_MINUTES = 30
+/** Transient errors in a row before a run is failed (each invocation retries the step once with backoff). */
+export const MAX_TRANSIENT_STREAK = 8
+const TRANSIENT_PAUSE_MS = 15_000
 const HANDOFF_MS = 10_000
 const PPLX_TIMEOUT_MS = 40_000
 const HAIKU_TIMEOUT_MS = 30_000
@@ -133,6 +136,38 @@ class RestError extends Error {
   constructor(readonly status: number, message: string) {
     super(message)
   }
+}
+
+/** A vendor or network failure worth retrying later (429 / 5xx / 529, timeouts, resets): the run stays running. */
+export class TransientError extends Error {}
+
+const RETRY_MS = [2_000, 5_000, 10_000]
+const retryableStatus = (s: number) => s === 429 || s >= 500
+/** Leave this much of the wall clock for the rest of the step and the hand-off before another attempt. */
+const RETRY_RESERVE_MS = 20_000
+
+/**
+ * fetch with bounded retries on 429 / 5xx (incl. 529) and network errors, only
+ * while the invocation's wall clock allows; a non-retryable status is returned
+ * as-is. Exhausted retries throw TransientError.
+ */
+async function fetchRetry(ctx: Ctx, url: string, init: RequestInit, timeoutMs: number, attempts = 3): Promise<Response> {
+  let last = ''
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+      if (!retryableStatus(res.status)) return res
+      last = `HTTP ${res.status}`
+      await res.body?.cancel()
+    } catch (err) {
+      last = err instanceof Error ? err.message : String(err)
+    }
+    const wait = RETRY_MS[i]
+    const left = WALL_CLOCK_MS - (ctx.deps.now() - ctx.startedAt)
+    if (i === attempts - 1 || left < wait + timeoutMs + RETRY_RESERVE_MS) break
+    await ctx.deps.sleep(wait)
+  }
+  throw new TransientError(`${new URL(url).host}: ${last}`)
 }
 
 const rpc = (fn: string, args: Record<string, unknown>) => rest('POST', `rpc/${fn}`, args, 'return=representation')
@@ -191,14 +226,13 @@ async function apifyMonthlyUsage(): Promise<number | null> {
   }
 }
 
-async function haiku(req: JsonRequest): Promise<{ json: unknown; usd: number }> {
+async function haiku(ctx: Ctx, req: JsonRequest): Promise<{ json: unknown; usd: number }> {
   if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is not set')
-  const res = await fetch(ANTHROPIC_URL, {
+  const res = await fetchRetry(ctx, ANTHROPIC_URL, {
     method: 'POST',
     headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
-    signal: AbortSignal.timeout(HAIKU_TIMEOUT_MS),
-  })
+  }, HAIKU_TIMEOUT_MS)
   if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 200)}`)
   const out = parseJsonResponse(await res.json())
   return { json: out.json, usd: haikuUsd(out.usage) }
@@ -294,12 +328,29 @@ function addCount(ctx: Ctx, key: string, by: number) {
 // ---------------------------------------------------------------------------
 // Apify: reserve + start, poll, read
 
-async function startApify(ctx: Ctx, inf: Influencer, kind: 'posts' | 'reactions', estimate: number, input: Record<string, unknown>): Promise<void> {
+/**
+ * Reserve on the shared monthly cap, then start the actor. 'stopped' when the
+ * run is no longer running (cancelled or failed meanwhile): the caller stops
+ * starting anything.
+ *
+ * Outcomes of the start call:
+ *  - Apify refused (HTTP error): definitive, the row fails at $0;
+ *  - no answer (timeout, network) or an answer without a run id: a run may be
+ *    live, the row fails keeping its reservation as the cost;
+ *  - a run id: recorded with retries; if it still cannot be recorded the run
+ *    is aborted on Apify and the row fails with the run id in its error, the
+ *    reservation kept as the cost.
+ */
+async function startApify(ctx: Ctx, inf: Influencer, kind: 'posts' | 'reactions', estimate: number, input: Record<string, unknown>): Promise<'ok' | 'stopped'> {
   const actor = kind === 'posts' ? POSTS_ACTOR : REACTIONS_ACTOR
   const gate = (await rpc('lume_influencer_reserve_apify', {
     p_run: ctx.run.id, p_influencer: inf.id, p_kind: kind, p_actor: actor, p_estimate: estimate,
     p_external_usd: await apifyMonthlyUsage(), p_cap: parseCap(Deno.env.get('LUME_RESEARCH_APIFY_CAP_USD')),
   })) as Record<string, unknown>
+  if (gate?.error === 'run_not_running') {
+    console.log(`[${FN}] ${ctx.run.id}: run is ${String(gate.status)}; no more starts`)
+    return 'stopped'
+  }
   if (!gate || gate.ok !== true) {
     const error = typeof gate?.error === 'string' ? gate.error : 'reserve_failed'
     // Recorded as a failed $0 row so the stage moves on without this influencer.
@@ -309,45 +360,78 @@ async function startApify(ctx: Ctx, inf: Influencer, kind: 'posts' | 'reactions'
       finished_at: new Date().toISOString(),
     }, 'resolution=ignore-duplicates,return=minimal')
     addCount(ctx, `${kind}_budget_skipped`, 1)
+    if (error === 'budget_exceeded') {
+      ctx.run.counts = { ...ctx.run.counts, [`${kind}_budget_skipped_names`]: [...((ctx.run.counts?.[`${kind}_budget_skipped_names`] as string[] | undefined) ?? []), inf.name] }
+    }
     console.log(`[${FN}] ${ctx.run.id} ${inf.slug} ${kind}: refused (${error})`)
-    return
+    return 'ok'
   }
-  if (gate.existing === true) return
+  if (gate.existing === true) return 'ok'
   const rowId = String(gate.id)
-  let answered = false
+  const fail = (patch: Record<string, unknown>) =>
+    restRetry(ctx, 'PATCH', `influencer_apify_runs?id=eq.${rowId}&status=eq.pending`, { status: 'failed', finished_at: new Date().toISOString(), ...patch })
+
+  // Both bounds: maxTotalChargeUsd (pay-per-event) and maxItems (pay-per-result) = the reservation.
+  const maxItems = Math.max(1, Math.floor(estimate * 1000 / (kind === 'posts' ? PRICE_PER_1K_POSTS : PRICE_PER_1K_REACTIONS)))
+  let res: Response
   try {
-    // Both bounds: maxTotalChargeUsd (pay-per-event) and maxItems (pay-per-result) = the reservation.
-    const maxItems = Math.max(1, Math.floor(estimate * 1000 / (kind === 'posts' ? PRICE_PER_1K_POSTS : PRICE_PER_1K_REACTIONS)))
-    const res = await apify(`/acts/${actor}/runs?maxTotalChargeUsd=${estimate}&maxItems=${maxItems}`, { method: 'POST', body: JSON.stringify(input) })
-    answered = true
-    const body = await res.json().catch(() => null) as { data?: { id?: string; defaultDatasetId?: string }; error?: { message?: string } } | null
-    if (!res.ok || !body?.data?.id) throw new Error(`Apify start failed (${res.status}): ${body?.error?.message ?? 'no run id'}`)
-    await rest('PATCH', `influencer_apify_runs?id=eq.${rowId}`, {
-      status: 'running', apify_run_id: body.data.id, dataset_id: body.data.defaultDatasetId ?? null, started_at: new Date().toISOString(),
+    res = await apify(`/acts/${actor}/runs?maxTotalChargeUsd=${estimate}&maxItems=${maxItems}`, { method: 'POST', body: JSON.stringify(input) })
+  } catch (err) {
+    await fail({ error: `Apify start outcome unknown (${err instanceof Error ? err.message : String(err)}); the reservation stays as the cost`.slice(0, 2000) })
+    return 'ok'
+  }
+  const body = await res.json().catch(() => null) as { data?: { id?: string; defaultDatasetId?: string }; error?: { message?: string } } | null
+  if (!res.ok) {
+    await fail({ cost_usd: 0, error: `Apify start refused (${res.status}): ${body?.error?.message ?? ''}`.slice(0, 2000) })
+    return 'ok'
+  }
+  const runId = body?.data?.id
+  if (!runId) {
+    await fail({ error: `Apify answered ${res.status} without a run id; the reservation stays as the cost` })
+    return 'ok'
+  }
+  try {
+    await restRetry(ctx, 'PATCH', `influencer_apify_runs?id=eq.${rowId}`, {
+      status: 'running', apify_run_id: runId, dataset_id: body?.data?.defaultDatasetId ?? null, started_at: new Date().toISOString(),
     })
   } catch (err) {
-    const raw = err instanceof Error ? err.message : String(err)
-    // A refusal is definitive ($0); a thrown fetch leaves a run possibly live: keep the reservation as its cost.
-    await rest('PATCH', `influencer_apify_runs?id=eq.${rowId}`, {
-      status: 'failed', ...(answered ? { cost_usd: 0 } : {}),
-      error: (answered ? raw : `Apify start outcome unknown (${raw}); the reservation stays as the cost`).slice(0, 2000),
-      finished_at: new Date().toISOString(),
-    })
+    console.error(`[${FN}] ${ctx.run.id}: could not record Apify run ${runId}; aborting it:`, err)
+    await abortApify([runId])
+    // Best effort: the run id goes in the error. If this write fails too, the sweep
+    // fails the pending row after 5 minutes (reservation kept as the cost).
+    await fail({ error: `Apify run ${runId} started but could not be recorded; aborted. The reservation stays as the cost.` }).catch(() => undefined)
+  }
+  return 'ok'
+}
+
+/** A state write that must land: 3 attempts with a short backoff. */
+async function restRetry(ctx: Ctx, method: string, path: string, body: unknown, attempts = 3): Promise<unknown> {
+  for (let i = 1; ; i++) {
+    try {
+      return await rest(method, path, body)
+    } catch (err) {
+      if (i >= attempts) throw err
+      await ctx.deps.sleep(500 * i)
+    }
   }
 }
 
 interface RunData { status?: string; statusMessage?: string; defaultDatasetId?: string; usageTotalUsd?: number }
 
-async function readRun(apifyRunId: string): Promise<RunData> {
-  const res = await apify(`/actor-runs/${encodeURIComponent(apifyRunId)}`)
+const apifyHeaders = () => ({ 'Authorization': `Bearer ${APIFY_API_TOKEN}`, 'Content-Type': 'application/json' })
+
+async function readRun(ctx: Ctx, apifyRunId: string): Promise<RunData> {
+  const res = await fetchRetry(ctx, `${APIFY}/actor-runs/${encodeURIComponent(apifyRunId)}`, { headers: apifyHeaders() }, 20_000)
   if (!res.ok) throw new Error(`Apify run read failed (${res.status})`)
   return ((await res.json()) as { data?: RunData }).data ?? {}
 }
 
-async function readItems(datasetId: string, fields?: string): Promise<unknown[]> {
+async function readItems(ctx: Ctx, datasetId: string, fields?: string): Promise<unknown[]> {
   const out: unknown[] = []
   for (let offset = 0; offset < 50_000; offset += 5_000) {
-    const res = await apify(`/datasets/${encodeURIComponent(datasetId)}/items?clean=true&format=json&limit=5000&offset=${offset}${fields ? `&fields=${fields}` : ''}`, {}, 40_000)
+    const res = await fetchRetry(ctx,
+      `${APIFY}/datasets/${encodeURIComponent(datasetId)}/items?clean=true&format=json&limit=5000&offset=${offset}${fields ? `&fields=${fields}` : ''}`,
+      { headers: apifyHeaders() }, 40_000)
     if (!res.ok) throw new Error(`Apify dataset read failed (${res.status})`)
     const page = await res.json() as unknown[]
     if (!Array.isArray(page)) break
@@ -358,18 +442,18 @@ async function readItems(datasetId: string, fields?: string): Promise<unknown[]>
 }
 
 /** Poll every running row once; finish the terminal ones with `ingest`. Returns whether any is still running. */
-async function pollApify(rows: ApifyRow[], ingest: (row: ApifyRow, items: unknown[]) => Promise<void>, pricePer1k: number): Promise<boolean> {
+async function pollApify(ctx: Ctx, rows: ApifyRow[], ingest: (row: ApifyRow, items: unknown[]) => Promise<void>, pricePer1k: number): Promise<boolean> {
   let live = false
   for (const row of rows) {
     if (row.status !== 'running' || !row.apify_run_id) continue
-    const run = await readRun(row.apify_run_id)
+    const run = await readRun(ctx, row.apify_run_id)
     if (!TERMINAL.has(run.status ?? '')) {
       live = true
       continue
     }
     const now = new Date().toISOString()
     if (run.status === 'SUCCEEDED' || run.status === 'TIMED-OUT') {
-      const items = await readItems(run.defaultDatasetId ?? row.dataset_id ?? '')
+      const items = await readItems(ctx, run.defaultDatasetId ?? row.dataset_id ?? '')
       await ingest(row, items)
       await rest('PATCH', `influencer_apify_runs?id=eq.${row.id}&status=eq.running`, {
         status: 'succeeded', cost_usd: apifyActualUsd(run, items.length, pricePer1k), item_count: items.length,
@@ -397,10 +481,10 @@ async function stagePosts(ctx: Ctx): Promise<StepResult> {
   for (const inf of infl) {
     if (rows.some((r) => r.influencer_id === inf.id)) continue
     if (ctx.deps.now() - ctx.startedAt > STEP_CUTOFF_MS) return 'continue'
-    await startApify(ctx, inf, 'posts', postsReserveUsd(inf.last_posts), buildPostsInput(inf.linkedin_url, inf.lookback_days))
+    if ((await startApify(ctx, inf, 'posts', postsReserveUsd(inf.last_posts), buildPostsInput(inf.linkedin_url, inf.lookback_days))) === 'stopped') return 'stop'
   }
   rows = await getApifyRows(ctx.run.id, 'posts')
-  const live = await pollApify(rows, async (row, items) => {
+  const live = await pollApify(ctx, rows, async (row, items) => {
     const posts = flattenPosts(items).map((p) => ({ run_id: ctx.run.id, influencer_id: row.influencer_id, ...p }))
     if (posts.length) {
       await rest('POST', 'influencer_posts?on_conflict=run_id,influencer_id,post_id', posts, 'resolution=ignore-duplicates,return=minimal')
@@ -421,7 +505,7 @@ interface PostDb { run_id: string; influencer_id: string; post_id: string; post_
 async function stageTopPosts(ctx: Ctx): Promise<StepResult> {
   const todo = (await rest('GET', `influencer_posts?run_id=eq.${ctx.run.id}&pm_relevant=is.null&select=*&limit=${RELEVANCE_BATCH}`)) as PostDb[]
   if (todo.length) {
-    const { json, usd } = await haiku(relevanceRequest(todo))
+    const { json, usd } = await haiku(ctx, relevanceRequest(todo))
     addCost(ctx, 'anthropic', usd)
     const labeled = applyRelevance(todo, parseRelevance(json))
     await rest('POST', 'influencer_posts?on_conflict=run_id,influencer_id,post_id', labeled, 'resolution=merge-duplicates,return=minimal')
@@ -472,11 +556,12 @@ async function stageReactions(ctx: Ctx): Promise<StepResult> {
     const top = (await rest('GET',
       `influencer_posts?run_id=eq.${ctx.run.id}&influencer_id=eq.${inf.id}&rank=not.is.null&select=post_url&order=rank`)) as { post_url: string }[]
     if (!top.length) continue
-    await startApify(ctx, inf, 'reactions', reactionsMaxChargeUsd(e.usd), buildReactionsInput(top.map((t) => t.post_url), inf.max_reactions_per_post))
+    const started = await startApify(ctx, inf, 'reactions', reactionsMaxChargeUsd(e.usd), buildReactionsInput(top.map((t) => t.post_url), inf.max_reactions_per_post))
+    if (started === 'stopped') return 'stop'
   }
   rows = await getApifyRows(ctx.run.id, 'reactions')
   const bySlug = new Map(infl.map((i) => [i.id, i.slug]))
-  const live = await pollApify(rows, async (row, items) => {
+  const live = await pollApify(ctx, rows, async (row, items) => {
     const posts = (await rest('GET',
       `influencer_posts?run_id=eq.${ctx.run.id}&influencer_id=eq.${row.influencer_id}&rank=not.is.null&select=post_id,post_url`)) as { post_id: string; post_url: string }[]
     const merged = aggregateReactors(flattenReactions(items, Object.fromEntries(posts.map((p) => [p.post_id, p.post_url]))), bySlug.get(row.influencer_id) ?? '')
@@ -508,7 +593,7 @@ async function stageTriage(ctx: Ctx): Promise<StepResult> {
   const { noCall, ask } = triageTodo(rows)
   const labels: Record<number, TriageLabel> = Object.fromEntries(noCall.map((id) => [id, 'no' as const]))
   if (ask.length) {
-    const { json, usd } = await haiku(triageRequest(ask))
+    const { json, usd } = await haiku(ctx, triageRequest(ask))
     addCost(ctx, 'anthropic', usd)
     Object.assign(labels, parseTriage(json, ask.map((r) => r.id)))
   }
@@ -567,7 +652,7 @@ async function verifyOne(ctx: Ctx, r: VerifyRow): Promise<number> {
   try {
     const res = await askPerplexity(ctx, verificationQuestion(r.name ?? '', r.headline ?? ''))
     spent = res.cost
-    const { json, usd } = await haiku(verifyParseRequest(r.name ?? '', r.headline ?? '', res.answer, res.citations))
+    const { json, usd } = await haiku(ctx, verifyParseRequest(r.name ?? '', r.headline ?? '', res.answer, res.citations))
     addCost(ctx, 'anthropic', usd)
     const p = groundDoorCount(parseVerifyJson(json), res.citations)
     await rest('PATCH', `influencer_reactors?id=eq.${r.id}`, {
@@ -594,7 +679,7 @@ async function doorOne(ctx: Ctx, r: VerifyRow): Promise<number> {
   try {
     const res = await askPerplexity(ctx, doorQuestion(r.company_name ?? '', r.location ?? ''))
     spent = res.cost
-    const { json, usd } = await haiku(verifyParseRequest(r.name ?? '', r.headline ?? '', res.answer, res.citations))
+    const { json, usd } = await haiku(ctx, verifyParseRequest(r.name ?? '', r.headline ?? '', res.answer, res.citations))
     addCost(ctx, 'anthropic', usd)
     const p = groundDoorCount(parseVerifyJson(json), res.citations)
     if (p.door_count !== null) {
@@ -725,6 +810,8 @@ export async function advance(runId: string, prev: string | null, deps: Deps = {
     while (true) {
       if (d.now() - startedAt > STEP_CUTOFF_MS) break
       const r = await step(ctx)
+      // A step that went through ends a streak of transient errors (persisted with the next write).
+      if (num(ctx.run.counts?.transient_streak) > 0) ctx.run.counts = { ...ctx.run.counts, transient_streak: 0 }
       if (r === 'stop') return
       // Cancelled meanwhile, or the lease was lost: stop without touching the run.
       const fresh = (await rpc('lume_influencer_claim_run', { p_run: runId, p_prev: token, p_token: token, p_lease_seconds: 170 })) as Run[]
@@ -736,16 +823,38 @@ export async function advance(runId: string, prev: string | null, deps: Deps = {
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error(`[${FN}] run ${runId} failed in ${ctx.run.stage}:`, message)
-    await rest('PATCH', `influencer_runs?id=eq.${runId}&status=eq.running`, {
-      status: 'failed', error: `${ctx.run.stage}: ${message}`.slice(0, 2000), finished_at: new Date().toISOString(),
-      cost: ctx.run.cost, counts: ctx.run.counts, lease_token: null, lease_until: null, updated_at: new Date().toISOString(),
-    }).catch((e) => console.error(`[${FN}] could not mark run ${runId} failed:`, e))
-    await notify(runId, 'influencer_run_failed', 'warn', `PM influencer run failed in ${ctx.run.stage}: ${message.slice(0, 300)}`)
-    return
+    const transient = err instanceof TransientError || (err instanceof RestError && err.status >= 500)
+    const streak = num(ctx.run.counts?.transient_streak) + 1
+    if (!transient || streak >= MAX_TRANSIENT_STREAK) {
+      await failRun(runId, `${ctx.run.stage}: ${message}${transient ? ` (${streak} transient errors in a row)` : ''}`)
+      return
+    }
+    // Transient: keep the run running; the next invocation retries this step.
+    console.warn(`[${FN}] run ${runId} transient error ${streak} in ${ctx.run.stage}:`, message)
+    ctx.run.counts = { ...ctx.run.counts, transient_streak: streak, last_transient_error: `${ctx.run.stage}: ${message}`.slice(0, 300) }
+    await patchRun(ctx, { counts: ctx.run.counts }).catch(() => undefined)
+    if (d.now() - startedAt + TRANSIENT_PAUSE_MS < WALL_CLOCK_MS - HANDOFF_MS * 2) await d.sleep(TRANSIENT_PAUSE_MS)
   }
   const handed = await (deps.handOff ?? selfInvoke)(runId, token)
   if (!handed) await notify(runId, 'influencer_run_handoff', 'warn', 'PM influencer run: could not start the next chunk after 4 attempts; the stale sweep will fail it in 30 minutes.')
+}
+
+/**
+ * A fatal error: fail the run AND its pending/running Apify rows in one
+ * statement (lume_influencer_fail_run), abort those runs on Apify and ping
+ * the owner. Their reservations stay as their cost and leave the shared
+ * budget's reserved sum 10 minutes later, like any finished row.
+ */
+async function failRun(runId: string, error: string): Promise<void> {
+  console.error(`[${FN}] run ${runId} failed:`, error)
+  try {
+    const out = (await rpc('lume_influencer_fail_run', { p_run: runId, p_error: error.slice(0, 2000) })) as { ok?: boolean; abort?: string[] }
+    if (out?.ok) await abortApify(out.abort ?? [])
+  } catch (e) {
+    // The sweep closes the rows (parent run no longer active / max run age) on a later invocation.
+    console.error(`[${FN}] could not fail run ${runId}:`, e)
+  }
+  await notify(runId, 'influencer_run_failed', 'warn', `PM influencer run failed: ${error.slice(0, 300)}`)
 }
 
 async function abortApify(ids: (string | null)[]): Promise<void> {
@@ -762,7 +871,8 @@ async function abortApify(ids: (string | null)[]): Promise<void> {
 
 async function sweepStale(): Promise<void> {
   try {
-    const rows = (await rpc('lume_influencer_sweep_stale', { p_minutes: STALE_MINUTES })) as { run_id: string; apify_run_id: string | null }[]
+    // Stale chains, hung or never-started Apify rows, rows under a finished run, max run age, expired approvals.
+    const rows = (await rpc('lume_influencer_sweep', { p_stale_minutes: STALE_MINUTES })) as { run_id: string; apify_run_id: string | null }[]
     if (Array.isArray(rows) && rows.length) await abortApify(rows.map((r) => r.apify_run_id))
   } catch (err) {
     console.error(`[${FN}] stale sweep failed:`, err)

@@ -30,7 +30,7 @@ const bodies = (calls: { url: string; method: string; body: string | null }[], m
   calls.filter((c) => match(c.url, c.method)).map((c) => JSON.parse(c.body ?? 'null'))
 
 const common: Route[] = [
-  [db('rpc/lume_influencer_sweep_stale'), () => json([])],
+  [(u) => u === 'https://db.test/rest/v1/rpc/lume_influencer_sweep', () => json([])],
   [db('rpc/lume_alert_upsert'), () => json('a1')],
 ]
 
@@ -101,7 +101,7 @@ Deno.test('start: creates the run, answers 202 and advances in the background', 
     const [row] = bodies(f.calls, is('influencer_runs', 'POST'))
     assertEquals(row, { influencer_ids: [INF], max_verify_usd: 5, start_action_id: ACTION, status: 'running', stage: 'posts', estimate: { posts_usd: 0.6 } })
     assert(f.calls.some((c) => c.url.endsWith('rpc/lume_influencer_claim_run')), 'advance claimed the run')
-    assert(f.calls.some((c) => c.url.endsWith('rpc/lume_influencer_sweep_stale')), 'stale sweep ran')
+    assert(f.calls.some((c) => c.url.endsWith('rpc/lume_influencer_sweep')), 'the sweep ran')
   } finally { f.restore() }
 })
 
@@ -325,5 +325,172 @@ Deno.test('verify: Perplexity + Haiku parse, door count kept only from a cited s
     const cost = bodies(f.calls, is('influencer_runs', 'PATCH'))[0].cost
     assertEquals(cost.perplexity, 0.005)
     assertEquals(cost.anthropic, 0.00015)
+  } finally { f.restore() }
+})
+
+// ---------------------------------------------------------------------------
+// review fixes: money safety and resumability
+
+const abortRoute = (ids: string[]): Route => [(u, m) => m === 'POST' && ids.some((id) => u === `https://api.apify.com/v2/actor-runs/${id}/abort`), () => json({ data: {} })]
+
+Deno.test('C1: a fatal error mid-reactions fails the run AND its live Apify rows, and aborts them on Apify', async () => {
+  const c = clock()
+  const f = stubFetch([
+    ...common,
+    [db('rpc/lume_influencer_claim_run'), () => json([claimed('reactions', {
+      reactions_estimate: [{ influencer_id: INF, slug: 'peter-lohmann', name: 'Peter Lohmann', posts: 2, reactions: 3, usd: 0.01 }],
+    })])],
+    [is('influencers', 'GET'), () => json([influencer])],
+    [is('influencer_apify_runs?run_id', 'GET'), () => json([
+      { id: APROW, influencer_id: INF, kind: 'reactions', status: 'running', apify_run_id: 'runBBBBBBBB2', dataset_id: 'dsBBBBBBBB2', estimate_usd: 0.07, cost_usd: 0.07 },
+    ])],
+    [(u) => u === 'https://api.apify.com/v2/actor-runs/runBBBBBBBB2', () => json({ data: { status: 'SUCCEEDED', defaultDatasetId: 'dsBBBBBBBB2' } })],
+    [(u) => u.startsWith('https://api.apify.com/v2/datasets/dsBBBBBBBB2/items'), () => json([])],
+    [(u) => u.includes('influencer_posts?'), () => json([])],
+    [db('rpc/lume_influencer_merge_reactions'), () => json({ ok: false, error: 'not_found' })],
+    [db('rpc/lume_influencer_fail_run'), () => json({ ok: true, abort: ['runCCCCCCCC3'] })],
+    abortRoute(['runCCCCCCCC3']),
+  ])
+  try {
+    await advance(RUN, null, { now: c.now, sleep: c.sleep, startedAt: 0, handOff: () => { throw new Error('no hand-off after a fatal error') } })
+    const [failed] = bodies(f.calls, (u) => u.endsWith('rpc/lume_influencer_fail_run'))
+    assertEquals(failed.p_run, RUN)
+    assert(String(failed.p_error).startsWith('reactions: merge failed'), failed.p_error)
+    assert(f.calls.some((x) => x.url.endsWith('/actor-runs/runCCCCCCCC3/abort')), 'live Apify run aborted')
+    assert(!f.calls.some((x) => x.method === 'PATCH' && x.url.includes('influencer_runs')), 'no run-only PATCH that would leak the rows')
+  } finally { f.restore() }
+})
+
+Deno.test('I3: a transient Haiku outage (529) leaves the run running and hands off; nothing is failed', async () => {
+  const c = clock()
+  let haikuCalls = 0
+  const f = stubFetch([
+    ...common,
+    [db('rpc/lume_influencer_claim_run'), () => json([claimed('triage', { counts: { transient_streak: 1 } })])],
+    [is('influencer_reactors', 'GET'), () => json([{ id: 1, headline: 'Owner, Acme PM' }])],
+    [(u) => u === 'https://api.anthropic.com/v1/messages', () => { haikuCalls++; return json({ type: 'error' }, 529) }],
+    [is('influencer_runs', 'PATCH'), () => json([{ id: RUN }])],
+  ])
+  try {
+    let handed = false
+    await advance(RUN, null, { now: c.now, sleep: c.sleep, startedAt: 0, handOff: () => { handed = true; return Promise.resolve(true) } })
+    assertEquals(haikuCalls, 3, 'bounded retries')
+    assert(handed, 'the next invocation retries')
+    assert(!f.calls.some((x) => x.url.endsWith('rpc/lume_influencer_fail_run')), 'not failed')
+    const patch = bodies(f.calls, is('influencer_runs', 'PATCH')).at(-1)
+    assertEquals(patch.counts.transient_streak, 2)
+    assert(String(patch.counts.last_transient_error).includes('529'))
+  } finally { f.restore() }
+})
+
+Deno.test('I3: too many transient errors in a row fail the run through fail_run', async () => {
+  const c = clock()
+  const f = stubFetch([
+    ...common,
+    [db('rpc/lume_influencer_claim_run'), () => json([claimed('triage', { counts: { transient_streak: 7 } })])],
+    [is('influencer_reactors', 'GET'), () => json([{ id: 1, headline: 'Owner' }])],
+    [(u) => u === 'https://api.anthropic.com/v1/messages', () => json({}, 503)],
+    [db('rpc/lume_influencer_fail_run'), () => json({ ok: true, abort: [] })],
+  ])
+  try {
+    await advance(RUN, null, { now: c.now, sleep: c.sleep, startedAt: 0, handOff: () => { throw new Error('no hand-off') } })
+    assert(f.calls.some((x) => x.url.endsWith('rpc/lume_influencer_fail_run')))
+  } finally { f.restore() }
+})
+
+Deno.test('I3: an Apify run read that fails once (503) is retried', async () => {
+  const c = clock()
+  let reads = 0
+  const f = stubFetch([
+    [db('rpc/lume_influencer_claim_run'), () => json([claimed('posts')])],
+    [is('influencers', 'GET'), () => json([influencer])],
+    [is('influencer_apify_runs', 'GET'), () => json([{ id: APROW, influencer_id: INF, kind: 'posts', status: 'running', apify_run_id: 'runAAAAAAAA1', estimate_usd: 1, cost_usd: 1 }])],
+    [(u) => u === 'https://api.apify.com/v2/actor-runs/runAAAAAAAA1', () => (reads++ === 0 ? json({}, 503) : json({ data: { status: 'RUNNING' } }))],
+  ])
+  try {
+    await advance(RUN, null, { now: c.now, sleep: c.sleep, startedAt: 0, handOff: () => Promise.resolve(true) })
+    assert(reads >= 2)
+    assert(!f.calls.some((x) => x.url.includes('lume_influencer_fail_run')))
+  } finally { f.restore() }
+})
+
+Deno.test('I1: a run cancelled mid-step reserves nothing more and starts no Apify run', async () => {
+  const c = clock()
+  const other = { ...influencer, id: '66666666-6666-4666-8666-666666666666', slug: 'deb-newell', name: 'Deb Newell' }
+  const f = stubFetch([
+    [db('rpc/lume_influencer_claim_run'), () => json([claimed('posts', { influencer_ids: [INF, other.id] })])],
+    [is('influencers', 'GET'), () => json([influencer, other])],
+    [is('influencer_apify_runs', 'GET'), () => json([])],
+    [(u) => u === 'https://api.apify.com/v2/users/me/usage/monthly', () => json({ data: { totalUsageCreditsUsdAfterVolumeDiscount: 1 } })],
+    [db('rpc/lume_influencer_reserve_apify'), () => json({ ok: false, error: 'run_not_running', status: 'cancelled' })],
+  ])
+  try {
+    await advance(RUN, null, { now: c.now, sleep: c.sleep, startedAt: 0, handOff: () => { throw new Error('no hand-off') } })
+    assertEquals(bodies(f.calls, (u) => u.endsWith('rpc/lume_influencer_reserve_apify')).length, 1, 'the second influencer is never reserved')
+    assert(!f.calls.some((x) => x.url.includes('/acts/')), 'no Apify start')
+    assert(!f.calls.some((x) => x.method === 'POST' && x.url.includes('influencer_apify_runs')), 'not recorded as a budget skip')
+  } finally { f.restore() }
+})
+
+Deno.test('I2: a started run whose id cannot be recorded is aborted on Apify; the reservation stays as its cost', async () => {
+  const c = clock()
+  let rowsCall = 0
+  const f = stubFetch([
+    [db('rpc/lume_influencer_claim_run'), () => json([claimed('posts')])],
+    [is('influencers', 'GET'), () => json([influencer])],
+    [is('influencer_apify_runs', 'GET'), () => json(rowsCall++ === 0 ? [] : [{ id: APROW, influencer_id: INF, kind: 'posts', status: 'pending', apify_run_id: null, estimate_usd: 1.06, cost_usd: 1.06 }])],
+    [(u) => u === 'https://api.apify.com/v2/users/me/usage/monthly', () => json({ data: { totalUsageCreditsUsdAfterVolumeDiscount: 1 } })],
+    [db('rpc/lume_influencer_reserve_apify'), () => json({ ok: true, existing: false, id: APROW })],
+    [(u, m) => u.includes('/acts/harvestapi~linkedin-profile-posts/runs') && m === 'POST', () => json({ data: { id: 'runHHHHHHHH8', defaultDatasetId: 'dsHHHHHHHH8' } }, 201)],
+    [is('influencer_apify_runs', 'PATCH'), () => json({ message: 'db down' }, 503)],
+    abortRoute(['runHHHHHHHH8']),
+  ])
+  try {
+    await advance(RUN, null, { now: c.now, sleep: c.sleep, startedAt: 0, handOff: () => Promise.resolve(true) })
+    assert(f.calls.some((x) => x.url.endsWith('/actor-runs/runHHHHHHHH8/abort')), 'aborted')
+    const patches = bodies(f.calls, is('influencer_apify_runs', 'PATCH'))
+    assert(patches.length >= 3, 'the PATCH was retried')
+    const last = patches.at(-1)
+    assertEquals(last.status, 'failed')
+    assert(!('cost_usd' in last), 'the reservation stays as the cost')
+    assert(String(last.error).includes('runHHHHHHHH8'), 'the run id is recorded in the error')
+  } finally { f.restore() }
+})
+
+Deno.test('I2: a thrown start (outcome unknown) keeps the reservation; an Apify refusal is $0', async () => {
+  for (const [res, refused] of [[() => { throw new TypeError('network') }, false], [() => json({ error: { message: 'no' } }, 402), true]] as const) {
+    const c = clock()
+    let rowsCall = 0
+    const f = stubFetch([
+      [db('rpc/lume_influencer_claim_run'), () => json([claimed('posts')])],
+      [is('influencers', 'GET'), () => json([influencer])],
+      [is('influencer_apify_runs', 'GET'), () => json(rowsCall++ === 0 ? [] : [{ id: APROW, influencer_id: INF, kind: 'posts', status: 'failed', cost_usd: 0, item_count: null }])],
+      [(u) => u === 'https://api.apify.com/v2/users/me/usage/monthly', () => json({})],
+      [db('rpc/lume_influencer_reserve_apify'), () => json({ ok: true, existing: false, id: APROW })],
+      [(u, m) => u.includes('/acts/') && m === 'POST', res as () => Response],
+      [is('influencer_apify_runs', 'PATCH'), () => json([])],
+      [is('influencer_runs', 'PATCH'), () => json([{ id: RUN }])],
+      [is('influencer_posts', 'GET'), () => json([])],
+    ])
+    try {
+      await advance(RUN, null, { now: c.now, sleep: c.sleep, startedAt: 0, handOff: () => Promise.resolve(true) })
+      const [p] = bodies(f.calls, is('influencer_apify_runs', 'PATCH'))
+      assertEquals(p.status, 'failed')
+      assertEquals('cost_usd' in p, refused, refused ? 'refusal is $0' : 'unknown keeps the reservation')
+    } finally { f.restore() }
+  }
+})
+
+Deno.test('sweep: every invocation runs lume_influencer_sweep and aborts the Apify runs it closed', async () => {
+  const waits: Promise<unknown>[] = []
+  const f = stubFetch([
+    [(u) => u === 'https://db.test/rest/v1/rpc/lume_influencer_sweep', () => json([{ run_id: RUN, apify_run_id: 'runIIIIIIII9', reason: 'timed out' }, { run_id: RUN, apify_run_id: null, reason: 'never started' }])],
+    abortRoute(['runIIIIIIII9']),
+    [db('rpc/lume_influencer_cancel_run'), () => json({ ok: true, abort: [] })],
+  ])
+  try {
+    await handle(post({ action: 'cancel', run_id: RUN }), (p) => waits.push(p))
+    await Promise.all(waits)
+    assert(f.calls.some((x) => x.url.endsWith('/actor-runs/runIIIIIIII9/abort')))
   } finally { f.restore() }
 })
