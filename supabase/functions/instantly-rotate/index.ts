@@ -1,5 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import type { JurisdictionRow } from "../_shared/research/jurisdiction.ts";
+import { rotateLeadBody } from "./lead.ts";
 
 // Rotates leads for one Instantly campaign under a workspace contact cap.
 // Modes: ?mode=rotate (default, twice daily) | ?mode=trim (one-time cutover: delete never-contacted leads down to cap)
@@ -116,13 +118,15 @@ Deno.serve(async (req) => {
         const free = Math.min(MAX_PUSH, CAP - (before - deleted));
         if (free > 0) {
           const { data: queue } = await sb.from("lead_bank").select("*").eq("campaign_id", CAMPAIGN).eq("state", "queued").order("id").limit(free);
+          // Active jurisdictions, read once per run. A failed read means none: every lead gets the fallback line.
+          const jur = await sb.from("jurisdictions").select("country,region,city_match,jurisdiction,copy_hook,active").eq("active", true);
+          if (jur.error) errors.push(`jurisdictions: ${String(jur.error.message).slice(0, 150)}; fallback line used`);
+          const jurisdictions = (jur.error ? [] : jur.data ?? []) as JurisdictionRow[];
           let consecutiveFailures = 0, tripped = false;
           await pool(queue ?? [], CONCURRENCY, async (q) => {
             if (tripped || left() < 8000) return;
             try {
-              const d = await ik("/leads", { method: "POST", body: JSON.stringify({ campaign: CAMPAIGN, email: q.email, first_name: q.first_name, last_name: q.last_name,
-                company_name: q.company_name, website: q.website, personalization: q.personalization,
-                custom_variables: { location: q.location, "Operating Cities Copied": q.operating_cities }, skip_if_in_workspace: true }) });
+              const d = await ik("/leads", { method: "POST", body: JSON.stringify(rotateLeadBody(q, CAMPAIGN, jurisdictions)) });
               await sb.from("lead_bank").update({ state: "active", instantly_lead_id: d?.id ?? null, pushed_at: now.toISOString(), updated_at: now.toISOString() }).eq("id", q.id);
               pushed++; consecutiveFailures = 0;
             } catch (e) {
