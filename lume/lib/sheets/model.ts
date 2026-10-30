@@ -302,7 +302,7 @@ export function fileSummary(file: FileHead, wb: ParsedWorkbook, max = SUMMARY_MA
   for (const s of wb.sheets) {
     if (!s.header.length) continue
     const title = `\n\n--- Sheet "${s.name}": header + first rows as CSV ---\n`
-    const headerLine = csvLine(s.header)
+    const headerLine = csvLine(s.header.map(clipCell))
     if (left < title.length + headerLine.length + 200) {
       unshown.push(s.name)
       continue
@@ -310,7 +310,7 @@ export function fileSummary(file: FileHead, wb: ParsedWorkbook, max = SUMMARY_MA
     let block = title + headerLine
     let shown = 0
     for (const r of s.rows.slice(0, PREVIEW_ROWS)) {
-      const line = `\n${csvLine(r)}`
+      const line = `\n${csvLine(r.map(clipCell))}`
       if (block.length + line.length > left - 160) break
       block += line
       shown++
@@ -331,17 +331,25 @@ export const READ_MAX_CHARS = 20_000
 
 /**
  * One page of a sheet as CSV (header first), from `offset` (0 = first data
- * row), at most `limit` rows and READ_MAX_CHARS characters; `next_offset`
- * when there is more.
+ * row), at most `limit` rows. The whole answer, header included, stays within
+ * `maxChars`: cells are clipped at READ_CELL_MAX_CHARS, a header longer than
+ * half the budget is cut (with a note), and a first row that alone does not
+ * fit is cut too, so paging always advances. `next_offset` when there is more.
  */
 export function readWindow(sheet: Pick<ParsedSheet, 'header' | 'rows'>, offset: number, limit = READ_DEFAULT_ROWS, maxChars = READ_MAX_CHARS) {
   const start = Math.max(0, Math.min(Math.floor(offset), sheet.rows.length))
   const cap = Math.max(1, Math.min(Math.floor(limit), READ_MAX_ROWS))
-  let csv = csvLine(sheet.header)
+  const cut = (s: string, room: number, note: string) => (s.length <= room ? s : `${s.slice(0, Math.max(0, room - note.length))}${note}`)
+  let csv = cut(csvLine(sheet.header.map(clipCell)), Math.floor(maxChars / 2), ` … [header cut: ${fmt.format(sheet.header.length)} columns]`)
   let i = start
   for (; i < sheet.rows.length && i < start + cap; i++) {
-    const line = `\n${csvLine(sheet.rows[i])}`
-    if (i > start && csv.length + line.length > maxChars) break
+    const line = `\n${csvLine(sheet.rows[i].map(clipCell))}`
+    if (csv.length + line.length > maxChars) {
+      if (i > start) break
+      csv += cut(line, maxChars - csv.length, ' … [row cut for length]')
+      i++
+      break
+    }
     csv += line
   }
   return { offset: start, returned: i - start, total_rows: sheet.rows.length, next_offset: i < sheet.rows.length ? i : null, csv }

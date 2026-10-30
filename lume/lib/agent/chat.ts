@@ -49,7 +49,7 @@ export const HISTORY_IMAGE_TURNS = 3
 /** ...and at most this many in all (older ones become "[image omitted: <name>]"). */
 export const HISTORY_IMAGE_MAX = 5
 
-/** Earlier spreadsheet summaries replayed: those of the newest few owner turns that carry any... */
+/** Earlier spreadsheets replayed as their brief (sheets, headers; no rows): those of the newest few owner turns that carry any... */
 export const HISTORY_FILE_TURNS = 3
 /** ...and at most this many (older ones become "[file: <name> — use read_attachment(…)]"). */
 export const HISTORY_FILE_MAX = 3

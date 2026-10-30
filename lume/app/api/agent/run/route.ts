@@ -413,9 +413,11 @@ async function loadHistoryImages(history: ContextTurn[], current: LoadedImage[],
 }
 
 /**
- * The summaries of the history files worth replaying (selectReplayFiles),
- * by id. A file whose row is gone, or a failed read, is left out: the turn
- * keeps a read_attachment note and the run goes on.
+ * The history files worth replaying (selectReplayFiles), by id, each with its
+ * BRIEF (name, sheets with counts, headers; ≤ 4k chars, no rows) rather than
+ * the full summary, so replay stays cheap; rows are paged with
+ * read_attachment. A file whose row is gone, or a failed read, is left out:
+ * the turn keeps a read_attachment note and the run goes on.
  */
 async function loadHistoryFiles(history: ContextTurn[], into: Map<string, LoadedFile>): Promise<void> {
   const refs = selectReplayFiles(history)
@@ -424,7 +426,7 @@ async function loadHistoryFiles(history: ContextTurn[], into: Map<string, Loaded
     const rows = new Map((await getChatFiles(refs.map((r) => r.id))).map((r) => [r.id, r]))
     for (const r of refs) {
       const row = rows.get(r.id)
-      if (row) into.set(r.id, { ...r, summary: row.summary })
+      if (row) into.set(r.id, { ...r, summary: row.brief || `${r.name}: use read_attachment(file_id: "${r.id}") for its contents.` })
     }
   } catch (err) {
     console.error('[api/agent/run] history file load failed:', errText(err))

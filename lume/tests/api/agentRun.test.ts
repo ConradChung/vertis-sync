@@ -1171,6 +1171,9 @@ describe('POST /api/agent/run with spreadsheets', () => {
     h.getChatFiles.mockImplementation(async (ids: string[]) => [row(F2, 'old.xlsx')].filter((r) => ids.includes(r.id)))
     fakeRunner([{ text: 'ok' }])
     await (await post('again', { conversation_id: CONV })).text()
-    expect((sentTurns(1)[0].content as Block[])[0].text).toContain('SUMMARY of old.xlsx')
+    // A replayed file carries its brief (sheets, headers), not the full summary with rows.
+    const replayed = (sentTurns(1)[0].content as Block[])[0].text
+    expect(replayed).toContain('BRIEF of old.xlsx')
+    expect(replayed).not.toContain('SUMMARY of old.xlsx')
   })
 })

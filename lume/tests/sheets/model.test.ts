@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildSheet, fileSummary, isSheetFile, pickSheet, readWindow, sheetExt, sheetToIngestCsv, type ParsedWorkbook } from '@/lib/sheets/model'
+import { buildSheet, fileBrief, fileSummary, isSheetFile, pickSheet, readWindow, sheetExt, sheetToIngestCsv, type ParsedWorkbook } from '@/lib/sheets/model'
 import { cellText, isDateFormat, isoDate, serialToDate } from '@/lib/sheets/parse'
 
 const FILE = { id: '11111111-2222-4333-8444-555555555555', name: 'leads.xlsx', kind: 'xlsx' as const, size_bytes: 2048 }
@@ -57,9 +57,11 @@ describe('readWindow / pickSheet', () => {
   })
   it('stops at the character cap', () => {
     const s = buildSheet('S', false, [['A'], ...Array.from({ length: 50 }, () => ['z'.repeat(1000)])])
+    // Each 1,000-char cell is clipped to 500 (+ a note), so nine rows fit in 5k.
     const w = readWindow(s, 0, 500, 5000)
-    expect(w.returned).toBe(4)
-    expect(w.next_offset).toBe(4)
+    expect(w.returned).toBe(9)
+    expect(w.next_offset).toBe(9)
+    expect(w.csv.length).toBeLessThanOrEqual(5000)
   })
   it('picks by name, case-insensitive name or 1-based index; default the first visible sheet with rows', () => {
     const sheets = [{ ...sheet(0, 'Empty') }, { ...sheet(2, 'Hidden'), hidden: true }, sheet(3, 'Data')]
@@ -98,5 +100,41 @@ describe('cell values', () => {
     expect(cellText({ value: { formula: 'A1+1', result: 46037 }, numFmt: 'dd/mm/yyyy' })).toBe('2026-01-15')
     expect(cellText({ value: { sharedFormula: 'A1', result: 0.1 + 0.2 } })).toBe('0.3')
     expect(cellText({ value: { formula: 'X()' } })).toBe('')
+  })
+})
+
+describe('readWindow caps the whole answer (review)', () => {
+  it('never returns more than maxChars, header included; wide cells are clipped; paging still advances', () => {
+    const header = Array.from({ length: 1000 }, (_, i) => `Column number ${i} with a long name`)
+    const row = Array.from({ length: 1000 }, () => 'v'.repeat(100))
+    const s = buildSheet('W', false, [header, row, row, row])
+    const w = readWindow(s, 0, 500)
+    expect(w.csv.length).toBeLessThanOrEqual(20_000)
+    expect(w.csv).toMatch(/\[header cut: 1,000 columns\]/)
+    expect(w.returned).toBe(1)
+    expect(w.next_offset).toBe(1)
+    expect(readWindow(s, 1, 500).offset).toBe(1)
+  })
+  it('a cell over 500 chars is clipped with a note', () => {
+    const s = buildSheet('C', false, [['A'], ['z'.repeat(5000)]])
+    const w = readWindow(s, 0)
+    expect(w.csv).toContain(`${'z'.repeat(500)}…[+4500 chars]`)
+    expect(w.csv).not.toContain('z'.repeat(501))
+  })
+})
+
+describe('fileBrief (what later turns replay)', () => {
+  it('names the file, the sheets with counts and the headers, never the rows', () => {
+    const wb: ParsedWorkbook = { kind: 'xlsx', sheets: [sheet(120)] }
+    const b = fileBrief(FILE, wb)
+    expect(b).toContain('- "Leads": 120 rows × 2 columns')
+    expect(b).toContain('Header of "Leads": Name,Email')
+    expect(b).not.toContain('p0@x.com')
+    expect(b).toMatch(/read_attachment/)
+    expect(fileBrief(FILE, { kind: 'xlsx', sheets: Array.from({ length: 20 }, (_, i) => buildSheet(`S${i}`, false, [Array.from({ length: 200 }, (_, k) => `h${k}`)])) }).length).toBeLessThanOrEqual(4000)
+  })
+  it('the summary clips wide cells too', () => {
+    const wb: ParsedWorkbook = { kind: 'xlsx', sheets: [buildSheet('C', false, [['A'], ['z'.repeat(5000)]])] }
+    expect(fileSummary(FILE, wb)).not.toContain('z'.repeat(501))
   })
 })
