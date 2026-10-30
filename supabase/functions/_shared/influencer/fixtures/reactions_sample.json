@@ -1,0 +1,44 @@
+[
+ {
+  "id": "urn:li:fsd_reaction:(urn:li:fsd_profile:AAA,urn:li:ugcPost:111,0)",
+  "reactionType": "LIKE",
+  "actor": {
+   "id": "AAA",
+   "name": "Alice Owner",
+   "linkedinUrl": "https://www.linkedin.com/in/AAA",
+   "position": "Owner, Acme Property Management | 450 doors"
+  },
+  "postId": "urn:li:activity:111",
+  "query": {
+   "post": "https://x/111"
+  }
+ },
+ {
+  "id": "urn:li:fsd_reaction:(urn:li:fsd_profile:BBB,urn:li:ugcPost:111,0)",
+  "reactionType": "PRAISE",
+  "actor": {
+   "id": "BBB",
+   "name": "Bob Agent",
+   "linkedinUrl": "https://www.linkedin.com/in/BBB",
+   "position": "Leasing Agent at Big PM Co"
+  },
+  "postId": "urn:li:activity:111",
+  "query": {
+   "post": "https://x/111"
+  }
+ },
+ {
+  "id": "urn:li:fsd_reaction:(urn:li:fsd_profile:AAA,urn:li:ugcPost:333,0)",
+  "reactionType": "LIKE",
+  "actor": {
+   "id": "AAA",
+   "name": "Alice Owner",
+   "linkedinUrl": "https://www.linkedin.com/in/AAA",
+   "position": "Owner, Acme Property Management | 450 doors"
+  },
+  "postId": "urn:li:activity:333",
+  "query": {
+   "post": "https://x/333"
+  }
+ }
+]

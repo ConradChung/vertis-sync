@@ -1,0 +1,17 @@
+[
+  {"type": "post", "id": "111", "linkedinUrl": "https://www.linkedin.com/posts/x_activity-111",
+   "content": "Three things every property management company owner gets wrong about pricing.",
+   "author": {"name": "Peter Lohmann", "publicIdentifier": "peterlohmann"},
+   "postedAt": {"timestamp": 1757000000000, "date": "2026-09-04T00:00:00.000Z"},
+   "engagement": {"likes": 320, "comments": 40, "shares": 5, "reactions": []}},
+  {"type": "post", "id": "222", "linkedinUrl": "https://www.linkedin.com/posts/x_activity-222",
+   "content": "My daughter's soccer team won the state finals this weekend!",
+   "author": {"name": "Peter Lohmann", "publicIdentifier": "peterlohmann"},
+   "postedAt": {"timestamp": 1757100000000, "date": "2026-09-05T00:00:00.000Z"},
+   "engagement": {"likes": 900, "comments": 100, "shares": 1, "reactions": []}},
+  {"type": "post", "id": "333", "linkedinUrl": "https://www.linkedin.com/posts/x_activity-333",
+   "content": "How we grew from 200 to 1,200 doors without adding a single BDM.",
+   "author": {"name": "Peter Lohmann", "publicIdentifier": "peterlohmann"},
+   "postedAt": {"timestamp": 1757200000000, "date": "2026-09-06T00:00:00.000Z"},
+   "engagement": {"likes": 150, "comments": 12, "shares": 0, "reactions": []}}
+]
