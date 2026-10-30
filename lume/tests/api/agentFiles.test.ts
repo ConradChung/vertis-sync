@@ -14,11 +14,14 @@ const h = vi.hoisted(() => ({
   insertChatFile: vi.fn(),
   getChatFile: vi.fn(),
   fileInConversation: vi.fn(),
+  recordFileUpload: vi.fn(),
+  claimFileUpload: vi.fn(),
+  clearFileUploads: vi.fn(),
 }))
 vi.mock('@/lib/auth/guards', () => ({ requireOwner: h.requireOwner }))
 vi.mock('@/lib/agent/chatFiles', async () => {
   const real = await vi.importActual<typeof import('@/lib/agent/chatFiles')>('@/lib/agent/chatFiles')
-  return { ...real, signFileUpload: h.signFileUpload, downloadFileObject: h.downloadFileObject, removeFileObjects: h.removeFileObjects, storeParsed: h.storeParsed, loadParsed: h.loadParsed, insertChatFile: h.insertChatFile, getChatFile: h.getChatFile, fileInConversation: h.fileInConversation }
+  return { ...real, signFileUpload: h.signFileUpload, downloadFileObject: h.downloadFileObject, removeFileObjects: h.removeFileObjects, storeParsed: h.storeParsed, loadParsed: h.loadParsed, insertChatFile: h.insertChatFile, getChatFile: h.getChatFile, fileInConversation: h.fileInConversation, recordFileUpload: h.recordFileUpload, claimFileUpload: h.claimFileUpload, clearFileUploads: h.clearFileUploads }
 })
 vi.mock('@/lib/supabase/service', () => ({ createServiceClient: () => { throw new Error('no db in tests') } }))
 
@@ -51,7 +54,10 @@ beforeEach(() => {
   h.getChatFile.mockResolvedValue(null)
   h.storeParsed.mockResolvedValue(undefined)
   h.insertChatFile.mockImplementation(async (row) => ({ ...row, created_at: 'now' }))
-  h.removeFileObjects.mockResolvedValue(undefined)
+  h.removeFileObjects.mockResolvedValue(true)
+  h.recordFileUpload.mockResolvedValue(undefined)
+  h.claimFileUpload.mockResolvedValue('claimed')
+  h.clearFileUploads.mockResolvedValue(undefined)
 })
 
 describe('POST /api/agent/files/sign', () => {
@@ -63,6 +69,8 @@ describe('POST /api/agent/files/sign', () => {
       expect(body.path).toMatch(new RegExp(`^[0-9a-f-]{36}\\.${ext}$`))
       expect(body.token).toBe('tok')
       expect(body.upload_ticket).toMatch(/^\d+\.[0-9a-f]{64}$/)
+      // Recorded before the object can exist, so the sweep can find it.
+      expect(h.recordFileUpload).toHaveBeenCalledWith(body.path)
     }
   })
   it('refuses .xls (save as .xlsx), other types, and files over 10 MB', async () => {
@@ -88,7 +96,11 @@ describe('POST /api/agent/files (finalize)', () => {
     const row = h.insertChatFile.mock.calls[0][0]
     expect(row).toMatchObject({ id: ID, storage_path: `${ID}.xlsx`, parsed_path: `${ID}.json.gz`, kind: 'xlsx' })
     expect(row.summary).toContain('Name,Email\nAnn,ann@acme.com')
+    expect(row.brief).toContain('Header of "Leads": Name,Email')
+    expect(row.brief).not.toContain('ann@acme.com')
     expect(h.removeFileObjects).not.toHaveBeenCalled()
+    expect(h.claimFileUpload).toHaveBeenCalledWith(`${ID}.xlsx`)
+    expect(h.clearFileUploads).toHaveBeenCalledWith([`${ID}.xlsx`])
   })
 
   it('takes the type from the magic bytes: a CSV renamed .xlsx is read as CSV', async () => {
@@ -112,6 +124,7 @@ describe('POST /api/agent/files (finalize)', () => {
     }
     expect(h.removeFileObjects).toHaveBeenCalledTimes(3)
     expect(h.removeFileObjects).toHaveBeenCalledWith([`${ID}.xlsx`, `${ID}.json.gz`])
+    expect(h.clearFileUploads).toHaveBeenCalledTimes(3)
     expect(h.insertChatFile).not.toHaveBeenCalled()
   })
 
@@ -131,15 +144,48 @@ describe('POST /api/agent/files (finalize)', () => {
     expect(h.downloadFileObject).not.toHaveBeenCalled()
   })
 
-  it('409 for an upload already finalized (its objects stay); 404 when the upload never arrived; 413 past 10 MB', async () => {
+  it('a concurrent second finalize loses the claim: 409, and it never deletes the first one\'s objects', async () => {
+    let release!: (b: Uint8Array) => void
+    h.downloadFileObject.mockReturnValueOnce(new Promise<Uint8Array>((r) => (release = r)))
+    h.claimFileUpload.mockResolvedValueOnce('claimed').mockResolvedValueOnce('taken')
+    const first = finalize(`${ID}.xlsx`)
+    const second = await finalize(`${ID}.xlsx`)
+    expect(second.status).toBe(409)
+    expect((await second.json()).error).toBe('already_added')
+    expect(h.removeFileObjects).not.toHaveBeenCalled()
+    release(await book())
+    expect((await first).status).toBe(201)
+    expect(h.removeFileObjects).not.toHaveBeenCalled()
+    expect(h.insertChatFile).toHaveBeenCalledTimes(1)
+  })
+
+  it('an upload already finalized (claim gone, row there) is 409; never signed or swept is 404; neither cleans up', async () => {
+    h.claimFileUpload.mockResolvedValue('missing')
     h.getChatFile.mockResolvedValueOnce({ id: ID })
     expect((await finalize(`${ID}.csv`)).status).toBe(409)
-    h.downloadFileObject.mockResolvedValueOnce(null)
     expect((await finalize(`${ID}.csv`)).status).toBe(404)
     expect(h.removeFileObjects).not.toHaveBeenCalled()
+    expect(h.downloadFileObject).not.toHaveBeenCalled()
+  })
+
+  it('the claim holder cleans up: object gone (404) or over 10 MB (413)', async () => {
+    h.downloadFileObject.mockResolvedValueOnce(null)
+    expect((await finalize(`${ID}.csv`)).status).toBe(404)
     h.downloadFileObject.mockResolvedValueOnce('too_large')
     expect((await finalize(`${ID}.csv`)).status).toBe(413)
-    expect(h.removeFileObjects).toHaveBeenCalledTimes(1)
+    expect(h.removeFileObjects).toHaveBeenCalledTimes(2)
+    expect(h.clearFileUploads).toHaveBeenCalledTimes(2)
+  })
+
+  it('parsed tables too big for the bucket even gzipped: 422, cleaned up', async () => {
+    const { ParsedTooLargeError } = await vi.importActual<typeof import('@/lib/agent/chatFiles')>('@/lib/agent/chatFiles')
+    h.downloadFileObject.mockResolvedValue(await book())
+    h.storeParsed.mockRejectedValueOnce(new ParsedTooLargeError())
+    const res = await finalize(`${ID}.xlsx`)
+    expect(res.status).toBe(422)
+    expect((await res.json()).error).toBe('too_large_uncompressed')
+    expect(h.removeFileObjects).toHaveBeenCalledWith([`${ID}.xlsx`, `${ID}.json.gz`])
+    expect(h.insertChatFile).not.toHaveBeenCalled()
   })
 })
 

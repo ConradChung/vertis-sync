@@ -34,6 +34,8 @@ const h = vi.hoisted(() => ({
 vi.mock('@/lib/operators/session', () => ({ currentOperator: h.currentOperator }))
 vi.mock('@/lib/agent/conversations', () => ({ getConversation: h.getConversation }))
 vi.mock('@/lib/auth/guards', async (orig) => ({ ...(await orig<typeof import('@/lib/auth/guards')>()), requireOwner: h.requireOwner }))
+const sweepFiles = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/agent/chatFiles', () => ({ sweepFileUploads: sweepFiles }))
 vi.mock('@/lib/agent/projects', async () => {
   class ProjectConflictError extends Error {
     constructor(readonly code: string) {
@@ -482,6 +484,7 @@ describe('/api/cron/project-uploads', () => {
   const sweep = (secret = 'hook') => sweepPOST(new Request('http://localhost/api/cron/project-uploads', { method: 'POST', headers: { 'X-Lume-Hook-Secret': secret } }))
   beforeEach(() => {
     process.env.LUME_HOOK_SECRET = 'hook'
+    sweepFiles.mockReset().mockResolvedValue({ ok: true, removed: 0, kept: 0 })
   })
 
   it('needs the hook secret', async () => {
@@ -493,7 +496,7 @@ describe('/api/cron/project-uploads', () => {
     h.stalePendingUploads.mockResolvedValue(['p/a.csv', 'p/b.pdf'])
     h.pathsInUse.mockResolvedValue(new Set(['p/b.pdf']))
     const res = await sweep()
-    expect(await res.json()).toEqual({ ok: true, removed: 1, kept: 1 })
+    expect(await res.json()).toEqual({ ok: true, removed: 1, kept: 1, chat_files: { ok: true, removed: 0, kept: 0 } })
     const cutoff = h.stalePendingUploads.mock.calls[0][0] as Date
     // Signed upload URLs stay valid for 2 h: only rows older than that can be orphans.
     expect(Date.now() - cutoff.getTime()).toBeGreaterThan(2 * 60 * 60 * 1000)
@@ -508,5 +511,16 @@ describe('/api/cron/project-uploads', () => {
     const res = await sweep()
     expect(res.status).toBe(502)
     expect(h.deletePendingUploads).toHaveBeenCalledWith(['p/b.pdf'])
+  })
+
+  it('also sweeps chat spreadsheet uploads with the same 3 h cutoff; a failed chat delete is a 502', async () => {
+    h.stalePendingUploads.mockResolvedValue([])
+    h.pathsInUse.mockResolvedValue(new Set())
+    h.removeProjectObjects.mockResolvedValue(true)
+    sweepFiles.mockResolvedValue({ ok: false, removed: 0, kept: 1 })
+    const res = await sweep()
+    expect(res.status).toBe(502)
+    expect((await res.json()).chat_files).toEqual({ ok: false, removed: 0, kept: 1 })
+    expect(Date.now() - (sweepFiles.mock.calls[0][0] as Date).getTime()).toBeGreaterThan(2 * 60 * 60 * 1000)
   })
 })

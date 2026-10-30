@@ -257,7 +257,10 @@ export function safeFileName(raw: string): string {
  * and the first PREVIEW_ROWS rows as CSV, within SUMMARY_MAX_CHARS. What was
  * cut is said, with the read_attachment call that pages past it.
  */
-export function fileSummary(file: { id: string; name: string; kind: SheetFileKind; size_bytes: number }, wb: ParsedWorkbook, max = SUMMARY_MAX_CHARS): string {
+type FileHead = { id: string; name: string; kind: SheetFileKind; size_bytes: number }
+
+/** The file line, the CSV encoding line and one line per sheet (counts and notes). */
+function summaryHead(file: FileHead, wb: ParsedWorkbook): string[] {
   const head: string[] = [
     `File: ${file.name} (${file.kind}, ${formatFileSize(file.size_bytes)}) · file_id ${file.id}`,
     ...(wb.kind === 'csv' ? [`CSV read as ${wb.encoding ?? 'utf-8'}, delimiter ${JSON.stringify(wb.delimiter ?? ',')}.`] : []),
@@ -273,6 +276,26 @@ export function fileSummary(file: { id: string; name: string; kind: SheetFileKin
     ].filter(Boolean)
     head.push(`- "${s.name}": ${plural(s.rows.length, 'row')} × ${plural(s.header.length, 'column')} (${notes.join('; ')})`)
   }
+  return head
+}
+
+/** The replayed form (BRIEF_MAX_CHARS): the head lines and each sheet's header, no rows. */
+export const BRIEF_MAX_CHARS = 4000
+
+export function fileBrief(file: FileHead, wb: ParsedWorkbook, max = BRIEF_MAX_CHARS): string {
+  const lines = summaryHead(file, wb)
+  for (const s of wb.sheets) if (s.header.length) lines.push(`Header of "${s.name}": ${csvLine(s.header.map(clipCell))}`)
+  lines.push(`(Rows are not repeated here: read_attachment(file_id: "${file.id}", sheet, offset) pages through them.)`)
+  const text = lines.join('\n')
+  return text.length > max ? `${text.slice(0, max - 40)}\n… [brief cut for length]` : text
+}
+
+/** A cell as the agent reads it: cut past READ_CELL_MAX_CHARS. */
+export const READ_CELL_MAX_CHARS = 500
+export const clipCell = (v: string) => (v.length > READ_CELL_MAX_CHARS ? `${v.slice(0, READ_CELL_MAX_CHARS)}…[+${v.length - READ_CELL_MAX_CHARS} chars]` : v)
+
+export function fileSummary(file: FileHead, wb: ParsedWorkbook, max = SUMMARY_MAX_CHARS): string {
+  const head = summaryHead(file, wb)
   const out = [head.join('\n')]
   let left = max - out[0].length
   const unshown: string[] = []
