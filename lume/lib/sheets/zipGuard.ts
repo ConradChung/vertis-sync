@@ -13,6 +13,16 @@ import { LIMITS } from '@/lib/sheets/model'
  * and stops as soon as the real uncompressed total passes the cap — declared
  * sizes can lie, inflated bytes cannot.
  *
+ * The layout must be exactly what JSZip will read, or the zip is refused:
+ * JSZip takes the LAST end-of-central-directory signature, keeps reading
+ * directory records for as long as the next 4 bytes are PK\x01\x02
+ * (whatever the EOCD's count says), and shifts every offset by any gap
+ * between the directory and the EOCD. So here: no zip64 or multi-disk
+ * markers, the EOCD and its comment end the file, the directory ends exactly
+ * at the EOCD, records are walked while the signature matches (as JSZip
+ * does) and their number must equal the EOCD's count, and the bytes right
+ * after the last record must be the EOCD.
+ *
  * Names follow exceljs's rules (lib/xlsx/xlsx.js): one leading "/" is
  * stripped, `xl/workbook.xml` is the workbook, and any name MATCHING
  * /xl\/worksheets\/sheet(\d+)[.]xml/ (unanchored, so `/xl/…`,
@@ -75,36 +85,47 @@ export function scanXlsxZip(
     const b = bytes
     const eocd = findEocd(b)
     if (eocd < 0) throw new Stop('not_xlsx')
+    const entriesOnDisk = u16(b, eocd + 8)
     const entries = u16(b, eocd + 10)
     const cdSize = u32(b, eocd + 12)
     const cdOffset = u32(b, eocd + 16)
+    const commentLen = u16(b, eocd + 20)
     // Multi-disk and zip64 archives are not spreadsheets Excel writes at this size.
-    if (u16(b, eocd + 4) !== 0 || u16(b, eocd + 6) !== 0 || entries === 0xffff || cdOffset === 0xffffffff) throw new Stop('not_xlsx')
-    if (entries > maxEntries || cdOffset + cdSize > eocd) throw new Stop('not_xlsx')
+    if (u16(b, eocd + 4) !== 0 || u16(b, eocd + 6) !== 0 || entries === 0xffff || entriesOnDisk !== entries || cdSize === 0xffffffff || cdOffset === 0xffffffff) {
+      throw new Stop('not_xlsx')
+    }
+    // The EOCD + its comment end the file, and the directory ends exactly at the EOCD (no gap JSZip would shift by).
+    if (eocd + 22 + commentLen !== b.length || cdOffset + cdSize !== eocd) throw new Stop('not_xlsx')
+    if (entries > maxEntries) throw new Stop('not_xlsx')
 
+    // Pass 1: the directory exactly as JSZip will read it. Nothing is inflated
+    // until every record is known to be the ones it opens.
+    interface Rec { nameBytes: Uint8Array; method: number; flags: number; compSize: number; localOff: number }
+    const recs: Rec[] = []
+    let p = cdOffset
+    // Like JSZip: read records while the signature matches; the count must then agree with the EOCD.
+    while (p + 4 <= eocd && u32(b, p) === SIG_CENTRAL) {
+      if (recs.length >= entries || p + 46 > eocd) throw new Stop('not_xlsx')
+      const nameLen = u16(b, p + 28)
+      const extraLen = u16(b, p + 30)
+      const commentLen = u16(b, p + 32)
+      recs.push({ flags: u16(b, p + 8), method: u16(b, p + 10), compSize: u32(b, p + 20), localOff: u32(b, p + 42), nameBytes: b.subarray(p + 46, p + 46 + nameLen) })
+      p += 46 + nameLen + extraLen + commentLen
+      if (p > eocd) throw new Stop('not_xlsx')
+    }
+    // Every record JSZip would see is one the EOCD declared, and the EOCD follows the last one directly.
+    if (recs.length !== entries || p !== eocd || u32(b, p) !== SIG_EOCD) throw new Stop('not_xlsx')
+
+    // Pass 2: each record's local header must agree with it; inflate under the caps.
     let total = 0
     let sheets = 0
     let cells = 0
     let workbook = false
     const names = new Set<string>()
     const utf8 = new TextDecoder('utf-8')
-    let p = cdOffset
-    for (let i = 0; i < entries; i++) {
-      if (p + 46 > cdOffset + cdSize || u32(b, p) !== SIG_CENTRAL) throw new Stop('not_xlsx')
-      const flags = u16(b, p + 8)
-      const method = u16(b, p + 10)
-      const compSize = u32(b, p + 20)
-      const nameLen = u16(b, p + 28)
-      const extraLen = u16(b, p + 30)
-      const commentLen = u16(b, p + 32)
-      const localOff = u32(b, p + 42)
-      const nameBytes = b.subarray(p + 46, p + 46 + nameLen)
-      p += 46 + nameLen + extraLen + commentLen
-      if (p > cdOffset + cdSize) throw new Stop('not_xlsx')
+    for (const { nameBytes, method, flags, compSize, localOff } of recs) {
       if (flags & 1) throw new Stop('not_xlsx') // encrypted entry
       if (method !== 0 && method !== 8) throw new Stop('not_xlsx')
-
-      // The local header this entry points at must agree with it.
       if (localOff + 30 > cdOffset || u32(b, localOff) !== SIG_LOCAL) throw new Stop('not_xlsx')
       const lNameLen = u16(b, localOff + 26)
       const lExtraLen = u16(b, localOff + 28)

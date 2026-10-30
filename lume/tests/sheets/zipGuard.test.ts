@@ -22,8 +22,20 @@ interface Entry {
 const u16 = (n: number) => [n & 0xff, (n >>> 8) & 0xff]
 const u32 = (n: number) => [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff]
 
+/** Layout tampering for the adversarial cases. */
+interface Tamper {
+  /** Entry count written in the EOCD (default: the real count). */
+  eocdCount?: number
+  /** Bytes between the end of the central directory and the EOCD (cdSize is NOT grown). */
+  gapBeforeEocd?: Uint8Array
+  /** Bytes after the EOCD record (beyond its comment). */
+  trailing?: Uint8Array
+  /** Write 0xffff / 0xffffffff in the EOCD (zip64 markers). */
+  zip64?: boolean
+}
+
 /** A minimal zip writer (no CRC check in JSZip by default; the guard never needs one). */
-function zip(entries: Entry[]): Uint8Array {
+function zip(entries: Entry[], t: Tamper = {}): Uint8Array {
   const parts: number[] = []
   const cd: number[] = []
   for (const e of entries) {
@@ -39,7 +51,10 @@ function zip(entries: Entry[]): Uint8Array {
   }
   const cdOffset = parts.length
   parts.push(...cd)
-  parts.push(...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(entries.length), ...u16(entries.length), ...u32(cd.length), ...u32(cdOffset), ...u16(0))
+  if (t.gapBeforeEocd) parts.push(...t.gapBeforeEocd)
+  const n = t.eocdCount ?? entries.length
+  parts.push(...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(t.zip64 ? 0xffff : n), ...u16(t.zip64 ? 0xffff : n), ...u32(cd.length), ...u32(t.zip64 ? 0xffffffff : cdOffset), ...u16(0))
+  if (t.trailing) parts.push(...t.trailing)
   return new Uint8Array(parts)
 }
 
@@ -83,6 +98,30 @@ describe('scanXlsxZip walks the central directory', () => {
     const good = zip([WORKBOOK])
     expect(scanXlsxZip(good.subarray(0, good.length - 5))).toEqual({ ok: false, error: 'not_xlsx' })
     expect(scanXlsxZip(strToU8('PK\x03\x04 not really'))).toEqual({ ok: false, error: 'not_xlsx' })
+  })
+
+  it('refuses a central-directory record hidden past the EOCD count (JSZip reads on while the signature matches)', () => {
+    // The EOCD says 2 entries; a third, a deflate bomb, sits inside the directory. JSZip would inflate it.
+    const entries = [WORKBOOK, { name: 'xl/worksheets/sheet1.xml', data: cells(1) }, { name: 'docProps/custom.xml', data: new Uint8Array(5 * 1024 * 1024) }]
+    const hidden = zip(entries, { eocdCount: 2 })
+    expect(hidden.length).toBeLessThan(100_000)
+    expect(scanXlsxZip(hidden)).toEqual({ ok: false, error: 'not_xlsx' })
+    expect(scanXlsxZip(zip(entries), { maxUncompressed: 1024 * 1024 })).toEqual({ ok: false, error: 'too_large_uncompressed' }) // honest count: caught by the cap
+  })
+
+  it('refuses a gap between the central directory and the EOCD (JSZip would shift every offset by it)', () => {
+    expect(scanXlsxZip(zip([WORKBOOK], { gapBeforeEocd: new Uint8Array(46).fill(0x20) }))).toEqual({ ok: false, error: 'not_xlsx' })
+  })
+
+  it('refuses bytes after the EOCD, and zip64 markers', () => {
+    expect(scanXlsxZip(zip([WORKBOOK], { trailing: new Uint8Array(10) }))).toEqual({ ok: false, error: 'not_xlsx' })
+    expect(scanXlsxZip(zip([WORKBOOK], { zip64: true }))).toEqual({ ok: false, error: 'not_xlsx' })
+  })
+
+  it('the hidden-record bomb never reaches exceljs', async () => {
+    const { parseSpreadsheet } = await import('@/lib/sheets/parse')
+    const bomb = zip([WORKBOOK, { name: 'xl/worksheets/sheet1.xml', data: cells(1) }, { name: 'docProps/custom.xml', data: new Uint8Array(5 * 1024 * 1024) }], { eocdCount: 2 })
+    expect(await parseSpreadsheet(bomb, 'xlsx')).toEqual({ ok: false, error: 'not_xlsx' })
   })
 
   it('caps the entry count from the central directory', () => {
