@@ -4,6 +4,7 @@ import type { ReplyCard } from '@/lib/inbox/model'
  * groups, and turning stored messages back into prompt context.
  */
 import type { ContextTurn } from '@/lib/agent/chat'
+import { ACCEPTED_IMAGE_TYPES, IMAGE_PATH_RE, type ChatImageRef } from '@/lib/agent/images'
 
 export interface ConversationSummary {
   id: string
@@ -52,6 +53,8 @@ export interface StoredMessage {
   run_id: string | null
   /** An automatic follow-up turn (an approval outcome), shown as a compact line, not a bubble. */
   auto: boolean
+  /** Images the owner attached (user turns only; references into `agent-chat-images`). */
+  attachments?: ChatImageRef[]
   created_at: string
 }
 
@@ -90,7 +93,32 @@ export function groupConversations<T extends { updated_at: string }>(
   return ORDER.filter((g) => buckets.get(g)!.length).map((label) => ({ label, items: buckets.get(label)! }))
 }
 
-/** Stored turns → `buildPrompt` context. Errored, empty assistant turns are left out. */
-export function contextFromMessages(messages: Pick<StoredMessage, 'role' | 'text'>[]): ContextTurn[] {
-  return messages.filter((m) => m.role === 'user' || m.text.trim()).map((m) => ({ role: m.role, text: m.text }))
+/** A stored `attachments` value, keeping only well-formed image references. */
+export function attachmentsOf(raw: unknown): ChatImageRef[] {
+  if (!Array.isArray(raw)) return []
+  return raw.filter(
+    (a): a is ChatImageRef =>
+      !!a &&
+      typeof a === 'object' &&
+      typeof (a as ChatImageRef).path === 'string' &&
+      IMAGE_PATH_RE.test((a as ChatImageRef).path) &&
+      typeof (a as ChatImageRef).name === 'string' &&
+      (ACCEPTED_IMAGE_TYPES as readonly string[]).includes((a as ChatImageRef).media_type)
+  )
+}
+
+/** Stored turns → `buildMessages` context. Errored, empty assistant turns are left out. */
+export function contextFromMessages(messages: (Pick<StoredMessage, 'role' | 'text'> & { attachments?: unknown })[]): ContextTurn[] {
+  return messages
+    .filter((m) => m.role === 'user' || m.text.trim())
+    .map((m) => {
+      const images = m.role === 'user' ? attachmentsOf(m.attachments) : []
+      return images.length ? { role: m.role, text: m.text, images } : { role: m.role, text: m.text }
+    })
+}
+
+/** A new chat's title: the text's first line, else its first image's name. */
+export function titleFromMessage(text: string, images: Pick<ChatImageRef, 'name'>[]): string {
+  if (text.trim() || !images.length) return titleFromPrompt(text)
+  return titleFromPrompt(`Image: ${images[0].name}${images.length > 1 ? ` +${images.length - 1}` : ''}`)
 }

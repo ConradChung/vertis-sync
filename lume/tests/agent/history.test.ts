@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { contextFromMessages, groupConversations, titleFromPrompt } from '@/lib/agent/history'
+import { attachmentsOf, contextFromMessages, groupConversations, titleFromPrompt, titleFromMessage } from '@/lib/agent/history'
 
 describe('titleFromPrompt', () => {
   it('uses the first line, collapsed', () => {
@@ -48,5 +48,26 @@ describe('contextFromMessages', () => {
       { role: 'user', text: 'a' },
       { role: 'assistant', text: 'b' },
     ])
+  })
+})
+
+describe('images in history', () => {
+  const good = { path: '0f3c2b1a-9d8e-4f7a-8b6c-5d4e3f2a1b0c.png', name: 'shot.png', media_type: 'image/png' as const }
+  it('carries a user turn\'s attachments as its images, including an image-only turn', () => {
+    expect(contextFromMessages([{ role: 'user', text: '', attachments: [good] }, { role: 'assistant', text: 'ok' }])).toEqual([
+      { role: 'user', text: '', images: [good] },
+      { role: 'assistant', text: 'ok' },
+    ])
+  })
+  it('attachmentsOf drops malformed stored entries', () => {
+    expect(attachmentsOf(null)).toEqual([])
+    expect(
+      attachmentsOf([good, { path: '../etc/passwd', name: 'x', media_type: 'image/png' }, { path: good.path, name: 'y', media_type: 'image/svg+xml' }, 'junk'])
+    ).toEqual([good])
+  })
+  it('titles an image-only first message after its image', () => {
+    expect(titleFromMessage('fix this', [good])).toBe('fix this')
+    expect(titleFromMessage('', [good])).toBe('Image: shot.png')
+    expect(titleFromMessage('  ', [good, good])).toBe('Image: shot.png +1')
   })
 })
