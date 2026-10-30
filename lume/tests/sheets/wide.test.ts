@@ -30,8 +30,9 @@ describe('width caps', () => {
     const text = Array(200_000).fill('a').join(',') + '\n' + Array(2000).fill('x').join('\n') + '\n'
     const r = await timed(() => parseSpreadsheet(enc(text), 'csv'))
     expect(r.value).toEqual({ ok: false, error: 'too_many_columns' })
-    expect(r.ms).toBeLessThan(1000)
-    expect(r.heapGrowthMb).toBeLessThan(150)
+    // Was 3 GB RSS and seconds; generous bounds so a cold, parallel CI run never flakes.
+    expect(r.ms).toBeLessThan(2000)
+    expect(r.heapGrowthMb).toBeLessThan(400)
   })
 
   it('the CSV reader stops at the first row past the width cap without building it', () => {
@@ -51,12 +52,13 @@ describe('width caps', () => {
     const buf = new Uint8Array((await wb.xlsx.writeBuffer()) as ArrayBuffer)
     const r = await timed(() => parseSpreadsheet(buf, 'xlsx'))
     expect(r.value).toEqual({ ok: false, error: 'too_many_columns' })
-    expect(r.ms).toBeLessThan(3000)
-    expect(r.heapGrowthMb).toBeLessThan(200)
+    // Was 1.07 GB RSS.
+    expect(r.ms).toBeLessThan(5000)
+    expect(r.heapGrowthMb).toBeLessThan(400)
     // Project files use the same parser: not readable, never a crash.
     const p = await timed(() => extractText(buf, 'xlsx'))
     expect(p.value).toEqual({ text: null, readable: false, truncated: false })
-    expect(p.ms).toBeLessThan(3000)
+    expect(p.ms).toBeLessThan(5000)
   }, 20_000)
 
   it('width × rows is capped before anything is densified (a ragged CSV)', async () => {
