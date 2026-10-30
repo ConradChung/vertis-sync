@@ -25,7 +25,7 @@ const bodyOf = (calls: { url: string; method: string; body: string | null }[], m
 
 function startRoutes(opts: { reserve?: unknown; usage?: Response } = {}): Route[] {
   return [
-    [(u) => u === 'https://db.test/rest/v1/rpc/lume_research_fail_stale_crawls', () => json(0)],
+    [(u) => u === 'https://db.test/rest/v1/rpc/lume_research_sweep_stale_crawls', () => json([])],
     [(u, m) => u.startsWith('https://db.test/rest/v1/companies') && m === 'POST', () => json([{ id: COMPANY }], 201)],
     [(u) => u === 'https://api.apify.com/v2/users/me/usage/monthly', () => opts.usage ?? json({ data: { totalUsageCreditsUsdAfterVolumeDiscount: 3.5 } })],
     [(u) => u === 'https://db.test/rest/v1/rpc/lume_research_reserve_crawl', () =>
@@ -186,7 +186,7 @@ const haiku = {
 function continueRoutes(run: Record<string, unknown>, extra: Route[] = []): Route[] {
   return [
     ...extra,
-    [(u) => u === 'https://db.test/rest/v1/rpc/lume_research_fail_stale_crawls', () => json(0)],
+    [(u) => u === 'https://db.test/rest/v1/rpc/lume_research_sweep_stale_crawls', () => json([])],
     [(u, m) => u.startsWith('https://db.test/rest/v1/company_crawls?id=eq.') && m === 'GET', () => json([crawlRow])],
     [(u) => u.startsWith('https://api.apify.com/v2/actor-runs/run1'), () => json({ data: run })],
     [(u) => u.startsWith('https://api.apify.com/v2/datasets/ds1/items'), () => json(items)],
@@ -294,7 +294,7 @@ Deno.test('handle {crawl_id}: authorized continuation is accepted and runs in th
 
 // --- stale sweep ----------------------------------------------------------------
 
-const sweepCalls = <T extends { url: string; body: string | null }>(calls: T[]) => calls.filter((c) => c.url === 'https://db.test/rest/v1/rpc/lume_research_fail_stale_crawls')
+const sweepCalls = <T extends { url: string; body: string | null }>(calls: T[]) => calls.filter((c) => c.url === 'https://db.test/rest/v1/rpc/lume_research_sweep_stale_crawls')
 
 Deno.test('sweep: every start first fails crawls stuck > 15 minutes, before the budget gate', async () => {
   const f = stubFetch(startRoutes({ reserve: { ok: false, error: 'budget_exceeded' } }))
@@ -303,7 +303,7 @@ Deno.test('sweep: every start first fails crawls stuck > 15 minutes, before the 
     const sweeps = sweepCalls(f.calls)
     assertEquals(sweeps.length, 1)
     assertEquals(JSON.parse(sweeps[0].body!), { p_minutes: 15 })
-    const iSweep = f.calls.findIndex((c) => c.url.endsWith('/rpc/lume_research_fail_stale_crawls'))
+    const iSweep = f.calls.findIndex((c) => c.url.endsWith('/rpc/lume_research_sweep_stale_crawls'))
     const iGate = f.calls.findIndex((c) => c.url.endsWith('/rpc/lume_research_reserve_crawl'))
     assert(iSweep < iGate, 'sweep runs before the reservation, so a stuck crawl frees its company and its reservation')
   } finally { f.restore() }
@@ -321,7 +321,7 @@ Deno.test('sweep: a continuation invocation sweeps too', async () => {
 
 Deno.test('sweep: a failing sweep is logged and never blocks the request', async () => {
   const routes = startRoutes()
-  routes.unshift([(u) => u.endsWith('/rpc/lume_research_fail_stale_crawls'), () => new Response('boom', { status: 500 })])
+  routes.unshift([(u) => u.endsWith('/rpc/lume_research_sweep_stale_crawls'), () => new Response('boom', { status: 500 })])
   const f = stubFetch(routes)
   try {
     const res = await handle(post({ domain: 'acme-pm.com' }), () => {})
@@ -489,5 +489,22 @@ Deno.test('continue: a background failure marks a pending or running crawl faile
     const last = crawlPatches(f.calls).at(-1)!
     assert(last.url.includes('status=in.(pending,running)'))
     assertEquals(JSON.parse(last.body!).status, 'failed')
+  } finally { f.restore() }
+})
+
+Deno.test('sweep: swept crawls with a run id get their Apify run aborted (best effort)', async () => {
+  const routes = startRoutes({ reserve: { ok: false, error: 'budget_exceeded' } })
+  routes.unshift(
+    [(u) => u.endsWith('/rpc/lume_research_sweep_stale_crawls'), () =>
+      json([{ id: 'a', apify_run_id: 'stuck1' }, { id: 'b', apify_run_id: null }, { id: 'c', apify_run_id: 'stuck2' }])],
+    [(u, m) => u === 'https://api.apify.com/v2/actor-runs/stuck1/abort' && m === 'POST', () => json({ data: { status: 'ABORTING' } })],
+    [(u, m) => u === 'https://api.apify.com/v2/actor-runs/stuck2/abort' && m === 'POST', () => new Response('already finished', { status: 400 })],
+  )
+  const f = stubFetch(routes)
+  try {
+    const res = await handle(post({ domain: 'acme-pm.com' }), () => {})
+    assertEquals(res.status, 409, 'an abort failure never blocks the request')
+    const aborts = f.calls.filter((c) => c.url.endsWith('/abort')).map((c) => c.url)
+    assertEquals(aborts, ['https://api.apify.com/v2/actor-runs/stuck1/abort', 'https://api.apify.com/v2/actor-runs/stuck2/abort'])
   } finally { f.restore() }
 })

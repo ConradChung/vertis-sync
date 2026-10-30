@@ -183,16 +183,29 @@ async function handOff(crawlId: string): Promise<boolean> {
 
 /**
  * Fail crawls stuck pending/running for > STALE_MINUTES (a dead hand-off chain
- * would otherwise block the company and keep its reservation forever). Runs on
- * every invocation, like Lume's failStaleRuns; never blocks the request.
+ * would otherwise block the company and keep its reservation forever) and
+ * abort their Apify runs, best effort. Runs on every invocation, like Lume's
+ * failStaleRuns; never blocks the request.
  */
 async function sweepStale(): Promise<void> {
+  let swept: { id: string; apify_run_id: string | null }[] = []
   try {
-    const n = await rest('POST', 'rpc/lume_research_fail_stale_crawls', { p_minutes: STALE_MINUTES }, 'return=representation')
-    if (typeof n === 'number' && n > 0) console.log(`[${FN}] failed ${n} stale crawl(s)`)
+    const rows = await rest('POST', 'rpc/lume_research_sweep_stale_crawls', { p_minutes: STALE_MINUTES }, 'return=representation')
+    swept = Array.isArray(rows) ? rows : []
   } catch (err) {
     console.error(`[${FN}] stale sweep failed:`, err)
+    return
   }
+  if (swept.length) console.log(`[${FN}] failed ${swept.length} stale crawl(s)`)
+  await Promise.all(swept.filter((r) => r.apify_run_id).map(async (r) => {
+    try {
+      const res = await apify(`/actor-runs/${encodeURIComponent(r.apify_run_id!)}/abort`, { method: 'POST' })
+      await res.body?.cancel()
+      if (!res.ok) console.warn(`[${FN}] abort of stale run ${r.apify_run_id} answered ${res.status}`)
+    } catch (err) {
+      console.warn(`[${FN}] abort of stale run ${r.apify_run_id} failed:`, err)
+    }
+  }))
 }
 
 // ---------------------------------------------------------------------------
