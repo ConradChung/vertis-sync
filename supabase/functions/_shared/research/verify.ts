@@ -12,7 +12,8 @@
 //     boolean; city / region a short string that appears in the snippet
 //     (case-insensitive); country a short string (it may be inferred, e.g.
 //     from a province, so it is not required in the snippet)
-// Then one value per field: highest confidence, then first.
+// Then one value per field: highest confidence, then first; kept facts come
+// back in field order (door_count, after_hours, city, region, country).
 // Everything else is dropped with a reason, for the crawl's extraction log.
 //
 // door_count copy_value (the number copy may print), rounded DOWN:
@@ -165,7 +166,5 @@ export function verifyCandidates(candidates: Candidate[], pages: Page[]): { kept
     kept.push(group[0].fact)
     for (const g of group.slice(1)) dropped.push({ field, reason: 'duplicate_field', source_url: g.fact.source_url })
   }
-  // Keep the caller's order for kept facts.
-  kept.sort((a, b) => passing.findIndex((p) => p.fact === a) - passing.findIndex((p) => p.fact === b))
   return { kept, dropped }
 }
