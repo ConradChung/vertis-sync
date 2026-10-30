@@ -336,6 +336,23 @@ export async function POST(req: Request) {
 
 const errText = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
+/** A 400 invalid_request_error about an image (dimensions, format, decode). */
+function isImageRejection(err: unknown): boolean {
+  if (!(err instanceof Anthropic.APIError) || err.status !== 400) return false
+  const type = (err as { error?: { error?: { type?: string } } }).error?.error?.type
+  return (type === undefined || type === 'invalid_request_error') && /\bimage\b/i.test(err.message)
+}
+
+/** The current message's own image was refused by the API. */
+class ImageRejectedError extends Error {
+  constructor(cause: unknown) {
+    super(
+      `Claude could not use an image attached to this message (${cause instanceof Error ? cause.message.slice(0, 300) : 'refused'}). Remove it and send again, or attach a different image.`
+    )
+    this.name = 'ImageRejectedError'
+  }
+}
+
 /**
  * Read the history images worth replaying into `into` (by path). One that is
  * gone, not an image, or fails to load is simply left out: buildMessages
@@ -601,68 +618,95 @@ async function executeRun({
     const lib = loadSopLibrary()
     const sopBlock = sopPromptBlock(lib, clientForContext(lib, sopContext))
     const client = new Anthropic()
-    const runner = client.beta.messages.toolRunner({
-      model: MODEL,
-      max_tokens: 16000,
-      thinking: { type: 'adaptive' },
-      output_config: { effort: 'low' },
-      // Automatic caching: one breakpoint that follows the conversation tail.
-      cache_control: { type: 'ephemeral' },
-      // Explicit breakpoints, most stable first (4 per request in total, the
-      // automatic one included): the static prompt (shared by every chat), the
-      // SOP block (changes only with the SOP files or the chat's client), then
-      // a filed chat's project block. At most 3 explicit + 1 automatic = 4.
-      system: [
-        { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
-        { type: 'text', text: sopBlock, cache_control: { type: 'ephemeral' } },
-        ...(project ? [{ type: 'text' as const, text: project.block, cache_control: { type: 'ephemeral' as const } }] : []),
-      ],
-      // Anthropic-hosted, read-only web research (no approval needed: nothing leaves Lume but a query/URL).
-      tools: [...tools, ...WEB_TOOLS],
-      messages: buildMessages(history, prompt, images),
-      max_iterations: 20,
-      stream: true,
-      // Server-side fallback on a safety-classifier refusal (routes by category).
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-    })
-
-    let turn = 0
-    for await (const messageStream of runner) {
-      if (turn++ > 0) send({ type: 'text', delta: '\n\n' })
-      messageStream.on('text', (delta) => send({ type: 'text', delta }))
-      // Server-side web tools run on Anthropic's side; surface them live as a status line.
-      messageStream.on('streamEvent', (ev) => {
-        if (ev.type !== 'content_block_start' || ev.content_block.type !== 'server_tool_use') return
-        const name = ev.content_block.name
-        send({ type: 'status', label: name === 'web_search' ? 'Searching the web' : name === 'web_fetch' ? 'Reading a web page' : 'Working' })
+    // Any output yet: a failure after it is never retried (tools may have run).
+    let started = false
+    const drive = async (messages: ReturnType<typeof buildMessages>) => {
+      const runner = client.beta.messages.toolRunner({
+        model: MODEL,
+        max_tokens: 16000,
+        thinking: { type: 'adaptive' },
+        output_config: { effort: 'low' },
+        // Automatic caching: one breakpoint that follows the conversation tail.
+        cache_control: { type: 'ephemeral' },
+        // Explicit breakpoints, most stable first (4 per request in total, the
+        // automatic one included): the static prompt (shared by every chat), the
+        // SOP block (changes only with the SOP files or the chat's client), then
+        // a filed chat's project block. At most 3 explicit + 1 automatic = 4.
+        system: [
+          { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: sopBlock, cache_control: { type: 'ephemeral' } },
+          ...(project ? [{ type: 'text' as const, text: project.block, cache_control: { type: 'ephemeral' as const } }] : []),
+        ],
+        // Anthropic-hosted, read-only web research (no approval needed: nothing leaves Lume but a query/URL).
+        tools: [...tools, ...WEB_TOOLS],
+        messages,
+        max_iterations: 20,
+        stream: true,
+        // Server-side fallback on a safety-classifier refusal (routes by category).
+        betas: ['server-side-fallback-2026-07-01'],
+        fallbacks: 'default',
       })
-      const message = await messageStream.finalMessage()
-      usage.input_tokens += message.usage.input_tokens ?? 0
-      usage.output_tokens += message.usage.output_tokens ?? 0
-      usage.cache_read_input_tokens += message.usage.cache_read_input_tokens ?? 0
-      usage.cache_creation_input_tokens += message.usage.cache_creation_input_tokens ?? 0
-      const text = message.content
-        .filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
-        .map((b) => b.text)
-        .join('')
-      if (text) outcome = text
-      await logServerToolUses(message.content, hooks)
-      // The runner does not auto-resume a paused server-tool turn; push it back so the answer isn't truncated.
-      if (message.stop_reason === 'pause_turn') {
-        runner.pushMessages({ role: 'assistant', content: message.content })
-        continue
+
+      let turn = 0
+      for await (const messageStream of runner) {
+        if (turn++ > 0) send({ type: 'text', delta: '\n\n' })
+        messageStream.on('text', (delta) => {
+          started = true
+          send({ type: 'text', delta })
+        })
+        // Server-side web tools run on Anthropic's side; surface them live as a status line.
+        messageStream.on('streamEvent', (ev) => {
+          if (ev.type !== 'content_block_start' || ev.content_block.type !== 'server_tool_use') return
+          const name = ev.content_block.name
+          send({ type: 'status', label: name === 'web_search' ? 'Searching the web' : name === 'web_fetch' ? 'Reading a web page' : 'Working' })
+        })
+        const message = await messageStream.finalMessage()
+        started = true
+        usage.input_tokens += message.usage.input_tokens ?? 0
+        usage.output_tokens += message.usage.output_tokens ?? 0
+        usage.cache_read_input_tokens += message.usage.cache_read_input_tokens ?? 0
+        usage.cache_creation_input_tokens += message.usage.cache_creation_input_tokens ?? 0
+        const text = message.content
+          .filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
+          .map((b) => b.text)
+          .join('')
+        if (text) outcome = text
+        await logServerToolUses(message.content, hooks)
+        // The runner does not auto-resume a paused server-tool turn; push it back so the answer isn't truncated.
+        if (message.stop_reason === 'pause_turn') {
+          runner.pushMessages({ role: 'assistant', content: message.content })
+          continue
+        }
+        if (message.stop_reason === 'refusal') {
+          outcome = outcome || 'The model declined this request.'
+          return 'refused' as const
+        }
       }
-      if (message.stop_reason === 'refusal') {
-        status = 'failed'
-        outcome = outcome || 'The model declined this request.'
-        break
+      return 'ok' as const
+    }
+
+    // An image the API refuses (bad dimensions, undecodable) fails the request
+    // before any output. A replayed history image must not fail every later
+    // run in this chat: retry once with each of them as "[image omitted: …]".
+    // If the current message's own image is the problem, say so.
+    let result: 'ok' | 'refused'
+    try {
+      result = await drive(buildMessages(history, prompt, images))
+    } catch (err) {
+      if (started || !isImageRejection(err)) throw err
+      if (!images.loaded.size) throw images.current.length ? new ImageRejectedError(err) : err
+      console.error('[api/agent/run] an image was refused; retrying without the replayed history images:', errText(err))
+      try {
+        result = await drive(buildMessages(history, prompt, { current: images.current }))
+      } catch (again) {
+        if (!started && isImageRejection(again) && images.current.length) throw new ImageRejectedError(again)
+        throw again
       }
     }
-    if (status !== 'failed') status = approvalActionId ? 'needs_approval' : 'done'
+    status = result === 'refused' ? 'failed' : approvalActionId ? 'needs_approval' : 'done'
   } catch (err) {
     status = 'failed'
-    outcome = err instanceof Anthropic.APIError ? `Claude API error ${err.status ?? ''}: ${err.message}` : err instanceof Error ? err.message : String(err)
+    outcome = err instanceof ImageRejectedError ? err.message : err instanceof Anthropic.APIError ? `Claude API error ${err.status ?? ''}: ${err.message}` : err instanceof Error ? err.message : String(err)
     console.error('[api/agent/run] run failed:', outcome)
     send({ type: 'error', message: outcome })
   }

@@ -983,3 +983,79 @@ describe('POST /api/agent/run with images', () => {
     expect(first[0].source?.data).toBe(b64(PNG))
   })
 })
+
+describe('POST /api/agent/run: an image the API refuses', () => {
+  const OLD = '0f3c2b1a-9d8e-4f7a-8b6c-000000000009.png'
+  const NEW = '0f3c2b1a-9d8e-4f7a-8b6c-000000000001.png'
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
+  type Block = { type: string; text?: string }
+  const imageRejected = async () => {
+    const { default: Anthropic } = await import('@anthropic-ai/sdk')
+    const e = new (Anthropic as unknown as { APIError: new (m: string) => Error & { status?: number } }).APIError(
+      '400 {"type":"error","error":{"type":"invalid_request_error","message":"messages.0.content.0.image.source.base64: image dimensions exceed max allowed size: 8000 pixels"}}'
+    )
+    e.status = 400
+    return e
+  }
+  /** The next toolRunner call fails before any output, as a 400 on the request does. */
+  const failOnce = async (err: Error) => {
+    h.toolRunner.mockImplementationOnce(() => ({
+      async *[Symbol.asyncIterator]() {
+        throw err
+      },
+    }))
+  }
+
+  beforeEach(() => {
+    h.loadChatImage.mockResolvedValue({ bytes: PNG, media_type: 'image/png' })
+    h.getMessages.mockResolvedValue([
+      { role: 'user', text: 'earlier', attachments: [{ path: OLD, name: 'old.png', media_type: 'image/png' }] },
+      { role: 'assistant', text: 'ok' },
+    ])
+  })
+
+  it('retries once with every replayed history image turned into a note; the current images stay', async () => {
+    fakeRunner([{ text: 'Done without the old one.' }])
+    await failOnce(await imageRejected())
+    const ev = await events(await post('and this?', { conversation_id: CONV, images: [{ path: NEW, name: 'new.png' }] }))
+    expect(h.toolRunner).toHaveBeenCalledTimes(2)
+    const first = sentTurns(0)
+    expect((first[0].content as Block[])[0].type).toBe('image')
+    const retry = sentTurns(1)
+    expect((retry[0].content as Block[]).map((b) => b.type)).toEqual(['text'])
+    expect(turnText(retry[0])).toContain('[image omitted: old.png]')
+    expect((retry.at(-1)!.content as Block[]).map((b) => b.type)).toEqual(['image', 'text'])
+    expect(ev.find((e) => e.type === 'error')).toBeUndefined()
+    expect(ev).toContainEqual({ type: 'text', delta: 'Done without the old one.' })
+    expect(ev.at(-1)).toMatchObject({ type: 'done', status: 'done' })
+  })
+
+  it('when only the current message has images, says clearly that an attached image was refused (no retry)', async () => {
+    h.getMessages.mockResolvedValue([])
+    await failOnce(await imageRejected())
+    const ev = await events(await post('look', { conversation_id: CONV, images: [{ path: NEW, name: 'new.png' }] }))
+    expect(h.toolRunner).toHaveBeenCalledTimes(1)
+    const err = ev.find((e) => e.type === 'error')
+    expect(err.message).toMatch(/Claude could not use an image attached to this message/)
+    expect(err.message).toMatch(/remove it/i)
+    expect(ev.at(-1)).toMatchObject({ type: 'done', status: 'failed' })
+  })
+
+  it('when the retry is refused too, blames the current message\'s image', async () => {
+    await failOnce(await imageRejected())
+    await failOnce(await imageRejected())
+    const ev = await events(await post('look', { conversation_id: CONV, images: [{ path: NEW, name: 'new.png' }] }))
+    expect(h.toolRunner).toHaveBeenCalledTimes(2)
+    expect(ev.find((e) => e.type === 'error').message).toMatch(/image attached to this message/)
+  })
+
+  it('a 400 that is not about images is not retried', async () => {
+    const { default: Anthropic } = await import('@anthropic-ai/sdk')
+    const e = new (Anthropic as unknown as { APIError: new (m: string) => Error & { status?: number } }).APIError('400 max_tokens: too large')
+    e.status = 400
+    await failOnce(e)
+    const ev = await events(await post('hi', { conversation_id: CONV }))
+    expect(h.toolRunner).toHaveBeenCalledTimes(1)
+    expect(ev.find((x) => x.type === 'error').message).toMatch(/Claude API error 400/)
+  })
+})
