@@ -6,6 +6,7 @@ import type { ToolLogEntry } from '@/components/orb/ToolLog'
 import { parseSseFrames, type AgentEvent } from '@/lib/agent/chat'
 import { attachmentsOf, type StoredMessage } from '@/lib/agent/history'
 import { imageUrl, type ChatImageRef } from '@/lib/agent/images'
+import { fileRefsOf, type ChatFileRef } from '@/lib/agent/files'
 import type { SkillMode } from '@/lib/agent/skillModel'
 
 export interface ChatMessage {
@@ -26,6 +27,8 @@ export interface ChatMessage {
   auto?: boolean
   /** Images the owner attached (shown through the authed proxy). */
   images?: { url: string; name: string }[]
+  /** Spreadsheets the owner attached (chips: name, size, sheets / rows). */
+  files?: ChatFileRef[]
 }
 
 export interface SendOptions {
@@ -33,6 +36,8 @@ export interface SendOptions {
   auto?: boolean
   /** Images already uploaded through `POST /api/agent/images`. */
   images?: ChatImageRef[]
+  /** Spreadsheets already uploaded and parsed through `POST /api/agent/files`. */
+  files?: ChatFileRef[]
 }
 
 const shownImages = (refs: ChatImageRef[]) => refs.map((r) => ({ url: imageUrl(r.path), name: r.name }))
@@ -179,6 +184,7 @@ export function storedToChat(m: StoredMessage): ChatMessage {
     ...(m.error ? { error: m.error } : {}),
     ...(m.auto ? { auto: true } : {}),
     ...(attachmentsOf(m.attachments).length ? { images: shownImages(attachmentsOf(m.attachments)) } : {}),
+    ...(fileRefsOf(m.attachments).length ? { files: fileRefsOf(m.attachments) } : {}),
   }
 }
 
@@ -254,7 +260,8 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
     async (raw: string, skill?: SkillRef, sendOpts: SendOptions = {}) => {
       const text = raw.trim()
       const images = sendOpts.images ?? []
-      if ((!text && !images.length) || busyRef.current) return false
+      const files = sendOpts.files ?? []
+      if ((!text && !images.length && !files.length) || busyRef.current) return false
       let accepted = false
       busyRef.current = true
       setBusy(true)
@@ -267,6 +274,7 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
         ...(skill ? { skill: { name: skill.name, mode: skill.mode } } : {}),
         ...(sendOpts.auto ? { auto: true } : {}),
         ...(images.length ? { images: shownImages(images) } : {}),
+        ...(files.length ? { files } : {}),
       }
       const aid = nextId()
       setMessages((ms) => [...ms, userMsg, { id: aid, role: 'assistant', text: '', tools: [], approvals: [], streaming: true }])
@@ -278,6 +286,7 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
           body: JSON.stringify({
             prompt: text,
             ...(images.length ? { images: images.map(({ path, name }) => ({ path, name })) } : {}),
+            ...(files.length ? { files: files.map(({ id }) => ({ id })) } : {}),
             ...(currentRef.current
               ? { conversation_id: currentRef.current }
               : {
@@ -295,6 +304,8 @@ export function useAgentChat(opts: AgentChatOptions = {}): AgentChat {
             patch(aid, (m) => ({ ...m, notConfigured: true, error: body.message ?? 'The agent is not configured yet.' }))
           } else if (body.error === 'image_not_found') {
             patch(aid, (m) => ({ ...m, error: 'An attached image could not be read. Attach it again and resend.' }))
+          } else if (body.error === 'file_not_found') {
+            patch(aid, (m) => ({ ...m, error: 'An attached spreadsheet could not be found. Attach it again and resend.' }))
           } else if (body.error === 'skill_not_found') {
             patch(aid, (m) => ({ ...m, error: 'That skill was deleted. Pick another one.' }))
           } else if (res.status === 404) {

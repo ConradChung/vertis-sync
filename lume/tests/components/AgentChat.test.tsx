@@ -406,9 +406,9 @@ describe('AgentChat images', () => {
 
   it('the paperclip opens a picker limited to the accepted types', () => {
     setup()
-    expect(screen.getByRole('button', { name: 'Attach images' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Attach images or spreadsheets' })).toBeTruthy()
     const input = screen.getByTestId('agent-attach-input') as HTMLInputElement
-    expect(input.accept).toBe('image/png,image/jpeg,image/gif,image/webp')
+    expect(input.accept).toBe('image/png,image/jpeg,image/gif,image/webp,.xlsx,.csv,.xls,text/csv')
     expect(input.multiple).toBe(true)
   })
 })

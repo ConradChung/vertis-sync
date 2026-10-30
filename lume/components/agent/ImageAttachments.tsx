@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2, Paperclip, X } from 'lucide-react'
 import { ACCEPTED_IMAGE_TYPES, IMAGE_ERRORS, MAX_IMAGES, type ChatImageRef } from '@/lib/agent/images'
+import { MAX_SHEET_FILES } from '@/lib/sheets/model'
 import { prepareImage, uploadChatImage, type ImageCodec } from '@/lib/agent/imageClient'
 import { cn } from '@/lib/utils'
 
@@ -224,7 +225,7 @@ export function AttachButton({ onFiles, disabled }: { onFiles: (files: File[]) =
       <input
         ref={input}
         type="file"
-        accept={ACCEPTED_IMAGE_TYPES.join(',')}
+        accept={[...ACCEPTED_IMAGE_TYPES, '.xlsx', '.csv', '.xls', 'text/csv'].join(',')}
         multiple
         hidden
         data-testid="agent-attach-input"
@@ -237,8 +238,8 @@ export function AttachButton({ onFiles, disabled }: { onFiles: (files: File[]) =
         type="button"
         onClick={() => input.current?.click()}
         disabled={disabled}
-        aria-label="Attach images"
-        title={`Attach images (PNG, JPEG, GIF, WebP; up to ${MAX_IMAGES}) — or paste / drop them`}
+        aria-label="Attach images or spreadsheets"
+        title={`Attach images (PNG, JPEG, GIF, WebP; up to ${MAX_IMAGES}) or spreadsheets (.xlsx, .csv; up to ${MAX_SHEET_FILES}, 10 MB each) — or paste / drop them`}
         className="grid size-9 shrink-0 place-items-center rounded-full border border-line text-fg-70 transition-colors hover:bg-white/8 hover:text-fg disabled:opacity-35"
       >
         <Paperclip className="size-4" />

@@ -8,6 +8,7 @@ import { ProjectChip } from '@/components/agent/ProjectChip'
 import { useProjectList } from '@/hooks/useProjectList'
 import { useFileDropGuard } from '@/hooks/useFileDropGuard'
 import { AttachButton, filesFrom, ImageChips, pastedImages, useImageAttachments } from '@/components/agent/ImageAttachments'
+import { FileChips, MessageFileChips, splitAttachments, useFileAttachments } from '@/components/agent/FileAttachments'
 import { ApprovalCard, type ApprovalDecision } from '@/components/agent/ApprovalCard'
 import { ManageSkills, SkillCard, SkillMenu, useSkillList } from '@/components/agent/AgentSkills'
 import { Markdown } from '@/components/agent/Markdown'
@@ -100,6 +101,17 @@ export function AgentChat() {
   const speech = useSpeechRecognition()
   const [draft, setDraft] = useState('')
   const images = useImageAttachments()
+  const sheets = useFileAttachments()
+  /** Spreadsheets to their own chips (≤ 3), everything else to the image path (≤ 5, or its refusal). */
+  const attachFiles = useCallback(
+    (list: File[]) => {
+      const { sheets: xs, others } = splitAttachments(list)
+      if (xs.length) sheets.add(xs)
+      if (others.length) images.add(others)
+    },
+    [sheets, images]
+  )
+  const attachments = { pending: images.pending || sheets.pending, any: images.refs.length + sheets.refs.length > 0 }
   const [dragging, setDragging] = useState(false)
   const [hello, setHello] = useState('Hello')
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -222,19 +234,23 @@ export function AgentChat() {
   const sendWith = useCallback(
     (text: string, skill?: SkillRef): boolean => {
       const refs = images.refs
+      const fileRefs = sheets.refs
       const taken = refs.length ? images.take() : []
-      const sent = send(text, skill, refs.length ? { images: refs } : undefined)
+      const takenFiles = fileRefs.length ? sheets.take() : []
+      const opts = { ...(refs.length ? { images: refs } : {}), ...(fileRefs.length ? { files: fileRefs } : {}) }
+      const sent = send(text, skill, refs.length || fileRefs.length ? opts : undefined)
       if (taken.length) void sent.then((ok) => (ok ? images.release(taken) : images.restore(taken)))
+      if (takenFiles.length) void sent.then((ok) => (ok ? undefined : sheets.restore(takenFiles)))
       return true
     },
-    [send, images]
+    [send, images, sheets]
   )
 
   const submit = useCallback(
     (text: string, opts: { withImages?: boolean } = {}): boolean => {
       const withImages = opts.withImages !== false
-      // Images still uploading hold the send; an image-only message is fine.
-      if ((!text.trim() && !(withImages && images.refs.length)) || busy || chat.loading || (withImages && images.pending)) return false
+      // Attachments still uploading hold the send; an attachment-only message is fine.
+      if ((!text.trim() && !(withImages && attachments.any)) || busy || chat.loading || (withImages && attachments.pending)) return false
       setDraft('')
       if (!withImages) {
         void send(text)
@@ -248,7 +264,7 @@ export function AgentChat() {
       }
       return sendWith(text)
     },
-    [busy, chat.loading, send, sendWith, picked, attach, clearSkill, images]
+    [busy, chat.loading, send, sendWith, picked, attach, clearSkill, attachments.any, attachments.pending]
   )
 
   /** A finished voice transcript: sent when it can be, else kept in the draft (never dropped). */
@@ -261,12 +277,12 @@ export function AgentChat() {
   )
 
   const runSkill = useCallback(() => {
-    if (!picked || busy || chat.loading || images.pending) return
+    if (!picked || busy || chat.loading || attachments.pending) return
     const extra = draft.trim()
     setDraft('')
     sendWith(`Run the skill "${picked.name}".${extra ? `\n\n${extra}` : ''}`, { id: picked.id, name: picked.name, mode: 'run' })
     clearSkill()
-  }, [picked, busy, chat.loading, draft, sendWith, clearSkill, images.pending])
+  }, [picked, busy, chat.loading, draft, sendWith, clearSkill, attachments.pending])
 
   // Drop a picked skill that was deleted in Manage.
   useEffect(() => {
@@ -480,6 +496,7 @@ export function AgentChat() {
               />
             </div>
             <ImageChips items={images.items} onRemove={images.remove} disabled={busy} />
+            <FileChips items={sheets.items} onRemove={sheets.remove} disabled={busy} />
             <form
               className={cn(
                 'glass flex items-end gap-2 rounded-2xl p-2 pl-4 transition-colors focus-within:border-primary/60',
@@ -504,7 +521,7 @@ export function AgentChat() {
                 const files = filesFrom(e.dataTransfer)
                 if (busy || !files.length) return
                 e.preventDefault()
-                images.add(files)
+                attachFiles(files)
                 inputRef.current?.focus()
               }}
             >
@@ -517,6 +534,13 @@ export function AgentChat() {
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onPaste={(e) => {
+                  // A copied .xlsx / .csv file attaches even when the paste also names it as text.
+                  const copied = splitAttachments(filesFrom(e.clipboardData)).sheets
+                  if (copied.length) {
+                    e.preventDefault()
+                    sheets.add(copied)
+                    return
+                  }
                   // A copied screenshot arrives as a file; a paste with any text pastes the text only.
                   const files = pastedImages(e.clipboardData)
                   if (!files.length) return
@@ -544,20 +568,20 @@ export function AgentChat() {
                 aria-describedby="agent-composer-hint"
                 className="max-h-[220px] min-h-10 flex-1 resize-none bg-transparent py-2 focus-visible:outline-none! text-[15px] leading-6 text-fg outline-none placeholder:text-fg-24 disabled:opacity-60"
               />
-              <AttachButton onFiles={images.add} disabled={busy} />
+              <AttachButton onFiles={attachFiles} disabled={busy} />
               <VoiceInput speech={speech} onFinal={onVoice} />
               <button
                 type="submit"
-                disabled={busy || images.pending || (!draft.trim() && !images.refs.length)}
+                disabled={busy || attachments.pending || (!draft.trim() && !attachments.any)}
                 aria-label="Send message"
                 className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-[opacity,background-color] outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-35 dark:shadow-(--primary-glow)"
               >
                 <ArrowUp className="size-4" />
               </button>
             </form>
-            {images.error && (
+            {(images.error || sheets.error) && (
               <p className="mt-2 text-center text-[12px] text-red" role="alert">
-                {images.error}
+                {[images.error, sheets.error].filter(Boolean).join(' ')}
               </p>
             )}
             <p id="agent-composer-hint" className="mt-2 flex items-center justify-center gap-3 text-[11px] text-fg-24 max-sm:sr-only">
@@ -745,6 +769,7 @@ function Message({
               ))}
             </div>
           )}
+          {m.files && m.files.length > 0 && <MessageFileChips files={m.files} />}
           {m.text && <div className="rounded-2xl bg-white/8 px-4 py-2.5 text-[15px] leading-6 whitespace-pre-wrap text-fg">{m.text}</div>}
         </div>
       </div>
