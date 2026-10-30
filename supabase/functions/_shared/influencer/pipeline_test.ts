@@ -82,7 +82,7 @@ Deno.test('posts input: lookback date, no reposts, no reactions/comments scraped
   })
 })
 
-Deno.test('flattenPosts extracts the expected columns and skips non-posts', async () => {
+Deno.test('flattenPosts extracts the expected columns and skips non-posts', () => {
   const rows = flattenPosts(postsSample)
   assertEquals(rows.length, 3)
   assertEquals(rows[0].post_id, '111')
@@ -131,7 +131,7 @@ Deno.test('reactions input uses post URLs and the per-post cap', () => {
   assertEquals(buildReactionsInput(['u1', 'u2'], 500), { posts: ['u1', 'u2'], maxItems: 500, profileScraperMode: 'short' })
 })
 
-Deno.test('flattenReactions joins on the query.post URL', async () => {
+Deno.test('flattenReactions joins on the query.post URL', () => {
   const rows = flattenReactions(reactionsSample, { '111': 'https://x/111', '333': 'https://x/333' })
   assertEquals(rows.length, 3)
   assertEquals(rows[0], {

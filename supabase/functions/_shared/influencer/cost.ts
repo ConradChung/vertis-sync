@@ -24,6 +24,7 @@ export const TOP_POSTS = 10
 
 const ceilCents = (n: number) => Math.ceil(n * 100 - 1e-9) / 100
 const round4 = (n: number) => Math.round(n * 10_000) / 10_000
+const round6 = (n: number) => Math.round(n * 1_000_000) / 1_000_000
 
 /** Exact reactions bill for a set of top posts: sum(min(likes, cap)) at $1.5/1k (cap 0 = uncapped). */
 export function estimateReactions(top: { likes?: number | null }[], cap: number): { reactions: number; usd: number } {
@@ -54,5 +55,5 @@ export function haikuUsd(usage: { input_tokens?: number; output_tokens?: number 
   if (!usage) return 0
   const i = Number(usage.input_tokens ?? 0) || 0
   const o = Number(usage.output_tokens ?? 0) || 0
-  return round4((i * HAIKU_IN_PER_M + o * HAIKU_OUT_PER_M) / 1_000_000)
+  return round6((i * HAIKU_IN_PER_M + o * HAIKU_OUT_PER_M) / 1_000_000)
 }
