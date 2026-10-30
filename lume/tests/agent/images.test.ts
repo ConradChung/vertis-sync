@@ -11,6 +11,7 @@ import {
   sniffImageType,
   validateImageUpload,
 } from '@/lib/agent/images'
+import { png } from '../stubs/imageHeaders'
 
 const bytes = (...xs: (number | string)[]) => {
   const out: number[] = []
@@ -47,7 +48,7 @@ describe('sniffImageType', () => {
 
 describe('validateImageUpload', () => {
   it('returns the sniffed type', () => {
-    expect(validateImageUpload(PNG)).toEqual({ ok: true, media_type: 'image/png' })
+    expect(validateImageUpload(png(640, 480))).toEqual({ ok: true, media_type: 'image/png', width: 640, height: 480 })
   })
   it('refuses an empty body, a non-image and an oversize image', () => {
     expect(validateImageUpload(new Uint8Array(0))).toEqual({ ok: false, error: 'empty' })

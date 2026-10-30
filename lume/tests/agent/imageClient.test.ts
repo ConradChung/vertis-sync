@@ -97,6 +97,8 @@ describe('uploadChatImage', () => {
   it('maps a refusal to its error code', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: 'unsupported_media_type' }, { status: 415 })))
     expect(await uploadChatImage(new Blob(['x']), 'x')).toEqual({ ok: false, error: 'unsupported_media_type' })
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: 'too_many_pixels' }, { status: 422 })))
+    expect(await uploadChatImage(new Blob(['x']), 'x')).toEqual({ ok: false, error: 'too_many_pixels' })
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline') }))
     expect(await uploadChatImage(new Blob(['x']), 'x')).toEqual({ ok: false, error: 'upload' })
   })

@@ -1,6 +1,6 @@
 import 'server-only'
 import { createServiceClient } from '@/lib/supabase/service'
-import { IMAGE_BUCKET, MAX_IMAGE_BYTES, sniffImageType, type ImageMediaType } from '@/lib/agent/images'
+import { IMAGE_BUCKET, MAX_IMAGE_BYTES, validateImageUpload, type ImageMediaType } from '@/lib/agent/images'
 
 /**
  * The private `agent-chat-images` bucket (service role only; no Storage
@@ -21,8 +21,9 @@ export async function storeChatImage(path: string, bytes: Uint8Array, mediaType:
 }
 
 /**
- * The stored bytes and their sniffed type; null when the object is missing,
- * over the cap, or (somehow) not an image. Throws on a Storage failure.
+ * The stored bytes and their sniffed type; null when the object is missing or
+ * fails the upload check (size, real type, parseable header, ≤ 8000 px), so an
+ * image the API would refuse is never sent. Throws on a Storage failure.
  */
 export async function loadChatImage(path: string): Promise<{ bytes: Uint8Array; media_type: ImageMediaType } | null> {
   const { data, error } = await createServiceClient().storage.from(IMAGE_BUCKET).download(path)
@@ -33,6 +34,6 @@ export async function loadChatImage(path: string): Promise<{ bytes: Uint8Array; 
   }
   if (data.size > MAX_IMAGE_BYTES) return null
   const bytes = new Uint8Array(await data.arrayBuffer())
-  const media_type = sniffImageType(bytes)
-  return media_type ? { bytes, media_type } : null
+  const check = validateImageUpload(bytes)
+  return check.ok ? { bytes, media_type: check.media_type } : null
 }

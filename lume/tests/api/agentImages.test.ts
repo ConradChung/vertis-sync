@@ -15,9 +15,10 @@ vi.mock('@/lib/agent/chatImages', () => ({ storeChatImage: h.storeChatImage, loa
 import { POST } from '@/app/api/agent/images/route'
 import { GET } from '@/app/api/agent/images/[path]/route'
 import { IMAGE_PATH_RE, MAX_IMAGE_BYTES } from '@/lib/agent/images'
+import { gif, jpeg, png, webpExtended } from '../stubs/imageHeaders'
 
-const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
-const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16])
+const PNG = png(1200, 800)
+const JPEG = jpeg(1024, 768)
 const PATH = '0f3c2b1a-9d8e-4f7a-8b6c-5d4e3f2a1b0c.png'
 
 const upload = (body: BodyInit, { name = 'Screen Shot.png', type = 'image/png' } = {}) =>
@@ -54,6 +55,22 @@ describe('POST /api/agent/images', () => {
     big.set(PNG)
     const res = await upload(big)
     expect(res.status).toBe(413)
+    expect(h.storeChatImage).not.toHaveBeenCalled()
+  })
+
+  it('refuses an image wider or taller than 8000 px (the API would 400 every run that replays it), in any format', async () => {
+    for (const big of [png(8001, 100), jpeg(100, 9000), gif(8001, 1), webpExtended(12000, 50)]) {
+      const res = await upload(big)
+      expect(res.status).toBe(422)
+      expect((await res.json()).error).toBe('too_many_pixels')
+    }
+    expect(h.storeChatImage).not.toHaveBeenCalled()
+  })
+
+  it('refuses a real signature with an unparseable header', async () => {
+    const res = await upload(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]))
+    expect(res.status).toBe(422)
+    expect((await res.json()).error).toBe('unreadable')
     expect(h.storeChatImage).not.toHaveBeenCalled()
   })
 

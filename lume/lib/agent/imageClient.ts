@@ -102,7 +102,9 @@ export async function prepareImage(file: File, codec: ImageCodec = canvasCodec):
   }
 }
 
-export type UploadError = 'unsupported_media_type' | 'too_large' | 'empty' | 'upload'
+export type UploadError = 'unsupported_media_type' | 'too_large' | 'empty' | 'unreadable' | 'too_many_pixels' | 'upload'
+
+const UPLOAD_ERRORS: readonly string[] = ['unsupported_media_type', 'too_large', 'empty', 'unreadable', 'too_many_pixels']
 
 export async function uploadChatImage(blob: Blob, name: string): Promise<{ ok: true; ref: ChatImageRef } | { ok: false; error: UploadError }> {
   try {
@@ -110,7 +112,7 @@ export async function uploadChatImage(blob: Blob, name: string): Promise<{ ok: t
     const body = (await res.json().catch(() => ({}))) as Partial<ChatImageRef> & { error?: string }
     if (res.ok && body.path && body.media_type) return { ok: true, ref: { path: body.path, name: body.name ?? name, media_type: body.media_type } }
     const e = body.error
-    return { ok: false, error: e === 'unsupported_media_type' || e === 'too_large' || e === 'empty' ? e : 'upload' }
+    return { ok: false, error: e && UPLOAD_ERRORS.includes(e) ? (e as UploadError) : 'upload' }
   } catch {
     return { ok: false, error: 'upload' }
   }

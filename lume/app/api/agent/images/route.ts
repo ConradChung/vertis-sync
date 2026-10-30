@@ -9,14 +9,16 @@ import { readBytesCapped } from '@/lib/http/readBody'
  * name, media_type }`. One image per request, ≤ MAX_IMAGE_BYTES (2 MB), so a
  * message's images never share one request body (Vercel caps those at
  * 4.5 MB). The type comes from the magic bytes, never the Content-Type or the
- * name; png / jpeg / gif / webp only. Stored in the private
+ * name; png / jpeg / gif / webp only, with a header that parses (422
+ * `unreadable`) and neither edge over 8000 px (422 `too_many_pixels`, the
+ * Claude API's limit: such an image would fail every run that replays it). Stored in the private
  * `agent-chat-images` bucket; `/api/agent/run` takes the returned paths.
  * Same guard as `/api/agent/run`.
  */
 
 export const runtime = 'nodejs'
 
-const STATUS = { empty: 400, too_large: 413, unsupported_media_type: 415 } as const
+const STATUS = { empty: 400, too_large: 413, unsupported_media_type: 415, unreadable: 422, too_many_pixels: 422 } as const
 
 export async function POST(req: Request) {
   const auth = await requireOwner(req)

@@ -60,13 +60,95 @@ export function sniffImageType(b: Uint8Array): ImageMediaType | null {
   return null
 }
 
-export type ImageUploadCheck = { ok: true; media_type: ImageMediaType } | { ok: false; error: 'empty' | 'too_large' | 'unsupported_media_type' }
+/** The Claude API refuses an image wider or taller than this. */
+export const API_MAX_EDGE = 8000
 
+const u16be = (b: Uint8Array, i: number) => (b[i] << 8) | b[i + 1]
+const u16le = (b: Uint8Array, i: number) => b[i] | (b[i + 1] << 8)
+const u24le = (b: Uint8Array, i: number) => b[i] | (b[i + 1] << 8) | (b[i + 2] << 16)
+const u32be = (b: Uint8Array, i: number) => ((b[i] << 24) >>> 0) + (b[i + 1] << 16) + (b[i + 2] << 8) + b[i + 3]
+
+/** SOF markers carry the frame size; C4 (DHT), C8 (JPG) and CC (DAC) do not. */
+const isSof = (m: number) => m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc
+
+function jpegSize(b: Uint8Array): { width: number; height: number } | null {
+  let i = 2
+  while (i + 3 < b.length) {
+    if (b[i] !== 0xff) return null
+    const m = b[i + 1]
+    if (m === 0xff) {
+      i++ // fill byte
+      continue
+    }
+    if (m === 0xd8 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) {
+      i += 2 // no length
+      continue
+    }
+    if (m === 0xd9 || m === 0xda) return null // end of image / start of scan before any frame header
+    const len = u16be(b, i + 2)
+    if (len < 2) return null
+    if (isSof(m)) return i + 8 < b.length ? { height: u16be(b, i + 5), width: u16be(b, i + 7) } : null
+    i += 2 + len
+  }
+  return null
+}
+
+function webpSize(b: Uint8Array): { width: number; height: number } | null {
+  if (b.length < 30) return null
+  const chunk = String.fromCharCode(b[12], b[13], b[14], b[15])
+  if (chunk === 'VP8 ') {
+    if (b[23] !== 0x9d || b[24] !== 0x01 || b[25] !== 0x2a) return null
+    return { width: u16le(b, 26) & 0x3fff, height: u16le(b, 28) & 0x3fff }
+  }
+  if (chunk === 'VP8L') {
+    if (b[20] !== 0x2f) return null
+    const bits = (b[21] | (b[22] << 8) | (b[23] << 16) | (b[24] << 24)) >>> 0
+    return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 }
+  }
+  if (chunk === 'VP8X') return { width: u24le(b, 24) + 1, height: u24le(b, 27) + 1 }
+  return null
+}
+
+/**
+ * Width and height from the file header (PNG IHDR, JPEG SOF, GIF logical
+ * screen, WebP VP8 / VP8L / VP8X), or null when the header is missing,
+ * truncated, or says 0 × n.
+ */
+export function imageDimensions(b: Uint8Array): { width: number; height: number } | null {
+  let d: { width: number; height: number } | null = null
+  switch (sniffImageType(b)) {
+    case 'image/png':
+      d = b.length >= 24 && String.fromCharCode(b[12], b[13], b[14], b[15]) === 'IHDR' ? { width: u32be(b, 16), height: u32be(b, 20) } : null
+      break
+    case 'image/gif':
+      d = b.length >= 10 ? { width: u16le(b, 6), height: u16le(b, 8) } : null
+      break
+    case 'image/jpeg':
+      d = jpegSize(b)
+      break
+    case 'image/webp':
+      d = webpSize(b)
+      break
+  }
+  return d && d.width > 0 && d.height > 0 ? d : null
+}
+
+export type ImageCheckError = 'empty' | 'too_large' | 'unsupported_media_type' | 'unreadable' | 'too_many_pixels'
+export type ImageUploadCheck = { ok: true; media_type: ImageMediaType; width: number; height: number } | { ok: false; error: ImageCheckError }
+
+/**
+ * Upload and load check: size, real type, and a parseable header within the
+ * API's 8000 px per edge, so a stored image can never fail a run later.
+ */
 export function validateImageUpload(b: Uint8Array): ImageUploadCheck {
   if (!b.length) return { ok: false, error: 'empty' }
   if (b.length > MAX_IMAGE_BYTES) return { ok: false, error: 'too_large' }
   const media_type = sniffImageType(b)
-  return media_type ? { ok: true, media_type } : { ok: false, error: 'unsupported_media_type' }
+  if (!media_type) return { ok: false, error: 'unsupported_media_type' }
+  const d = imageDimensions(b)
+  if (!d) return { ok: false, error: 'unreadable' }
+  if (d.width > API_MAX_EDGE || d.height > API_MAX_EDGE) return { ok: false, error: 'too_many_pixels' }
+  return { ok: true, media_type, ...d }
 }
 
 /** A display name: the base name only, no control characters, ≤ 120 chars. */
@@ -88,6 +170,8 @@ export function fitWithin(width: number, height: number, max = IMAGE_MAX_EDGE): 
 export const IMAGE_ERRORS = {
   unsupported_media_type: 'is not a PNG, JPEG, GIF or WebP image',
   too_large: 'is too large, even after shrinking it',
+  unreadable: 'has an image header that could not be read',
+  too_many_pixels: `is larger than ${8000} px on a side`,
   empty: 'is empty',
   decode: 'could not be read as an image',
   too_many: `Up to ${MAX_IMAGES} images per message`,
