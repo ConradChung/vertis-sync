@@ -43,7 +43,12 @@ export async function POST(req: Request) {
   try {
     const built = await buildActionRequest(body.data)
     if (!built.ok) {
-      return answer(NextResponse.json({ error: built.error, ...(built.problems ? { problems: built.problems } : {}) }, { status: built.status }))
+      return answer(
+        NextResponse.json(
+          { error: built.error, ...(built.problems ? { problems: built.problems } : {}), ...(built.violations ? { violations: built.violations } : {}) },
+          { status: built.status }
+        )
+      )
     }
     if (built.kind === 'send_reply' && auth.via === 'session') {
       // A reply a Grok Bot files with its own cookie is its draft: it may not approve it (lib/operators/policy.ts).

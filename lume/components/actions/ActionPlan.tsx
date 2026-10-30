@@ -19,6 +19,8 @@ export interface ActionView {
   details: [string, string][]
   /** update_sequence: the before/after per step and variant. */
   sequenceDiff?: StepDiff[]
+  /** update_sequence awaiting: what the SOP lint says about it now (rule, step, variant per line). */
+  sopViolations?: string[]
   requestedBy: string
   status: string
   decidedVia: string | null
@@ -129,7 +131,22 @@ export function ActionPlan({ action }: { action: ActionView }) {
         {action.executedAt && ` · finished ${when(action.executedAt)}`}
       </div>
 
-      {action.error && <p className="text-[13px] text-red">{action.error}</p>}
+      {action.sopViolations && action.sopViolations.length > 0 && (
+        <div role="alert" className="rounded-lg border border-red/30 bg-red/10 px-3 py-2 text-[12px] text-fg">
+          <p className="mb-1 font-medium">
+            {action.status === 'awaiting'
+              ? 'The cold-email SOP has changed since this edit was filed: Confirm will be refused until these are fixed.'
+              : 'Cold-email SOP violations:'}
+          </p>
+          <ul className="list-inside list-disc">
+            {action.sopViolations.map((v) => (
+              <li key={v}>{v}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {action.error && <p className="whitespace-pre-wrap text-[13px] text-red">{action.error}</p>}
 
       {awaiting ? (
         <div className="flex justify-end gap-2">

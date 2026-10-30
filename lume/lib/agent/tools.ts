@@ -44,7 +44,7 @@ export interface CreatedAction {
 /** Server-side snapshot builder (`buildActionRequest`), injected so this module stays pure. */
 export type PrepareAction = (request: { kind: PendingActionKind; payload: Record<string, Json> }) => Promise<
   | { ok: true; kind: PendingActionKind; payload: Record<string, Json> & { summary: string }; ruleId?: string }
-  | { ok: false; status: number; error: string }
+  | { ok: false; status: number; error: string; problems?: string[] }
 >
 
 export interface ToolDeps {
@@ -175,7 +175,12 @@ async function requestApproval(
   request: Record<string, Json>
 ): Promise<ToolResult> {
   const built = await deps.prepare({ kind, payload: request })
-  if (!built.ok) throw new Error(`${kind} refused: ${built.error} (HTTP ${built.status})`)
+  if (!built.ok) {
+    // One line per problem (SOP violations name rule, step and variant) so the model can fix the copy.
+    const lines = built.problems?.length ? `\n${built.problems.map((p) => `- ${p}`).join('\n')}` : ''
+    const hint = built.error === 'sop_violations' ? '\nRewrite the copy to fix every violation above, then call the tool again with the complete sequence.' : ''
+    throw new Error(`${kind} refused: ${built.error} (HTTP ${built.status})${lines}${hint}`)
+  }
   if (built.kind === 'send_reply' && deps.draftedByOperator) built.payload.drafted_by_operator = deps.draftedByOperator
   // A reply shows the owner its card in the chat (components/agent/ApprovalCard.tsx).
   const card = built.kind === 'send_reply' ? { reply: replyCardOf(built.payload) } : {}

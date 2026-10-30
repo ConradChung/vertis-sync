@@ -108,6 +108,25 @@ describe('buildTools', () => {
     expect(createAction).not.toHaveBeenCalled()
   })
 
+  it('an SOP-refused sequence returns every violation to the model, so it fixes the copy', async () => {
+    const { tool, prepare, createAction } = setup()
+    prepare.mockResolvedValueOnce({
+      ok: false,
+      status: 422,
+      error: 'sop_violations',
+      problems: ['Step 1, variant A — banned_phrase: body uses the banned phrase "reach out" (“…”)', 'Step 4, variant A — signoff: must end with the sign-off "Frank Jing" (“Frank”)'],
+    } as never)
+    const t = tool('update_campaign_sequence')
+    const err = await t.run(t.inputSchema.parse({ campaign_id: 'c1', steps: [{ delay: 0, variants: [{ subject: 'hi', body: 'x' }] }] })).catch((e: Error) => e)
+    expect((err as Error).message).toBe(
+      'update_sequence refused: sop_violations (HTTP 422)\n' +
+        '- Step 1, variant A — banned_phrase: body uses the banned phrase "reach out" (“…”)\n' +
+        '- Step 4, variant A — signoff: must end with the sign-off "Frank Jing" (“Frank”)\n' +
+        'Rewrite the copy to fix every violation above, then call the tool again with the complete sequence.'
+    )
+    expect(createAction).not.toHaveBeenCalled()
+  })
+
   it('assign_leads rejects a filter key the rule filter does not know', () => {
     const { tool } = setup()
     expect(tool('assign_leads').inputSchema.safeParse({ campaign_id: 'c1', filter: { state: 'TX' } }).success).toBe(false)

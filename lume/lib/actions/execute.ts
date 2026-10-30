@@ -32,6 +32,9 @@ import { findDeal, getDeal, setStage } from '@/lib/crm/service'
 import { startRun } from '@/lib/adapters/apify'
 import { getSequenceFresh, patchSequence } from '@/lib/adapters/instantlySequences'
 import type { InstantlyStep } from '@/lib/campaigns/sequence'
+import { payloadLintSteps } from '@/lib/campaigns/sequenceAction'
+import { sopGate, sopRefusalText, type SopGate } from '@/lib/copy/sopGate'
+import { formatViolation } from '@/lib/copy/sopLint'
 import { checkRunActor, tightenOptions } from '@/lib/apify/service'
 import type { RunOptions } from '@/lib/apify/pricing'
 import type { Json, PendingActionRow } from '@/lib/db/types'
@@ -431,6 +434,9 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
    * Replace a campaign's email sequence with the confirmed edit. Re-reads the
    * live sequence first: if it is not the one the edit was made against
    * (`before_hash`), nothing is written and the owner re-opens the editor.
+   * Then re-lints against the cold-email SOP as it is NOW (base + the
+   * campaign's client overlay): a blocking violation, or an SOP that fails to
+   * load, refuses the write with each rule and step named.
    */
   async update_sequence(p) {
     const campaignId = need(p, 'campaign_id')
@@ -442,6 +448,20 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
         campaign_id: campaignId,
         stale: true,
         current_hash: current.hash,
+      })
+    }
+    // The SOP may have changed since this edit was approved: lint again before writing.
+    let gate: SopGate
+    try {
+      gate = sopGate({ id: campaignId, name: current.name ?? str(p.campaign_name) }, payloadLintSteps(p))
+    } catch (err) {
+      throw new ActionFailure(`Cold-email SOP could not be loaded, so nothing was written: ${err instanceof Error ? err.message : String(err)}`, { campaign_id: campaignId, sop_invalid: true })
+    }
+    if (gate.blocking.length) {
+      throw new ActionFailure(`${sopRefusalText(gate)}\nNothing was written to Instantly. Fix the copy and file the edit again.`, {
+        campaign_id: campaignId,
+        sop_client: gate.client,
+        sop_violations: gate.blocking.map(formatViolation),
       })
     }
     await patchSequence(campaignId, p.steps as unknown as InstantlyStep[])

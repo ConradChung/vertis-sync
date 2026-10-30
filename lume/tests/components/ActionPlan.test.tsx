@@ -34,3 +34,27 @@ describe('ActionPlan decided line', () => {
     expect(screen.getByText(/decided in telegram/)).toBeTruthy()
   })
 })
+
+describe('ActionPlan SOP violations', () => {
+  it('lists the rule and step of each violation on an awaiting sequence edit', () => {
+    render(
+      <ActionPlan
+        action={view({
+          kind: 'update_sequence',
+          status: 'awaiting',
+          decidedVia: null,
+          decidedAt: null,
+          executedAt: null,
+          sopViolations: ['Step 2, variant A — banned_phrase: body uses the banned phrase "reach out"'],
+        })}
+      />
+    )
+    expect(screen.getByText(/SOP has changed since this edit was filed/)).toBeTruthy()
+    expect(screen.getByText(/Step 2, variant A — banned_phrase/)).toBeTruthy()
+  })
+
+  it('keeps a multi-line executor refusal readable', () => {
+    render(<ActionPlan action={view({ kind: 'update_sequence', status: 'failed', error: 'Blocked by the cold-email SOP (the kaspen client SOP): 1 violation.\n- Step 4, variant A — signoff: must end with the sign-off "Frank Jing"' })} />)
+    expect(screen.getByText(/Step 4, variant A — signoff/).className).toMatch(/whitespace-pre-wrap/)
+  })
+})

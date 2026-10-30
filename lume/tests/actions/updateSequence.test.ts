@@ -42,6 +42,20 @@ vi.mock('@/lib/adapters/instantlySequences', async (orig) => ({
   ...seq,
 }))
 
+// The SOP library is swapped per test: a lenient base by default, stricter ones to exercise the gate.
+const sopLib = vi.hoisted(() => ({ current: null as unknown, error: null as Error | null }))
+vi.mock('@/lib/copy/sop', async (orig) => {
+  const real = await orig<typeof import('@/lib/copy/sop')>()
+  return {
+    ...real,
+    loadSopLibrary: () => {
+      if (sopLib.error) throw sopLib.error
+      return sopLib.current
+    },
+  }
+})
+
+import { buildSopLibrary, SopError } from '@/lib/copy/sop'
 import { buildActionRequest } from '@/lib/actions/build'
 import { createAction, DuplicateActionError, InvalidActionPayloadError } from '@/lib/actions/create'
 import { executeAction, EXECUTABLE_KINDS } from '@/lib/actions/execute'
@@ -64,6 +78,42 @@ function row(payload: Record<string, unknown>): PendingActionRow {
   }
 }
 
+const BASE = (banned = '[leverage]') => `---
+version: 1
+placeholder: false
+banned_phrases: ${banned}
+word_count:
+  step1: { min: 1, max: 500 }
+  followup: { min: 1, max: 500 }
+subject:
+  casing: any
+  max_words: 20
+proof_points: []
+personalization_fields: [city]
+max_personalization_fields_per_email: 1
+step1_cta:
+  forbid_yes_no_meeting: true
+  meeting_words: [a call]
+fallbacks: { open_role: a, door_count: b, pms: c, jurisdiction: d, generic: e }
+---
+## Voice
+`
+const ZEN = `---
+version: 1
+client: zen
+name: Zen
+match:
+  campaign_names: [zenport]
+no_exclamation: true
+sequence:
+  steps: 4
+---
+## Zen
+`
+const useSop = (banned?: string) => {
+  sopLib.current = buildSopLibrary(BASE(banned), [{ file: 'zen.md', raw: ZEN }])
+}
+
 function edited() {
   const e = toEditSteps(LIVE)
   e[1].variants[0].body = 'Bump, any thoughts?'
@@ -72,6 +122,8 @@ function edited() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  useSop()
+  sopLib.error = null
   seq.getSequenceFresh.mockResolvedValue(fresh(LIVE))
   seq.patchSequence.mockResolvedValue({})
   camp.findAwaitingActionBy.mockResolvedValue(null)
@@ -119,6 +171,61 @@ describe('update_sequence: build', () => {
     await expect(createAction('update_sequence', p, 'user')).rejects.toBeInstanceOf(DuplicateActionError)
     expect(camp.findAwaitingActionBy).toHaveBeenCalledWith('update_sequence', 'campaign_id', CAMP)
     await expect(createAction('update_sequence', { ...p, before_hash: 'nope' }, 'user')).rejects.toBeInstanceOf(InvalidActionPayloadError)
+  })
+})
+
+describe('update_sequence: SOP gate', () => {
+  it('refuses to build an edit that breaks the SOP, naming rule, step and variant', async () => {
+    const steps = edited()
+    steps[1].variants[0].body = 'Bump. We leverage AI.'
+    const b = await buildActionRequest({ kind: 'update_sequence', payload: { campaign_id: CAMP, steps } })
+    expect(b).toMatchObject({ ok: false, status: 422, error: 'sop_violations' })
+    if (b.ok) return
+    expect(b.problems).toEqual([expect.stringMatching(/^Step 2, variant A — banned_phrase: body uses the banned phrase "leverage"/)])
+    expect(b.violations).toEqual([expect.objectContaining({ rule: 'banned_phrase', step: 2, variant: 'A' })])
+    expect(camp.findAwaitingActionBy).not.toHaveBeenCalled()
+  })
+
+  it('refuses (never skips the lint) when the SOP is malformed', async () => {
+    sopLib.error = new SopError('word_count.step1: min must be <= max')
+    const b = await buildActionRequest({ kind: 'update_sequence', payload: { campaign_id: CAMP, steps: edited() } })
+    expect(b).toMatchObject({ ok: false, status: 500, error: 'sop_invalid', problems: [expect.stringMatching(/min must be <= max/)] })
+  })
+
+  it("applies the client overlay matching the campaign's name; warnings ride along without blocking", async () => {
+    seq.getSequenceFresh.mockResolvedValue({ ...fresh(LIVE), name: 'Zenport - Oct' })
+    const p = await built()
+    expect(p.sop_client).toBe('zen')
+    expect(p.sop_warnings).toEqual([expect.stringMatching(/sequence_structure \(warning\): the sequence has 2 steps; the SOP plans 4/)])
+    const loud = edited()
+    loud[1].variants[0].body = 'Bump!'
+    const b = await buildActionRequest({ kind: 'update_sequence', payload: { campaign_id: CAMP, steps: loud } })
+    expect(b).toMatchObject({ ok: false, status: 422, error: 'sop_violations', problems: [expect.stringMatching(/Step 2, variant A — no_exclamation/), expect.stringMatching(/warning/)] })
+  })
+
+  it('createAction refuses a snapshot that breaks the SOP', async () => {
+    const p = await built()
+    useSop('[bump]')
+    await expect(createAction('update_sequence', p, 'user')).rejects.toThrow(/sop_violations: Step 2, variant A — banned_phrase/)
+  })
+
+  it('the executor re-lints with the SOP as it is now: an edit approved before an SOP change is refused, nothing written', async () => {
+    const p = await built()
+    useSop('[bump]')
+    store.claimExecution.mockResolvedValueOnce(row(p))
+    const out = await executeAction(ID)
+    expect(out).toMatchObject({ ran: true, status: 'failed', result: { sop_violations: [expect.stringMatching(/^Step 2, variant A — banned_phrase/)] } })
+    expect(out.ran && out.error).toMatch(/Blocked by the cold-email SOP \(the base SOP\): 1 violation\.\n- Step 2, variant A — banned_phrase/)
+    expect(seq.patchSequence).not.toHaveBeenCalled()
+  })
+
+  it('the executor refuses when the SOP cannot be loaded', async () => {
+    const p = await built()
+    sopLib.error = new SopError('boom')
+    store.claimExecution.mockResolvedValueOnce(row(p))
+    const out = await executeAction(ID)
+    expect(out).toMatchObject({ ran: true, status: 'failed', result: { sop_invalid: true } })
+    expect(seq.patchSequence).not.toHaveBeenCalled()
   })
 })
 

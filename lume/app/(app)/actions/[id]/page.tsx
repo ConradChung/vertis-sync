@@ -7,6 +7,9 @@ import { requireOwner } from '@/lib/auth/guards'
 import { uuidParam } from '@/lib/http/json'
 import type { Json } from '@/lib/db/types'
 import { diffSequences, type EditStep } from '@/lib/campaigns/sequence'
+import { payloadLintSteps } from '@/lib/campaigns/sequenceAction'
+import { sopGate } from '@/lib/copy/sopGate'
+import { formatViolation } from '@/lib/copy/sopLint'
 
 export const metadata: Metadata = { title: 'Confirm action' }
 export const dynamic = 'force-dynamic'
@@ -55,6 +58,26 @@ function sequenceDetails(payload: Record<string, Json>, result: Record<string, J
   return out
 }
 
+/**
+ * The SOP lint of a sequence edit against the SOP as it is now (the executor
+ * runs the same check before writing): a details line, plus the blocking
+ * violations while it still awaits a decision.
+ */
+function sequenceSop(payload: Record<string, Json>, awaiting: boolean): { line: [string, string]; violations?: string[] } {
+  try {
+    const id = typeof payload.campaign_id === 'string' ? payload.campaign_id : null
+    const name = typeof payload.campaign_name === 'string' ? payload.campaign_name : null
+    const gate = sopGate({ id, name }, payloadLintSteps(payload))
+    const which = gate.client ? `${gate.client} client SOP` : 'base SOP'
+    const warn = gate.warnings.length ? `; warnings: ${gate.warnings.map(formatViolation).join(' · ')}` : ''
+    const line: [string, string] = ['sop check', gate.blocking.length ? `${gate.blocking.length} violation(s) of the ${which}${warn}` : `passes the ${which}${warn}`]
+    return { line, ...(awaiting && gate.blocking.length ? { violations: gate.blocking.map(formatViolation) } : {}) }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { line: ['sop check', msg], ...(awaiting ? { violations: [msg] } : {}) }
+  }
+}
+
 const asSteps = (v: Json | undefined): EditStep[] => (Array.isArray(v) ? (v as unknown as EditStep[]) : [])
 
 /** Payload fields worth showing; the lead list and reply body are summarised. */
@@ -82,6 +105,7 @@ export default async function ActionPage({ params }: { params: Promise<{ id: str
   const row = await getAction(id)
   if (!row) notFound()
 
+  const sop = row.kind === 'update_sequence' && Array.isArray(row.payload?.steps) ? sequenceSop(row.payload ?? {}, row.status === 'awaiting') : null
   const view: ActionView = {
     id: row.id,
     kind: row.kind,
@@ -90,8 +114,9 @@ export default async function ActionPage({ params }: { params: Promise<{ id: str
       row.kind === 'run_actor'
         ? runActorDetails(row.payload ?? {}, (row.result as Record<string, Json> | null) ?? null)
         : row.kind === 'update_sequence'
-          ? sequenceDetails(row.payload ?? {}, (row.result as Record<string, Json> | null) ?? null)
+          ? [...sequenceDetails(row.payload ?? {}, (row.result as Record<string, Json> | null) ?? null), ...(sop ? [sop.line] : [])]
           : details(row.payload),
+    ...(sop?.violations ? { sopViolations: sop.violations } : {}),
     ...(row.kind === 'update_sequence' ? { sequenceDiff: diffSequences(asSteps(row.payload?.before), asSteps(row.payload?.after)) } : {}),
     requestedBy: row.requested_by,
     status: row.status,

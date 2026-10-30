@@ -12,6 +12,7 @@ import { buildActivateRule, buildAssignLeads, rotateActionBody } from '@/lib/rul
 import { ACTOR_ID_RE, checkRunActor, runActorPayload } from '@/lib/apify/service'
 import { ACTOR_RUN_CAP_USD } from '@/lib/apify/pricing'
 import { buildUpdateSequence } from '@/lib/campaigns/sequenceAction'
+import type { SopViolation } from '@/lib/copy/sopLint'
 import { getVertical } from '@/lib/operators/store'
 import { buildRemoveLeads, removeLeadsBody } from '@/lib/actions/removeLeads'
 import { getEmail } from '@/lib/adapters/instantlyEmails'
@@ -93,7 +94,7 @@ export type ActionRequest = z.infer<typeof ActionRequestBody>
 
 export type ActionBuild =
   | { ok: true; kind: PendingActionKind; payload: Record<string, Json> & { summary: string }; ruleId?: string }
-  | { ok: false; status: number; error: string; problems?: string[] }
+  | { ok: false; status: number; error: string; problems?: string[]; violations?: SopViolation[] }
 
 // Gate steps that need their own confirmation flow never ride on decide_gate.
 const NOT_VIA_DECIDE_GATE: ReadonlySet<string> = new Set(['push_go', 'camp_launch', 'lume_ok', 'lume_no'])

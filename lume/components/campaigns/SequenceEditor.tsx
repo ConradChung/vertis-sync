@@ -51,6 +51,8 @@ export function SequenceEditor({ campaignId }: { campaignId: string }) {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<NoticeState | null>(null)
   const [problems, setProblems] = useState<string[]>([])
+  /** Set when the server's SOP lint refused the edit (each problem names rule, step and variant). */
+  const [sopBlocked, setSopBlocked] = useState(false)
 
   const loaded = data?.configured ? data.steps : null
   const steps = useMemo(() => draft ?? loaded ?? [], [draft, loaded])
@@ -65,6 +67,7 @@ export function SequenceEditor({ campaignId }: { campaignId: string }) {
     setDraft(fn(structuredClone(steps)))
     setNotice(null)
     setProblems([])
+    setSopBlocked(false)
   }
   const setVariant = (i: number, j: number, patch: Partial<EditVariant>) =>
     update((s) => {
@@ -82,14 +85,17 @@ export function SequenceEditor({ campaignId }: { campaignId: string }) {
       setNotice({ kind: 'created', id: r.id, summary: r.summary })
       void mutate()
     } else if (r.error === 'duplicate') setNotice({ kind: 'duplicate', existingId: r.existingId ?? null })
-    else if (r.problems?.length) setProblems(r.problems)
-    else setNotice({ kind: 'error', message: SAVE_ERRORS[r.error] ?? r.error })
+    else if (r.problems?.length) {
+      setProblems(r.problems)
+      setSopBlocked(r.error === 'sop_violations' || r.error === 'sop_invalid')
+    } else setNotice({ kind: 'error', message: SAVE_ERRORS[r.error] ?? r.error })
   }
 
   const reload = async () => {
     setDraft(null)
     setNotice(null)
     setProblems([])
+    setSopBlocked(false)
     await mutate()
   }
 
@@ -240,11 +246,14 @@ export function SequenceEditor({ campaignId }: { campaignId: string }) {
       )}
 
       {problems.length > 0 && (
-        <ul role="alert" className="list-inside list-disc rounded-lg border border-red/30 bg-red/10 px-3 py-2 text-[12px] text-fg">
-          {problems.map((p) => (
-            <li key={p}>{p}</li>
-          ))}
-        </ul>
+        <div role="alert" className="rounded-lg border border-red/30 bg-red/10 px-3 py-2 text-[12px] text-fg">
+          {sopBlocked && <p className="mb-1 font-medium">Blocked by the cold-email SOP — fix these and request again:</p>}
+          <ul className="list-inside list-disc">
+            {problems.map((p) => (
+              <li key={p}>{p}</li>
+            ))}
+          </ul>
+        </div>
       )}
       {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
 
