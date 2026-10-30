@@ -54,7 +54,9 @@ max_proof_points_per_email: 1
 
 # {{variables}} that count as personalization. {{company}} and {{companyName}}
 # are the same field; {{firstName}} is not personalization.
-personalization_fields: [company, city, door_count, pms, open_role, after_hours, review_signal, jurisdiction, hook]
+# {{jurisdiction_line}} is a whole sentence the push always sends: the lead's
+# jurisdiction hook, or fallbacks.jurisdiction_line.
+personalization_fields: [company, city, door_count, pms, open_role, after_hours, review_signal, jurisdiction, jurisdiction_line, hook]
 max_personalization_fields_per_email: 1
 
 # Step 1 may not ask a yes/no question that requires a meeting: a sentence
@@ -92,6 +94,9 @@ fallbacks:
   door_count: Most owners end up as the middle manager of their own portfolio.
   pms: Most owners end up as the middle manager of their own portfolio.
   jurisdiction: Most owners end up as the middle manager of their own portfolio.
+  # Also in supabase/functions/_shared/research/jurisdiction.ts (edge functions
+  # can't read this file); lume/tests/copy/jurisdiction.test.ts keeps them equal.
+  jurisdiction_line: Most owners end up as the middle manager of their own portfolio.
 ---
 
 # Cold-email playbook (base)
@@ -159,3 +164,8 @@ point not used before.
 
 No high-confidence value for a field: use the fallback sentence. Never guess a
 value and never invent a fact to fill the gap.
+
+`{{jurisdiction_line}}` already is that sentence: the push sends the lead's
+reviewed jurisdiction hook, or `fallbacks.jurisdiction_line`, so it is never
+blank. Use it as its own sentence. Never write `{{jurisdiction}}` bare in copy:
+Instantly renders a missing variable as nothing.

@@ -221,6 +221,26 @@ describe('Kaspen SOP lint', () => {
     }
   })
 
+  it('step 3 may use {{jurisdiction_line}} as its own sentence', () => {
+    const s = zenport()
+    s[2].variants[0].body = s[2].variants[0].body.replace('one more angle.', 'one more angle.\n\n{{jurisdiction_line}}')
+    expect(RULES.personalization_fields).toContain('jurisdiction_line')
+    expect(lintSequence(s, RULES)).toEqual([])
+  })
+
+  it('step 3 with {{jurisdiction_line}} and a second personalization field fails', () => {
+    const s = zenport()
+    s[2].variants[0].body = s[2].variants[0].body.replace(
+      'one more angle.',
+      'one more angle.\n\n{{jurisdiction_line}} On {{pms}} that date sits in a report nobody opens.'
+    )
+    expect(only(s)).toEqual([['personalization_fields', 3, 'A']])
+  })
+
+  it('the SOP falls back to a whole sentence for {{jurisdiction_line}}', () => {
+    expect(RULES.fallbacks.jurisdiction_line).toBe(RULES.fallbacks.jurisdiction)
+  })
+
   it('the step-3 ban leaves door counts alone elsewhere (21,000 units in step 4 passes)', () => {
     const s = zenport()
     s[3].variants[0].body = s[3].variants[0].body.replace('in my own portfolio', 'across the 21,000 units it runs on')

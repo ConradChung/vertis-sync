@@ -74,7 +74,9 @@ only_in_step:
   Vancouver: [1]
 
 # {{company}} and {{companyName}} are the same field; {{firstName}} is not personalization.
-personalization_fields: [company, city, door_count, pms, open_role, after_hours, review_signal, jurisdiction]
+# {{jurisdiction_line}} is a whole sentence (the jurisdiction's hook, or the fallback
+# below), sent with every push; it counts as a personalization field.
+personalization_fields: [company, city, door_count, pms, open_role, after_hours, review_signal, jurisdiction, jurisdiction_line]
 max_personalization_fields_per_email: 1
 
 step1_cta:
@@ -125,6 +127,9 @@ fallbacks:
   door_count: Without a GM, the owner becomes the middle manager.
   pms: Without a GM, the owner becomes the middle manager.
   jurisdiction: Without a GM, the owner becomes the middle manager.
+  # Also in supabase/functions/_shared/research/jurisdiction.ts (edge functions
+  # can't read this file); lume/tests/copy/jurisdiction.test.ts keeps them equal.
+  jurisdiction_line: Without a GM, the owner becomes the middle manager.
   after_hours: Without a GM, the owner becomes the middle manager.
   review_signal: Without a GM, the owner becomes the middle manager.
   city: Without a GM, the owner becomes the middle manager.
@@ -218,6 +223,12 @@ otherwise the generic fallback. Never guess.
 
 `{{company}}` is the same field as Instantly's `{{companyName}}`.
 
+`{{jurisdiction_line}}` is a whole sentence, sent with every push: the lead's
+jurisdiction hook when its country and state/province match a reviewed,
+active jurisdiction (e.g. BC, Ontario, England, Dubai), otherwise the fallback
+sentence below. It is never blank. Never write `{{jurisdiction}}` bare in copy:
+Instantly renders a missing variable as nothing.
+
 ## CTA rules
 
 This is the part that failed, so follow it exactly.
@@ -243,9 +254,11 @@ All steps in the same thread.
   payroll case study, mistakes & compliance.
 - **Step 2 (+3 days):** price contrast ($1.45/door vs a hire who goes home at
   5) + demo offer.
-- **Step 3 (+4 days):** proactive/compliance angle, with a
-  jurisdiction-specific example when `{{jurisdiction}}` is high-confidence. No
-  door count, no Miami.
+- **Step 3 (+4 days):** proactive/compliance angle. It may use
+  `{{jurisdiction_line}}` as its own sentence (the jurisdiction-specific
+  example, or the fallback when there is none); it is the email's one
+  personalization field. Never `{{jurisdiction}}` bare. No door count, no
+  Miami.
 - **Step 4 (+5 days):** last note, lead magnet.
 
 Sign step 1 and step 4 "Frank Jing"; steps 2 and 3 "Frank".
