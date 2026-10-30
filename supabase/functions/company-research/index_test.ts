@@ -283,7 +283,7 @@ Deno.test('handle {crawl_id}: authorized continuation is accepted and runs in th
     const fast = { startedAt: Date.now() - 200_000, sleep: () => Promise.resolve() }
     const res = await handle(post({ crawl_id: CRAWL }), (p) => { bg.push(p.catch(() => {})) }, fast)
     assertEquals(res.status, 202)
-    assertEquals(bg.length, 1)
+    assertEquals(bg.length, 2, 'the stale sweep and the poll')
     await Promise.all(bg)
     assert(f.calls.some((c) => c.url === 'https://db.test/functions/v1/company-research'), 'continued (and handed off)')
     assertEquals((await handle(post({ crawl_id: 'nope' }), () => {})).status, 400)
@@ -507,4 +507,30 @@ Deno.test('sweep: swept crawls with a run id get their Apify run aborted (best e
     const aborts = f.calls.filter((c) => c.url.endsWith('/abort')).map((c) => c.url)
     assertEquals(aborts, ['https://api.apify.com/v2/actor-runs/stuck1/abort', 'https://api.apify.com/v2/actor-runs/stuck2/abort'])
   } finally { f.restore() }
+})
+
+Deno.test('sweep: on the continue path it runs in the background, so a slow sweep cannot outlast the caller\'s hand-off timeout', async () => {
+  const f = stubFetch(continueRoutes({ id: 'run1', status: 'RUNNING', defaultDatasetId: 'ds1' }))
+  const stubbed = globalThis.fetch
+  let release!: () => void
+  const hang = new Promise<void>((r) => { release = r })
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    if (String(input).endsWith('/rpc/lume_research_sweep_stale_crawls')) await hang
+    return stubbed(input, init)
+  }) as typeof fetch
+  const bg: Promise<unknown>[] = []
+  try {
+    const res = await Promise.race([
+      handle(post({ crawl_id: CRAWL }), (p) => { bg.push(p) }, { startedAt: Date.now() - 200_000, sleep: () => Promise.resolve() }),
+      new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 200)),
+    ])
+    assert(res !== 'timeout', 'answered while the sweep was still running')
+    assertEquals((res as Response).status, 202)
+    assertEquals(bg.length, 2, 'the sweep and the poll both run in the background')
+  } finally {
+    release()
+    await Promise.all(bg)
+    globalThis.fetch = stubbed
+    f.restore()
+  }
 })

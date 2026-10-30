@@ -476,7 +476,10 @@ export async function handle(
 
   if (body.crawl_id !== undefined) {
     if (typeof body.crawl_id !== 'string' || !UUID_RE.test(body.crawl_id)) return reply({ error: 'bad_crawl_id' }, 400)
-    await sweepStale()
+    // In the background: the caller (a hand-off) waits at most HANDOFF_MS for
+    // this 202, and a slow sweep (aborts up to 20 s) would make it retry and
+    // start a second poll chain.
+    waitUntil(sweepStale())
     waitUntil(runContinue(body.crawl_id, deps))
     return reply({ ok: true, crawl_id: body.crawl_id }, 202)
   }
