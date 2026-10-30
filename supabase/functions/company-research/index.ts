@@ -20,7 +20,8 @@
 //      otherwise it inserts the pending crawl carrying the estimate.
 //   3. start apify/website-content-crawler (cheerio, <= 8 pages, 1 GB, 180 s)
 //   4. answer 202; polling continues in the background
-// Continue (self-reinvoked past ~110 s, like operating-city-enricher):
+// Continue (self-reinvoked before the 150 s wall clock, like operating-city-enricher;
+// the clock starts at the request, see WALL_CLOCK_MS):
 //   poll the run; when it ends, claim the crawl once, snapshot pages, record
 //   the run's actual usageTotalUsd, detect the PMS (deterministic), extract
 //   door_count / after_hours / city / region / country with Haiku, keep only
@@ -55,11 +56,24 @@ const FN = 'company-research'
 
 /** Crawls pending/running longer than this are failed on every invocation (the run itself times out at 180 s). */
 export const STALE_MINUTES = 15
-/** Re-invoke past this, to stay inside the edge wall clock. */
-const CHUNK_LIMIT_MS = 110_000
-/** Only start extraction (Haiku can take ~30 s) with this much of the chunk used at most. */
-const EXTRACT_START_LIMIT_MS = 75_000
+/**
+ * Time budget per invocation, measured from the REQUEST start (start() can
+ * already have spent ~40 s on the usage read, the gate and the run start).
+ * Edge wall clock assumed 150 s.
+ *   extraction cutoff = 150 - (dataset read 20 + Haiku 60 + writes 10 + margin 10) = 50 s:
+ *     a run that finishes later than that is extracted by a fresh invocation.
+ *   poll cutoff = 150 - (run read 20 + hand-off 10 + poll sleep 5 + margin 10) = 105 s.
+ */
+export const WALL_CLOCK_MS = 150_000
+const DATASET_READ_MS = 20_000
+const HAIKU_MS = 60_000
+const WRITES_MS = 10_000
+const MARGIN_MS = 10_000
+const RUN_READ_MS = 20_000
+const HANDOFF_MS = 10_000
 const POLL_MS = 5_000
+export const EXTRACT_CUTOFF_MS = WALL_CLOCK_MS - (DATASET_READ_MS + HAIKU_MS + WRITES_MS + MARGIN_MS)
+export const POLL_CUTOFF_MS = WALL_CLOCK_MS - (RUN_READ_MS + HANDOFF_MS + POLL_MS + MARGIN_MS)
 const TERMINAL = new Set(['SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT'])
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const SNAPSHOT_TEXT_CHARS = 20_000
@@ -122,8 +136,10 @@ async function apifyMonthlyUsage(): Promise<number | null> {
 }
 
 export interface ContinueDeps {
+  /** When this invocation's request started (the wall clock's zero). */
   startedAt?: number
   sleep?: (ms: number) => Promise<void>
+  now?: () => number
 }
 
 async function handOff(crawlId: string): Promise<boolean> {
@@ -251,7 +267,8 @@ function runContinue(crawlId: string, deps: ContinueDeps): Promise<void> {
 }
 
 export async function continueCrawl(crawlId: string, deps: ContinueDeps = {}): Promise<void> {
-  const startedAt = deps.startedAt ?? Date.now()
+  const clock = deps.now ?? Date.now
+  const startedAt = deps.startedAt ?? clock()
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
 
   const rows = (await rest('GET',
@@ -267,9 +284,9 @@ export async function continueCrawl(crawlId: string, deps: ContinueDeps = {}): P
     const res = await apify(`/actor-runs/${encodeURIComponent(crawl.apify_run_id)}`)
     if (!res.ok) throw new Error(`Apify run read failed (${res.status}): ${(await res.text()).slice(0, 200)}`)
     run = ((await res.json()) as { data?: RunData }).data ?? {}
-    const elapsed = Date.now() - startedAt
+    const elapsed = clock() - startedAt
     const done = TERMINAL.has(run.status ?? '')
-    if ((done && elapsed > EXTRACT_START_LIMIT_MS) || (!done && elapsed > CHUNK_LIMIT_MS)) {
+    if ((done && elapsed > EXTRACT_CUTOFF_MS) || (!done && elapsed > POLL_CUTOFF_MS)) {
       if (!(await handOff(crawlId))) {
         await notifyFailure(crawlId, crawl.start_url, 'Could not start the next polling chunk after 4 attempts; the crawl is still running.')
       }
@@ -381,6 +398,8 @@ export async function handle(
   deps: ContinueDeps = {},
 ): Promise<Response> {
   if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
+  // The wall clock runs from here, through start() and into the background poll.
+  deps = { ...deps, startedAt: deps.startedAt ?? (deps.now ?? Date.now)() }
   const auth = req.headers.get('Authorization') ?? ''
   const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
   if (!(await secretsMatch(token, SUPABASE_SERVICE_ROLE_KEY))) return reply({ error: 'unauthorized' }, 401)

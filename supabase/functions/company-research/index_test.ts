@@ -8,7 +8,7 @@ prepareModule({
   APIFY_API_TOKEN: 'apify-tok',
   ANTHROPIC_API_KEY: 'ant-key',
 })
-const { handle, continueCrawl } = await import('./index.ts')
+const { handle, continueCrawl, EXTRACT_CUTOFF_MS, WALL_CLOCK_MS } = await import('./index.ts')
 
 const COMPANY = '11111111-1111-4111-8111-111111111111'
 const CRAWL = '22222222-2222-4222-8222-222222222222'
@@ -335,5 +335,56 @@ Deno.test('sweep: unauthorized or invalid requests do not touch the database', a
     await handle(post({ domain: 'acme-pm.com' }, 'Bearer nope'), () => {})
     await handle(post({ domain: 'localhost' }), () => {})
     assertEquals(sweepCalls(f.calls).length, 0)
+  } finally { f.restore() }
+})
+
+// --- wall clock (review item 1) -------------------------------------------------
+
+const succeeded = { id: 'run1', status: 'SUCCEEDED', defaultDatasetId: 'ds1', usageTotalUsd: 0.004 }
+const handedOff = (calls: { url: string }[]) => calls.some((c) => c.url === 'https://db.test/functions/v1/company-research')
+const extracted = (calls: { url: string }[]) => calls.some((c) => c.url === 'https://api.anthropic.com/v1/messages')
+
+Deno.test('wall clock: a finished run past the extraction cutoff hands off to a fresh invocation instead of extracting', async () => {
+  const f = stubFetch(continueRoutes(succeeded))
+  try {
+    await continueCrawl(CRAWL, { startedAt: Date.now() - (EXTRACT_CUTOFF_MS + 5_000), sleep: () => Promise.resolve() })
+    assert(handedOff(f.calls))
+    assert(!extracted(f.calls))
+    assert(!f.calls.some((c) => c.url.includes('/datasets/')), 'not even the dataset read')
+  } finally { f.restore() }
+})
+
+Deno.test('wall clock: under the cutoff it extracts in this invocation', async () => {
+  const f = stubFetch(continueRoutes(succeeded))
+  try {
+    await continueCrawl(CRAWL, { startedAt: Date.now() - (EXTRACT_CUTOFF_MS - 5_000), sleep: () => Promise.resolve() })
+    assert(extracted(f.calls))
+    assert(!handedOff(f.calls))
+  } finally { f.restore() }
+})
+
+Deno.test('wall clock: the cutoff leaves room for the dataset read (20 s), Haiku (60 s), writes and a margin in a 150 s wall clock', () => {
+  assertEquals(WALL_CLOCK_MS, 150_000)
+  assert(EXTRACT_CUTOFF_MS + 20_000 + 60_000 + 10_000 + 10_000 <= WALL_CLOCK_MS)
+})
+
+Deno.test('wall clock: the clock starts at the request, so time spent in start() counts', async () => {
+  let clock = 5_000_000
+  const routes = [
+    [(u: string) => u === 'https://db.test/rest/v1/rpc/lume_research_reserve_crawl', () => {
+      clock += 60_000 // a slow start: Apify usage + gate + run start
+      return json({ ok: true, crawl_id: CRAWL, basis: 'account', cap_usd: 29 })
+    }] as Route,
+    ...continueRoutes(succeeded),
+    ...startRoutes(),
+  ]
+  const f = stubFetch(routes)
+  const bg: Promise<unknown>[] = []
+  try {
+    const res = await handle(post({ domain: 'acme-pm.com' }), (p) => { bg.push(p) }, { now: () => clock, sleep: () => Promise.resolve() })
+    assertEquals(res.status, 202)
+    await Promise.all(bg)
+    assert(handedOff(f.calls), 'extraction moved to a fresh invocation')
+    assert(!extracted(f.calls))
   } finally { f.restore() }
 })
