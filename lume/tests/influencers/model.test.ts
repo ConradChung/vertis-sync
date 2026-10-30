@@ -107,6 +107,16 @@ describe('names and locations', () => {
     expect(splitName('Cher')).toEqual({ first: 'Cher', last: '' })
     expect(splitName(null)).toEqual({ first: '', last: '' })
   })
+  it('drops honorific prefixes and trailing credentials without a comma', () => {
+    expect(splitName('Dr. Jane Smith')).toEqual({ first: 'Jane', last: 'Smith' })
+    expect(splitName('Mrs Ann Lee')).toEqual({ first: 'Ann', last: 'Lee' })
+    expect(splitName('John Doe MBA CPM')).toEqual({ first: 'John', last: 'Doe' })
+    expect(splitName('Bob Stone Jr.')).toEqual({ first: 'Bob', last: 'Stone' })
+    expect(splitName('Al Cole III')).toEqual({ first: 'Al', last: 'Cole' })
+    expect(splitName('Kim Park, CCIM, RMP')).toEqual({ first: 'Kim', last: 'Park' })
+    expect(splitName('Sam Ng PhD')).toEqual({ first: 'Sam', last: 'Ng' })
+    expect(splitName('Mary Camm')).toEqual({ first: 'Mary', last: 'Camm' })
+  })
   it('splits locations; a US state implies United States', () => {
     expect(splitLocation('Ogden, Utah')).toEqual({ city: 'Ogden', state: 'Utah', country: 'United States' })
     expect(splitLocation('Austin, TX')).toEqual({ city: 'Austin', state: 'TX', country: 'United States' })
@@ -148,6 +158,16 @@ describe('influencerApolloCsv', () => {
     expect(line).toContain('"CEO, ""Founder"" and owner"')
     expect(line).toContain(`"'=HYPERLINK(""x"")"`)
     expect(csv.trimEnd().split('\n')).toHaveLength(2)
+  })
+  it('neutralises every OWASP formula lead character: = + - @ (tab / CR are trimmed away)', () => {
+    const titleOf = (title: string) => influencerApolloCsv([reactor({ title })], { names }).csv.split('\n')[1].split(',')[2]
+    expect(titleOf('=1+1')).toBe("'=1+1")
+    expect(titleOf('+1')).toBe("'+1")
+    expect(titleOf('-2+3')).toBe("'-2+3")
+    expect(titleOf('@SUM(A1)')).toBe("'@SUM(A1)")
+    expect(titleOf('\t=1')).toBe("'=1")
+    expect(titleOf('\r-1')).toBe("'-1")
+    expect(titleOf('Owner - Founder')).toBe('Owner - Founder')
   })
   it('the Apollo steps end with the search link pasted back to Lume for a Leadsfriday order', () => {
     expect(APOLLO_IMPORT_STEPS.join(' ')).toMatch(/Import/)

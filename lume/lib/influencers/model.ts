@@ -256,11 +256,21 @@ export function exportColumns(opts: { doorCount?: boolean; reactedTo?: boolean }
   return [...APOLLO_CONTACT_COLUMNS, ...(opts.doorCount ? ['Door Count'] : []), ...(opts.reactedTo ? ['Reacted To'] : [])]
 }
 
-/** First and last name; a credential after a comma ("Brad Randall, CPM") and parentheses are dropped. */
+const NAME_PREFIX = /^(dr|mr|mrs|ms|miss|mx|prof)\.?$/i
+const NAME_SUFFIX = /^(mba|cpm|ccim|rmp|mpm|cam|crm|arm|cpa|cfp|esq|phd|md|jd|jr|sr|ii|iii|iv)\.?$/i
+
+/**
+ * First and last name. Dropped: everything after a comma ("Brad Randall, CPM"),
+ * parentheses, honorific prefixes (Dr., Mr., Mrs., Ms.) and trailing
+ * credentials or generational suffixes (MBA, CPM, CCIM, RMP, MPM, CAM, CRM,
+ * PhD, Jr., Sr., II, III).
+ */
 export function splitName(raw: string | null): { first: string; last: string } {
-  const s = (raw ?? '').split(',')[0].replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim()
-  if (!s) return { first: '', last: '' }
-  const [first, ...rest] = s.split(' ')
+  const words = (raw ?? '').split(',')[0].replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
+  while (words.length > 1 && NAME_PREFIX.test(words[0])) words.shift()
+  while (words.length > 1 && NAME_SUFFIX.test(words[words.length - 1])) words.pop()
+  if (!words.length) return { first: '', last: '' }
+  const [first, ...rest] = words
   return { first, last: rest.join(' ') }
 }
 
@@ -285,11 +295,16 @@ export function splitLocation(raw: string | null): { city: string; state: string
   return { city: '', state: '', country: '' }
 }
 
-/** One CSV cell: newlines flattened, a leading = + @ (spreadsheet formula) prefixed with ', quoted when needed. */
+/**
+ * One CSV cell: newlines flattened and the ends trimmed (a leading tab or CR
+ * goes), a leading = + - @ (the OWASP formula-injection set) prefixed with ',
+ * quoted when needed. Numbers are written as numbers.
+ */
 export function csvCell(v: string | number | null | undefined): string {
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : ''
   let s = v === null || v === undefined ? '' : String(v)
   s = s.replace(/[\r\n]+/g, ' ').trim()
-  if (/^[=+@\t]/.test(s)) s = `'${s}`
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`
   return /[",]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
