@@ -15,10 +15,16 @@
 //       after_hours a boolean, and the snippet carries an after-hours keyword
 //                   (after-hours, 24/7, 24 hours, emergency, night, on-call,
 //                   answering service)
-//       city/region a short string that appears in the snippet (case-insensitive)
-//       country     named in the snippet (full name or common alias; short
-//                   aliases like "US" only as upper-case words, so "Contact us"
-//                   is not the United States), or derived from the kept region
+//       city        a short string named in the snippet (whole word, case-insensitive,
+//                   not the tail of a longer place: "York" is not in "New York")
+//       region      a 2-letter code only as a standalone upper-case token not next
+//                   to other all-caps words ("Toronto, ON M5V" yes, "Contact our"
+//                   or "ON SALE" no); a full name whole-word as for city
+//       country     named in the snippet (full name, whole word; no adjectives or
+//                   sub-regions like "British" or "America"; short aliases like
+//                   "US" only as standalone upper-case tokens, so "Contact us" and
+//                   "ABOUT US | CONTACT US" are not the United States), or derived
+//                   from the kept region (itself matched as above)
 //                   (BC -> Canada, TX -> United States; see geo.ts). Stored as
 //                   the canonical English name.
 // Then one value per field: highest confidence, then first; kept facts come
@@ -32,7 +38,7 @@
 //                    12,345 -> 12,000)
 // Rounding down keeps "over N doors" true.
 
-import { canonicalCountry, countryInText, regionCountry } from './geo.ts'
+import { canonicalCountry, countryInText, placeInText, regionCountry, regionInText } from './geo.ts'
 import type { Confidence, Page } from './pms.ts'
 
 export const EXTRACT_FIELDS = ['door_count', 'after_hours', 'city', 'region', 'country'] as const
@@ -202,7 +208,7 @@ export function verifyCandidates(candidates: Candidate[], pages: Page[]): { kept
       case 'region':
         if (!placeOk(c.value)) return drop('bad_value')
         value = normalizeWs(c.value)
-        if (!snippet.toLowerCase().includes(value.toLowerCase())) return drop('value_not_in_snippet')
+        if (!(c.field === 'region' ? regionInText(value, snippet) : placeInText(value, snippet))) return drop('value_not_in_snippet')
         break
       case 'country': {
         if (!placeOk(c.value)) return drop('bad_value')

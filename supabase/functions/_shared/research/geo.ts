@@ -2,15 +2,14 @@
 // Covers the markets in the design (US, Canada, UK, UAE); anything else is
 // unknown here, so a country outside them must be named in its snippet.
 
+// Full names only: adjectives and sub-regions ("British", "Canadian",
+// "America", "England", "Wales", "Emirates") name other places too
+// (British Columbia, North America, New England, New South Wales).
 const COUNTRIES: Array<{ name: string; names: string[]; short: string[] }> = [
-  { name: 'United States', names: ['united states', 'united states of america', 'america'], short: ['US', 'USA', 'U.S.', 'U.S.A.'] },
-  { name: 'Canada', names: ['canada', 'canadian'], short: [] },
-  {
-    name: 'United Kingdom',
-    names: ['united kingdom', 'great britain', 'britain', 'british', 'england', 'scotland', 'wales', 'northern ireland'],
-    short: ['UK', 'U.K.', 'GB'],
-  },
-  { name: 'United Arab Emirates', names: ['united arab emirates', 'emirates'], short: ['UAE', 'U.A.E.'] },
+  { name: 'United States', names: ['united states', 'united states of america'], short: ['US', 'USA', 'U.S.', 'U.S.A.'] },
+  { name: 'Canada', names: ['canada'], short: [] },
+  { name: 'United Kingdom', names: ['united kingdom', 'great britain'], short: ['UK', 'U.K.', 'GB'] },
+  { name: 'United Arab Emirates', names: ['united arab emirates'], short: ['UAE', 'U.A.E.'] },
 ]
 
 const fold = (s: string) => s.toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim()
@@ -26,16 +25,42 @@ export function canonicalCountry(value: string): string | null {
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
+/** Words that, right before a place name, make it part of a longer one (New England, West Virginia). */
+const PLACE_PREFIX = /\b(new|north|south|east|west|northern|southern|greater|upper|lower)\s+$/i
+
+/** Whole-word, case-insensitive, and not the tail of a longer place name. */
+export function placeInText(place: string, text: string): boolean {
+  const re = new RegExp(`(^|[^\\p{L}\\p{N}])(${esc(place.trim())})(?![\\p{L}\\p{N}])`, 'giu')
+  for (const m of text.matchAll(re)) {
+    const start = m.index! + m[1].length
+    if (!PLACE_PREFIX.test(text.slice(0, start))) return true
+  }
+  return false
+}
+
 /**
- * True when the text names the country: a full name / adjective anywhere
- * (case-insensitive, word-bounded), or a short alias as an upper-case word
- * ("US" yes, "Contact us" no).
+ * An upper-case code (US, ON, BC) standing alone, case-sensitive, and not
+ * next to another all-caps word (separated only by spaces), so menu text like
+ * "ABOUT US | CONTACT US" or "ON SALE NOW" never counts. "Toronto, ON M5V"
+ * and "Austin, TX, US" do.
  */
+export function codeInText(code: string, text: string): boolean {
+  const re = new RegExp(`(^|[^A-Za-z.])(${esc(code)})(?![A-Za-z])`, 'g')
+  for (const m of text.matchAll(re)) {
+    const start = m.index! + m[1].length
+    const end = start + m[2].length
+    if (/\b[A-Z]{2,}\s+$/.test(text.slice(0, start))) continue
+    if (/^\s+[A-Z]{2,}\b/.test(text.slice(end))) continue
+    return true
+  }
+  return false
+}
+
+/** True when the text names the country: a full name (whole word) or a standalone short alias. */
 export function countryInText(country: string, text: string): boolean {
   const c = COUNTRIES.find((x) => x.name === country)
-  if (!c) return new RegExp(`\\b${esc(country)}\\b`, 'i').test(text)
-  if (c.names.some((n) => new RegExp(`\\b${esc(n)}\\b`, 'i').test(text))) return true
-  return c.short.some((s) => new RegExp(`(^|[^A-Za-z.])${esc(s)}(?![A-Za-z])`).test(text))
+  if (!c) return placeInText(country, text)
+  return c.names.some((n) => placeInText(n, text)) || c.short.some((s) => codeInText(s, text))
 }
 
 const REGIONS: Record<string, string[]> = {
@@ -64,4 +89,11 @@ for (const [country, regions] of Object.entries(REGIONS)) for (const r of region
 /** Province / state / emirate / UK nation (name or postal abbreviation) -> country, or null. */
 export function regionCountry(region: string): string | null {
   return REGION_INDEX.get(fold(region)) ?? null
+}
+
+/** A region named in the text: 2-letter codes as standalone upper-case tokens; full names whole-word. */
+export function regionInText(region: string, text: string): boolean {
+  const r = region.trim()
+  if (/^[A-Za-z]{2}$/.test(r)) return codeInText(r.toUpperCase(), text)
+  return placeInText(r, text)
 }

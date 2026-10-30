@@ -207,7 +207,7 @@ Deno.test('after_hours: the snippet must carry an after-hours keyword', () => {
 Deno.test('country: named (or a common alias) in the snippet', () => {
   const kept = (value: string, snippet: string) => at({ field: 'country', value, snippet }).kept[0]?.value
   assertEquals(kept('Canada', 'Serving the United States and Canada.'), 'Canada')
-  assertEquals(kept('Canada', 'Proudly Canadian.'), 'Canada')
+  assertEquals(at({ field: 'country', value: 'Canada', snippet: 'Proudly Canadian.' }).kept.length, 0) // adjectives are not countries
   assertEquals(kept('United Arab Emirates', 'Offices in Dubai, UAE.'), 'United Arab Emirates')
   assertEquals(kept('USA', 'Serving the United States and Canada.'), 'United States')
 })
@@ -232,3 +232,36 @@ Deno.test('country: derived from a verified region (province/state -> country), 
   const noRegion = verifyCandidates([c({ field: 'country', value: 'Canada', snippet: 'Burnaby, BC V5H 2E2', source_url: contact })], p2)
   assertEquals(noRegion.dropped.map((d) => d.reason), ['country_not_supported'])
 })
+
+// --- round-2 review I1: country / region / city ---------------------------------------
+
+const one = (text: string, cands: Partial<Candidate>[]) => {
+  const pages: Page[] = [{ url: 'https://x.com/', text, links: [] }]
+  const r = verifyCandidates(cands.map((x) => c({ source_url: 'https://x.com/', confidence: 'high', snippet: text, ...x })), pages)
+  return r.kept.map((k) => `${k.field}=${k.value}`)
+}
+
+Deno.test('I1 probe cases are all rejected', () => {
+  assertEquals(one('ABOUT US | CONTACT US', [{ field: 'country', value: 'United States' }]), [])
+  assertEquals(one('Vancouver, British Columbia', [{ field: 'country', value: 'United Kingdom' }]), [])
+  assertEquals(one('Serving New England since 1990', [{ field: 'country', value: 'UK' }]), [])
+  assertEquals(one('Serving clients across North America', [{ field: 'country', value: 'USA' }]), [])
+  assertEquals(one('Sydney, New South Wales', [{ field: 'country', value: 'United Kingdom' }]), [])
+  assertEquals(one('Contact our team today', [{ field: 'region', value: 'ON' }, { field: 'country', value: 'Canada' }]), [])
+  assertEquals(one('Homes in Toronto', [{ field: 'region', value: 'IN' }, { field: 'country', value: 'United States' }]), [])
+})
+
+Deno.test('I1 positives are kept', () => {
+  assertEquals(one('Toronto, ON M5V 2T6', [{ field: 'city', value: 'Toronto' }, { field: 'region', value: 'ON' }, { field: 'country', value: 'Canada' }]),
+    ['city=Toronto', 'region=ON', 'country=Canada'])
+  assertEquals(one('Vancouver, BC', [{ field: 'region', value: 'BC' }, { field: 'country', value: 'Canada' }]), ['region=BC', 'country=Canada'])
+  assertEquals(one('Austin, Texas, USA', [{ field: 'city', value: 'Austin' }, { field: 'region', value: 'Texas' }, { field: 'country', value: 'USA' }]),
+    ['city=Austin', 'region=Texas', 'country=United States'])
+  assertEquals(one('London, United Kingdom', [{ field: 'city', value: 'London' }, { field: 'country', value: 'United Kingdom' }]),
+    ['city=London', 'country=United Kingdom'])
+})
+
+Deno.test('city matches whole words only', () => {
+  assertEquals(one('Read the New Yorker', [{ field: 'city', value: 'York' }]), [])
+})
+
