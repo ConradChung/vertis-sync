@@ -34,7 +34,7 @@ Names only; values live in Vercel (Root Directory `lume`) and `.env.local`.
 | Name | Where | Used for |
 | --- | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Vercel | Browser + session client; Realtime |
-| `SUPABASE_SERVICE_ROLE_KEY` | Vercel | Server-only data layer and Storage (`raw-uploads`, `agent-projects`, `agent-chat-images`) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Vercel | Server-only data layer and Storage (`raw-uploads`, `agent-projects`, `agent-chat-images`, `agent-chat-files`) |
 | `LUME_ALLOWED_EMAIL` | Vercel | The one account allowed to sign in (middleware + magic-link route) |
 | `LUME_ACTION_SECRET` | Vercel **and** edge secret | `X-Lume-Secret`: Lume → `telegram-inbox` decisions, and `telegram-inbox` → `/api/actions/<id>/execute` after a Telegram `lume_ok` |
 | `LUME_HOOK_SECRET` | Vercel (+ vault `lume_hook_secret`, same value) | `X-Lume-Hook-Secret` on `/api/hooks/gate-opened` and `/api/cron/rotation-tick` (called by pg_net) |
@@ -239,6 +239,51 @@ Environment variable names are listed in `.env.example`.
   `GET /api/agent/images/<path>` (owner session, `private` cache, `nosniff`),
   never a signed URL. An image removed from the composer before sending stays
   in the bucket (orphan, harmless; no cleanup job yet).
+- Agent chat spreadsheets (.xlsx / .csv: paperclip, drop, or paste a copied
+  file; ≤ 3 per message beside the 5 images, ≤ 10 MB each; `.xls` and
+  password-protected workbooks are refused with "save as .xlsx"). **Upload
+  path:** 10 MB is over Vercel's ~4.5 MB body cap, so the bytes never pass
+  through a function: `POST /api/agent/files/sign` checks the name and size
+  and returns a one-time signed Storage upload URL for `<uuid>.<xlsx|csv>` in
+  the private `agent-chat-files` bucket (service role only, no Storage
+  policies; 20 MB limit; MIME allowlist xlsx / text/csv / gzip) plus an
+  `upload_ticket` (HMAC, purpose `agent-chat-file-upload`, 15 min); the
+  browser uploads with `uploadToSignedUrl` (raw ArrayBuffer, so the
+  Content-Type is ours); `POST /api/agent/files` then reads the object back
+  and **validates it after upload, before any use**: magic bytes decide the
+  type (zip with `xl/workbook.xml` → xlsx, text → CSV; OLE / other binary →
+  415), never the name. Parsing (`lib/sheets/`): exceljs 4.4.0 (MIT; its
+  `uuid` is overridden to 11.1.1 for GHSA-w5hq-g745-h8pq) behind an fflate
+  streaming zip-bomb guard that inflates and counts before exceljs runs
+  (≤ 50 MB uncompressed, ≤ 20 sheets, ≤ 500k cells; cell text capped at
+  50M chars so shared strings cannot fan out); header row detected (title
+  rows skipped), formulas → cached values, dates → ISO, merged-overflow and
+  empty columns dropped, hidden sheets noted. CSV: UTF-8 (BOM or not),
+  UTF-16 by BOM, else latin1; delimiter `, ; tab |` detected. The parsed
+  tables go to `<uuid>.json.gz`, an `agent_chat_files` row holds the
+  per-sheet counts and the summary; a refused upload is deleted.
+  `/api/agent/run` takes `files: [{ id }]`; each file's summary (sheets with
+  counts, header, first 50 rows as CSV, ≤ 20k chars, cuts named) is its own
+  text block in an `<attachment>` tag marked as data; the message stores
+  `{ kind: 'file', id, name, file_kind, size_bytes, sheets }` in
+  `attachments` beside the image refs (chips on reload). Replay: summaries
+  of the newest 3 owner turns with files (≤ 3 files); older ones become
+  `[file: <name> — use read_attachment(file_id: …)]`; the char budget
+  charges a file as its note, like images. Tools: `read_attachment` (read;
+  `GET /api/agent/files/<id>/rows`, ≤ 500 rows / 20k chars per page, only
+  files attached in that chat), `load_attachment_as_leads` (low; a sheet →
+  lead review set with the column mapping shown and overridable, every
+  column kept in raw, same `normaliseLead`; `lead_review_sets.source_kind
+  'attachment'`), `stage_attachment_for_validation` (high, always asks:
+  pending kind `stage_attachment`; the build refuses a sheet with no single
+  email column, the executor re-checks rows and email column, then
+  `createIngest` — the Import CSV intake, which stops at the ingest gate;
+  telegram-inbox creates the validation job after the owner approves).
+  Import card: `.xlsx` goes through the same upload + parse, asks which
+  sheet when several have rows, then `POST /api/import/xlsx` puts that
+  sheet into the CSV intake. Project files accept `.xlsx` (each sheet
+  extracted as CSV for `read_project_file`). An attachment removed before
+  sending stays in the bucket (orphan, harmless; no cleanup job yet).
 
 ## PM influencer reactions → Apollo CSV (built-in skill)
 
