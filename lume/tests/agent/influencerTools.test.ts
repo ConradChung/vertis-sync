@@ -119,6 +119,11 @@ describe('low tools', () => {
     expect(out).toMatchObject({ status: 'ready', rows: 97, download: '/api/influencers/exports/e1' })
     expect(String(out.note)).toMatch(/create_order/)
   })
+  it('export_influencer_csv says rows are marked exported at creation and the link downloads again', () => {
+    const { tool } = setup()
+    expect(tool('export_influencer_csv').description).toMatch(/marked exported when the export is created/)
+    expect(tool('export_influencer_csv').description).toMatch(/download.*again/)
+  })
   it('export_influencer_csv: nothing to export is a plain answer, not a failure', async () => {
     const { run } = setup({ '/api/influencers/exports': { __status: 422, error: 'nothing_to_export' } })
     expect(await run('export_influencer_csv', { only_new: true })).toMatchObject({ status: 'nothing_to_export' })

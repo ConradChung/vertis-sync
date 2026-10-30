@@ -216,3 +216,12 @@ export async function influencerNames(): Promise<Record<string, string>> {
   if (res.error) throw new DbError('influencerNames', res.error)
   return Object.fromEntries(((res.data ?? []) as { slug: string; name: string }[]).map((r) => [r.slug, r.name]))
 }
+
+export interface ApifyRunRow { influencer_id: string; kind: 'posts' | 'reactions'; status: string; error: string | null; cost_usd: number | string }
+
+export async function getApifyRuns(runId: string): Promise<ApifyRunRow[]> {
+  const sb = createServiceClient()
+  const res = await sb.from('influencer_apify_runs').select('influencer_id, kind, status, error, cost_usd').eq('run_id', runId)
+  if (res.error) throw new DbError('getInfluencerApifyRuns', res.error)
+  return (res.data ?? []) as ApifyRunRow[]
+}

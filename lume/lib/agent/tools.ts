@@ -1228,7 +1228,8 @@ const SPECS: Built[] = [
       description:
         'Status of a PM influencer reactions run: status (running, awaiting_approval, done, failed, cancelled), stage (posts, top_posts, reactions, triage, ' +
         'verify, doors, output), per-stage counts, the exact reactions bill per influencer once top posts are ranked (reactions_estimate), and estimated and ' +
-        'actual cost per vendor (apify_posts, apify_reactions, perplexity, anthropic). Without run_id: the newest runs.',
+        'actual cost per vendor (apify_posts, apify_reactions, perplexity, anthropic), and budget: the influencers the shared Apify cap skipped ' +
+        '(posts_budget_skipped / reactions_budget_skipped, by name) and the cap left this month. Without run_id: the newest runs.',
       inputSchema: z.object({ run_id: uuid.optional() }),
       run: async ({ run_id }, { call }) =>
         (await call(run_id ? `/api/influencers/runs/${run_id.toLowerCase()}` : '/api/influencers/runs')) as ToolResult,
@@ -1269,8 +1270,9 @@ const SPECS: Built[] = [
       description:
         'Export verified PM decision makers from the influencer reactions pipeline as an Apollo contact-import CSV: First Name, Last Name, Title, Company, ' +
         'Website (company domain), Person Linkedin Url, City, State, Country, optionally Door Count and Reacted To. Filters: min_door_count (e.g. 700), ' +
-        'only_new (never exported before), verified_only (default true), run_id, influencer_slugs. Marks the rows exported. Returns a download link and ' +
-        'the Apollo steps; nothing is sent to Apollo.',
+        'only_new (never exported before), verified_only (default true), run_id, influencer_slugs. The rows are marked exported when the export is created ' +
+        '(so only_new skips them next time, even if the file is never downloaded); the link can be used to download the same export again. ' +
+        'Returns the download link and the Apollo steps; nothing is sent to Apollo.',
       inputSchema: z.object({
         min_door_count: z.number().int().min(0).max(1_000_000).optional(),
         only_new: z.boolean().optional(),

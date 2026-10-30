@@ -2,9 +2,9 @@ import 'server-only'
 import { z } from 'zod'
 import type { Json } from '@/lib/db/types'
 import { callInfluencerFn } from '@/lib/adapters/influencerFn'
-import { estimateRun, reactionsMaxChargeUsd } from '@/lib/influencers/model'
+import { estimateRun, MONTHLY_APIFY_CAP_USD, reactionsMaxChargeUsd } from '@/lib/influencers/model'
 import { MaxVerifyUsd, Slug } from '@/lib/influencers/schemas'
-import { activeRun, getInfluencersByIds, getInfluencersBySlugs, getRun } from '@/lib/influencers/store'
+import { activeRun, apifyMonthSpend, getInfluencersByIds, getInfluencersBySlugs, getRun } from '@/lib/influencers/store'
 import { INFLUENCER_PIPELINE, type InfluencerActionBuild } from '@/lib/influencers/actionPayload'
 
 /**
@@ -26,6 +26,17 @@ import { INFLUENCER_PIPELINE, type InfluencerActionBuild } from '@/lib/influence
 
 const fmt = (n: number) => `$${n.toFixed(2)}`
 const fail = (status: number, error: string): InfluencerActionBuild => ({ ok: false, status, error })
+
+/** The shared monthly Apify cap left (calendar-month ledger: finished costs + reservations), for the approval card. */
+async function capLeft(): Promise<{ left: number | null; line: string }> {
+  const spend = await apifyMonthSpend()
+  if (spend === null || !Number.isFinite(spend)) return { left: null, line: `Shared Apify cap: $${MONTHLY_APIFY_CAP_USD}/month (month-to-date unreadable).` }
+  const left = Math.max(0, Math.round((MONTHLY_APIFY_CAP_USD - spend) * 100) / 100)
+  return { left, line: `Shared Apify cap: ${fmt(left)} of $${MONTHLY_APIFY_CAP_USD} left this month (ledger); an influencer that would pass it is skipped.` }
+}
+
+/** A call whose outcome is unknown (timeout, connection lost): it may have run. */
+const uncertainCall = (error: string) => error === 'timeout' || error === 'unreachable'
 
 const RunBody = z.object({ slugs: z.array(Slug).min(1).max(100), max_verify_usd: MaxVerifyUsd.optional() })
 const ReactionsBody = z.object({ run_id: z.string().uuid(), max_verify_usd: MaxVerifyUsd.optional() })
@@ -49,7 +60,8 @@ export async function buildInfluencerRun(raw: Record<string, unknown>): Promise<
     `PM influencer reactions run for ${names.length} influencer${names.length === 1 ? '' : 's'} (${who}). ` +
     `Approving runs the posts scrape now: ~${fmt(est.posts_usd_now)} (Apify charge capped at ${fmt(est.posts_reserve_usd)}) + Haiku top-posts ranking (~${fmt(est.haiku_top_posts_usd)}). ` +
     `It stops after top posts with the exact reactions bill (expected ${fmt(est.reactions_usd.low)}-${fmt(est.reactions_usd.high)}) for a second approval; ` +
-    `Perplexity verify later is capped at ${fmt(maxVerify)} (expected ${fmt(est.perplexity_usd.low)}-${fmt(est.perplexity_usd.high)}).`
+    `Perplexity verify later is capped at ${fmt(maxVerify)} (expected ${fmt(est.perplexity_usd.low)}-${fmt(est.perplexity_usd.high)}). `
+  const cap = await capLeft()
   return {
     ok: true,
     kind: 'influencer_run',
@@ -66,7 +78,8 @@ export async function buildInfluencerRun(raw: Record<string, unknown>): Promise<
       total_usd_range: est.total_usd as unknown as Json,
       expected_leads: est.leads as unknown as Json,
       warnings: est.warnings,
-      summary,
+      apify_cap_left_usd: cap.left,
+      summary: summary + cap.line,
     },
   }
 }
@@ -90,7 +103,8 @@ export async function buildInfluencerReactions(raw: Record<string, unknown>): Pr
     `Approve the reactions scrape for PM influencer run ${runId.slice(0, 8)}: exactly ${reactions.toLocaleString('en-US')} reactions on ` +
     `${per.reduce((s, e) => s + e.posts, 0)} top posts = ${fmt(usd)} (Apify charge capped at ${fmt(maxCharge)}), ` +
     `then Haiku triage of the new reactors and Perplexity verify capped at ${fmt(maxVerify)}. ` +
-    `Per influencer: ${lines.join('; ')}.`
+    `Per influencer: ${lines.join('; ')}. `
+  const cap = await capLeft()
   return {
     ok: true,
     kind: 'influencer_reactions',
@@ -101,7 +115,8 @@ export async function buildInfluencerReactions(raw: Record<string, unknown>): Pr
       max_charge_usd: maxCharge,
       max_verify_usd: maxVerify,
       per_influencer: per.map((e) => ({ name: e.name, slug: e.slug, posts: e.posts, reactions: e.reactions, usd: e.usd })),
-      summary,
+      apify_cap_left_usd: cap.left,
+      summary: summary + cap.line,
     },
   }
 }
@@ -126,7 +141,16 @@ export async function executeInfluencerRun(p: Record<string, Json>, actionId: st
     total_usd_range: p.total_usd_range ?? null,
   }
   const r = await callInfluencerFn({ action: 'start', influencer_ids: ids, max_verify_usd: p.max_verify_usd, start_action_id: actionId, estimate })
-  if (!r.ok) return { ok: false, error: `influencer-reactions start: ${r.error}`, result: { http_status: r.status } }
+  if (!r.ok) {
+    const uncertain = uncertainCall(r.error)
+    return {
+      ok: false,
+      error: `influencer-reactions start: ${r.error}`,
+      result: uncertain
+        ? { http_status: r.status, uncertain: true, note: 'The start may have gone through: check get_influencer_run before retrying.' }
+        : { http_status: r.status },
+    }
+  }
   return { ok: true, result: { run_id: String(r.body.run_id ?? ''), status: String(r.body.status ?? 'running'), stage: 'posts' } }
 }
 
@@ -142,6 +166,15 @@ export async function executeInfluencerReactions(p: Record<string, Json>, action
     return { ok: false, error: 'the reactions bill changed since approval', result: { run_id: runId, approved_usd: usd, current_usd: Number(run.reactions_estimate_usd) } }
   }
   const r = await callInfluencerFn({ action: 'approve_reactions', run_id: runId, approved_usd: usd, reactions_action_id: actionId, max_verify_usd: p.max_verify_usd })
-  if (!r.ok) return { ok: false, error: `influencer-reactions approve: ${r.error}`, result: { run_id: runId, http_status: r.status } }
+  if (!r.ok) {
+    const uncertain = uncertainCall(r.error)
+    return {
+      ok: false,
+      error: `influencer-reactions approve: ${r.error}`,
+      result: uncertain
+        ? { run_id: runId, http_status: r.status, uncertain: true, note: 'The approval may have gone through: check get_influencer_run before retrying.' }
+        : { run_id: runId, http_status: r.status },
+    }
+  }
   return { ok: true, result: { run_id: runId, status: 'running', stage: 'reactions', approved_usd: usd } }
 }

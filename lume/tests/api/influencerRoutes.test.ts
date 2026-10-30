@@ -13,6 +13,9 @@ const h = vi.hoisted(() => ({
   exportRows: vi.fn(),
   insertInfluencer: vi.fn(),
   callInfluencerFn: vi.fn(),
+  getRun: vi.fn(),
+  getInfluencersByIds: vi.fn(),
+  getApifyRuns: vi.fn(),
 }))
 vi.mock('@/lib/auth/guards', () => ({ requireOwner: h.requireOwner }))
 vi.mock('@/lib/influencers/store', () => ({
@@ -26,6 +29,9 @@ vi.mock('@/lib/influencers/store', () => ({
   getExport: h.getExport,
   exportRows: h.exportRows,
   insertInfluencer: h.insertInfluencer,
+  getRun: h.getRun,
+  getInfluencersByIds: h.getInfluencersByIds,
+  getApifyRuns: h.getApifyRuns,
   DuplicateInfluencerError: class extends Error {},
 }))
 vi.mock('@/lib/adapters/influencerFn', () => ({ callInfluencerFn: h.callInfluencerFn }))
@@ -35,6 +41,7 @@ import { GET as exportGET } from '@/app/api/influencers/exports/[id]/route'
 import { GET as estimateGET } from '@/app/api/influencers/estimate/route'
 import { POST as addPOST } from '@/app/api/influencers/route'
 import { POST as cancelPOST } from '@/app/api/influencers/runs/[id]/cancel/route'
+import { GET as runGET } from '@/app/api/influencers/runs/[id]/route'
 
 const EXP = '55555555-5555-4555-8555-555555555555'
 const RUN = '33333333-3333-4333-8333-333333333333'
@@ -121,5 +128,27 @@ describe('POST /api/influencers/runs/<id>/cancel', () => {
     expect(h.callInfluencerFn).toHaveBeenCalledWith({ action: 'cancel', run_id: RUN })
     h.callInfluencerFn.mockResolvedValue({ ok: false, status: 409, error: 'not_active' })
     expect((await cancelPOST(new Request('http://x', { method: 'POST' }), ctx({ id: RUN }))).status).toBe(409)
+  })
+})
+
+describe('GET /api/influencers/runs/<id>', () => {
+  it('names the influencers the budget gate skipped and the cap left this month', async () => {
+    const P = '11111111-1111-4111-8111-111111111111'
+    const D = '22222222-2222-4222-8222-222222222222'
+    h.getRun.mockResolvedValue({ id: RUN, status: 'running', stage: 'triage', influencer_ids: [P, D] })
+    h.getInfluencersByIds.mockResolvedValue([{ id: P, slug: 'peter-lohmann', name: 'Peter Lohmann' }, { id: D, slug: 'deb-newell', name: 'Deb Newell' }])
+    h.getApifyRuns.mockResolvedValue([
+      { influencer_id: P, kind: 'posts', status: 'succeeded', error: null, cost_usd: '0.6' },
+      { influencer_id: D, kind: 'posts', status: 'succeeded', error: null, cost_usd: '0.1' },
+      { influencer_id: P, kind: 'reactions', status: 'succeeded', error: null, cost_usd: '1.7' },
+      { influencer_id: D, kind: 'reactions', status: 'failed', error: 'budget_exceeded (committed $28.6 + $0.79 > cap $29)', cost_usd: '0' },
+    ])
+    h.apifyMonthSpend.mockResolvedValue(28.6)
+    const body = await (await runGET(new Request('http://x'), ctx({ id: RUN }))).json()
+    expect(body.budget).toEqual({
+      posts_budget_skipped: [], reactions_budget_skipped: ['Deb Newell'],
+      apify_month_to_date_ledger_usd: 28.6, monthly_cap_usd: 29, cap_left_usd: 0.4,
+    })
+    expect(body.influencers).toEqual([{ slug: 'peter-lohmann', name: 'Peter Lohmann' }, { slug: 'deb-newell', name: 'Deb Newell' }])
   })
 })

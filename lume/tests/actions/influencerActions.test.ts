@@ -6,6 +6,7 @@ const store = vi.hoisted(() => ({
   getInfluencersByIds: vi.fn(),
   activeRun: vi.fn(),
   getRun: vi.fn(),
+  apifyMonthSpend: vi.fn(),
 }))
 vi.mock('@/lib/influencers/store', () => store)
 const fn = vi.hoisted(() => ({ callInfluencerFn: vi.fn() }))
@@ -40,6 +41,7 @@ const awaiting = {
 beforeEach(() => {
   vi.resetAllMocks()
   store.activeRun.mockResolvedValue(null)
+  store.apifyMonthSpend.mockResolvedValue(20.5)
 })
 
 describe('buildInfluencerRun (approval 1)', () => {
@@ -56,6 +58,8 @@ describe('buildInfluencerRun (approval 1)', () => {
     expect(b.payload.summary).toMatch(/posts scrape now: ~\$0\.72 \(Apify charge capped at \$1\.29\)/)
     expect(b.payload.summary).toMatch(/stops after top posts with the exact reactions bill/)
     expect(b.payload.summary).toMatch(/capped at \$5\.00/)
+    expect(b.payload.summary).toMatch(/Shared Apify cap: \$8\.50 of \$29 left this month/)
+    expect(b.payload.apify_cap_left_usd).toBe(8.5)
     expect(influencerPayloadError('influencer_run', b.payload)).toBeNull()
   })
   it('refuses unknown or inactive influencers, and a second run while one is active', async () => {
@@ -78,6 +82,7 @@ describe('buildInfluencerReactions (approval 2)', () => {
     expect(b.payload).toMatchObject({ run_id: RUN, reactions: 1558, reactions_usd: 2.34, max_charge_usd: 2.68, max_verify_usd: 10 })
     expect(b.payload.summary).toMatch(/exactly 1,558 reactions on 20 top posts = \$2\.34 \(Apify charge capped at \$2\.68\)/)
     expect(b.payload.summary).toMatch(/Peter Lohmann 1114 \(\$1\.67\); Deb Newell 444 \(\$0\.67\)/)
+    expect(b.payload.summary).toMatch(/Shared Apify cap: \$8\.50 of \$29 left this month \(ledger\); an influencer that would pass it is skipped/)
     expect(influencerPayloadError('influencer_reactions', b.payload)).toBeNull()
   })
   it('refuses a run that is not waiting for this approval', async () => {
@@ -104,6 +109,18 @@ describe('executeInfluencerRun re-checks before starting', () => {
     expect(await executeInfluencerRun(payload, ACTION)).toMatchObject({ ok: false, error: 'another influencer run is active' })
     expect(fn.callInfluencerFn).not.toHaveBeenCalled()
   })
+  it('a timeout or an unreachable function is uncertain: check before retrying', async () => {
+    store.getInfluencersByIds.mockResolvedValue([peter, deb])
+    for (const error of ['timeout', 'unreachable']) {
+      fn.callInfluencerFn.mockResolvedValueOnce({ ok: false, status: 0, error })
+      const out = await executeInfluencerRun(payload, ACTION)
+      expect(out).toMatchObject({ ok: false, result: { uncertain: true } })
+      if (!out.ok) expect(String(out.result.note)).toMatch(/get_influencer_run/)
+    }
+    fn.callInfluencerFn.mockResolvedValueOnce({ ok: false, status: 0, error: 'not_configured' })
+    const out = await executeInfluencerRun(payload, ACTION)
+    expect(out.ok || out.result.uncertain).toBeFalsy()
+  })
   it('a function refusal is a failure', async () => {
     store.getInfluencersByIds.mockResolvedValue([peter, deb])
     fn.callInfluencerFn.mockResolvedValue({ ok: false, status: 409, error: 'run_in_progress' })
@@ -118,6 +135,11 @@ describe('executeInfluencerReactions re-checks the bill', () => {
     fn.callInfluencerFn.mockResolvedValue({ ok: true, status: 202, body: { ok: true } })
     expect(await executeInfluencerReactions(payload, ACTION)).toMatchObject({ ok: true, result: { approved_usd: 2.34 } })
     expect(fn.callInfluencerFn.mock.calls[0][0]).toEqual({ action: 'approve_reactions', run_id: RUN, approved_usd: 2.34, reactions_action_id: ACTION, max_verify_usd: 10 })
+  })
+  it('a timeout approving the bill is uncertain', async () => {
+    store.getRun.mockResolvedValue(awaiting)
+    fn.callInfluencerFn.mockResolvedValue({ ok: false, status: 0, error: 'timeout' })
+    expect(await executeInfluencerReactions(payload, ACTION)).toMatchObject({ ok: false, result: { uncertain: true, run_id: RUN } })
   })
   it('refuses when the bill changed or the run moved on', async () => {
     store.getRun.mockResolvedValue({ ...awaiting, reactions_estimate_usd: '2.5' })
