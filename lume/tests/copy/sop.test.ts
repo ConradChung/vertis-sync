@@ -35,6 +35,7 @@ fallbacks:
   door_count: b
   pms: c
   jurisdiction: d
+  jurisdiction_line: d
   generic: e
 `
 const doc = (rules: string, prose = '## Voice\n\nPlain.\n') => `---\n${rules}---\n\n${prose}`
@@ -64,6 +65,7 @@ describe('parseSop', () => {
     ['an unknown key (a typo)', doc(`${RULES}banned_phrase: [x]\n`)],
     ['a missing section', doc(RULES.replace(/fallbacks:[\s\S]*$/, ''))],
     ['a missing fallback field', doc(RULES.replace('  pms: c\n', ''))],
+    ['a missing jurisdiction_line fallback (edge pushes send it)', doc(RULES.replace('  jurisdiction_line: d\n', ''))],
     ['min above max', doc(RULES.replace('{ min: 10, max: 100 }', '{ min: 200, max: 100 }'))],
     ['an unknown subject casing', doc(RULES.replace('casing: lowercase', 'casing: shouty'))],
     ['a duplicate proof point id', doc(RULES.replace('    patterns: [Acme Property Group]\n', '    patterns: [Acme]\n  - id: acme\n    patterns: [Acme 2]\n'))],
@@ -182,7 +184,7 @@ describe('the committed SOPs (lume/sops)', () => {
     const sop = loadSop()
     expect(sop.rules.version).toBe(1)
     expect(sop.rules.personalization_fields.length).toBeGreaterThan(0)
-    for (const f of ['open_role', 'door_count', 'pms', 'jurisdiction', 'generic'] as const) expect(sop.rules.fallbacks[f].trim()).not.toBe('')
+    for (const f of ['open_role', 'door_count', 'pms', 'jurisdiction', 'jurisdiction_line', 'generic'] as const) expect(sop.rules.fallbacks[f].trim()).not.toBe('')
     expect(sop.prose).toMatch(/## Voice/)
     expect(sop.prose).toMatch(/## Fallback sentences/)
   })

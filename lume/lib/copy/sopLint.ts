@@ -45,6 +45,9 @@ import type { SopRules } from '@/lib/copy/sop'
  *   regex that no part of the email matches.
  * - signoff: the body's last non-empty line is not the step's sign-off
  *   (case-insensitive, trailing punctuation ignored).
+ * - bare_jurisdiction: `{{jurisdiction}}` in a subject or body. Instantly
+ *   renders a missing variable as nothing and the push never sends it; use
+ *   `{{jurisdiction_line}}`, a whole sentence that is never blank.
  * - sequence_structure (warning): step count, delays (in days) or the number
  *   of step-1 variants differ from `sequence`.
  *
@@ -66,6 +69,7 @@ export type SopRule =
   | 'step_forbid'
   | 'step_require'
   | 'signoff'
+  | 'bare_jurisdiction'
   | 'sequence_structure'
 
 export interface SopViolation {
@@ -94,6 +98,7 @@ export interface LintStep {
 type Finding = Omit<SopViolation, 'step' | 'variant'>
 
 const VAR_RE = /\{\{\s*([A-Za-z_][\w.]*)\s*\}\}/g
+const BARE_JURISDICTION_RE = /\{\{\s*jurisdiction\s*\}\}/i
 const BOUND_L = '(?<![\\p{L}\\p{N}_])'
 const BOUND_R = '(?![\\p{L}\\p{N}_])'
 const FIELD_ALIASES: Record<string, string> = { companyname: 'company', company_name: 'company' }
@@ -259,6 +264,11 @@ export function lintSequence(steps: LintStep[], rules: SopRules): SopViolation[]
           const hit = firstMatch(text, re)
           if (hit) add({ rule: 'banned_phrase', message: `${where} uses the banned phrase "${p}"`, excerpt: around(text, hit.start, hit.end) })
         }
+      }
+
+      for (const [where, text] of parts) {
+        const m = BARE_JURISDICTION_RE.exec(text)
+        if (m) add({ rule: 'bare_jurisdiction', message: `${where} uses {{jurisdiction}}; use {{jurisdiction_line}}`, excerpt: around(text, m.index, m.index + m[0].length) })
       }
 
       if (rules.no_exclamation) {

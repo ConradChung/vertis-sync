@@ -94,7 +94,7 @@ max_personalization_fields_per_email: 1
 step1_cta:
   forbid_yes_no_meeting: true
   meeting_words: [a call]
-fallbacks: { open_role: a, door_count: b, pms: c, jurisdiction: d, generic: e }
+fallbacks: { open_role: a, door_count: b, pms: c, jurisdiction: d, jurisdiction_line: d, generic: e }
 ---
 ## Voice
 `

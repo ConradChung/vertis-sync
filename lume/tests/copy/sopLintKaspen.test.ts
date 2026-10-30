@@ -237,6 +237,14 @@ describe('Kaspen SOP lint', () => {
     expect(only(s)).toEqual([['personalization_fields', 3, 'A']])
   })
 
+  it('step 3 with a bare {{jurisdiction}} is refused: use {{jurisdiction_line}}', () => {
+    const s = zenport()
+    s[2].variants[0].body = s[2].variants[0].body.replace('one more angle.', 'one more angle, in {{jurisdiction}}.')
+    expect(lintSequence(s, RULES).map((x) => [x.rule, x.step, x.variant, x.message])).toEqual([
+      ['bare_jurisdiction', 3, 'A', 'body uses {{jurisdiction}}; use {{jurisdiction_line}}'],
+    ])
+  })
+
   it('the SOP falls back to a whole sentence for {{jurisdiction_line}}', () => {
     expect(RULES.fallbacks.jurisdiction_line).toBe(RULES.fallbacks.jurisdiction)
   })

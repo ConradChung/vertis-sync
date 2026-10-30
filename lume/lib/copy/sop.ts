@@ -81,7 +81,8 @@ const sequenceShape = z
     step1_variants: z.number().int().positive().optional(),
   })
   .strict()
-const FALLBACK_KEYS = ['open_role', 'door_count', 'pms', 'jurisdiction', 'generic'] as const
+/** `jurisdiction_line` is required: the edge pushes always send it (its sentence is mirrored in _shared/research/jurisdiction.ts). */
+const FALLBACK_KEYS = ['open_role', 'door_count', 'pms', 'jurisdiction', 'jurisdiction_line', 'generic'] as const
 
 /** The full (base or merged) rule set. Keys added after v1 are optional with defaults. */
 export const SopRulesSchema = z
