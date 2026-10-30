@@ -118,7 +118,7 @@ select ok(
 
 -- jurisdictions + personalization log ---------------------------------------
 select has_table('public', 'jurisdictions', 'jurisdictions exists');
-select is((select count(*)::int from public.jurisdictions), 0, 'jurisdictions ships empty (P4 seeds it)');
+select is((select count(*)::int from public.jurisdictions where active), 0, 'no jurisdiction ships active (P4 seeds them inactive)');
 select has_table('public', 'lead_personalization_log', 'lead_personalization_log exists');
 
 -- service role only ----------------------------------------------------------
