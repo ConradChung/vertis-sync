@@ -15,6 +15,7 @@ export type FileUploadError =
   | 'too_large_uncompressed'
   | 'too_many_sheets'
   | 'too_many_cells'
+  | 'too_many_columns'
   | 'not_xlsx'
   | 'not_csv'
   | 'empty'
@@ -24,7 +25,7 @@ export type FileUploadError =
   | 'upload'
 
 const KNOWN: readonly string[] = [
-  'xls', 'unsupported_media_type', 'too_large', 'legacy_or_encrypted', 'too_large_uncompressed', 'too_many_sheets', 'too_many_cells',
+  'xls', 'unsupported_media_type', 'too_large', 'legacy_or_encrypted', 'too_large_uncompressed', 'too_many_sheets', 'too_many_cells', 'too_many_columns',
   'not_xlsx', 'not_csv', 'empty', 'unreadable', 'invalid_ticket', 'upload_missing',
 ]
 

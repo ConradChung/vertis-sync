@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs'
-import { decodeCsv, detectDelimiter, parseDelimited } from '@/lib/sheets/csv'
+import { CsvLimitError, decodeCsv, detectDelimiter, parseDelimited } from '@/lib/sheets/csv'
 import { buildSheet, CELL_MAX_CHARS, LIMITS, sniffSpreadsheet, type ParsedSheet, type ParseResult, type SheetFileKind } from '@/lib/sheets/model'
 import { scanXlsxZip } from '@/lib/sheets/zipGuard'
 
@@ -16,7 +16,7 @@ import { scanXlsxZip } from '@/lib/sheets/zipGuard'
 export type Limits = Partial<typeof LIMITS>
 
 class CapError extends Error {
-  constructor(readonly code: 'too_many_cells' | 'too_large_uncompressed') {
+  constructor(readonly code: 'too_many_cells' | 'too_many_columns' | 'too_large_uncompressed') {
     super(code)
   }
 }
@@ -48,9 +48,17 @@ export async function parseSpreadsheet(bytes: Uint8Array, kind: SheetFileKind, l
     if (sniffSpreadsheet(bytes) !== 'text') return { ok: false, error: 'not_csv' }
     const decoded = decodeCsv(bytes)
     if (!decoded) return { ok: false, error: 'not_csv' }
-    const delimiter = detectDelimiter(decoded.text)
+    const delimiter = detectDelimiter(decoded.text, L.maxColumns)
     let truncated = 0
-    const grid = parseDelimited(decoded.text, delimiter).map((row) =>
+    let parsedRows: string[][]
+    try {
+      parsedRows = parseDelimited(decoded.text, delimiter, Infinity, { maxCols: L.maxColumns, maxCells: L.maxCells })
+    } catch (err) {
+      if (err instanceof CsvLimitError) return { ok: false, error: err.code }
+      throw err
+    }
+    checkGrid(parsedRows.length, parsedRows.reduce((w, r) => Math.max(w, r.length), 0), L)
+    const grid = parsedRows.map((row) =>
       row.map((v) => {
         const cut = v.length > CELL_MAX_CHARS ? (truncated++, v.slice(0, CELL_MAX_CHARS)) : v
         charge(budget, cut)
@@ -83,11 +91,17 @@ async function readXlsx(bytes: Uint8Array, L: typeof LIMITS, budget: Budget): Pr
   const date1904 = !!(wb.properties as { date1904?: boolean } | undefined)?.date1904
   const sheets: ParsedSheet[] = []
   for (const ws of wb.worksheets) {
+    // Compact: only the rows the sheet has, with their source numbers (a cell
+    // on row 500,000 must not allocate the 499,999 rows above it).
     const grid: string[][] = []
+    const rowNumbers: number[] = []
+    let width = 0
     let truncated = 0
     ws.eachRow({ includeEmpty: false }, (row, r) => {
       const out: string[] = []
       row.eachCell({ includeEmpty: false }, (cell, c) => {
+        // Before anything is stored: a cell past the width cap refuses the sheet.
+        if (c > L.maxColumns) throw new CapError('too_many_columns')
         // A merged range keeps its value in the top-left cell only.
         if (cell.isMerged && cell.master && cell.master.address !== cell.address) {
           out[c - 1] = ''
@@ -101,11 +115,20 @@ async function readXlsx(bytes: Uint8Array, L: typeof LIMITS, budget: Budget): Pr
         charge(budget, text)
         out[c - 1] = text
       })
-      grid[r - 1] = Array.from(out, (v) => v ?? '')
+      width = Math.max(width, out.length)
+      checkGrid(grid.length + 1, width, L)
+      grid.push(Array.from(out, (v) => v ?? ''))
+      rowNumbers.push(r)
     })
-    sheets.push(buildSheet(ws.name, ws.state !== 'visible', Array.from(grid, (r) => r ?? []), truncated))
+    sheets.push(buildSheet(ws.name, ws.state !== 'visible', grid, truncated, rowNumbers))
   }
   return { ok: true, sheets }
+}
+
+/** Refuse a sheet whose dense size (rows × widest row) would pass the caps, before it is built. */
+function checkGrid(rows: number, width: number, L: typeof LIMITS) {
+  if (width > L.maxColumns) throw new CapError('too_many_columns')
+  if (rows * width > L.maxGridCells) throw new CapError('too_many_cells')
 }
 
 // ---------------------------------------------------------------------------

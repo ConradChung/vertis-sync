@@ -17,6 +17,14 @@ export const LIMITS = {
   maxUncompressed: 50 * 1024 * 1024,
   maxSheets: 20,
   maxCells: 500_000,
+  /**
+   * Columns per sheet. Wider sheets are refused (too_many_columns), never
+   * cut: a stray cell far to the right would otherwise be densified into
+   * every row (a 33 KB file took 1 GB).
+   */
+  maxColumns: 1000,
+  /** Rows × columns of one sheet once dense, checked before densifying. */
+  maxGridCells: 2_000_000,
   /** Characters of cell text across the whole file once parsed (shared-string fan-out). */
   maxChars: 50_000_000,
   /** Entries in the zip (an .xlsx has a few dozen). */
@@ -60,6 +68,7 @@ export type ParseError =
   | 'too_large_uncompressed'
   | 'too_many_sheets'
   | 'too_many_cells'
+  | 'too_many_columns'
   | 'unreadable'
 
 export type ParseResult = { ok: true; workbook: ParsedWorkbook } | { ok: false; error: ParseError }
@@ -149,9 +158,12 @@ export function columnLetter(i: number): string {
  * A raw grid (row-major, '' for empty, ragged) → one table: header found,
  * blank rows and title rows skipped, columns empty everywhere dropped,
  * blank header cells named "Column <letter>", duplicates suffixed " (2)".
+ * `rowNumbers` are the grid rows' 1-based source rows when the grid is
+ * compact (only the rows a sheet actually has); default index + 1. Callers
+ * cap width and width × rows first (LIMITS.maxColumns / maxGridCells).
  */
-export function buildSheet(name: string, hidden: boolean, raw: string[][], truncated_cells = 0): ParsedSheet {
-  const grid = raw.map((r) => r.map((v) => (v ?? '').trim()))
+export function buildSheet(name: string, hidden: boolean, raw: string[][], truncated_cells = 0, rowNumbers?: readonly number[]): ParsedSheet {
+  const grid = raw.map((r) => Array.from(r, (v) => (v ?? '').trim()))
   const { index, detected } = detectHeader(grid)
   const width = grid.reduce((w, r) => Math.max(w, r.length), 0)
   const headerCells = detected ? grid[index] : []
@@ -174,7 +186,7 @@ export function buildSheet(name: string, hidden: boolean, raw: string[][], trunc
     name,
     hidden,
     header,
-    header_row: detected ? index + 1 : null,
+    header_row: detected ? (rowNumbers?.[index] ?? index + 1) : null,
     rows: body.map((r) => keep.map((c) => r[c] ?? '')),
     dropped_columns: width - keep.length,
     skipped_rows: skipped,
@@ -328,6 +340,7 @@ export const SHEET_ERRORS: Record<string, string> = {
   too_large_uncompressed: 'expands to more than 50 MB of data — split it into smaller files',
   too_many_sheets: `has more than ${LIMITS.maxSheets} sheets`,
   too_many_cells: `has more than ${fmt.format(LIMITS.maxCells)} cells — split it into smaller files`,
+  too_many_columns: `has a sheet wider than ${fmt.format(LIMITS.maxColumns)} columns — delete the stray far-right cells or split it`,
   not_xlsx: "doesn't read as an .xlsx workbook",
   not_csv: "doesn't read as a CSV (text) file",
   unsupported_media_type: 'is not an .xlsx or .csv file',

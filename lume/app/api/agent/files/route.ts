@@ -39,6 +39,7 @@ const PARSE_STATUS: Record<ParseError, number> = {
   too_large_uncompressed: 422,
   too_many_sheets: 422,
   too_many_cells: 422,
+  too_many_columns: 422,
   unreadable: 422,
 }
 

@@ -22,19 +22,40 @@ export function decodeCsv(b: Uint8Array): { text: string; encoding: CsvEncoding 
   }
 }
 
-/** Rows of `text` split on `delim`; stops after `maxRows` rows when given. A trailing empty line is not a row. */
-export function parseDelimited(text: string, delim: string, maxRows = Infinity): string[][] {
+/** A CSV past a cap while it is being read (nothing past the cap is built). */
+export class CsvLimitError extends Error {
+  constructor(readonly code: 'too_many_columns' | 'too_many_cells') {
+    super(code)
+    this.name = 'CsvLimitError'
+  }
+}
+
+/**
+ * Rows of `text` split on `delim`; stops after `maxRows` rows when given. A
+ * trailing empty line is not a row. Throws CsvLimitError as soon as a row
+ * would get more than `maxCols` fields or the file more than `maxCells`, so
+ * a 200k-column row costs the first few KB, not the whole row.
+ */
+export function parseDelimited(text: string, delim: string, maxRows = Infinity, limits: { maxCols?: number; maxCells?: number } = {}): string[][] {
+  const maxCols = limits.maxCols ?? Infinity
+  const maxCells = limits.maxCells ?? Infinity
   const rows: string[][] = []
   let row: string[] = []
   let field = ''
   let quoted = false
+  let cells = 0
   let i = 0
   const n = text.length
-  const endRow = () => {
+  const push = () => {
+    if (row.length >= maxCols) throw new CsvLimitError('too_many_columns')
+    if (++cells > maxCells) throw new CsvLimitError('too_many_cells')
     row.push(field)
+    field = ''
+  }
+  const endRow = () => {
+    push()
     rows.push(row)
     row = []
-    field = ''
   }
   while (i < n && rows.length < maxRows) {
     const c = text[i]
@@ -57,8 +78,7 @@ export function parseDelimited(text: string, delim: string, maxRows = Infinity):
       quoted = true
       i++
     } else if (c === delim) {
-      row.push(field)
-      field = ''
+      push()
       i++
     } else if (c === '\n' || c === '\r') {
       endRow()
@@ -79,12 +99,17 @@ const CANDIDATES = [',', ';', '\t', '|']
  * of fields over the first 50 rows; ties go to the earlier candidate, and a
  * one-column file is ','.
  */
-export function detectDelimiter(text: string): string {
+export function detectDelimiter(text: string, maxCols = Infinity): string {
   const sample = text.slice(0, 64 * 1024)
   let best = ','
   let bestScore = 0
   for (const d of CANDIDATES) {
-    const counts = parseDelimited(sample, d, 50).map((r) => r.length)
+    let counts: number[]
+    try {
+      counts = parseDelimited(sample, d, 50, { maxCols }).map((r) => r.length)
+    } catch {
+      continue // wider than the cap under this delimiter: the parse refuses it either way
+    }
     const freq = new Map<number, number>()
     for (const c of counts) if (c > 1) freq.set(c, (freq.get(c) ?? 0) + 1)
     const score = Math.max(0, ...freq.values())
