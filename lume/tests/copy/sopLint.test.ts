@@ -19,7 +19,7 @@ const RULES: SopRules = SopRulesSchema.parse({
     meeting_words: ['a call', 'quick call', 'meeting', 'demo', 'a chat', 'hop on'],
     meeting_patterns: ['\\b(10|15|20|30)[ -]?min(ute)?s?\\b'],
   },
-  fallbacks: { open_role: 'a', door_count: 'b', pms: 'c', jurisdiction: 'd', jurisdiction_line: 'd', generic: 'e' },
+  fallbacks: { open_role: 'a', door_count: 'b', pms: 'c', jurisdiction: 'd', compliance_law: 'd', generic: 'e' },
 })
 
 const v = (subject: string, body: string, disabled?: boolean) => ({ subject, body, ...(disabled ? { disabled } : {}) })
@@ -256,21 +256,21 @@ describe('linear trims (no regex backtracking on hostile copy)', () => {
 })
 
 describe('bare {{jurisdiction}}', () => {
-  it('blocks a bare {{jurisdiction}} in a body or subject: use {{jurisdiction_line}}', () => {
+  it('blocks a bare {{jurisdiction}} in a body or subject: use {{compliance_law}}', () => {
     const s = clean()
     s[1].variants[0].body = 'One more thought: in {{ jurisdiction }} the rules changed.'
     s[2].variants[0].subject = 'rules in {{jurisdiction}}'
     const out = lintSequence(s, RULES).filter((x) => x.rule === 'bare_jurisdiction')
     expect(out.map((x) => [x.step, x.variant, x.message])).toEqual([
-      [2, 'A', 'body uses {{jurisdiction}}; use {{jurisdiction_line}}'],
-      [3, 'A', 'subject uses {{jurisdiction}}; use {{jurisdiction_line}}'],
+      [2, 'A', 'body uses {{jurisdiction}}; use the {{compliance_law}}'],
+      [3, 'A', 'subject uses {{jurisdiction}}; use the {{compliance_law}}'],
     ])
     expect(out.every(isBlocking)).toBe(true)
   })
 
-  it('leaves {{jurisdiction_line}} and the word "jurisdiction" alone', () => {
+  it('leaves {{compliance_law}} and the word "jurisdiction" alone', () => {
     const s = clean()
-    s[1].variants[0].body = 'One more thought: {{jurisdiction_line}} Every jurisdiction differs.'
+    s[1].variants[0].body = 'One more thought: keeping up with the {{compliance_law}} is a job. Every jurisdiction differs.'
     expect(lintSequence(s, RULES).filter((x) => x.rule === 'bare_jurisdiction')).toEqual([])
   })
 })

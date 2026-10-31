@@ -2,7 +2,7 @@
  * Country / region normalisation for lead_bank inserts (country ISO2, region
  * canonical name, only when the country is certain). A mirror of
  * supabase/functions/_shared/research/jurisdiction.ts, which edge functions use
- * to resolve {{jurisdiction_line}} at push time; edge functions don't share
+ * to resolve {{compliance_law}} at push time; edge functions don't share
  * code with the Next.js apps. tests/copy/jurisdiction.test.ts runs both on the
  * same inputs, so the copies can't drift silently.
  */

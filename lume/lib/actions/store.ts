@@ -273,8 +273,8 @@ export interface LeadBankInsert {
   country?: string | null
   /** Canonical region name, only alongside a certain country. */
   region?: string | null
-  /** An explicit {{jurisdiction_line}}; null lets instantly-rotate resolve it at push time. */
-  jurisdiction_line?: string | null
+  /** An explicit {{compliance_law}} (a law name); null lets instantly-rotate resolve it at push time. */
+  compliance_law?: string | null
 }
 
 /** `on conflict (campaign_id, email) do nothing`; returns how many were new. */
@@ -310,10 +310,10 @@ interface LeadBankViewRow {
   /** Raw Apollo Country / Company Country on validation rows; ISO2 on lead_bank rows. */
   country: string | null
   region: string | null
-  jurisdiction_line: string | null
+  compliance_law: string | null
 }
 
-const VIEW_COLS = 'origin,id,email,first_name,last_name,company_name,city,campaign_id,country,region,jurisdiction_line'
+const VIEW_COLS = 'origin,id,email,first_name,last_name,company_name,city,campaign_id,country,region,compliance_law'
 /** PostgREST's default max-rows; filter reads page at this size. */
 const PAGE = 1000
 /** Ids per `.in()` lookup: 100 uuids keep the GET URL well under proxy limits. */
@@ -330,7 +330,7 @@ const toInsert = (campaignId: string) => (r: LeadBankViewRow): LeadBankInsert | 
     company_name: r.company_name,
     location: r.city,
     ...leadGeo(r.country, r.region),
-    jurisdiction_line: r.jurisdiction_line?.trim() || null,
+    compliance_law: r.compliance_law?.trim() || null,
   }
 }
 

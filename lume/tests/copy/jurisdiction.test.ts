@@ -5,15 +5,14 @@ import { findClient, loadSopLibrary } from '@/lib/copy/sop'
 /**
  * lib/copy/jurisdiction.ts mirrors the edge resolver's normalisation
  * (supabase/functions/_shared/research/jurisdiction.ts) for lead_bank
- * inserts; the edge module also holds the SOP fallback sentences, since edge
+ * inserts; the edge module also holds the {{compliance_law}} fallback, since edge
  * functions can't read sops/. Both are checked against the edge module here,
  * so a change on one side fails until the other follows.
  */
 type Edge = {
   normalizeCountry: (v: string | null | undefined) => string | null
   normalizeRegion: (c: string | null | undefined, v: string | null | undefined) => string | null
-  BASE_FALLBACK_JURISDICTION_LINE: string
-  CAMPAIGN_FALLBACK_JURISDICTION_LINES: Record<string, string>
+  FALLBACK_COMPLIANCE_LAW: string
 }
 const EDGE_PATH = '../../../supabase/functions/_shared/research/jurisdiction.ts'
 const edge = () => import(/* @vite-ignore */ new URL(EDGE_PATH, import.meta.url).href) as Promise<Edge>
@@ -54,24 +53,22 @@ describe('jurisdiction normalisation (Lume mirror)', () => {
   })
 })
 
-describe('edge fallback sentences match the SOPs', () => {
+describe('the edge {{compliance_law}} fallback matches the SOPs', () => {
   const lib = loadSopLibrary()
 
-  it('base: fallbacks.jurisdiction_line', async () => {
+  it('base and every client SOP use the same fallbacks.compliance_law as the edge pushes', async () => {
     const e = await edge()
-    expect(lib.base.rules.fallbacks.jurisdiction_line).toBeTruthy()
-    expect(e.BASE_FALLBACK_JURISDICTION_LINE).toBe(lib.base.rules.fallbacks.jurisdiction_line)
+    expect(e.FALLBACK_COMPLIANCE_LAW).toBe('local landlord-tenant law')
+    expect(lib.base.rules.fallbacks.compliance_law).toBe(e.FALLBACK_COMPLIANCE_LAW)
+    for (const c of lib.clients) expect(c.rules.fallbacks.compliance_law, c.name).toBe(e.FALLBACK_COMPLIANCE_LAW)
+    expect(findClient(lib, 'kaspen')!.rules.fallbacks.compliance_law).toBe(e.FALLBACK_COMPLIANCE_LAW)
   })
 
-  it("every client's pinned campaign ids map to its fallbacks.jurisdiction_line, and nothing else is pinned", async () => {
-    const e = await edge()
-    const expected: Record<string, string> = {}
-    for (const c of lib.clients) {
-      const line = c.rules.fallbacks.jurisdiction_line
-      if (line && line !== lib.base.rules.fallbacks.jurisdiction_line) for (const id of c.match.campaign_ids) expected[id] = line
+  it('no SOP still names {{jurisdiction_line}}', () => {
+    for (const sop of [lib.base, ...lib.clients]) {
+      expect(sop.rules.personalization_fields).toContain('compliance_law')
+      expect(sop.rules.personalization_fields).not.toContain('jurisdiction_line')
+      expect(Object.keys(sop.rules.fallbacks)).not.toContain('jurisdiction_line')
     }
-    expect(Object.keys(expected).length).toBeGreaterThan(0)
-    expect(e.CAMPAIGN_FALLBACK_JURISDICTION_LINES).toEqual(expected)
-    expect(findClient(lib, 'kaspen')!.rules.fallbacks.jurisdiction_line).toBe('Without a GM, the owner becomes the middle manager.')
   })
 })

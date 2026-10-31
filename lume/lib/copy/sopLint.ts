@@ -47,7 +47,8 @@ import type { SopRules } from '@/lib/copy/sop'
  *   (case-insensitive, trailing punctuation ignored).
  * - bare_jurisdiction: `{{jurisdiction}}` in a subject or body. Instantly
  *   renders a missing variable as nothing and the push never sends it; use
- *   `{{jurisdiction_line}}`, a whole sentence that is never blank.
+ *   "the {{compliance_law}}", the law's name (or "local landlord-tenant
+ *   law"), which is never blank.
  * - sequence_structure (warning): step count, delays (in days) or the number
  *   of step-1 variants differ from `sequence`.
  *
@@ -268,7 +269,7 @@ export function lintSequence(steps: LintStep[], rules: SopRules): SopViolation[]
 
       for (const [where, text] of parts) {
         const m = BARE_JURISDICTION_RE.exec(text)
-        if (m) add({ rule: 'bare_jurisdiction', message: `${where} uses {{jurisdiction}}; use {{jurisdiction_line}}`, excerpt: around(text, m.index, m.index + m[0].length) })
+        if (m) add({ rule: 'bare_jurisdiction', message: `${where} uses {{jurisdiction}}; use the {{compliance_law}}`, excerpt: around(text, m.index, m.index + m[0].length) })
       }
 
       if (rules.no_exclamation) {

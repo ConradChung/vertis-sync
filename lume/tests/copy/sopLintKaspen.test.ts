@@ -221,32 +221,33 @@ describe('Kaspen SOP lint', () => {
     }
   })
 
-  it('step 3 may use {{jurisdiction_line}} as its own sentence', () => {
+  it('step 3 may use the {{compliance_law}} inline, mid-sentence', () => {
     const s = zenport()
-    s[2].variants[0].body = s[2].variants[0].body.replace('one more angle.', 'one more angle.\n\n{{jurisdiction_line}}')
-    expect(RULES.personalization_fields).toContain('jurisdiction_line')
+    s[2].variants[0].body = s[2].variants[0].body.replace('one more angle.', 'one more angle: keeping up with the {{compliance_law}} is a job of its own.')
+    expect(RULES.personalization_fields).toContain('compliance_law')
+    expect(RULES.personalization_fields).not.toContain('jurisdiction_line')
     expect(lintSequence(s, RULES)).toEqual([])
   })
 
-  it('step 3 with {{jurisdiction_line}} and a second personalization field fails', () => {
+  it('step 3 with {{compliance_law}} and a second personalization field fails', () => {
     const s = zenport()
     s[2].variants[0].body = s[2].variants[0].body.replace(
       'one more angle.',
-      'one more angle.\n\n{{jurisdiction_line}} On {{pms}} that date sits in a report nobody opens.'
+      'one more angle: keeping up with the {{compliance_law}} is a job. On {{pms}} that date sits in a report nobody opens.'
     )
     expect(only(s)).toEqual([['personalization_fields', 3, 'A']])
   })
 
-  it('step 3 with a bare {{jurisdiction}} is refused: use {{jurisdiction_line}}', () => {
+  it('step 3 with a bare {{jurisdiction}} is refused: use the {{compliance_law}}', () => {
     const s = zenport()
     s[2].variants[0].body = s[2].variants[0].body.replace('one more angle.', 'one more angle, in {{jurisdiction}}.')
     expect(lintSequence(s, RULES).map((x) => [x.rule, x.step, x.variant, x.message])).toEqual([
-      ['bare_jurisdiction', 3, 'A', 'body uses {{jurisdiction}}; use {{jurisdiction_line}}'],
+      ['bare_jurisdiction', 3, 'A', 'body uses {{jurisdiction}}; use the {{compliance_law}}'],
     ])
   })
 
-  it('the SOP falls back to a whole sentence for {{jurisdiction_line}}', () => {
-    expect(RULES.fallbacks.jurisdiction_line).toBe(RULES.fallbacks.jurisdiction)
+  it('the SOP falls back to the generic noun phrase for {{compliance_law}} (same for every client)', () => {
+    expect(RULES.fallbacks.compliance_law).toBe('local landlord-tenant law')
   })
 
   it('the step-3 ban leaves door counts alone elsewhere (21,000 units in step 4 passes)', () => {

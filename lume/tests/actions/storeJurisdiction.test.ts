@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * resolveLeadsByRefs / resolveLeadsByFilter carry country, region and
- * jurisdiction_line from lume_lead_bank into the lead_bank inserts: country
+ * compliance_law from lume_lead_bank into the lead_bank inserts: country
  * as ISO2 and region as its canonical name, only when the country is certain.
  */
 const results: { data: unknown; error: unknown }[] = []
@@ -29,7 +29,7 @@ import { resolveLeadsByFilter, resolveLeadsByRefs } from '@/lib/actions/store'
 
 const view = (o: Record<string, unknown>) => ({
   origin: 'validation_rows', id: 'r1', email: 'A@acme.com', first_name: 'Ann', last_name: 'Lee', company_name: 'Acme',
-  city: 'Vancouver', campaign_id: null, country: null, region: null, jurisdiction_line: null, ...o,
+  city: 'Vancouver', campaign_id: null, country: null, region: null, compliance_law: null, ...o,
 })
 
 beforeEach(() => {
@@ -41,7 +41,9 @@ describe('lead_bank inserts carry jurisdiction data', () => {
   it('selects the new view columns', async () => {
     results.push({ data: [], error: null })
     await resolveLeadsByRefs([{ origin: 'validation_rows', id: 'r1' }], 'camp')
-    expect(String(selects[0])).toContain('country,region,jurisdiction_line')
+    expect(String(selects[0])).toContain('country,region,compliance_law')
+    // The deprecated always-null column is never read.
+    expect(String(selects[0])).not.toContain('jurisdiction_line')
   })
 
   it('normalises raw Apollo country / state from validation rows', async () => {
@@ -59,7 +61,7 @@ describe('lead_bank inserts carry jurisdiction data', () => {
       ['r1', 'r2', 'r3', 'r4', 'r5'].map((id) => ({ origin: 'validation_rows' as const, id })),
       'camp'
     )
-    expect(out.map((r) => [r.email, r.country, r.region, r.jurisdiction_line])).toEqual([
+    expect(out.map((r) => [r.email, r.country, r.region, r.compliance_law])).toEqual([
       ['a@x.com', 'CA', 'British Columbia', null],
       ['b@x.com', 'US', 'Texas', null],
       ['c@x.com', 'CA', null, null],
@@ -68,16 +70,16 @@ describe('lead_bank inserts carry jurisdiction data', () => {
     ])
   })
 
-  it('keeps a lead_bank row\'s country, region and explicit jurisdiction_line', async () => {
+  it('keeps a lead_bank row\'s country, region and explicit compliance_law', async () => {
     results.push({
-      data: [view({ origin: 'lead_bank', id: '7', country: 'GB', region: null, jurisdiction_line: 'Set by hand.', campaign_id: 'old' })],
+      data: [view({ origin: 'lead_bank', id: '7', country: 'GB', region: null, compliance_law: 'Residential Tenancies Act, 2006', campaign_id: 'old' })],
       error: null,
     })
     const out = await resolveLeadsByFilter({}, 'camp', 10)
     expect(out).toEqual([
       {
         campaign_id: 'camp', email: 'a@acme.com', first_name: 'Ann', last_name: 'Lee', company_name: 'Acme', location: 'Vancouver',
-        country: 'GB', region: null, jurisdiction_line: 'Set by hand.',
+        country: 'GB', region: null, compliance_law: 'Residential Tenancies Act, 2006',
       },
     ])
   })

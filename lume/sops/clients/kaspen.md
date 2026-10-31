@@ -74,9 +74,10 @@ only_in_step:
   Vancouver: [1]
 
 # {{company}} and {{companyName}} are the same field; {{firstName}} is not personalization.
-# {{jurisdiction_line}} is a whole sentence (the jurisdiction's hook, or the fallback
-# below), sent with every push; it counts as a personalization field.
-personalization_fields: [company, city, door_count, pms, open_role, after_hours, review_signal, jurisdiction, jurisdiction_line]
+# {{compliance_law}} is the name of the lead's compliance law (or the fallback
+# below), sent with every push and written inline after "the"; it counts as a
+# personalization field.
+personalization_fields: [company, city, door_count, pms, open_role, after_hours, review_signal, jurisdiction, compliance_law]
 max_personalization_fields_per_email: 1
 
 step1_cta:
@@ -127,9 +128,10 @@ fallbacks:
   door_count: Without a GM, the owner becomes the middle manager.
   pms: Without a GM, the owner becomes the middle manager.
   jurisdiction: Without a GM, the owner becomes the middle manager.
-  # Also in supabase/functions/_shared/research/jurisdiction.ts (edge functions
-  # can't read this file); lume/tests/copy/jurisdiction.test.ts keeps them equal.
-  jurisdiction_line: Without a GM, the owner becomes the middle manager.
+  # The same noun phrase for every client (not a sentence). Also in
+  # supabase/functions/_shared/research/jurisdiction.ts; lume/tests/copy/jurisdiction.test.ts
+  # keeps them equal.
+  compliance_law: local landlord-tenant law
   after_hours: Without a GM, the owner becomes the middle manager.
   review_signal: Without a GM, the owner becomes the middle manager.
   city: Without a GM, the owner becomes the middle manager.
@@ -223,11 +225,14 @@ otherwise the generic fallback. Never guess.
 
 `{{company}}` is the same field as Instantly's `{{companyName}}`.
 
-`{{jurisdiction_line}}` is a whole sentence, sent with every push: the lead's
-jurisdiction hook when its country and state/province match a reviewed,
-active jurisdiction (e.g. BC, Ontario, England, Dubai), otherwise the fallback
-sentence below. It is never blank. Never write `{{jurisdiction}}` bare in copy:
-Instantly renders a missing variable as nothing.
+`{{compliance_law}}` is the name of the compliance law the lead's place
+follows, sent with every push: the reviewed jurisdiction's short name (e.g.
+"RTA") or full name (e.g. "Residential Tenancies Act, 2006") when its country
+and state/province match an active jurisdiction (e.g. BC, Ontario, England,
+Dubai), otherwise "local landlord-tenant law". It is never blank. Write it
+inline after "the", never at the start of a sentence: "Keeping up with the
+{{compliance_law}} is a job of its own." Never write `{{jurisdiction}}` bare in
+copy: Instantly renders a missing variable as nothing.
 
 ## CTA rules
 
@@ -254,9 +259,9 @@ All steps in the same thread.
   payroll case study, mistakes & compliance.
 - **Step 2 (+3 days):** price contrast ($1.45/door vs a hire who goes home at
   5) + demo offer.
-- **Step 3 (+4 days):** proactive/compliance angle. It may use
-  `{{jurisdiction_line}}` as its own sentence (the jurisdiction-specific
-  example, or the fallback when there is none); it is the email's one
+- **Step 3 (+4 days):** proactive/compliance angle. It may name the law
+  inline, "keeping up with the {{compliance_law}}" (the lead's law, or "local
+  landlord-tenant law" when there is none); it is the email's one
   personalization field. Never `{{jurisdiction}}` bare. No door count, no
   Miami.
 - **Step 4 (+5 days):** last note, lead magnet.
