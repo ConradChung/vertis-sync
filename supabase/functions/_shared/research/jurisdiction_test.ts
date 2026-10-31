@@ -1,9 +1,8 @@
 import { assertEquals } from 'jsr:@std/assert@1'
 import {
-  BASE_FALLBACK_JURISDICTION_LINE,
-  fallbackJurisdictionLine,
+  complianceLaw,
+  FALLBACK_COMPLIANCE_LAW,
   type JurisdictionRow,
-  jurisdictionLine,
   normalizeCountry,
   normalizeRegion,
   resolveJurisdiction,
@@ -56,15 +55,15 @@ Deno.test('normalizeRegion: a region of another country, unknown, or no country 
 })
 
 const row = (o: Partial<JurisdictionRow>): JurisdictionRow => ({
-  country: 'US', region: null, city_match: null, jurisdiction: 'x', copy_hook: null, active: true, ...o,
+  country: 'US', region: null, city_match: null, jurisdiction: 'x', compliance_name: null, active: true, ...o,
 })
 const ROWS: JurisdictionRow[] = [
-  row({ country: 'CA', region: 'British Columbia', jurisdiction: 'British Columbia', copy_hook: 'BC hook.' }),
-  row({ country: 'CA', region: 'Ontario', jurisdiction: 'Ontario', copy_hook: 'ON hook.', active: false }),
-  row({ country: 'US', region: 'Texas', jurisdiction: 'Texas' }),
-  row({ country: 'GB', region: null, jurisdiction: 'England and Wales', copy_hook: 'UK hook.' }),
-  row({ country: 'AE', region: 'Dubai', jurisdiction: 'Dubai', copy_hook: 'Dubai hook.' }),
-  row({ country: 'AE', region: 'Dubai', city_match: 'Jebel Ali', jurisdiction: 'JAFZA', copy_hook: 'city hook.' }),
+  row({ country: 'CA', region: 'British Columbia', jurisdiction: 'British Columbia', compliance_name: 'Residential Tenancy Act' }),
+  row({ country: 'CA', region: 'Ontario', jurisdiction: 'Ontario', compliance_name: 'Residential Tenancies Act, 2006', active: false }),
+  row({ country: 'US', region: 'Texas', jurisdiction: 'Texas', compliance_name: 'Texas Property Code' }),
+  row({ country: 'GB', region: null, jurisdiction: 'England and Wales', compliance_name: 'Housing Act 1988' }),
+  row({ country: 'AE', region: 'Dubai', jurisdiction: 'Dubai', compliance_name: 'Ejari tenancy registration' }),
+  row({ country: 'AE', region: 'Dubai', city_match: 'Jebel Ali', jurisdiction: 'JAFZA', compliance_name: 'JAFZA rules' }),
 ]
 
 Deno.test('resolveJurisdiction: certain country + exact region', () => {
@@ -93,31 +92,33 @@ Deno.test('resolveJurisdiction: anything uncertain -> null', () => {
 })
 
 Deno.test('resolveJurisdiction: never picks a city-scoped row (no city is passed)', () => {
-  const onlyCity = [row({ country: 'AE', region: 'Dubai', city_match: 'Jebel Ali', copy_hook: 'city hook.' })]
+  const onlyCity = [row({ country: 'AE', region: 'Dubai', city_match: 'Jebel Ali', compliance_name: 'JAFZA rules' })]
   assertEquals(resolveJurisdiction('UAE', 'Dubai', onlyCity), null)
 })
 
-Deno.test('jurisdictionLine: hook when the row is active and has one, else the fallback', () => {
-  assertEquals(jurisdictionLine(row({ copy_hook: '  BC hook.  ' }), 'fb'), 'BC hook.')
-  assertEquals(jurisdictionLine(row({ copy_hook: null }), 'fb'), 'fb')
-  assertEquals(jurisdictionLine(row({ copy_hook: '   ' }), 'fb'), 'fb')
-  assertEquals(jurisdictionLine(row({ copy_hook: 'hook', active: false }), 'fb'), 'fb')
-  assertEquals(jurisdictionLine(null, 'fb'), 'fb')
+Deno.test('complianceLaw: the active row\'s compliance_name, trimmed, without a leading "the"; else the generic fallback', () => {
+  assertEquals(complianceLaw(row({ compliance_name: '  Residential Tenancies Act, 2006  ' })), 'Residential Tenancies Act, 2006')
+  // Templates write "the {{compliance_law}}", so a stored "The ..." never renders "the The ...".
+  assertEquals(complianceLaw(row({ compliance_name: 'The Housing Act 1988' })), 'Housing Act 1988')
+  assertEquals(complianceLaw(row({ compliance_name: null })), FALLBACK_COMPLIANCE_LAW)
+  assertEquals(complianceLaw(row({ compliance_name: '   ' })), FALLBACK_COMPLIANCE_LAW)
+  assertEquals(complianceLaw(row({ compliance_name: 'Act', active: false })), FALLBACK_COMPLIANCE_LAW)
+  assertEquals(complianceLaw(null), FALLBACK_COMPLIANCE_LAW)
 })
 
-Deno.test('fallbackJurisdictionLine: Kaspen campaigns get the Kaspen SOP line, anything else the base SOP line', () => {
-  const kaspen = 'Without a GM, the owner becomes the middle manager.'
-  assertEquals(fallbackJurisdictionLine('869d73b3-5bf3-4f1c-ba8c-43ac6d0f529d'), kaspen)
-  assertEquals(fallbackJurisdictionLine('04ca2257-5ea6-434e-bf62-f55add156914'), kaspen)
-  assertEquals(fallbackJurisdictionLine('bcf7a6d2-1302-47fc-ae77-9d2a760c91c1'), kaspen)
-  assertEquals(fallbackJurisdictionLine('some-other-campaign'), BASE_FALLBACK_JURISDICTION_LINE)
-  assertEquals(fallbackJurisdictionLine(null), BASE_FALLBACK_JURISDICTION_LINE)
-  assertEquals(BASE_FALLBACK_JURISDICTION_LINE, 'Most owners end up as the middle manager of their own portfolio.')
+Deno.test('FALLBACK_COMPLIANCE_LAW: one generic noun phrase for every client, reads after "the" and without it', () => {
+  assertEquals(FALLBACK_COMPLIANCE_LAW, 'local landlord-tenant law')
+})
+
+Deno.test('resolveJurisdiction: an active row with no compliance_name is no match (activation = active + a name)', () => {
+  const rows = [row({ country: 'CA', region: 'Ontario', compliance_name: null }), row({ country: 'CA', region: null, compliance_name: 'Canada-wide Act' })]
+  assertEquals(resolveJurisdiction('Canada', 'ON', rows)?.compliance_name, 'Canada-wide Act')
+  assertEquals(resolveJurisdiction('Canada', 'ON', [rows[0]]), null)
 })
 
 // The seeded UK row after lume_jurisdictions_seed_fixes: England only.
 const UK_ROWS: JurisdictionRow[] = [
-  row({ country: 'GB', region: 'England', jurisdiction: 'England', copy_hook: 'England hook.' }),
+  row({ country: 'GB', region: 'England', jurisdiction: 'England', compliance_name: "Renters' Rights Act 2025" }),
 ]
 
 Deno.test('normalizeRegion: English counties and cities are England; the other nations stay themselves', () => {

@@ -24,9 +24,9 @@
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 import { alert, type AlertInput, gateKey, lumeLink, titleFrom } from '../_shared/alert.ts'
 import {
-  fallbackJurisdictionLine,
+  complianceLaw,
+  FALLBACK_COMPLIANCE_LAW,
   type JurisdictionRow,
-  jurisdictionLine,
   normalizeCountry,
   normalizeRegion,
   resolveJurisdiction,
@@ -284,16 +284,15 @@ interface Lead {
   // the canonical name, set only when the country is certain; '' otherwise.
   country: string
   region: string
-  // {{jurisdiction_line}}: the active jurisdiction's copy_hook, else the
-  // campaign's SOP fallback sentence. Never blank (Instantly can't fall back).
-  jurisdictionLine: string
+  // {{compliance_law}}: the compliance_name of the matching active
+  // jurisdiction ("Residential Tenancies Act, 2006"), else the generic
+  // fallback "local landlord-tenant law". Never blank (Instantly can't fall back).
+  complianceLaw: string
 }
 
-// Active jurisdictions rows (loaded once per push) and the fallback sentence
-// for the job's campaign (_shared/research/jurisdiction.ts).
+// Active, named jurisdictions rows, loaded once per push (_shared/research/jurisdiction.ts).
 export interface JurisdictionContext {
   rows: JurisdictionRow[]
-  fallback: string
 }
 
 /** Country from Country, else Company Country; region from State, else Company State, within that country. */
@@ -313,7 +312,7 @@ export function decideRow(
   row: ValidationRow,
   cols: Columns,
   job: ValidationJob,
-  ctx: JurisdictionContext = { rows: [], fallback: fallbackJurisdictionLine(job.instantly_campaign_id) },
+  ctx: JurisdictionContext = { rows: [] },
 ): Decision {
   const data = row.row_data ?? {}
   const get = (col: string | null): string => (col ? String(data[col] ?? '').trim() : '')
@@ -350,7 +349,7 @@ export function decideRow(
   }
 
   const geo = leadGeo(data)
-  const line = jurisdictionLine(resolveJurisdiction(geo.country, geo.region, ctx.rows), ctx.fallback)
+  const law = complianceLaw(resolveJurisdiction(geo.country, geo.region, ctx.rows))
 
   return {
     keep: true,
@@ -365,34 +364,26 @@ export function decideRow(
       operatingCities,
       country: geo.country,
       region: geo.region,
-      jurisdictionLine: line,
+      complianceLaw: law,
     },
   }
 }
 
 /**
- * {{jurisdiction_line}} for the campaign the lead is actually pushed to: the
- * matching active hook, else THAT campaign's fallback (a no-location lead
- * routed to the separate campaign gets its fallback, not the main one's).
- */
-export function jurisdictionLineFor(lead: Lead, campaignId: string, rows: JurisdictionRow[]): string {
-  return jurisdictionLine(resolveJurisdiction(lead.country, lead.region, rows), fallbackJurisdictionLine(campaignId))
-}
-
-/**
- * The active jurisdictions, one REST select per push. A failed read is
- * logged and treated as no rows: every lead then gets the fallback sentence,
- * which is what an unreviewed table means anyway.
+ * The active jurisdictions that have a compliance_name (activation = active +
+ * a name; copy_hook is no longer read), one REST select per push. A failed
+ * read is logged and treated as no rows: every lead then gets the fallback
+ * law, which is what an unreviewed table means anyway.
  */
 export async function loadActiveJurisdictions(): Promise<JurisdictionRow[]> {
   try {
     const rows = (await supabaseRequest(
       'GET',
-      'jurisdictions?active=eq.true&select=country,region,city_match,jurisdiction,copy_hook,active',
+      'jurisdictions?active=eq.true&compliance_name=not.is.null&select=country,region,city_match,jurisdiction,compliance_name,active',
     )) as JurisdictionRow[] | null
     return Array.isArray(rows) ? rows : []
   } catch (err) {
-    console.error('[instantly-push] jurisdictions read failed, using the fallback line:', err instanceof Error ? err.message : err)
+    console.error('[instantly-push] jurisdictions read failed, using the fallback compliance_law:', err instanceof Error ? err.message : err)
     return []
   }
 }
@@ -504,9 +495,9 @@ export async function createLead(campaignId: string, lead: Lead): Promise<Record
   // better left absent than written as an empty string.
   if (lead.location) custom['location'] = lead.location
   if (lead.operatingCities) custom['Operating Cities Copied'] = lead.operatingCities
-  // Always set: a hook or the target campaign's fallback sentence, so a
-  // {{jurisdiction_line}} in the sequence never renders blank.
-  custom['jurisdiction_line'] = lead.jurisdictionLine.trim() || fallbackJurisdictionLine(campaignId)
+  // Always set: the compliance law's name or the generic fallback, so a
+  // {{compliance_law}} in the sequence never renders blank.
+  custom['compliance_law'] = lead.complianceLaw.trim() || FALLBACK_COMPLIANCE_LAW
 
   const body: Record<string, unknown> = {
     campaign: campaignId,
@@ -545,14 +536,14 @@ export async function createLead(campaignId: string, lead: Lead): Promise<Record
 // payload before committing the other few hundred.
 //
 // problem: location / Operating Cities Copied missing -> the push halts (as
-// before). warning: jurisdiction_line missing -> logged and recorded, never a
+// before). warning: compliance_law missing -> logged and recorded, never a
 // halt. An unreadable echo is unverifiable, not proven broken: neither.
 export interface FirstLeadCheck {
   problem: string | null
   warning: string | null
 }
 
-const JURISDICTION_ECHO_WARNING = 'jurisdiction_line missing on the first lead (Instantly did not echo it); push continued'
+const JURISDICTION_ECHO_WARNING = 'compliance_law missing on the first lead (Instantly did not echo it); push continued'
 
 export async function verifyFirstLead(campaignId: string, lead: Lead): Promise<FirstLeadCheck> {
   const ok: FirstLeadCheck = { problem: null, warning: null }
@@ -576,7 +567,7 @@ export async function verifyFirstLead(campaignId: string, lead: Lead): Promise<F
     if (!match || !match.payload) return ok
     const missing = expected.filter(k => !(k in match.payload!))
     if (missing.length > 0) return { problem: `custom variables missing on the first lead: ${missing.join(', ')}`, warning: null }
-    if (!('jurisdiction_line' in match.payload)) return { problem: null, warning: JURISDICTION_ECHO_WARNING }
+    if (!('compliance_law' in match.payload)) return { problem: null, warning: JURISDICTION_ECHO_WARNING }
     return ok
   } catch {
     return ok
@@ -597,10 +588,7 @@ export async function processJob(jobId: string): Promise<void> {
   await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { instantly_status: 'pushing' })
 
   const cols = await resolveColumns(job)
-  const jurisdictionCtx: JurisdictionContext = {
-    rows: await loadActiveJurisdictions(),
-    fallback: fallbackJurisdictionLine(campaignId),
-  }
+  const jurisdictionCtx: JurisdictionContext = { rows: await loadActiveJurisdictions() }
   // A lead with no resolved city must never land in a campaign whose subject
   // line interpolates {{location}}. Instantly rotates A/B variants by its own
   // algorithm, so there is no per-lead variant targeting — a separate campaign
@@ -638,10 +626,8 @@ export async function processJob(jobId: string): Promise<void> {
       const targetCampaign = (!decision.lead.location && noLocationCampaignId)
         ? noLocationCampaignId
         : campaignId
-      const lead: Lead = {
-        ...decision.lead,
-        jurisdictionLine: jurisdictionLineFor(decision.lead, targetCampaign, jurisdictionCtx.rows),
-      }
+      // compliance_law does not depend on the campaign (one generic fallback).
+      const lead: Lead = decision.lead
       let rowWarning: string | null = null
 
       try {

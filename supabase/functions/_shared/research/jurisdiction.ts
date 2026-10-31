@@ -1,17 +1,20 @@
-// Per-lead jurisdiction (research P4, minimal). Pure.
+// Per-lead compliance law (research P4, minimal). Pure.
 //
 // A lead's country / region (Apollo's Country / Company Country / State /
 // Company State) resolves to one `jurisdictions` row only when the country is
 // certain and the row is country-wide or names the same region exactly.
-// Anything else is no match, and the lead gets the SOP's fallback sentence.
+// Only ACTIVE rows WITH a compliance_name take part (that is what activating
+// a jurisdiction means; copy_hook is no longer read).
 //
 // Instantly cannot fall back on its own (a missing custom variable renders
-// blank), so the push sends a whole sentence as `jurisdiction_line`: the
-// row's copy_hook, or the fallback. Never blank.
+// blank), so the push always sends `compliance_law`: the matched row's
+// compliance_name ("Residential Tenancies Act, 2006"), else
+// FALLBACK_COMPLIANCE_LAW. A noun phrase used inline after "the":
+// "Keeping up with the {{compliance_law}} is ...". Never blank.
 //
 // Lume mirrors normalizeCountry / normalizeRegion in lume/lib/copy/jurisdiction.ts
 // (for lead_bank inserts); lume/tests/copy/jurisdiction.test.ts runs both on
-// the same inputs and checks the fallbacks below against the SOP files.
+// the same inputs and checks the fallback below against the SOP files.
 
 import { canonicalCountry } from './geo.ts'
 
@@ -102,12 +105,14 @@ export interface JurisdictionRow {
   region: string | null
   city_match: string | null
   jurisdiction: string
-  copy_hook: string | null
+  compliance_name: string | null
   active: boolean
 }
 
+const hasName = (x: JurisdictionRow) => !!(x.compliance_name ?? '').trim()
+
 /**
- * The matching active row, or null. Matches only when the country is certain
+ * The matching active row that has a compliance_name, or null. Matches only when the country is certain
  * AND the row has no region or the same region exactly; a region-specific row
  * beats a country-wide one. City-scoped rows never match (no city is passed).
  */
@@ -119,7 +124,7 @@ export function resolveJurisdiction<R extends JurisdictionRow>(
   const c = normalizeCountry(country)
   if (!c) return null
   const r = normalizeRegion(c, region)
-  const candidates = rows.filter((x) => x.active && x.country === c && !(x.city_match ?? '').trim())
+  const candidates = rows.filter((x) => x.active && hasName(x) && x.country === c && !(x.city_match ?? '').trim())
   if (r) {
     const exact = candidates.find((x) => x.region && (normalizeRegion(c, x.region) ?? x.region.trim()) === r)
     if (exact) return exact
@@ -127,30 +132,18 @@ export function resolveJurisdiction<R extends JurisdictionRow>(
   return candidates.find((x) => !(x.region ?? '').trim()) ?? null
 }
 
-/** The row's copy_hook when it exists, is active and has one; otherwise the fallback sentence. */
-export function jurisdictionLine(row: JurisdictionRow | null | undefined, fallback: string): string {
-  const hook = row?.active ? (row.copy_hook ?? '').trim() : ''
-  return hook || fallback
-}
+/**
+ * {{compliance_law}}'s value when nothing matches: the same for every client
+ * (lume/sops `fallbacks.compliance_law`, checked by
+ * lume/tests/copy/jurisdiction.test.ts). Reads right after "the" and without it.
+ */
+export const FALLBACK_COMPLIANCE_LAW = 'local landlord-tenant law'
 
-// ---- Fallback sentences ----
-// Edge functions cannot read Lume's SOP files, so the `fallbacks.jurisdiction_line`
-// sentences live here too, keyed by the Instantly campaign ids each client
-// overlay pins (`match.campaign_ids`). lume/tests/copy/jurisdiction.test.ts
-// fails if these drift from lume/sops/.
-
-/** lume/sops/cold-email-sop.md `fallbacks.jurisdiction_line`. */
-export const BASE_FALLBACK_JURISDICTION_LINE = 'Most owners end up as the middle manager of their own portfolio.'
-
-const KASPEN_FALLBACK = 'Without a GM, the owner becomes the middle manager.'
-
-/** lume/sops/clients/*.md `fallbacks.jurisdiction_line`, by pinned campaign id. */
-export const CAMPAIGN_FALLBACK_JURISDICTION_LINES: Readonly<Record<string, string>> = {
-  '04ca2257-5ea6-434e-bf62-f55add156914': KASPEN_FALLBACK,
-  '869d73b3-5bf3-4f1c-ba8c-43ac6d0f529d': KASPEN_FALLBACK,
-  'bcf7a6d2-1302-47fc-ae77-9d2a760c91c1': KASPEN_FALLBACK,
-}
-
-export function fallbackJurisdictionLine(campaignId: string | null | undefined): string {
-  return (campaignId && CAMPAIGN_FALLBACK_JURISDICTION_LINES[campaignId]) || BASE_FALLBACK_JURISDICTION_LINE
+/**
+ * The row's compliance_name when it is active and has one (trimmed, a leading
+ * "The " dropped: templates write "the {{compliance_law}}"), else the fallback.
+ */
+export function complianceLaw(row: JurisdictionRow | null | undefined): string {
+  const name = row?.active ? (row.compliance_name ?? '').trim().replace(/^the\s+/i, '') : ''
+  return name || FALLBACK_COMPLIANCE_LAW
 }

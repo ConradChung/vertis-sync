@@ -3,12 +3,12 @@ import { assertEquals } from 'jsr:@std/assert@1'
 import { json, prepareModule, stubFetch } from '../_shared/test_fetch.ts'
 
 prepareModule({ SUPABASE_URL: 'https://db.test', SUPABASE_SERVICE_ROLE_KEY: 'svc', INSTANTLY_API_KEY: 'ik' })
-const { createLead, decideRow, jurisdictionLineFor, loadActiveJurisdictions, processJob, verifyFirstLead } = await import('./index.ts')
+const { createLead, decideRow, loadActiveJurisdictions, processJob, verifyFirstLead } = await import('./index.ts')
 
 const KASPEN = '869d73b3-5bf3-4f1c-ba8c-43ac6d0f529d'
-const KASPEN_FALLBACK = 'Without a GM, the owner becomes the middle manager.'
-const BASE_FALLBACK = 'Most owners end up as the middle manager of their own portfolio.'
-const BC_HOOK = 'In BC, a landlord notice hook.'
+// One generic fallback for every client (no per-campaign sentences any more).
+const FALLBACK = 'local landlord-tenant law'
+const BC_LAW = 'Residential Tenancy Act'
 
 const job = {
   id: 'j1', filename: 'f.csv', icp_filter: false, column_order: null,
@@ -19,10 +19,10 @@ const job = {
 }
 const cols = { company: 'Company Name', website: 'Website', first: 'First Name', last: 'Last Name' }
 const rows = [
-  { country: 'CA', region: 'British Columbia', city_match: null, jurisdiction: 'British Columbia', copy_hook: BC_HOOK, active: true },
-  { country: 'US', region: 'Texas', city_match: null, jurisdiction: 'Texas', copy_hook: null, active: true },
+  { country: 'CA', region: 'British Columbia', city_match: null, jurisdiction: 'British Columbia', compliance_name: BC_LAW, active: true },
+  { country: 'US', region: 'Texas', city_match: null, jurisdiction: 'Texas', compliance_name: null, active: true },
 ]
-const ctx = { rows, fallback: KASPEN_FALLBACK }
+const ctx = { rows }
 const vrow = (extra: Record<string, unknown>) => ({
   id: 'r1', row_index: 0, email: 'a@acme.com',
   row_data: { 'First Name': 'Ann', 'Last Name': 'Lee', 'Company Name': 'Acme Properties LLC', operating_city: 'Vancouver', ...extra },
@@ -30,37 +30,37 @@ const vrow = (extra: Record<string, unknown>) => ({
 // deno-lint-ignore no-explicit-any
 const keep = (d: any) => { if (!d.keep) throw new Error(`dropped: ${d.reason}`); return d.lead }
 
-Deno.test('decideRow: certain country + region -> ISO2, canonical region and the hook line', () => {
+Deno.test('decideRow: certain country + region -> ISO2, canonical region and the compliance law', () => {
   const lead = keep(decideRow(vrow({ Country: 'Canada', State: 'BC' }), cols, job, ctx))
-  assertEquals([lead.country, lead.region, lead.jurisdictionLine], ['CA', 'British Columbia', BC_HOOK])
+  assertEquals([lead.country, lead.region, lead.complianceLaw], ['CA', 'British Columbia', BC_LAW])
 })
 
 Deno.test('decideRow: falls back to Company Country / Company State', () => {
   const lead = keep(decideRow(vrow({ Country: '', State: '', 'Company Country': 'Canada', 'Company State': 'British Columbia' }), cols, job, ctx))
-  assertEquals([lead.country, lead.region, lead.jurisdictionLine], ['CA', 'British Columbia', BC_HOOK])
+  assertEquals([lead.country, lead.region, lead.complianceLaw], ['CA', 'British Columbia', BC_LAW])
 })
 
-Deno.test('decideRow: a matching row with no hook -> the fallback sentence', () => {
+Deno.test('decideRow: an active row with no compliance_name is no match -> the fallback', () => {
   const lead = keep(decideRow(vrow({ Country: 'United States', State: 'Texas' }), cols, job, ctx))
-  assertEquals([lead.country, lead.region, lead.jurisdictionLine], ['US', 'Texas', KASPEN_FALLBACK])
+  assertEquals([lead.country, lead.region, lead.complianceLaw], ['US', 'Texas', FALLBACK])
 })
 
 Deno.test('decideRow: uncertain country -> no country/region, fallback sentence', () => {
   for (const extra of [{}, { Country: 'Narnia', State: 'BC' }, { State: 'BC' }]) {
     const lead = keep(decideRow(vrow(extra), cols, job, ctx))
-    assertEquals([lead.country, lead.region, lead.jurisdictionLine], ['', '', KASPEN_FALLBACK], JSON.stringify(extra))
+    assertEquals([lead.country, lead.region, lead.complianceLaw], ['', '', FALLBACK], JSON.stringify(extra))
   }
 })
 
 Deno.test('decideRow: region is dropped when it is not a region of that country', () => {
   const lead = keep(decideRow(vrow({ Country: 'Canada', State: 'Texas' }), cols, job, ctx))
-  assertEquals([lead.country, lead.region, lead.jurisdictionLine], ['CA', '', KASPEN_FALLBACK])
+  assertEquals([lead.country, lead.region, lead.complianceLaw], ['CA', '', FALLBACK])
 })
 
-Deno.test("decideRow: without a context (preview) the line is the job campaign's fallback", () => {
-  assertEquals(keep(decideRow(vrow({ Country: 'Canada', State: 'BC' }), cols, job)).jurisdictionLine, KASPEN_FALLBACK)
+Deno.test('decideRow: without a context (preview) the law is the generic fallback, whatever the campaign', () => {
+  assertEquals(keep(decideRow(vrow({ Country: 'Canada', State: 'BC' }), cols, job)).complianceLaw, FALLBACK)
   const other = { ...job, instantly_campaign_id: 'other' }
-  assertEquals(keep(decideRow(vrow({}), cols, other)).jurisdictionLine, BASE_FALLBACK)
+  assertEquals(keep(decideRow(vrow({}), cols, other)).complianceLaw, FALLBACK)
 })
 
 Deno.test('decideRow: location and operating cities unchanged', () => {
@@ -73,26 +73,26 @@ function instantlyStub() {
 }
 const baseLead = {
   email: 'a@acme.com', first_name: 'Ann', last_name: 'Lee', company_name: 'Acme', website: '',
-  location: 'Vancouver', operatingCities: 'Vancouver; Burnaby', country: 'CA', region: 'British Columbia', jurisdictionLine: BC_HOOK,
+  location: 'Vancouver', operatingCities: 'Vancouver; Burnaby', country: 'CA', region: 'British Columbia', complianceLaw: BC_LAW,
 }
 
-Deno.test('createLead: sends jurisdiction_line next to the unchanged location vars', async () => {
+Deno.test('createLead: sends compliance_law next to the unchanged location vars (no jurisdiction_line)', async () => {
   const f = instantlyStub()
   try {
     await createLead(KASPEN, baseLead)
     assertEquals(JSON.parse(f.calls[0].body!).custom_variables, {
-      'location': 'Vancouver', 'Operating Cities Copied': 'Vancouver; Burnaby', 'jurisdiction_line': BC_HOOK,
+      'location': 'Vancouver', 'Operating Cities Copied': 'Vancouver; Burnaby', 'compliance_law': BC_LAW,
     })
   } finally { f.restore() }
 })
 
-Deno.test('createLead: jurisdiction_line is never blank (fallback of the target campaign)', async () => {
+Deno.test('createLead: compliance_law is never blank (the generic fallback)', async () => {
   const f = instantlyStub()
   try {
-    await createLead(KASPEN, { ...baseLead, location: '', operatingCities: '', jurisdictionLine: '' })
-    await createLead('other', { ...baseLead, location: '', operatingCities: '', jurisdictionLine: '  ' })
-    assertEquals(JSON.parse(f.calls[0].body!).custom_variables, { jurisdiction_line: KASPEN_FALLBACK })
-    assertEquals(JSON.parse(f.calls[1].body!).custom_variables, { jurisdiction_line: BASE_FALLBACK })
+    await createLead(KASPEN, { ...baseLead, location: '', operatingCities: '', complianceLaw: '' })
+    await createLead('other', { ...baseLead, location: '', operatingCities: '', complianceLaw: '  ' })
+    assertEquals(JSON.parse(f.calls[0].body!).custom_variables, { compliance_law: FALLBACK })
+    assertEquals(JSON.parse(f.calls[1].body!).custom_variables, { compliance_law: FALLBACK })
   } finally { f.restore() }
 })
 
@@ -101,7 +101,8 @@ Deno.test('loadActiveJurisdictions: one REST select of the active rows; a failur
   try {
     assertEquals(await loadActiveJurisdictions(), rows)
     assertEquals(f.calls.length, 1)
-    assertEquals(f.calls[0].url, 'https://db.test/rest/v1/jurisdictions?active=eq.true&select=country,region,city_match,jurisdiction,copy_hook,active')
+    // Activation = active + a compliance_name; copy_hook is no longer read.
+    assertEquals(f.calls[0].url, 'https://db.test/rest/v1/jurisdictions?active=eq.true&compliance_name=not.is.null&select=country,region,city_match,jurisdiction,compliance_name,active')
   } finally { f.restore() }
   f = stubFetch([[(u) => u.startsWith('https://db.test/rest/v1/jurisdictions?'), () => json({ message: 'boom' }, 500)]])
   const err = console.error
@@ -111,14 +112,14 @@ Deno.test('loadActiveJurisdictions: one REST select of the active rows; a failur
   } finally { f.restore(); console.error = err }
 })
 
-// ---- verifyFirstLead: location vars halt, jurisdiction_line only warns ----
+// ---- verifyFirstLead: location vars halt, compliance_law only warns ----
 
 const listStub = (respond: () => Response) =>
   stubFetch([[(u, m) => u === 'https://api.instantly.ai/api/v2/leads/list' && m === 'POST', respond]])
 const echo = (payload: Record<string, unknown>) => () => json({ items: [{ email: 'a@acme.com', payload }] })
 
 Deno.test('verifyFirstLead: a missing location var halts, as before', async () => {
-  const f = listStub(echo({ 'Operating Cities Copied': 'x', jurisdiction_line: 'x' }))
+  const f = listStub(echo({ 'Operating Cities Copied': 'x', compliance_law: 'x' }))
   try {
     assertEquals(await verifyFirstLead(KASPEN, baseLead), {
       problem: 'custom variables missing on the first lead: location', warning: null,
@@ -126,17 +127,17 @@ Deno.test('verifyFirstLead: a missing location var halts, as before', async () =
   } finally { f.restore() }
 })
 
-Deno.test('verifyFirstLead: a missing jurisdiction_line only warns; the push continues', async () => {
+Deno.test('verifyFirstLead: a missing compliance_law only warns; the push continues', async () => {
   const f = listStub(echo({ location: 'x', 'Operating Cities Copied': 'x' }))
   try {
     const r = await verifyFirstLead(KASPEN, baseLead)
     assertEquals(r.problem, null)
-    assertEquals(r.warning, 'jurisdiction_line missing on the first lead (Instantly did not echo it); push continued')
+    assertEquals(r.warning, 'compliance_law missing on the first lead (Instantly did not echo it); push continued')
   } finally { f.restore() }
 })
 
 Deno.test('verifyFirstLead: all vars echoed -> no problem, no warning', async () => {
-  const f = listStub(echo({ location: 'x', 'Operating Cities Copied': 'x', jurisdiction_line: 'x' }))
+  const f = listStub(echo({ location: 'x', 'Operating Cities Copied': 'x', compliance_law: 'x' }))
   try {
     assertEquals(await verifyFirstLead(KASPEN, baseLead), { problem: null, warning: null })
   } finally { f.restore() }
@@ -153,18 +154,9 @@ Deno.test('verifyFirstLead: a failed list call never blocks, as before', async (
   } finally { f.restore() }
 })
 
-// ---- per-target-campaign fallback ----
-
-Deno.test("jurisdictionLineFor: a matching hook wins; otherwise the TARGET campaign's fallback", () => {
-  assertEquals(jurisdictionLineFor(baseLead, 'nolocation-campaign', rows), BC_HOOK)
-  const none = { ...baseLead, country: '', region: '' }
-  assertEquals(jurisdictionLineFor(none, KASPEN, rows), KASPEN_FALLBACK)
-  assertEquals(jurisdictionLineFor(none, 'nolocation-campaign', rows), BASE_FALLBACK)
-})
-
 // ---- processJob: routing, fallback per target, non-fatal warning recorded ----
 
-Deno.test('processJob: a no-location lead gets its own campaign fallback; a missing jurisdiction_line echo is recorded, not fatal', async () => {
+Deno.test('processJob: a no-location lead goes to its campaign with the generic fallback law; a missing compliance_law echo is recorded, not fatal', async () => {
   const NOLOC = 'noloc-campaign'
   const pushJob = { ...job, instantly_campaign_id: KASPEN, instantly_campaign_id_nolocation: NOLOC, instantly_campaign_name_nolocation: 'NoLoc' }
   const rowNoCity = { id: 'r1', row_index: 0, email: 'a@acme.com', row_data: { 'First Name': 'Ann', 'Company Name': 'Acme', operating_city: 'UNKNOWN' } }
@@ -188,17 +180,17 @@ Deno.test('processJob: a no-location lead gets its own campaign fallback; a miss
     const create = f.calls.find((c) => c.url === 'https://api.instantly.ai/api/v2/leads')!
     const body = JSON.parse(create.body!)
     assertEquals(body.campaign, NOLOC)
-    assertEquals(body.custom_variables, { jurisdiction_line: BASE_FALLBACK })
+    assertEquals(body.custom_variables, { compliance_law: FALLBACK })
     // Not halted: the row is pushed and the job finishes.
     const rowPatch = f.calls.find((c) => c.url.startsWith('https://db.test/rest/v1/validation_rows?id=eq.r1') && c.method === 'PATCH')!
     const patched = JSON.parse(rowPatch.body!)
     assertEquals(patched.instantly_status, 'pushed')
-    assertEquals(patched.instantly_result.warning, 'jurisdiction_line missing on the first lead (Instantly did not echo it); push continued')
+    assertEquals(patched.instantly_result.warning, 'compliance_law missing on the first lead (Instantly did not echo it); push continued')
     const jobPatches = f.calls.filter((c) => c.url.startsWith('https://db.test/rest/v1/validation_jobs?') && c.method === 'PATCH').map((c) => JSON.parse(c.body!))
     assertEquals(jobPatches.some((p) => p.instantly_status === 'done'), true)
     assertEquals(jobPatches.some((p) => p.instantly_status === 'error'), false)
     const alertBody = f.calls.filter((c) => c.url.startsWith('https://db.test/rest/v1/rpc/')).map((c) => c.body ?? '').join('\n')
-    assertEquals(alertBody.includes('jurisdiction_line missing on the first lead'), true)
+    assertEquals(alertBody.includes('compliance_law missing on the first lead'), true)
     assertEquals(warned.length > 0, true)
   } finally { f.restore(); console.warn = warn }
 })
