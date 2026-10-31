@@ -8,10 +8,11 @@
 //
 // Instantly cannot fall back on its own (a missing custom variable renders
 // blank), so the push always sends `compliance_law`: the matched row's
-// operator short_name ("RTA", "Chapter 83", "Ejari"), else its
-// compliance_name ("Residential Tenancies Act, 2006"), else
-// FALLBACK_COMPLIANCE_LAW. A short_name alone never activates a row. A noun phrase used inline after "the":
-// "Keeping up with the {{compliance_law}} is ...". Never blank.
+// operator short_name ("the RTA", "Chapter 83", "AB 1482"), else its
+// compliance_name ("the Residential Tenancies Act, 2006"), else
+// FALLBACK_COMPLIANCE_LAW. A short_name alone never activates a row. The
+// value carries its own article, so copy writes it bare: "Keeping up with
+// {{compliance_law}} is ...". Never blank.
 //
 // Lume mirrors normalizeCountry / normalizeRegion in lume/lib/copy/jurisdiction.ts
 // (for lead_bank inserts); lume/tests/copy/jurisdiction.test.ts runs both on
@@ -138,17 +139,16 @@ export function resolveJurisdiction<R extends JurisdictionRow>(
 /**
  * {{compliance_law}}'s value when nothing matches: the same for every client
  * (lume/sops `fallbacks.compliance_law`, checked by
- * lume/tests/copy/jurisdiction.test.ts). Reads right after "the" and without it.
+ * lume/tests/copy/jurisdiction.test.ts). No article: "Keeping up with local landlord-tenant law".
  */
 export const FALLBACK_COMPLIANCE_LAW = 'local landlord-tenant law'
 
 /**
- * For an active row: its short_name, else its compliance_name (trimmed, a
- * leading "The " dropped: templates write "the {{compliance_law}}"); else
- * the fallback.
+ * For an active row: its short_name, else its compliance_name, trimmed and
+ * otherwise as stored (the article is part of the value); else the fallback.
  */
 export function complianceLaw(row: JurisdictionRow | null | undefined): string {
   if (!row?.active) return FALLBACK_COMPLIANCE_LAW
-  const clean = (v: string | null | undefined) => (v ?? '').trim().replace(/^the\s+/i, '')
+  const clean = (v: string | null | undefined) => (v ?? '').trim()
   return clean(row.short_name) || clean(row.compliance_name) || FALLBACK_COMPLIANCE_LAW
 }

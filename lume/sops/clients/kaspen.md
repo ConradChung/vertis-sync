@@ -74,9 +74,9 @@ only_in_step:
   Vancouver: [1]
 
 # {{company}} and {{companyName}} are the same field; {{firstName}} is not personalization.
-# {{compliance_law}} is the name of the lead's compliance law (or the fallback
-# below), sent with every push and written inline after "the"; it counts as a
-# personalization field.
+# {{compliance_law}} is the name of the lead's compliance law with its own article
+# ("the RTA", "Chapter 83"), or the fallback below; sent with every push, written
+# bare mid-sentence, never "the {{compliance_law}}"; it counts as a personalization field.
 personalization_fields: [company, city, door_count, pms, open_role, after_hours, review_signal, jurisdiction, compliance_law]
 max_personalization_fields_per_email: 1
 
@@ -227,12 +227,13 @@ otherwise the generic fallback. Never guess.
 
 `{{compliance_law}}` is the name of the compliance law the lead's place
 follows, sent with every push: the reviewed jurisdiction's short name (e.g.
-"RTA") or full name (e.g. "Residential Tenancies Act, 2006") when its country
-and state/province match an active jurisdiction (e.g. BC, Ontario, England,
-Dubai), otherwise "local landlord-tenant law". It is never blank. Write it
-inline after "the", never at the start of a sentence: "Keeping up with the
-{{compliance_law}} is a job of its own." Never write `{{jurisdiction}}` bare in
-copy: Instantly renders a missing variable as nothing.
+"the RTA") or full name (e.g. "the Residential Tenancies Act, 2006") when its
+country and state/province match an active jurisdiction (e.g. BC, Ontario,
+England, Dubai), otherwise "local landlord-tenant law". It is never blank. The
+value carries its own article: write it bare, mid-sentence, never at the start
+of a sentence: "Keeping up with {{compliance_law}} is a job of its own." Never
+"the {{compliance_law}}" (blocked by the linter). Never write `{{jurisdiction}}`
+bare in copy: Instantly renders a missing variable as nothing.
 
 ## CTA rules
 
@@ -260,7 +261,7 @@ All steps in the same thread.
 - **Step 2 (+3 days):** price contrast ($1.45/door vs a hire who goes home at
   5) + demo offer.
 - **Step 3 (+4 days):** proactive/compliance angle. It may name the law
-  inline, "keeping up with the {{compliance_law}}" (the lead's law, or "local
+  inline, "keeping up with {{compliance_law}}" (the lead's law, or "local
   landlord-tenant law" when there is none); it is the email's one
   personalization field. Never `{{jurisdiction}}` bare. No door count, no
   Miami.

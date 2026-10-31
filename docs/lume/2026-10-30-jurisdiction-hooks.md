@@ -7,8 +7,9 @@ must follow:
 
 | Lead in | `{{compliance_law}}` |
 |---|---|
-| Ontario (row active, short name set) | RTA |
-| Ontario (row active, no short name) | Residential Tenancies Act, 2006 |
+| Ontario (row active, short name set) | the RTA |
+| Florida (row active, short name set) | Chapter 83 |
+| Ontario (row active, no short name) | the Residential Tenancies Act, 2006 |
 | no active row with a name, or uncertain country / region | local landlord-tenant law |
 
 It is never blank. The fallback is one generic noun phrase, the same for
@@ -16,19 +17,22 @@ every client. There are no per-campaign fallback sentences any more.
 
 ## Writing it in copy
 
-Use it inline, always after "the", never at the start of a sentence:
+The value carries its own article, so copy writes the variable bare,
+mid-sentence, never at the start of a sentence:
 
-> Keeping up with the {{compliance_law}} is a job of its own.
+> Keeping up with {{compliance_law}} is a job of its own.
 
-This reads correctly for every value: "the RTA", "the Residential Tenancies
-Act, 2006", "the Renters' Rights Act 2025", "the Ejari tenancy registration",
-and the fallback "the local landlord-tenant law". Law names need the article,
-so the template supplies it. If a name is stored with a leading "The", the
-resolver drops it, so the email never says "the The ...".
+This reads correctly for every value: "the RTA", "the Renters' Rights Act",
+"Chapter 83", "AB 1482", and the fallback "local landlord-tenant law". Some
+names take an article and some don't, and only the stored value knows which.
+So `short_name` and `compliance_name` are stored with their article
+("the RTA"), and the resolver sends them as stored (trimmed).
 
-`{{compliance_law}}` counts as that email's one personalization field. The SOP
-linter still blocks a bare `{{jurisdiction}}`, and its message now says "use
-the {{compliance_law}}".
+The SOP linter blocks "the {{compliance_law}}" (any case) in a subject or
+body. Its message says that the value already carries its article; the text
+would otherwise render "the the RTA". It still blocks a bare
+`{{jurisdiction}}`, now with "use {{compliance_law}}".
+`{{compliance_law}}` counts as that email's one personalization field.
 
 ## What decides the value
 
@@ -42,9 +46,9 @@ the {{compliance_law}}".
    `compliance_name` take part. A `short_name` alone activates nothing.
    `copy_hook` is no longer read; the column stays in place and is marked
    deprecated.
-3. **Value.** The matched row's `short_name` (operator shorthand: "RTA",
-   "Chapter 83", "Ejari") when set, else its `compliance_name`, else
-   "local landlord-tenant law".
+3. **Value.** The matched row's `short_name` (operator shorthand with its
+   article: "the RTA", "Chapter 83", "AB 1482") when set, else its
+   `compliance_name`, else "local landlord-tenant law" (no article).
 
 The fallback also lives in `lume/sops` as `fallbacks.compliance_law` (base and
 every client). Edge functions can't read the SOP files, so
@@ -54,7 +58,9 @@ every client). Edge functions can't read the SOP files, so
 
 74 rows: 51 US (50 states + DC), 13 Canada, 8 Australia, England, and Dubai.
 Singapore has no row, so it always gets the fallback. **Every row is
-`active = false`**, and 4 rows have a `compliance_name`:
+`active = false`**, and 4 rows have a `compliance_name` (seeded without an
+article; reload them with it, e.g. "the Residential Tenancy Act", before
+activating):
 
 | Row | compliance_name |
 |---|---|
@@ -80,8 +86,8 @@ Once a row's names are reviewed:
 update public.jurisdictions set active = true, updated_at = now()
  where compliance_name is not null
    and (country, region) in (('CA', 'British Columbia'), ('CA', 'Ontario'), ('GB', 'England'), ('AE', 'Dubai'));
--- optional shorthand, sent instead of the full name:
-update public.jurisdictions set short_name = 'RTA' where country = 'CA' and region = 'Ontario';
+-- optional shorthand, with its article, sent instead of the full name:
+update public.jurisdictions set short_name = 'the RTA' where country = 'CA' and region = 'Ontario';
 ```
 
 Activating a row with no `compliance_name` changes nothing: it is still no

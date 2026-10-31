@@ -96,10 +96,11 @@ Deno.test('resolveJurisdiction: never picks a city-scoped row (no city is passed
   assertEquals(resolveJurisdiction('UAE', 'Dubai', onlyCity), null)
 })
 
-Deno.test('complianceLaw: the active row\'s compliance_name, trimmed, without a leading "the"; else the generic fallback', () => {
-  assertEquals(complianceLaw(row({ compliance_name: '  Residential Tenancies Act, 2006  ' })), 'Residential Tenancies Act, 2006')
-  // Templates write "the {{compliance_law}}", so a stored "The ..." never renders "the The ...".
-  assertEquals(complianceLaw(row({ compliance_name: 'The Housing Act 1988' })), 'Housing Act 1988')
+Deno.test('complianceLaw: the active row\'s compliance_name, trimmed and sent as stored (its article included); else the generic fallback', () => {
+  assertEquals(complianceLaw(row({ compliance_name: '  the Residential Tenancies Act, 2006  ' })), 'the Residential Tenancies Act, 2006')
+  // The value carries its own article (copy never writes "the" before it): kept as is.
+  assertEquals(complianceLaw(row({ compliance_name: "the Renters' Rights Act" })), "the Renters' Rights Act")
+  assertEquals(complianceLaw(row({ compliance_name: 'Chapter 83' })), 'Chapter 83')
   assertEquals(complianceLaw(row({ compliance_name: null })), FALLBACK_COMPLIANCE_LAW)
   assertEquals(complianceLaw(row({ compliance_name: '   ' })), FALLBACK_COMPLIANCE_LAW)
   assertEquals(complianceLaw(row({ compliance_name: 'Act', active: false })), FALLBACK_COMPLIANCE_LAW)
@@ -107,7 +108,8 @@ Deno.test('complianceLaw: the active row\'s compliance_name, trimmed, without a 
 })
 
 Deno.test('complianceLaw: the operator short_name wins, then compliance_name, then the fallback', () => {
-  assertEquals(complianceLaw(row({ compliance_name: 'Residential Tenancies Act, 2006', short_name: ' RTA ' })), 'RTA')
+  assertEquals(complianceLaw(row({ compliance_name: 'the Residential Tenancies Act, 2006', short_name: ' the RTA ' })), 'the RTA')
+  assertEquals(complianceLaw(row({ compliance_name: 'California Tenant Protection Act', short_name: 'AB 1482' })), 'AB 1482')
   assertEquals(complianceLaw(row({ compliance_name: 'Florida Residential Landlord and Tenant Act', short_name: 'Chapter 83' })), 'Chapter 83')
   assertEquals(complianceLaw(row({ compliance_name: 'Ejari tenancy registration', short_name: '  ' })), 'Ejari tenancy registration')
   assertEquals(complianceLaw(row({ compliance_name: 'Residential Tenancies Act, 2006', short_name: 'RTA', active: false })), FALLBACK_COMPLIANCE_LAW)
@@ -117,7 +119,7 @@ Deno.test('resolveJurisdiction: a short_name alone does not activate a row (comp
   assertEquals(resolveJurisdiction('Canada', 'ON', [row({ country: 'CA', region: 'Ontario', short_name: 'RTA' })]), null)
 })
 
-Deno.test('FALLBACK_COMPLIANCE_LAW: one generic noun phrase for every client, reads after "the" and without it', () => {
+Deno.test('FALLBACK_COMPLIANCE_LAW: one generic noun phrase for every client, no article ("Keeping up with {{compliance_law}}")', () => {
   assertEquals(FALLBACK_COMPLIANCE_LAW, 'local landlord-tenant law')
 })
 

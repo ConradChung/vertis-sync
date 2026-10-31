@@ -255,6 +255,24 @@ describe('linear trims (no regex backtracking on hostile copy)', () => {
   })
 })
 
+describe('the {{compliance_law}}', () => {
+  it('blocks "the {{compliance_law}}" in a body or subject, any case: the value carries its own article', () => {
+    const s = clean()
+    s[1].variants[0].body = 'One more thought: keeping up with the {{compliance_law}} is a job.'
+    s[2].variants[0].subject = 'THE {{ compliance_law }} changed'
+    const out = lintSequence(s, RULES).filter((x) => x.rule === 'compliance_law_article')
+    expect(out.map((x) => [x.step, x.variant, x.message])).toEqual([
+      [2, 'A', 'body writes "the {{compliance_law}}"; the value already carries its article ("the RTA", "Chapter 83", "local landlord-tenant law"): write {{compliance_law}}'],
+      [3, 'A', 'subject writes "the {{compliance_law}}"; the value already carries its article ("the RTA", "Chapter 83", "local landlord-tenant law"): write {{compliance_law}}'],
+    ])
+  })
+  it('leaves {{compliance_law}} alone, and "the" elsewhere in the sentence', () => {
+    const s = clean()
+    s[1].variants[0].body = 'Keeping up with {{compliance_law}} is the hard part. Breathe {{compliance_law}}.'
+    expect(lintSequence(s, RULES).filter((x) => x.rule === 'compliance_law_article')).toEqual([])
+  })
+})
+
 describe('bare {{jurisdiction}}', () => {
   it('blocks a bare {{jurisdiction}} in a body or subject: use {{compliance_law}}', () => {
     const s = clean()
@@ -262,15 +280,15 @@ describe('bare {{jurisdiction}}', () => {
     s[2].variants[0].subject = 'rules in {{jurisdiction}}'
     const out = lintSequence(s, RULES).filter((x) => x.rule === 'bare_jurisdiction')
     expect(out.map((x) => [x.step, x.variant, x.message])).toEqual([
-      [2, 'A', 'body uses {{jurisdiction}}; use the {{compliance_law}}'],
-      [3, 'A', 'subject uses {{jurisdiction}}; use the {{compliance_law}}'],
+      [2, 'A', 'body uses {{jurisdiction}}; use {{compliance_law}}'],
+      [3, 'A', 'subject uses {{jurisdiction}}; use {{compliance_law}}'],
     ])
     expect(out.every(isBlocking)).toBe(true)
   })
 
   it('leaves {{compliance_law}} and the word "jurisdiction" alone', () => {
     const s = clean()
-    s[1].variants[0].body = 'One more thought: keeping up with the {{compliance_law}} is a job. Every jurisdiction differs.'
+    s[1].variants[0].body = 'One more thought: keeping up with {{compliance_law}} is a job. Every jurisdiction differs. The rules change.'
     expect(lintSequence(s, RULES).filter((x) => x.rule === 'bare_jurisdiction')).toEqual([])
   })
 })

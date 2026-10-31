@@ -221,9 +221,9 @@ describe('Kaspen SOP lint', () => {
     }
   })
 
-  it('step 3 may use the {{compliance_law}} inline, mid-sentence', () => {
+  it('step 3 may use {{compliance_law}} inline, mid-sentence (no article before it)', () => {
     const s = zenport()
-    s[2].variants[0].body = s[2].variants[0].body.replace('one more angle.', 'one more angle: keeping up with the {{compliance_law}} is a job of its own.')
+    s[2].variants[0].body = s[2].variants[0].body.replace('one more angle.', 'one more angle: keeping up with {{compliance_law}} is a job of its own.')
     expect(RULES.personalization_fields).toContain('compliance_law')
     expect(RULES.personalization_fields).not.toContain('jurisdiction_line')
     expect(lintSequence(s, RULES)).toEqual([])
@@ -233,17 +233,23 @@ describe('Kaspen SOP lint', () => {
     const s = zenport()
     s[2].variants[0].body = s[2].variants[0].body.replace(
       'one more angle.',
-      'one more angle: keeping up with the {{compliance_law}} is a job. On {{pms}} that date sits in a report nobody opens.'
+      'one more angle: keeping up with {{compliance_law}} is a job. On {{pms}} that date sits in a report nobody opens.'
     )
     expect(only(s)).toEqual([['personalization_fields', 3, 'A']])
   })
 
-  it('step 3 with a bare {{jurisdiction}} is refused: use the {{compliance_law}}', () => {
+  it('step 3 with a bare {{jurisdiction}} is refused: use {{compliance_law}}', () => {
     const s = zenport()
     s[2].variants[0].body = s[2].variants[0].body.replace('one more angle.', 'one more angle, in {{jurisdiction}}.')
     expect(lintSequence(s, RULES).map((x) => [x.rule, x.step, x.variant, x.message])).toEqual([
-      ['bare_jurisdiction', 3, 'A', 'body uses {{jurisdiction}}; use the {{compliance_law}}'],
+      ['bare_jurisdiction', 3, 'A', 'body uses {{jurisdiction}}; use {{compliance_law}}'],
     ])
+  })
+
+  it('step 3 writing "the {{compliance_law}}" is refused (the value has its article)', () => {
+    const s = zenport()
+    s[2].variants[0].body = s[2].variants[0].body.replace('one more angle.', 'one more angle: keeping up with the {{compliance_law}} is a job.')
+    expect(lintSequence(s, RULES).map((x) => x.rule)).toEqual(['compliance_law_article'])
   })
 
   it('the SOP falls back to the generic noun phrase for {{compliance_law}} (same for every client)', () => {

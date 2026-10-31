@@ -47,8 +47,11 @@ import type { SopRules } from '@/lib/copy/sop'
  *   (case-insensitive, trailing punctuation ignored).
  * - bare_jurisdiction: `{{jurisdiction}}` in a subject or body. Instantly
  *   renders a missing variable as nothing and the push never sends it; use
- *   "the {{compliance_law}}", the law's name (or "local landlord-tenant
- *   law"), which is never blank.
+ *   `{{compliance_law}}`, the law's name (or "local landlord-tenant law"),
+ *   which is never blank.
+ * - compliance_law_article: "the {{compliance_law}}" (any case) in a subject
+ *   or body. The value already carries its article ("the RTA", "Chapter 83",
+ *   "local landlord-tenant law"), so copy writes "{{compliance_law}}" alone.
  * - sequence_structure (warning): step count, delays (in days) or the number
  *   of step-1 variants differ from `sequence`.
  *
@@ -71,6 +74,7 @@ export type SopRule =
   | 'step_require'
   | 'signoff'
   | 'bare_jurisdiction'
+  | 'compliance_law_article'
   | 'sequence_structure'
 
 export interface SopViolation {
@@ -100,6 +104,7 @@ type Finding = Omit<SopViolation, 'step' | 'variant'>
 
 const VAR_RE = /\{\{\s*([A-Za-z_][\w.]*)\s*\}\}/g
 const BARE_JURISDICTION_RE = /\{\{\s*jurisdiction\s*\}\}/i
+const THE_COMPLIANCE_LAW_RE = /\bthe\s+\{\{\s*compliance_law\s*\}\}/i
 const BOUND_L = '(?<![\\p{L}\\p{N}_])'
 const BOUND_R = '(?![\\p{L}\\p{N}_])'
 const FIELD_ALIASES: Record<string, string> = { companyname: 'company', company_name: 'company' }
@@ -269,7 +274,15 @@ export function lintSequence(steps: LintStep[], rules: SopRules): SopViolation[]
 
       for (const [where, text] of parts) {
         const m = BARE_JURISDICTION_RE.exec(text)
-        if (m) add({ rule: 'bare_jurisdiction', message: `${where} uses {{jurisdiction}}; use the {{compliance_law}}`, excerpt: around(text, m.index, m.index + m[0].length) })
+        if (m) add({ rule: 'bare_jurisdiction', message: `${where} uses {{jurisdiction}}; use {{compliance_law}}`, excerpt: around(text, m.index, m.index + m[0].length) })
+        const a = THE_COMPLIANCE_LAW_RE.exec(text)
+        if (a) {
+          add({
+            rule: 'compliance_law_article',
+            message: `${where} writes "the {{compliance_law}}"; the value already carries its article ("the RTA", "Chapter 83", "local landlord-tenant law"): write {{compliance_law}}`,
+            excerpt: around(text, a.index, a.index + a[0].length),
+          })
+        }
       }
 
       if (rules.no_exclamation) {

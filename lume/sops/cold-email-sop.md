@@ -54,9 +54,10 @@ max_proof_points_per_email: 1
 
 # {{variables}} that count as personalization. {{company}} and {{companyName}}
 # are the same field; {{firstName}} is not personalization.
-# {{compliance_law}} is the NAME of the compliance law the lead's place follows
-# ("Residential Tenancies Act, 2006"), or fallbacks.compliance_law. Always sent,
-# never blank. Write it inline after "the": "keeping up with the {{compliance_law}}".
+# {{compliance_law}} is the NAME of the compliance law the lead's place follows,
+# with its own article ("the RTA", "Chapter 83"), or fallbacks.compliance_law.
+# Always sent, never blank. Write it bare, mid-sentence: "keeping up with
+# {{compliance_law}}"; never "the {{compliance_law}}" (the linter blocks it).
 personalization_fields: [company, city, door_count, pms, open_role, after_hours, review_signal, jurisdiction, compliance_law, hook]
 max_personalization_fields_per_email: 1
 
@@ -95,8 +96,7 @@ fallbacks:
   door_count: Most owners end up as the middle manager of their own portfolio.
   pms: Most owners end up as the middle manager of their own portfolio.
   jurisdiction: Most owners end up as the middle manager of their own portfolio.
-  # A noun phrase, not a sentence: it reads after "the" and without it. The same
-  # for every client. Also in supabase/functions/_shared/research/jurisdiction.ts
+  # A noun phrase with no article, not a sentence. The same for every client. Also in supabase/functions/_shared/research/jurisdiction.ts
   # (edge functions can't read this file); lume/tests/copy/jurisdiction.test.ts
   # keeps them equal.
   compliance_law: local landlord-tenant law
@@ -170,9 +170,11 @@ value and never invent a fact to fill the gap.
 
 `{{compliance_law}}` needs no fallback sentence: it is the name of the
 compliance law the lead's place follows (the reviewed jurisdiction's short
-name, e.g. "RTA", else its full name, e.g. "Residential Tenancies Act, 2006"),
-or `fallbacks.compliance_law` ("local landlord-tenant law"), so it is never
-blank. Use it inline, always after "the" and never at the start of a sentence:
-"Keeping up with the {{compliance_law}} is a job of its own." Never write
+name, e.g. "the RTA" or "Chapter 83", else its full name, e.g. "the Residential
+Tenancies Act, 2006"), or `fallbacks.compliance_law` ("local landlord-tenant
+law"), so it is never blank. The value carries its own article, so write it
+bare, mid-sentence, never at the start of a sentence: "Keeping up with
+{{compliance_law}} is a job of its own." Never write "the {{compliance_law}}"
+(the linter blocks it; it would read "the the RTA"). Never write
 `{{jurisdiction}}` bare in copy: Instantly renders a missing variable as
 nothing.
