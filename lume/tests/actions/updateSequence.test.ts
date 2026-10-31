@@ -219,6 +219,30 @@ describe('update_sequence: SOP gate', () => {
     expect(seq.patchSequence).not.toHaveBeenCalled()
   })
 
+  it('the executor refuses a stale approved edit that still writes the retired {{jurisdiction_line}}, nothing written', async () => {
+    const p = await built()
+    // As filed before {{jurisdiction_line}} was retired (e.g. a live awaiting action): only the stored snapshot has it.
+    const steps = JSON.parse(JSON.stringify(p.steps))
+    steps[1].variants[0].body = '<div>Bump, any thoughts?</div><div>{{jurisdiction_line}}</div>'
+    store.claimExecution.mockResolvedValueOnce(row({ ...p, steps }))
+    const out = await executeAction(ID)
+    expect(out).toMatchObject({ ran: true, status: 'failed' })
+    expect(out.ran && out.error).toMatch(/retired_variable: body uses \{\{jurisdiction_line\}\}: retired, use \{\{compliance_law\}\}/)
+    expect(seq.patchSequence).not.toHaveBeenCalled()
+  })
+
+  it('a retired variable blocks even under a placeholder base SOP with no client (it would render blank)', async () => {
+    const p = await built()
+    useSop(undefined, true)
+    const steps = JSON.parse(JSON.stringify(p.steps))
+    steps[1].variants[0].body = '<div>Bump {{jurisdiction_line}}</div>'
+    store.claimExecution.mockResolvedValueOnce(row({ ...p, steps, campaign_id: 'no-client-campaign' }))
+    seq.getSequenceFresh.mockResolvedValueOnce({ ...fresh(LIVE), name: 'Roofers Austin' })
+    const out = await executeAction(ID)
+    expect(out).toMatchObject({ ran: true, status: 'failed' })
+    expect(seq.patchSequence).not.toHaveBeenCalled()
+  })
+
   it('the executor refuses when the SOP cannot be loaded', async () => {
     const p = await built()
     sopLib.error = new SopError('boom')

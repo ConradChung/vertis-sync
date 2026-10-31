@@ -50,8 +50,14 @@ import type { SopRules } from '@/lib/copy/sop'
  *   `{{compliance_law}}`, the law's name (or "local landlord-tenant law"),
  *   which is never blank.
  * - compliance_law_article: "the {{compliance_law}}" (any case) in a subject
- *   or body. The value already carries its article ("the RTA", "Chapter 83",
- *   "local landlord-tenant law"), so copy writes "{{compliance_law}}" alone.
+ *   or body, also when HTML sits between them (`&nbsp;`, `&#160;`, tags, a
+ *   paragraph break). The value already carries its article ("the RTA",
+ *   "Chapter 83", "local landlord-tenant law"), so copy writes
+ *   "{{compliance_law}}" alone.
+ * - retired_variable: `{{jurisdiction_line}}` (any spacing / case). The pushes
+ *   no longer send it, so it would render blank: use `{{compliance_law}}`.
+ *   sopGate blocks these three rules even where a placeholder base SOP only
+ *   warns: they are about what renders, not style.
  * - sequence_structure (warning): step count, delays (in days) or the number
  *   of step-1 variants differ from `sequence`.
  *
@@ -75,6 +81,7 @@ export type SopRule =
   | 'signoff'
   | 'bare_jurisdiction'
   | 'compliance_law_article'
+  | 'retired_variable'
   | 'sequence_structure'
 
 export interface SopViolation {
@@ -104,7 +111,14 @@ type Finding = Omit<SopViolation, 'step' | 'variant'>
 
 const VAR_RE = /\{\{\s*([A-Za-z_][\w.]*)\s*\}\}/g
 const BARE_JURISDICTION_RE = /\{\{\s*jurisdiction\s*\}\}/i
-const THE_COMPLIANCE_LAW_RE = /\bthe\s+\{\{\s*compliance_law\s*\}\}/i
+/** "the" then {{compliance_law}}, with whitespace, non-breaking spaces or tags between them. */
+const THE_COMPLIANCE_LAW_RE = /\bthe(?:\s|&nbsp;|&#160;|&#x0*a0;|<[^>]*>)+\{\{\s*compliance_law\s*\}\}/i
+/** Variables the pushes no longer send (they render blank) → what replaces them. */
+const RETIRED_VARIABLES: readonly { re: RegExp; name: string; use: string }[] = [
+  { re: /\{\{\s*jurisdiction_line\s*\}\}/i, name: 'jurisdiction_line', use: 'compliance_law' },
+]
+/** Rules about what renders (blank variables, "the the RTA"), not style: sopGate always blocks them. */
+export const RENDER_RULES: ReadonlySet<SopViolation['rule']> = new Set(['retired_variable', 'bare_jurisdiction', 'compliance_law_article'])
 const BOUND_L = '(?<![\\p{L}\\p{N}_])'
 const BOUND_R = '(?![\\p{L}\\p{N}_])'
 const FIELD_ALIASES: Record<string, string> = { companyname: 'company', company_name: 'company' }
@@ -275,6 +289,10 @@ export function lintSequence(steps: LintStep[], rules: SopRules): SopViolation[]
       for (const [where, text] of parts) {
         const m = BARE_JURISDICTION_RE.exec(text)
         if (m) add({ rule: 'bare_jurisdiction', message: `${where} uses {{jurisdiction}}; use {{compliance_law}}`, excerpt: around(text, m.index, m.index + m[0].length) })
+        for (const r of RETIRED_VARIABLES) {
+          const hit = r.re.exec(text)
+          if (hit) add({ rule: 'retired_variable', message: `${where} uses {{${r.name}}}: retired, use {{${r.use}}}`, excerpt: around(text, hit.index, hit.index + hit[0].length) })
+        }
         const a = THE_COMPLIANCE_LAW_RE.exec(text)
         if (a) {
           add({

@@ -1,6 +1,6 @@
 import 'server-only'
 import { loadSopLibrary, SopError, sopForCampaign } from '@/lib/copy/sop'
-import { formatViolation, isBlocking, lintSequence, type LintStep, type SopViolation } from '@/lib/copy/sopLint'
+import { formatViolation, isBlocking, lintSequence, RENDER_RULES, type LintStep, type SopViolation } from '@/lib/copy/sopLint'
 
 /**
  * The SOP gate on `update_sequence`: lint a whole sequence against the base
@@ -29,7 +29,9 @@ const key = (v: SopViolation) => JSON.stringify([v.rule, v.step, v.variant, v.me
  * `blockingRules`: a violation blocks only when the blocking rules flag it
  * too. While the base SOP is a placeholder its rules are warnings: a campaign
  * no client SOP covers is never refused, and a client campaign is refused
- * only by the client's own rules.
+ * only by the client's own rules. The render rules (a retired variable that
+ * would send blank, a bare {{jurisdiction}}, "the {{compliance_law}}") block
+ * whatever the SOP says.
  */
 export function sopGate(campaign: { id?: string | null; name?: string | null }, steps: LintStep[]): SopGate {
   const { rules, client, blocking: strict } = sopForCampaign(campaign, loadSopLibrary())
@@ -42,6 +44,8 @@ export function sopGate(campaign: { id?: string | null; name?: string | null }, 
     const n = strictKeys.get(key(v)) ?? 0
     if (isBlocking(v) && n > 0) {
       strictKeys.set(key(v), n - 1)
+      blocking.push(v)
+    } else if (isBlocking(v) && RENDER_RULES.has(v.rule)) {
       blocking.push(v)
     } else warnings.push({ ...v, severity: 'warning' })
   }

@@ -255,6 +255,40 @@ describe('linear trims (no regex backtracking on hostile copy)', () => {
   })
 })
 
+describe('retired {{jurisdiction_line}}', () => {
+  it('blocks {{jurisdiction_line}} in a body or subject (any spacing / case): retired, use {{compliance_law}}', () => {
+    const s = clean()
+    s[1].variants[0].body = '<p>One more thought.</p><p>{{ jurisdiction_line }}</p>'
+    s[2].variants[0].subject = 'rules: {{JURISDICTION_LINE}}'
+    const out = lintSequence(s, RULES).filter((x) => x.rule === 'retired_variable')
+    expect(out.map((x) => [x.step, x.variant, x.message])).toEqual([
+      [2, 'A', 'body uses {{jurisdiction_line}}: retired, use {{compliance_law}}'],
+      [3, 'A', 'subject uses {{jurisdiction_line}}: retired, use {{compliance_law}}'],
+    ])
+  })
+})
+
+describe('the {{compliance_law}} in HTML', () => {
+  const hits = (body: string) => {
+    const s = clean()
+    s[1].variants[0].body = body
+    return lintSequence(s, RULES).filter((x) => x.rule === 'compliance_law_article').length
+  }
+  it('catches "the" separated by &nbsp;, &#160;, tags or paragraph breaks', () => {
+    for (const b of [
+      'keeping up with the&nbsp;{{compliance_law}} is a job',
+      'keeping up with the&#160;{{compliance_law}} is a job',
+      'keeping up with the <b>{{compliance_law}}</b> is a job',
+      'keeping up with the <span>{{ compliance_law }}</span> is a job',
+      '<p>keeping up with the</p><p>{{compliance_law}} is a job</p>',
+      'keeping up with The&NBSP;<i>{{compliance_law}}</i>',
+    ]) expect(hits(b), b).toBe(1)
+  })
+  it('no false positive on a word ending in "the" or a "the" elsewhere', () => {
+    for (const b of ['breathe {{compliance_law}}', 'breathe&nbsp;<b>{{compliance_law}}</b>', 'Keeping up with {{compliance_law}} is the job', 'other{{compliance_law}}']) expect(hits(b), b).toBe(0)
+  })
+})
+
 describe('the {{compliance_law}}', () => {
   it('blocks "the {{compliance_law}}" in a body or subject, any case: the value carries its own article', () => {
     const s = clean()

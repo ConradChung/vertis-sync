@@ -33,4 +33,10 @@ describe('sopGate with the committed SOPs', () => {
       'body uses the banned phrase "touching base"',
     ])
   })
+
+  it('the Kaspen campaign of the live pending edit (bcf7a6d2…): {{jurisdiction_line}} blocks', () => {
+    const g = sopGate({ id: 'bcf7a6d2-1302-47fc-ae77-9d2a760c91c1' }, [{ variants: [{ subject: 'no general manager', body: body1('{{jurisdiction_line}}') }] }])
+    expect(g.client).toBe('kaspen')
+    expect(g.blocking.map((v) => v.message)).toContain('body uses {{jurisdiction_line}}: retired, use {{compliance_law}}')
+  })
 })
