@@ -6,8 +6,9 @@ const KASPEN = '869d73b3-5bf3-4f1c-ba8c-43ac6d0f529d'
 const FALLBACK = 'local landlord-tenant law'
 const ON_LAW = 'Residential Tenancies Act, 2006'
 const rows = [
-  { country: 'CA', region: 'Ontario', city_match: null, jurisdiction: 'Ontario', compliance_name: ON_LAW, active: true },
-  { country: 'US', region: 'Texas', city_match: null, jurisdiction: 'Texas', compliance_name: null, active: true },
+  { country: 'CA', region: 'Ontario', city_match: null, jurisdiction: 'Ontario', compliance_name: ON_LAW, short_name: null, active: true },
+  { country: 'US', region: 'Texas', city_match: null, jurisdiction: 'Texas', compliance_name: null, short_name: null, active: true },
+  { country: 'US', region: 'Florida', city_match: null, jurisdiction: 'Florida', compliance_name: 'Florida Residential Landlord and Tenant Act', short_name: 'Chapter 83', active: true },
 ]
 const q = {
   email: 'a@acme.com', first_name: 'Ann', last_name: 'Lee', company_name: 'Acme', website: 'acme.com',
@@ -26,6 +27,10 @@ Deno.test('rotateLeadBody: the pre-jurisdiction body is unchanged, plus complian
 
 Deno.test('rotateLeadBody: country/region resolve to the active compliance_name at push time', () => {
   assertEquals(rotateLeadBody({ ...q, country: 'CA', region: 'Ontario' }, KASPEN, rows).custom_variables.compliance_law, ON_LAW)
+})
+
+Deno.test('rotateLeadBody: the operator short_name is sent when the row has one', () => {
+  assertEquals(rotateLeadBody({ ...q, country: 'US', region: 'FL' }, KASPEN, rows).custom_variables.compliance_law, 'Chapter 83')
 })
 
 Deno.test('rotateLeadBody: no name on the row, no rows, or uncertain geo -> the same generic fallback for every campaign', () => {

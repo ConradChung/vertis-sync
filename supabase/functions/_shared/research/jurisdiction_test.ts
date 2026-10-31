@@ -55,7 +55,7 @@ Deno.test('normalizeRegion: a region of another country, unknown, or no country 
 })
 
 const row = (o: Partial<JurisdictionRow>): JurisdictionRow => ({
-  country: 'US', region: null, city_match: null, jurisdiction: 'x', compliance_name: null, active: true, ...o,
+  country: 'US', region: null, city_match: null, jurisdiction: 'x', compliance_name: null, short_name: null, active: true, ...o,
 })
 const ROWS: JurisdictionRow[] = [
   row({ country: 'CA', region: 'British Columbia', jurisdiction: 'British Columbia', compliance_name: 'Residential Tenancy Act' }),
@@ -104,6 +104,17 @@ Deno.test('complianceLaw: the active row\'s compliance_name, trimmed, without a 
   assertEquals(complianceLaw(row({ compliance_name: '   ' })), FALLBACK_COMPLIANCE_LAW)
   assertEquals(complianceLaw(row({ compliance_name: 'Act', active: false })), FALLBACK_COMPLIANCE_LAW)
   assertEquals(complianceLaw(null), FALLBACK_COMPLIANCE_LAW)
+})
+
+Deno.test('complianceLaw: the operator short_name wins, then compliance_name, then the fallback', () => {
+  assertEquals(complianceLaw(row({ compliance_name: 'Residential Tenancies Act, 2006', short_name: ' RTA ' })), 'RTA')
+  assertEquals(complianceLaw(row({ compliance_name: 'Florida Residential Landlord and Tenant Act', short_name: 'Chapter 83' })), 'Chapter 83')
+  assertEquals(complianceLaw(row({ compliance_name: 'Ejari tenancy registration', short_name: '  ' })), 'Ejari tenancy registration')
+  assertEquals(complianceLaw(row({ compliance_name: 'Residential Tenancies Act, 2006', short_name: 'RTA', active: false })), FALLBACK_COMPLIANCE_LAW)
+})
+
+Deno.test('resolveJurisdiction: a short_name alone does not activate a row (compliance_name is required)', () => {
+  assertEquals(resolveJurisdiction('Canada', 'ON', [row({ country: 'CA', region: 'Ontario', short_name: 'RTA' })]), null)
 })
 
 Deno.test('FALLBACK_COMPLIANCE_LAW: one generic noun phrase for every client, reads after "the" and without it', () => {

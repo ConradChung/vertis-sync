@@ -119,7 +119,7 @@ Deno.serve(async (req) => {
         if (free > 0) {
           const { data: queue } = await sb.from("lead_bank").select("*").eq("campaign_id", CAMPAIGN).eq("state", "queued").order("id").limit(free);
           // Active jurisdictions, read once per run. A failed read means none: every lead gets the fallback law.
-          const jur = await sb.from("jurisdictions").select("country,region,city_match,jurisdiction,compliance_name,active").eq("active", true);
+          const jur = await sb.from("jurisdictions").select("country,region,city_match,jurisdiction,compliance_name,short_name,active").eq("active", true);
           if (jur.error) errors.push(`jurisdictions: ${String(jur.error.message).slice(0, 150)}; fallback compliance_law used`);
           const jurisdictions = (jur.error ? [] : jur.data ?? []) as JurisdictionRow[];
           let consecutiveFailures = 0, tripped = false;

@@ -19,8 +19,8 @@ const job = {
 }
 const cols = { company: 'Company Name', website: 'Website', first: 'First Name', last: 'Last Name' }
 const rows = [
-  { country: 'CA', region: 'British Columbia', city_match: null, jurisdiction: 'British Columbia', compliance_name: BC_LAW, active: true },
-  { country: 'US', region: 'Texas', city_match: null, jurisdiction: 'Texas', compliance_name: null, active: true },
+  { country: 'CA', region: 'British Columbia', city_match: null, jurisdiction: 'British Columbia', compliance_name: BC_LAW, short_name: null, active: true },
+  { country: 'US', region: 'Texas', city_match: null, jurisdiction: 'Texas', compliance_name: null, short_name: null, active: true },
 ]
 const ctx = { rows }
 const vrow = (extra: Record<string, unknown>) => ({
@@ -102,7 +102,7 @@ Deno.test('loadActiveJurisdictions: one REST select of the active rows; a failur
     assertEquals(await loadActiveJurisdictions(), rows)
     assertEquals(f.calls.length, 1)
     // Activation = active + a compliance_name; copy_hook is no longer read.
-    assertEquals(f.calls[0].url, 'https://db.test/rest/v1/jurisdictions?active=eq.true&compliance_name=not.is.null&select=country,region,city_match,jurisdiction,compliance_name,active')
+    assertEquals(f.calls[0].url, 'https://db.test/rest/v1/jurisdictions?active=eq.true&compliance_name=not.is.null&select=country,region,city_match,jurisdiction,compliance_name,short_name,active')
   } finally { f.restore() }
   f = stubFetch([[(u) => u.startsWith('https://db.test/rest/v1/jurisdictions?'), () => json({ message: 'boom' }, 500)]])
   const err = console.error

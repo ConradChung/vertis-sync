@@ -284,8 +284,8 @@ interface Lead {
   // the canonical name, set only when the country is certain; '' otherwise.
   country: string
   region: string
-  // {{compliance_law}}: the compliance_name of the matching active
-  // jurisdiction ("Residential Tenancies Act, 2006"), else the generic
+  // {{compliance_law}}: the short_name ("RTA") or compliance_name ("Residential
+  // Tenancies Act, 2006") of the matching active jurisdiction, else the generic
   // fallback "local landlord-tenant law". Never blank (Instantly can't fall back).
   complianceLaw: string
 }
@@ -379,7 +379,7 @@ export async function loadActiveJurisdictions(): Promise<JurisdictionRow[]> {
   try {
     const rows = (await supabaseRequest(
       'GET',
-      'jurisdictions?active=eq.true&compliance_name=not.is.null&select=country,region,city_match,jurisdiction,compliance_name,active',
+      'jurisdictions?active=eq.true&compliance_name=not.is.null&select=country,region,city_match,jurisdiction,compliance_name,short_name,active',
     )) as JurisdictionRow[] | null
     return Array.isArray(rows) ? rows : []
   } catch (err) {

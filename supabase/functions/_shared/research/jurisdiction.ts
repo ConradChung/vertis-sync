@@ -8,8 +8,9 @@
 //
 // Instantly cannot fall back on its own (a missing custom variable renders
 // blank), so the push always sends `compliance_law`: the matched row's
+// operator short_name ("RTA", "Chapter 83", "Ejari"), else its
 // compliance_name ("Residential Tenancies Act, 2006"), else
-// FALLBACK_COMPLIANCE_LAW. A noun phrase used inline after "the":
+// FALLBACK_COMPLIANCE_LAW. A short_name alone never activates a row. A noun phrase used inline after "the":
 // "Keeping up with the {{compliance_law}} is ...". Never blank.
 //
 // Lume mirrors normalizeCountry / normalizeRegion in lume/lib/copy/jurisdiction.ts
@@ -106,6 +107,8 @@ export interface JurisdictionRow {
   city_match: string | null
   jurisdiction: string
   compliance_name: string | null
+  /** Operator shorthand ("RTA", "Chapter 83"), sent instead of compliance_name when set. */
+  short_name?: string | null
   active: boolean
 }
 
@@ -140,10 +143,12 @@ export function resolveJurisdiction<R extends JurisdictionRow>(
 export const FALLBACK_COMPLIANCE_LAW = 'local landlord-tenant law'
 
 /**
- * The row's compliance_name when it is active and has one (trimmed, a leading
- * "The " dropped: templates write "the {{compliance_law}}"), else the fallback.
+ * For an active row: its short_name, else its compliance_name (trimmed, a
+ * leading "The " dropped: templates write "the {{compliance_law}}"); else
+ * the fallback.
  */
 export function complianceLaw(row: JurisdictionRow | null | undefined): string {
-  const name = row?.active ? (row.compliance_name ?? '').trim().replace(/^the\s+/i, '') : ''
-  return name || FALLBACK_COMPLIANCE_LAW
+  if (!row?.active) return FALLBACK_COMPLIANCE_LAW
+  const clean = (v: string | null | undefined) => (v ?? '').trim().replace(/^the\s+/i, '')
+  return clean(row.short_name) || clean(row.compliance_name) || FALLBACK_COMPLIANCE_LAW
 }
