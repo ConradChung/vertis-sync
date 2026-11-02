@@ -103,6 +103,31 @@ export function parseCsv(text: string): { headers: string[]; rows: string[][] } 
   return { headers: records[0], rows: records.slice(1) }
 }
 
+// Headers and data-row count of a CSV without materialising its rows: a
+// 12 MB Apollo export parsed with parseCsv exceeds the edge memory limit.
+// Same record rules as parseCsv (quoted newlines, CRLF, blank lines skipped);
+// works on the raw UTF-8 bytes because ", \r and \n are single bytes there.
+export function csvShape(bytes: Uint8Array): { headers: string[]; rowCount: number } {
+  let records = 0
+  let headerEnd = -1
+  let inQuotes = false
+  let blank = true
+  for (let i = 0; i < bytes.length; i++) {
+    const c = bytes[i]
+    if (c === 34 /* " */) { inQuotes = !inQuotes; blank = false; continue }
+    if (inQuotes) continue
+    if (c === 10 /* \n */) {
+      if (!blank) { records++; if (headerEnd < 0) headerEnd = i }
+      blank = true; continue
+    }
+    if (c !== 13 /* \r */) blank = false
+  }
+  if (!blank) { records++; if (headerEnd < 0) headerEnd = bytes.length }
+  if (records === 0) return { headers: [], rowCount: 0 }
+  const headers = parseCsv(new TextDecoder().decode(bytes.subarray(0, headerEnd))).headers
+  return { headers, rowCount: records - 1 }
+}
+
 export function parseCsvRow(row: string): string[] {
   return parseCsv(row + '\n').headers
 }

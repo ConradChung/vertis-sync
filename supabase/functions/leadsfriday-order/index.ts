@@ -11,7 +11,7 @@
 //
 // Helpers copied from telegram-inbox; polling pattern from jobsearch-puller.
 
-import { parseCsv } from '../_shared/jobsearch/pure.ts'
+import { csvShape } from '../_shared/jobsearch/pure.ts'
 import { alert, type AlertInput, gateKey, lumeLink, titleFrom } from '../_shared/alert.ts'
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
@@ -307,7 +307,7 @@ export async function ingest(order: ApolloOrder, st: LeadsfridayStatus): Promise
   })
   if (!up.ok) throw new Error(`Storage upload failed (${up.status}): ${await up.text()}`)
 
-  const { headers, rows } = parseCsv(new TextDecoder().decode(bytes))
+  const { headers, rowCount } = csvShape(bytes)
   const detected = detectEmailColumn(headers)
   const filename = `leadsfriday-${order.leadsfriday_order_id}.csv`
 
@@ -325,7 +325,7 @@ export async function ingest(order: ApolloOrder, st: LeadsfridayStatus): Promise
     sender_platform: 'telegram',
     filename,
     storage_path: storagePath,
-    row_count: rows.length,
+    row_count: rowCount,
     detected_email_column: detected,
     status: 'awaiting_approval',
   }, { returning: true })) as { id: string }[]
@@ -337,7 +337,7 @@ export async function ingest(order: ApolloOrder, st: LeadsfridayStatus): Promise
   const ownerText = [
     `📥 Leadsfriday delivered order #${order.leadsfriday_order_id}`,
     `File: ${filename}`,
-    `Rows: ${rows.length}${st.delivered_count !== undefined && st.delivered_count !== rows.length ? ` (Leadsfriday reports ${st.delivered_count})` : ''}`,
+    `Rows: ${rowCount}${st.delivered_count !== undefined && st.delivered_count !== rowCount ? ` (Leadsfriday reports ${st.delivered_count})` : ''}`,
     columnLine,
   ].join('\n')
   const keyboard = detected
@@ -361,7 +361,7 @@ export async function ingest(order: ApolloOrder, st: LeadsfridayStatus): Promise
   if (order.telegram_message_id) {
     await tg('editMessageReplyMarkup', { chat_id: TELEGRAM_CHAT_ID, message_id: order.telegram_message_id, reply_markup: { inline_keyboard: [] } })
   }
-  console.log(`[leadsfriday-order] ingested #${order.leadsfriday_order_id}: ${rows.length} rows -> ingest ${ing.id}`)
+  console.log(`[leadsfriday-order] ingested #${order.leadsfriday_order_id}: ${rowCount} rows -> ingest ${ing.id}`)
 }
 
 // ---- Dispatch -------------------------------------------------------------
