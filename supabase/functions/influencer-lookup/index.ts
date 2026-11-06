@@ -25,8 +25,12 @@
 // Spend: before each pair, what is left of max_lookup_usd must cover them at
 // LOOKUP_USD_PER_PERSON each; otherwise the batch stops as 'capped' (the
 // owner can approve more). Memory: candidates are read two at a time, never
-// the whole batch. Resumable: one invocation works ~100 s under a lease
-// (lease_token / lease_until on the batch), then hands off to a fresh one.
+// the whole batch. Resumable: a pair starts only while at least 75 s of the
+// 150 s wall clock remain (a pair can take ~70 s with retries), under a lease
+// (lease_token / lease_until on the batch); then it hands off to a fresh one.
+// Defence in depth on start: the action_id must be an approved / executing
+// influencer_lookup for THIS batch, and an action that already ran the batch
+// is never used again.
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 import { alert, gateKey, lumeLink } from '../_shared/alert.ts'
@@ -55,8 +59,10 @@ const TELEGRAM_CHAT_ID = Deno.env.get('TELEGRAM_CHAT_ID') ?? ''
 
 const FN = 'influencer-lookup'
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
-/** Work per invocation before handing off (the edge wall clock is 150 s). */
-export const WORK_MS = 100_000
+/** The edge wall clock per invocation. */
+export const WALL_CLOCK_MS = 150_000
+/** Start a pair only with this much wall clock left (Perplexity 40 s + Haiku 30 s per call, worst case, plus the save). */
+export const MIN_LEFT_FOR_PAIR_MS = 75_000
 /** A lease outlives one invocation; the sweep re-kicks a batch after it expires. */
 const LEASE_MS = 3 * 60_000
 const PPLX_TIMEOUT_MS = 40_000
@@ -144,8 +150,8 @@ async function askPerplexity(ctx: Ctx, c: LookupCandidate) {
     if (res.ok) return parseLookupResponse(await res.json())
     const text = (await res.text()).slice(0, 200)
     const wait = RETRY_BACKOFF_MS[attempt]
-    const left = WORK_MS - (ctx.now() - ctx.startedAt)
-    if (!retryable(res.status) || wait === undefined || left < wait + PPLX_TIMEOUT_MS) throw new Error(`Perplexity ${res.status}: ${text}`)
+    const left = WALL_CLOCK_MS - (ctx.now() - ctx.startedAt)
+    if (!retryable(res.status) || wait === undefined || left < wait + PPLX_TIMEOUT_MS + HAIKU_TIMEOUT_MS + 5_000) throw new Error(`Perplexity ${res.status}: ${text}`)
     await ctx.sleep(wait)
   }
 }
@@ -188,7 +194,7 @@ async function lookupOne(ctx: Ctx, c: Candidate): Promise<number> {
     spent += answer.cost
     const { json, usd } = await haiku(lookupParseRequest(c, answer.answer, answer.sources))
     spent += usd
-    const g = groundLookup(c, parseLookupJson(json), answer.sources)
+    const g = groundLookup(c, parseLookupJson(json), answer.sources, answer.answer)
     const dupe = g.linkedin_url ? (await existingInfluencers(ctx)).get(g.linkedin_url) : undefined
     await save({
       status: dupe ? 'duplicate' : g.status,
@@ -251,7 +257,7 @@ export async function runBatch(batchId: string, prev: string | null, deps: Deps 
       : `Influencer lookup stopped at its $${cap.toFixed(2)} cap with people still to look up. Approve more in Lume to continue.`)
   }
 
-  while (now() - ctx.startedAt < WORK_MS) {
+  while (WALL_CLOCK_MS - (now() - ctx.startedAt) >= MIN_LEFT_FOR_PAIR_MS) {
     const rows = (await rest('GET', `influencer_candidates?batch_id=eq.${batchId}&status=eq.pending_lookup&lookup_attempts=lt.${MAX_LOOKUP_ATTEMPTS}&order=row_index&limit=${VERIFY_WORKERS}&select=id,name,title,company,lookup_attempts`)) as Candidate[] | null
     if (!rows?.length) return finish('done')
     const affordable = Math.floor((cap - spent + 1e-9) / LOOKUP_USD_PER_PERSON)
@@ -280,8 +286,16 @@ async function start(body: Record<string, unknown>, waitUntil: (p: Promise<unkno
   const b = rows?.[0]
   if (!b) return reply({ error: 'batch_not_found' }, 404)
   const run = deps.run ?? ((id: string, prev: string | null) => runBatch(id, prev, deps))
-  // A retried start for the same approval: already running, nothing new.
-  if (b.status === 'looking_up' && b.lookup_action_id === actionId) return reply({ ok: true, batch_id: batchId, already: true }, 202)
+  // Defence in depth: only an owner-approved influencer_lookup for this very batch may start it.
+  const actions = (await rest('GET', `pending_actions?id=eq.${actionId}&select=kind,status,payload`)) as { kind: string; status: string; payload: Record<string, unknown> | null }[] | null
+  const action = actions?.[0]
+  if (!action || action.kind !== 'influencer_lookup' || !['approved', 'executing'].includes(action.status) || action.payload?.batch_id !== batchId) {
+    return reply({ error: 'action_not_approved' }, 403)
+  }
+  if (b.lookup_action_id === actionId) {
+    // A retried start for the same approval while it runs: nothing new. After it ran: never a second spend.
+    return b.status === 'looking_up' ? reply({ ok: true, batch_id: batchId, already: true }, 202) : reply({ error: 'action_already_used', status: b.status }, 409)
+  }
   if (b.status !== 'staged' && b.status !== 'capped') return reply({ error: 'not_startable', status: b.status }, 409)
   const cap = Math.min(MAX_CAP_USD, round4(num(b.spent_usd) + maxUsd))
   const flipped = (await rest('PATCH', `${batchPath(batchId)}&status=eq.${b.status}`, {

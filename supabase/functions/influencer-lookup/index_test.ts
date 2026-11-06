@@ -38,11 +38,14 @@ Deno.test('auth: no bearer or a wrong one -> 401, nothing called', async () => {
   } finally { f.restore() }
 })
 
+const approvedAction = (o: Record<string, unknown> = {}) => [is('pending_actions?id=eq.', 'GET'), () => json([{ kind: 'influencer_lookup', status: 'executing', payload: { batch_id: BATCH }, ...o }])] as Route
+
 Deno.test('start: flips a staged batch to looking_up with the approved cap (on top of what was spent) and starts the chain', async () => {
   const kicked: Promise<unknown>[] = []
   const f = stubFetch([
     [is('influencer_candidate_batches?id=eq.', 'GET'), () => json([{ id: BATCH, status: 'staged', spent_usd: 0.5, lookup_action_id: null }])],
     [is('influencer_candidate_batches?id=eq.', 'PATCH'), (_u, b) => json([{ id: BATCH, ...JSON.parse(b!) }])],
+    approvedAction(),
   ])
   try {
     const res = await handle(post({ action: 'start', batch_id: BATCH, max_usd: 1.2, action_id: ACTION }), (p) => kicked.push(p), { run: () => Promise.resolve() })
@@ -54,9 +57,33 @@ Deno.test('start: flips a staged batch to looking_up with the approved cap (on t
   } finally { f.restore() }
 })
 
+Deno.test('start: defence in depth — the action must be an approved influencer_lookup for this batch, and never re-used once it ran', async () => {
+  const startBody = { action: 'start', batch_id: BATCH, max_usd: 1, action_id: ACTION }
+  const cases: [Route[], number, string][] = [
+    [[approvedAction({ kind: 'influencer_run' })], 403, 'action_not_approved'],
+    [[approvedAction({ status: 'awaiting' })], 403, 'action_not_approved'],
+    [[approvedAction({ payload: { batch_id: '99999999-9999-4999-8999-999999999999' } })], 403, 'action_not_approved'],
+    [[[is('pending_actions?id=eq.', 'GET'), () => json([])]], 403, 'action_not_approved'],
+  ]
+  for (const [routes, status, error] of cases) {
+    const f = stubFetch([[is('influencer_candidate_batches?id=eq.', 'GET'), () => json([{ id: BATCH, status: 'staged', spent_usd: 0, lookup_action_id: null }])], ...routes])
+    try {
+      const res = await handle(post(startBody), noWait, { run: () => Promise.resolve() })
+      assertEquals([res.status, (await res.json()).error], [status, error])
+      assertEquals(f.calls.filter((c) => c.method === 'PATCH').length, 0)
+    } finally { f.restore() }
+  }
+  // The same approval already ran this batch (now capped / done): never a second spend.
+  const f = stubFetch([[is('influencer_candidate_batches?id=eq.', 'GET'), () => json([{ id: BATCH, status: 'capped', spent_usd: 1, lookup_action_id: ACTION }])], approvedAction()])
+  try {
+    const res = await handle(post(startBody), noWait, { run: () => Promise.resolve() })
+    assertEquals([res.status, (await res.json()).error], [409, 'action_already_used'])
+  } finally { f.restore() }
+})
+
 Deno.test('start: a batch already running for this action is a no-op 202; one in another state is 409', async () => {
   let row: Record<string, unknown> = { id: BATCH, status: 'looking_up', spent_usd: 0, lookup_action_id: ACTION }
-  const f = stubFetch([[is('influencer_candidate_batches?id=eq.', 'GET'), () => json([row])]])
+  const f = stubFetch([[is('influencer_candidate_batches?id=eq.', 'GET'), () => json([row])], approvedAction()])
   try {
     assertEquals((await handle(post({ action: 'start', batch_id: BATCH, max_usd: 1, action_id: ACTION }), noWait, { run: () => Promise.resolve() })).status, 202)
     row = { id: BATCH, status: 'done', spent_usd: 0, lookup_action_id: null }
@@ -114,6 +141,25 @@ Deno.test('runBatch: stops at the hard cap (status capped) without calling Perpl
     await runBatch(BATCH, null, { now: c.now, sleep: c.sleep, handOff: () => Promise.resolve(true) })
     assertEquals(f.calls.some((x) => x.url.includes('perplexity')), false)
     assertEquals(bodies(f.calls, is('influencer_candidate_batches?id=eq.', 'PATCH')).at(-1)!.body.status, 'capped')
+  } finally { f.restore() }
+})
+
+Deno.test('runBatch: kill safety — a pair starts only with >= 75 s of the 150 s wall clock left; then it hands off', async () => {
+  const c = clock()
+  let handed = 0
+  const f = stubFetch([
+    ...chainRoutes({ cap: 1, candidates: [
+      [{ id: C1, name: 'Sarah Johnson', title: 'Director', company: 'Greystar', lookup_attempts: 0 }],
+      [{ id: C2, name: 'Mo Lee', title: 'Director', company: 'Acme', lookup_attempts: 0 }],
+    ] }),
+    // The first lookup takes 70 s: 80 s are left, then 76 s after the next page read... the second pair would start with < 75 s left.
+    [(u) => u === 'https://api.perplexity.ai/chat/completions', () => { c.tick(76_000); return pplx('https://www.linkedin.com/in/sarah-johnson', 'Sarah Johnson - Director - Greystar') }],
+    [(u) => u === 'https://api.anthropic.com/v1/messages', () => haiku('https://www.linkedin.com/in/sarah-johnson')],
+  ])
+  try {
+    await runBatch(BATCH, null, { now: c.now, sleep: c.sleep, handOff: () => { handed++; return Promise.resolve(true) } })
+    assertEquals(f.calls.filter((x) => x.url.includes('perplexity')).length, 1)
+    assertEquals(handed, 1)
   } finally { f.restore() }
 })
 

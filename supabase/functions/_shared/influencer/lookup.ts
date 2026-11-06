@@ -133,10 +133,12 @@ const NOT_FOUND: LookupResult = { status: 'not_found', confidence: 'not_found', 
  *  - high:   that LinkedIn result's own title / snippet names the person and
  *            their company;
  *  - medium: it names the person and their role, or a quote from another CITED
- *            source names the person with their company or role;
+ *            source names the person with their company or role. The quote is
+ *            model text, so it counts only when it really is in that source's
+ *            title / snippet or in Perplexity's own answer (folded substring);
  *  - else not_found (no URL kept).
  */
-export function groundLookup(c: LookupCandidate, p: LookupParsed, sources: Source[]): LookupResult {
+export function groundLookup(c: LookupCandidate, p: LookupParsed, sources: Source[], answer = ''): LookupResult {
   const url = normalizeLinkedinUrl(p.linkedin_url)
   if (!url) return NOT_FOUND
   const src = sources.find((s) => normalizeLinkedinUrl(s.url) === url)
@@ -144,11 +146,14 @@ export function groundLookup(c: LookupCandidate, p: LookupParsed, sources: Sourc
   const slug = url.slice('https://www.linkedin.com/in/'.length)
   const own = fold(`${src.title} ${src.snippet}`)
   const cited = sources.find((s) => s.url === p.evidence_url)
-  const quote = cited ? fold(p.evidence_quote) : ''
+  // Haiku's quote must exist verbatim (folded) in the cited source's text or in the answer; an invented one counts for nothing.
+  const folded = fold(p.evidence_quote)
+  const verbatim = !!cited && folded.length >= 8 && (fold(`${cited.title} ${cited.snippet}`).includes(folded) || fold(answer).includes(folded))
+  const quote = verbatim ? folded : ''
   const snippet = [src.title, src.snippet].filter(Boolean).join(' · ').slice(0, 500)
   if (nameIn(c, own, slug) && companyIn(c, own)) return { status: 'found', confidence: 'high', linkedin_url: url, evidence: { url: src.url, snippet } }
   if (nameIn(c, own, slug) && roleIn(c, own)) return { status: 'found', confidence: 'medium', linkedin_url: url, evidence: { url: src.url, snippet } }
-  if (cited && nameIn(c, quote, slug) && (companyIn(c, quote) || roleIn(c, quote))) {
+  if (cited && quote && nameIn(c, quote, slug) && (companyIn(c, quote) || roleIn(c, quote))) {
     return { status: 'found', confidence: 'medium', linkedin_url: url, evidence: { url: cited.url, snippet: p.evidence_quote.slice(0, 500) } }
   }
   return NOT_FOUND

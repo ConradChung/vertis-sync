@@ -58,8 +58,13 @@ Deno.test('groundLookup: medium when only the role ties it, or the tie is in a c
   const role = [src('https://www.linkedin.com/in/sjohnson', 'Sarah Johnson - Director of Property Management', '')]
   assertEquals(groundLookup(C, parsed({ linkedin_url: 'https://www.linkedin.com/in/sjohnson' }), role).confidence, 'medium')
   const viaQuote = [src('https://www.linkedin.com/in/sjohnson', 'Sarah Johnson | LinkedIn', ''), src('https://www.greystar.com/team', 'Team', '')]
-  const g = groundLookup(C, parsed({ linkedin_url: 'https://www.linkedin.com/in/sjohnson', evidence_url: 'https://www.greystar.com/team', evidence_quote: 'Sarah Johnson leads property management at Greystar.' }), viaQuote)
+  // The quote is taken from the answer text Perplexity wrote with that citation.
+  const answer = 'Sarah Johnson leads property management at Greystar [2]; her profile is linkedin.com/in/sjohnson [1].'
+  const g = groundLookup(C, parsed({ linkedin_url: 'https://www.linkedin.com/in/sjohnson', evidence_url: 'https://www.greystar.com/team', evidence_quote: 'Sarah Johnson leads property management at Greystar' }), viaQuote, answer)
   assertEquals([g.confidence, g.evidence?.url], ['medium', 'https://www.greystar.com/team'])
+  // ...or from the cited source's own title / snippet.
+  const inSnippet = [src('https://www.linkedin.com/in/sjohnson', 'Sarah Johnson | LinkedIn', ''), src('https://www.greystar.com/team', 'Team', 'Sarah Johnson, Greystar regional lead')]
+  assertEquals(groundLookup(C, parsed({ linkedin_url: 'https://www.linkedin.com/in/sjohnson', evidence_url: 'https://www.greystar.com/team', evidence_quote: 'Sarah Johnson, Greystar' }), inSnippet, '').confidence, 'medium')
 })
 
 Deno.test('groundLookup: a cited URL with no tie to the company or role, or the wrong name, is not_found', () => {
@@ -70,6 +75,17 @@ Deno.test('groundLookup: a cited URL with no tie to the company or role, or the 
   // A quote from a source that was NOT cited never counts.
   const g = groundLookup(C, parsed({ linkedin_url: 'https://www.linkedin.com/in/sjohnson', evidence_url: 'https://uncited.com', evidence_quote: 'Sarah Johnson at Greystar' }), [src('https://www.linkedin.com/in/sjohnson', 'Sarah Johnson | LinkedIn')])
   assertEquals(g.status, 'not_found')
+})
+
+Deno.test('groundLookup: an invented quote attached to a cited namesake URL is not_found (the quote must be in the source or the answer)', () => {
+  const sources = [src('https://www.linkedin.com/in/sjohnson', 'Sarah Johnson | LinkedIn', 'Yoga teacher, Portland'), src('https://www.greystar.com/team', 'Our team', 'Meet the leasing staff')]
+  const g = groundLookup(
+    C,
+    parsed({ linkedin_url: 'https://www.linkedin.com/in/sjohnson', evidence_url: 'https://www.greystar.com/team', evidence_quote: 'Sarah Johnson is Director of Property Management at Greystar' }),
+    sources,
+    'I found a Sarah Johnson on LinkedIn [1] and a Greystar team page [2].',
+  )
+  assertEquals([g.status, g.confidence, g.linkedin_url], ['not_found', 'not_found', null])
 })
 
 Deno.test('lookupParseRequest: Haiku JSON with the numbered sources; parseLookupJson validates', () => {
