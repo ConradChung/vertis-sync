@@ -11,6 +11,7 @@ import { updateSequencePayloadError } from '@/lib/campaigns/sequenceAction'
 import { removeLeadsPayloadError } from '@/lib/actions/removeLeadsPayload'
 import { approvePayloadError, INFLUENCER_ACTION_KEY, influencerPayloadError, LOOKUP_ACTION_KEY, lookupPayloadError } from '@/lib/influencers/actionPayload'
 import { STAGE_ATTACHMENT_KEY, stageAttachmentPayloadError } from '@/lib/agent/attachmentActionPayload'
+import { LEAD_LIST_KEY, leadListPayloadError } from '@/lib/leads/lists/actionPayload'
 import { tryGrantSend } from '@/lib/actions/grant'
 import { pushForItem } from '@/lib/webhooks/deliver'
 import { pushSummary } from '@/lib/webhooks/push'
@@ -154,6 +155,11 @@ export async function createAction(
     // No uniqueness key: approving the same candidates twice is a no-op (only rows still 'found' change).
     const err = approvePayloadError(payload)
     if (err) throw new InvalidActionPayloadError(err)
+  } else if (kind === 'send_lead_list' || kind === 'delete_lead_list') {
+    // One awaiting send / delete per list.
+    const err = leadListPayloadError(payload)
+    if (err) throw new InvalidActionPayloadError(err)
+    campaignKey = { field: LEAD_LIST_KEY, value: String(payload[LEAD_LIST_KEY]) }
   } else if (kind === 'influencer_lookup') {
     // One awaiting lookup per batch (pending_actions_one_awaiting_influencer_lookup_idx).
     const err = lookupPayloadError(payload)

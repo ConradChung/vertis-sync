@@ -185,6 +185,8 @@ export type PendingActionKind =
   | 'stage_attachment'
   | 'influencer_lookup'
   | 'influencer_approve'
+  | 'send_lead_list'
+  | 'delete_lead_list'
 
 export type PendingActionStatus =
   | 'awaiting'

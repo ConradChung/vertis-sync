@@ -90,13 +90,14 @@ export async function createReviewSetFromRows(
 }
 
 export async function getReviewSet(id: string): Promise<ReviewSet | null> {
-  const { data, error } = await db().from('lead_review_sets').select(SET_COLS).eq('id', id).is('archived_at', null).maybeSingle()
+  // Lead lists (kind 'list') live in the same table; they have their own routes (lib/leads/lists).
+  const { data, error } = await db().from('lead_review_sets').select(SET_COLS).eq('id', id).neq('kind', 'list').is('archived_at', null).maybeSingle()
   if (error) throw error
   return (data as ReviewSet | null) ?? null
 }
 
 export async function listReviewSets(conversationId?: string | null, limit = 20): Promise<ReviewSet[]> {
-  let q = db().from('lead_review_sets').select(SET_COLS).is('archived_at', null).order('created_at', { ascending: false }).limit(limit)
+  let q = db().from('lead_review_sets').select(SET_COLS).neq('kind', 'list').is('archived_at', null).order('created_at', { ascending: false }).limit(limit)
   if (conversationId) q = q.eq('source_conversation_id', conversationId)
   const { data, error } = await q
   if (error) throw error

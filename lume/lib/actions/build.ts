@@ -23,6 +23,7 @@ import { buildInfluencerReactions, buildInfluencerRun } from '@/lib/influencers/
 import { buildStageAttachment } from '@/lib/agent/attachmentAction'
 import { buildInfluencerLookup } from '@/lib/influencers/lookupAction'
 import { buildInfluencerApprove } from '@/lib/influencers/approveAction'
+import { buildDeleteLeadList, buildSendLeadList } from '@/lib/leads/lists/actions'
 
 /**
  * Turn a requested action `{ kind, payload }` into the snapshot the owner
@@ -49,6 +50,9 @@ import { buildInfluencerApprove } from '@/lib/influencers/approveAction'
  *                     from last run; one awaiting at a time, none while a run is active
  *  influencer_reactions { run_id, max_verify_usd? } → the run's exact reactions bill
  *  influencer_approve { candidate_ids } → lib/influencers/approveAction.ts: found candidates only
+ *  send_lead_list     { list_id } → lib/leads/lists/actions.ts: the list's email rows as a CSV ingest
+ *                     (refused with no emails, or already sent unchanged)
+ *  delete_lead_list   { list_id } → the list's name and size
  *  influencer_lookup  { batch_id, max_usd? } → lib/influencers/lookupAction.ts: the people still
  *                     pending x $0.0065 and a hard cap the edge function stops at
  *  stage_attachment   { file_id, sheet? } → lib/agent/attachmentAction.ts: the sheet's rows and
@@ -103,9 +107,10 @@ const InfluencerBody = z.object({ kind: z.enum(['influencer_run', 'influencer_re
 const StageAttachmentBody = z.object({ kind: z.literal('stage_attachment'), payload: z.record(z.string(), z.unknown()) })
 const InfluencerLookupBody = z.object({ kind: z.literal('influencer_lookup'), payload: z.record(z.string(), z.unknown()) })
 const InfluencerApproveBody = z.object({ kind: z.literal('influencer_approve'), payload: z.record(z.string(), z.unknown()) })
+const LeadListBody = z.object({ kind: z.enum(['send_lead_list', 'delete_lead_list']), payload: z.record(z.string(), z.unknown()) })
 
 /** Shape check for `POST /api/actions`; `buildActionRequest` validates each payload fully. */
-export const ActionRequestBody = z.union([JobBody, rotateActionBody, OtherBody, RunActorBody, UpdateSequenceBody, RemoveLeadsBody, LabelReplyBody, InfluencerBody, StageAttachmentBody, InfluencerLookupBody, InfluencerApproveBody, CampaignBody])
+export const ActionRequestBody = z.union([JobBody, rotateActionBody, OtherBody, RunActorBody, UpdateSequenceBody, RemoveLeadsBody, LabelReplyBody, InfluencerBody, StageAttachmentBody, InfluencerLookupBody, InfluencerApproveBody, LeadListBody, CampaignBody])
 export type ActionRequest = z.infer<typeof ActionRequestBody>
 
 export type ActionBuild =
@@ -201,6 +206,10 @@ export async function buildActionRequest(input: unknown): Promise<ActionBuild> {
       return buildInfluencerLookup(req.payload)
     case 'influencer_approve':
       return buildInfluencerApprove(req.payload)
+    case 'send_lead_list':
+      return buildSendLeadList(req.payload)
+    case 'delete_lead_list':
+      return buildDeleteLeadList(req.payload)
     case 'push_to_instantly':
     case 'launch_campaign':
       return buildJobAction(req.kind, (req.payload as { job_id: string }).job_id.toLowerCase())

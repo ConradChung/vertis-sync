@@ -66,6 +66,12 @@ describe('parsePastedRows', () => {
     expect(out.rows[0].item).toMatchObject({ email: 'jane@acme.com', company: 'Acme', linkedin_url: 'https://linkedin.com/in/jane' })
     expect(out.rows[0].raw).toEqual({ 'Full Name': 'Jane Doe', Company: 'Acme', 'Work Email': 'jane@acme.com', LinkedIn: 'https://linkedin.com/in/jane' })
   })
+  it('a one-word full name is still the lead name', () => {
+    const out = parsePastedRows('Name\tEmail\nAlpha\ta@a.co\n')
+    expect(out.ok && [out.rows[0].item.name, out.rows[0].item.first_name]).toEqual(['Alpha', 'Alpha'])
+    const withCo = parsePastedRows('Name\tCompany\nAlpha\tA Co\n')
+    expect(withCo.ok && [withCo.rows[0].item.name, withCo.rows[0].item.first_name]).toEqual(['A Co', 'Alpha'])
+  })
   it('CSV with quotes; refuses no header / no rows / too many rows', () => {
     const out = parsePastedRows('email,company\n"x@y.com","A, B"\n')
     expect(out.ok && out.rows[0].item.company).toBe('A, B')

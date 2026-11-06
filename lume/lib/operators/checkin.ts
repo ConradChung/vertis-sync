@@ -111,6 +111,8 @@ const ACTION_LABEL: Record<string, string> = {
   stage_attachment: 'Send a chat spreadsheet to the ingest gate',
   influencer_lookup: 'Look up influencer LinkedIn profiles (spends money)',
   influencer_approve: 'Approve influencer candidates (inactive influencers)',
+  send_lead_list: 'Send a lead list to the ingest gate',
+  delete_lead_list: 'Delete a lead list',
 }
 
 function priorityOf(gate: GateRow): Priority {

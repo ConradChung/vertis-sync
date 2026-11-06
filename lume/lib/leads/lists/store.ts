@@ -235,7 +235,7 @@ export async function pageItems(
   const size = Math.min(500, Math.max(1, opts.pageSize ?? 50))
   let q = items().select('idx,item,source', { count: 'exact' }).eq('set_id', listId)
   const term = opts.q?.trim().replace(/[%,()*\\]/g, ' ').trim()
-  if (term) q = q.or(['name', 'company', 'email', 'title', 'city', 'domain'].map((f) => `item->>${f}.ilike.%${term}%`).join(','))
+  if (term) q = q.or(['name', 'first_name', 'last_name', 'company', 'email', 'title', 'city', 'domain'].map((f) => `item->>${f}.ilike.%${term}%`).join(','))
   const sort = !opts.sort || opts.sort === 'idx' ? 'idx' : `item->>${opts.sort}`
   q = q.order(sort, { ascending: opts.dir !== 'desc' })
   if (sort !== 'idx') q = q.order('idx', { ascending: true })
@@ -283,7 +283,7 @@ export async function removeWhere(listId: string, f: { missing?: (typeof MISSING
     const { data, error } = await items()
       .delete()
       .eq('set_id', listId)
-      .or(['name', 'company', 'email', 'title', 'city', 'domain'].map((x) => `item->>${x}.ilike.%${term}%`).join(','))
+      .or(['name', 'first_name', 'last_name', 'company', 'email', 'title', 'city', 'domain'].map((x) => `item->>${x}.ilike.%${term}%`).join(','))
       .select('idx')
     if (error) throw error
     removed += (data ?? []).length

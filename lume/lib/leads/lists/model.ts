@@ -137,9 +137,21 @@ export function parsePastedRows(text: string): PasteResult {
   const { mapping, unmapped } = leadColumnMapping(header, {}, grid.slice(0, 50))
   const rows = grid.map((cells) => {
     const raw = rowRecord(header, cells)
-    return { raw, item: normaliseLead(mappedRecord(raw, mapping)) }
+    return { raw, item: leadFromMapped(raw, mapping) }
   })
   return { ok: true, header, mapping, unmapped, rows }
+}
+
+/**
+ * A mapped row as a lead. normaliseLead keeps a person's name only when it
+ * splits into first + last; a one-word full name ("Alpha") is kept here as the
+ * first name (and the name, when there is no company).
+ */
+export function leadFromMapped(raw: Record<string, string>, mapping: ColumnMapping): ListItem {
+  const item = normaliseLead(mappedRecord(raw, mapping))
+  const full = mapping.full_name ? raw[mapping.full_name]?.trim() : ''
+  if (!full || item.first_name || item.last_name) return item
+  return { ...item, first_name: full, name: item.name ?? full }
 }
 
 /** Inline rows from the agent (field → value) as items, normalised like everything else. */

@@ -103,6 +103,8 @@ const KIND_SCOPE: Record<PendingActionKind, VerticalScope | null> = {
   // The influencer LinkedIn lookup (Perplexity): a paid data order.
   influencer_lookup: 'orders',
   influencer_approve: 'orders',
+  send_lead_list: 'validation',
+  delete_lead_list: null,
   decide_gate: null,
   // Owner / master-bot business: never a vertical's item.
   issue_operator_key: null,

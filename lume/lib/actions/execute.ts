@@ -40,6 +40,7 @@ import { executeInfluencerReactions, executeInfluencerRun } from '@/lib/influenc
 import { executeStageAttachment } from '@/lib/agent/attachmentAction'
 import { executeInfluencerLookup } from '@/lib/influencers/lookupAction'
 import { executeInfluencerApprove } from '@/lib/influencers/approveAction'
+import { executeDeleteLeadList, executeSendLeadList } from '@/lib/leads/lists/actions'
 import type { RunOptions } from '@/lib/apify/pricing'
 import type { Json, PendingActionRow } from '@/lib/db/types'
 import { nextRun } from '@/lib/rules/nextRun'
@@ -452,6 +453,19 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
   /** Continue a run past its reactions bill, only if the run still waits with the bill that was approved. */
   async influencer_reactions(p, action) {
     const out = await executeInfluencerReactions(p, action.id)
+    if (!out.ok) throw new ActionFailure(out.error, out.result)
+    return out.result
+  },
+
+  /** A lead list's email rows → a CSV ingest at the usual gate, after re-checking the list is as approved. */
+  async send_lead_list(p) {
+    const out = await executeSendLeadList(p)
+    if (!out.ok) throw new ActionFailure(out.error, out.result)
+    return out.result
+  },
+
+  async delete_lead_list(p) {
+    const out = await executeDeleteLeadList(p)
     if (!out.ok) throw new ActionFailure(out.error, out.result)
     return out.result
   },
