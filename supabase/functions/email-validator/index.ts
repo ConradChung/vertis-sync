@@ -6,6 +6,7 @@
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 import { alert, type AlertInput, lumeLink, titleFrom } from '../_shared/alert.ts'
 import { promptForCampaign } from './campaign_prompt.ts'
+import { makePacer } from './pacer.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -188,6 +189,7 @@ async function validateEmail(
     // rate limiting quietly evicts good addresses from the list.
     let res = await fetch(url)
     for (let backoff = 0; res.status === 429 && backoff < 4; backoff++) {
+      console.warn(`[email-validator] 429 from MailTester (backoff ${backoff + 1})`)
       await new Promise((r) => setTimeout(r, 2_000 * (backoff + 1)))
       res = await fetch(url)
     }
@@ -293,6 +295,12 @@ async function processJob(jobId: string): Promise<void> {
   // 1000ms = 10 requests per 10s, one under the plan's 11 — the margin matters
   // because the ceiling is a sliding window, not an average.
   const MIN_INTERVAL_MS = 1_000
+  // Three in flight: a check takes 1-4s (slow corporate mail servers), so a
+  // single worker used a quarter of the allowance. Measured 2026-11-06: the
+  // limit is per key across connections ("Your rate is now 13 - Using 2
+  // connection" -> 429), which is why pacing is shared, not per worker.
+  const CONCURRENCY = 3
+  const pace = makePacer(MIN_INTERVAL_MS)
   const MAX_ATTEMPTS = 3
 
   // 3. Main processing loop — 50 rows at a time. Once nothing is pending,
@@ -330,8 +338,18 @@ async function processJob(jobId: string): Promise<void> {
 
     if (!rows || rows.length === 0) break
 
-    for (const row of rows) {
-      const cycleStart = Date.now()
+    // Up to CONCURRENCY checks in flight; `pace` spaces request STARTS at
+    // least MIN_INTERVAL_MS apart across all workers, so the key never sees
+    // more than 10 per 10s however slow a mail server answers. Workers share
+    // the counters below; JS is single-threaded, so the increments are safe.
+    const queue = [...rows]
+    let handOffNow = false
+    const worker = async (): Promise<void> => {
+     try {
+     while (!handOffNow) {
+      const row = queue.shift()
+      if (!row) return
+      await pace()
       const { verdict, result } = await validateEmail(row.email)
 
       if (verdict === 'inconclusive') {
@@ -390,16 +408,29 @@ async function processJob(jobId: string): Promise<void> {
         }
       }
 
-      // Top up to the documented interval only if the request itself was
-      // faster than it. Usually it wasn't, so this sleeps 0ms.
-      const cycleElapsed = Date.now() - cycleStart
-      if (cycleElapsed < MIN_INTERVAL_MS) {
-        await new Promise((resolve) => setTimeout(resolve, MIN_INTERVAL_MS - cycleElapsed))
-      }
+      // Approaching wall clock limit — stop taking rows; the in-flight ones
+      // finish, then this invocation hands off below.
+      if (Date.now() - startTime > CHUNK_LIMIT_MS) handOffNow = true
+     }
+     } catch (err) {
+       // A rejected key (or any throw) stops the sibling workers too, before
+       // they take another row; the error propagates as it did single-file.
+       handOffNow = true
+       throw err
+     }
+    }
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker))
 
-      // Approaching wall clock limit — hand off to a fresh invocation and exit.
-      // The next invocation resumes from remaining pending rows automatically.
-      if (Date.now() - startTime > CHUNK_LIMIT_MS) {
+    // Concurrent progress PATCHes can land out of order; settle the counters
+    // so the next chunk (which reads them back) starts from the true values.
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
+      processed_rows: processed,
+      valid_count: validCount,
+      invalid_count: invalidCount,
+    })
+
+    // The next invocation resumes from remaining pending rows automatically.
+    if (handOffNow) {
         const handedOff = await handOff('email-validator', jobId)
         if (!handedOff) {
           await notify(
@@ -409,7 +440,6 @@ async function processJob(jobId: string): Promise<void> {
           )
         }
         return
-      }
     }
   }
 
