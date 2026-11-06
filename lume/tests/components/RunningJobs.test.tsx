@@ -53,9 +53,9 @@ describe('RunningJobs', () => {
     jobs = [job({})]
     fresh(<RunningJobs />)
     const section = await screen.findByRole('region', { name: 'Running jobs' })
-    const card = await within(section).findByRole('group', { name: /pm-leads\.csv/ })
+    const card = await within(section).findByRole('group', { name: /^5,272 leads · / })
     const meta = within(card).getByText(/started 2h ago/).parentElement!
-    expect(meta.textContent).toBe("pm-leads.csv·processing·started 2h ago")
+    expect(meta.textContent).toMatch(/^5,272 leads · \d{2} \w{3}·pm-leads\.csv·processing·started 2h ago$/)
     await within(card).findByRole('progressbar', { name: 'Verified' })
     expect(within(card).getByRole('progressbar', { name: 'Enrich queued' })).toBeTruthy()
     expect(within(card).getByLabelText('Row verdicts')).toBeTruthy()

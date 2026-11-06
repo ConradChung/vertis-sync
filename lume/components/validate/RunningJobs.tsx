@@ -5,7 +5,7 @@ import { ChevronRight } from 'lucide-react'
 import { JobProgress } from '@/components/validate/JobProgress'
 import { useRecentJobs } from '@/hooks/useJob'
 import { ago } from '@/lib/import/format'
-import { partitionJobs, showsError, type JobSummary } from '@/lib/validate/jobs'
+import { jobTitle, partitionJobs, showsError, type JobSummary } from '@/lib/validate/jobs'
 import { cn } from '@/lib/utils'
 
 /**
@@ -26,7 +26,7 @@ export function RunningJobs() {
       {running.length ? (
         <div className="grid items-start gap-3 lg:grid-cols-2">
           {running.map((j) => (
-            <div key={j.id} role="group" aria-label={j.filename ?? j.id} className="flex flex-col gap-1.5">
+            <div key={j.id} role="group" aria-label={jobTitle(j)} className="flex flex-col gap-1.5">
               <JobMeta job={j} />
               <JobProgress jobId={j.id} />
             </div>
@@ -57,8 +57,14 @@ const STATUS_TONE: Record<string, string> = { failed: 'text-red', cancelled: 'te
 function JobMeta({ job }: { job: JobSummary }) {
   return (
     <p className="flex flex-wrap items-center gap-x-2 text-[11px] text-fg-46">
-      <span className="truncate font-medium text-fg-70">{job.filename ?? 'Untitled job'}</span>
+      <span className="font-medium text-fg-70">{jobTitle(job)}</span>
       <span aria-hidden>·</span>
+      {job.filename && (
+        <>
+          <span className="truncate">{job.filename}</span>
+          <span aria-hidden>·</span>
+        </>
+      )}
       <span className={cn('font-mono', STATUS_TONE[job.status ?? ''] ?? 'text-cyan')}>{job.status ?? 'unknown'}</span>
       <span aria-hidden>·</span>
       <span title={new Date(job.created_at).toLocaleString()}>started {ago(job.created_at)}</span>

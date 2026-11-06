@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { jobsPollInterval, partitionJobs, RECENT_MS, showsError, type JobSummary } from '@/lib/validate/jobs'
+import { jobTitle, jobsPollInterval, partitionJobs, RECENT_MS, showsError, type JobSummary } from '@/lib/validate/jobs'
 
 const NOW = Date.parse('2026-11-05T12:00:00Z')
 const job = (o: Partial<JobSummary>): JobSummary => ({
@@ -34,5 +34,11 @@ describe('jobsPollInterval / showsError', () => {
     expect(showsError(job({ status: 'cancelled', error_message: null }))).toBe('No reason recorded.')
     expect(showsError(job({ status: 'completed', error_message: null }))).toBeNull()
     expect(showsError(job({ status: 'completed', error_message: 'note' }))).toBe('note')
+  })
+})
+
+describe('jobTitle', () => {
+  it('reads "<n> leads · <dd Mon>"', () => {
+    expect(jobTitle({ total_rows: 5272, created_at: '2026-11-06T12:00:00Z' })).toBe('5,272 leads · 06 Nov')
   })
 })

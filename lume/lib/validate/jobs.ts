@@ -39,3 +39,9 @@ export function showsError(j: Pick<JobSummary, 'status' | 'error_message'>): str
   if (j.status === 'failed' || j.status === 'cancelled') return msg ?? 'No reason recorded.'
   return msg
 }
+
+/** "5,272 leads · 06 Nov": the owner reads a job by its size and day, not its filename. */
+export function jobTitle(j: Pick<JobSummary, 'total_rows' | 'created_at'>): string {
+  const day = new Date(j.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+  return `${j.total_rows.toLocaleString('en-US')} leads · ${day}`
+}
