@@ -9,6 +9,7 @@ import { leadBankSearchParams } from '@/lib/db/leadBankQuery'
 export const TAB_KEYS: Record<string, readonly string[]> = {
   '/overview': ['/api/overview', '/api/overview/instantly', '/api/overview/verticals'],
   '/import': ['/api/orders?limit=100'],
+  '/import/leads': ['/api/lead-lists'],
   '/influencers': ['/api/influencers/candidates'],
   '/validate': ['/api/gates', '/api/instantly/campaigns'],
   '/rotate': [`/api/lead-bank${leadBankSearchParams({ filter: {}, page: 1, pageSize: 100 })}`, '/api/rules', '/api/campaigns'],
