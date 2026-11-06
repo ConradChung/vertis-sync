@@ -1,5 +1,6 @@
 import 'server-only'
 import type { JobSummary } from '@/lib/validate/jobs'
+import type { HistoryJob } from '@/lib/validate/stats'
 import { maskOperatorKeys } from '@/lib/operators/mask'
 import type { PostgrestError } from '@supabase/supabase-js'
 import { createServiceClient } from '@/lib/supabase/service'
@@ -300,6 +301,9 @@ export async function getJobProgress(jobId: string): Promise<JobProgress | null>
       return [status, r.count ?? 0] as const
     })
   )
+  // Grouped status × MailTester reason counts (lume_validation_stats): the invalid-rate breakdown.
+  const reasonsRes = await sb.rpc('lume_validation_stats', { p_job: jobId })
+  if (reasonsRes.error) throw new DbError('getJobProgress.reasons', reasonsRes.error)
   const j = jobRes.data as unknown as Record<string, unknown>
   const num = (v: unknown) => (typeof v === 'number' ? v : 0)
   return {
@@ -327,7 +331,16 @@ export async function getJobProgress(jobId: string): Promise<JobProgress | null>
     company_barrier: j.company_barrier !== false,
     company_strict: j.company_strict === true,
     counts: Object.fromEntries(counts) as JobProgress['counts'],
+    reasons: Array.isArray(reasonsRes.data) ? (reasonsRes.data as JobProgress['reasons']) : [],
   }
+}
+
+/** Completed validation jobs of the last `days`, newest first, with counts by status and the top invalid reason (lume_validation_history). */
+export async function getValidationHistory(opts: { days?: number; limit?: number; offset?: number } = {}): Promise<{ total: number; jobs: HistoryJob[] }> {
+  const res = await createServiceClient().rpc('lume_validation_history', { p_days: opts.days ?? 30, p_limit: opts.limit ?? 25, p_offset: opts.offset ?? 0 })
+  if (res.error) throw new DbError('getValidationHistory', res.error)
+  const d = (res.data ?? {}) as { total?: number; jobs?: HistoryJob[] }
+  return { total: Number(d.total) || 0, jobs: d.jobs ?? [] }
 }
 
 /**
@@ -338,7 +351,7 @@ export async function getJobProgress(jobId: string): Promise<JobProgress | null>
 export async function listRecentJobs(since: Date): Promise<JobSummary[]> {
   const res = await createServiceClient()
     .from('validation_jobs')
-    .select('id,filename,status,total_rows,processed_rows,enrich,created_at,updated_at,error_message')
+    .select('id,filename,status,total_rows,processed_rows,valid_count,invalid_count,enrich,created_at,updated_at,error_message')
     .or(`status.in.(pending,processing),updated_at.gte.${since.toISOString()}`)
     .order('created_at', { ascending: false })
     .limit(50)
@@ -349,6 +362,8 @@ export async function listRecentJobs(since: Date): Promise<JobSummary[]> {
     status: (j.status as string | null) ?? null,
     total_rows: typeof j.total_rows === 'number' ? j.total_rows : 0,
     processed_rows: typeof j.processed_rows === 'number' ? j.processed_rows : 0,
+    valid_count: typeof j.valid_count === 'number' ? j.valid_count : 0,
+    invalid_count: typeof j.invalid_count === 'number' ? j.invalid_count : 0,
     enrich: j.enrich === true,
     created_at: String(j.created_at),
     updated_at: String(j.updated_at ?? j.created_at),

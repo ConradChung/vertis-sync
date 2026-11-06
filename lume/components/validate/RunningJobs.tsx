@@ -7,6 +7,7 @@ import { useRecentJobs } from '@/hooks/useJob'
 import { ago } from '@/lib/import/format'
 import { jobTitle, partitionJobs, showsError, type JobSummary } from '@/lib/validate/jobs'
 import { cn } from '@/lib/utils'
+import { invalidRate } from '@/lib/validate/stats'
 
 /**
  * The Validate page's "Running" section, read-only: validation jobs still
@@ -66,6 +67,14 @@ function JobMeta({ job }: { job: JobSummary }) {
         </>
       )}
       <span className={cn('font-mono', STATUS_TONE[job.status ?? ''] ?? 'text-cyan')}>{job.status ?? 'unknown'}</span>
+      {invalidRate(job.valid_count ?? 0, job.invalid_count ?? 0) !== null && (
+        <>
+          <span aria-hidden>·</span>
+          <span className="font-mono text-red" title="invalid ÷ (valid + invalid)">
+            {invalidRate(job.valid_count ?? 0, job.invalid_count ?? 0)!.toFixed(1)}% invalid
+          </span>
+        </>
+      )}
       <span aria-hidden>·</span>
       <span title={new Date(job.created_at).toLocaleString()}>started {ago(job.created_at)}</span>
     </p>

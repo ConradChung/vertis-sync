@@ -9,6 +9,9 @@ export interface JobSummary {
   status: string | null
   total_rows: number
   processed_rows: number
+  /** The job's own counters (the list's invalid rate: invalid ÷ (valid + invalid)). */
+  valid_count?: number
+  invalid_count?: number
   enrich: boolean
   created_at: string
   updated_at: string
