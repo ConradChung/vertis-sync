@@ -3,7 +3,7 @@ import { requireOwner } from '@/lib/auth/guards'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { uuidParam } from '@/lib/http/json'
 import { apifyMonthSpend, getApifyRuns, getInfluencersByIds, getRun } from '@/lib/influencers/store'
-import { MONTHLY_APIFY_CAP_USD } from '@/lib/influencers/model'
+import { getApifyCapUsd } from '@/lib/settings/store'
 
 /**
  * `GET /api/influencers/runs/<id>` → `{ run, influencers, budget }`: status,
@@ -21,7 +21,7 @@ export async function GET(req: Request, ctx: Ctx) {
   try {
     const run = await getRun(id)
     if (!run) return NextResponse.json({ error: 'not_found' }, { status: 404 })
-    const [infl, apifyRuns, spend] = await Promise.all([getInfluencersByIds(run.influencer_ids), getApifyRuns(id), apifyMonthSpend()])
+    const [infl, apifyRuns, spend, capUsd] = await Promise.all([getInfluencersByIds(run.influencer_ids), getApifyRuns(id), apifyMonthSpend(), getApifyCapUsd()])
     const name = (iid: string) => infl.find((i) => i.id === iid)?.name ?? iid
     const skipped = (kind: string) =>
       apifyRuns.filter((a) => a.kind === kind && a.status === 'failed' && (a.error ?? '').startsWith('budget_exceeded')).map((a) => name(a.influencer_id))
@@ -32,8 +32,8 @@ export async function GET(req: Request, ctx: Ctx) {
         posts_budget_skipped: skipped('posts'),
         reactions_budget_skipped: skipped('reactions'),
         apify_month_to_date_ledger_usd: spend,
-        monthly_cap_usd: MONTHLY_APIFY_CAP_USD,
-        cap_left_usd: spend === null ? null : Math.max(0, Math.round((MONTHLY_APIFY_CAP_USD - spend) * 100) / 100),
+        monthly_cap_usd: capUsd,
+        cap_left_usd: spend === null ? null : Math.max(0, Math.round((capUsd - spend) * 100) / 100),
       },
     })
   } catch (err) {

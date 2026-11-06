@@ -165,6 +165,23 @@ export function parseMonthlyUsage(body: unknown): number | null {
   return null
 }
 
+/**
+ * The shared monthly Apify cap: Lume Settings → Budget (`lume_settings`
+ * apify_monthly_cap_usd) when readable and valid, else the env fallback.
+ * `read` returns the PostgREST rows for that key (or throws).
+ */
+export async function resolveCap(read: () => Promise<unknown>, envRaw: string | undefined): Promise<number> {
+  try {
+    const rows = await read()
+    const v = Array.isArray(rows) ? (rows[0] as { value?: unknown } | undefined)?.value : undefined
+    const n = typeof v === 'number' ? v : Number(v)
+    if (Number.isFinite(n) && n > 0 && n <= 1000) return n
+  } catch {
+    // Settings unreadable: the env / default cap still applies.
+  }
+  return parseCap(envRaw)
+}
+
 export function parseCap(raw: string | undefined): number {
   const n = Number((raw ?? '').trim())
   return raw && raw.trim() && Number.isFinite(n) && n > 0 ? n : DEFAULT_CAP_USD
