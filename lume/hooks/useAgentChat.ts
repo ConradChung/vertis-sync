@@ -96,6 +96,9 @@ export interface AgentChatOptions {
 }
 
 let seq = 0
+const isLink = (v: unknown): v is { label: string; href: string } =>
+  !!v && typeof v === 'object' && typeof (v as { label?: unknown }).label === 'string' && typeof (v as { href?: unknown }).href === 'string' && (v as { href: string }).href.startsWith('/import/leads?list=')
+
 const nextId = () => `m${Date.now().toString(36)}${(seq++).toString(36)}`
 
 /** Fold one SSE event from `/api/agent/run` into the assistant message. */
@@ -122,6 +125,7 @@ export function applyAgentEvent(m: ChatMessage, e: AgentEvent): ChatMessage {
                 ms: Number(e.ms),
                 error: e.error as string | undefined,
                 ...(Array.isArray(e.warnings) && e.warnings.length ? { warnings: e.warnings.map(String) } : {}),
+                ...(isLink(e.link) ? { link: { label: e.link.label, href: e.link.href } } : {}),
               }
             : x
         ),

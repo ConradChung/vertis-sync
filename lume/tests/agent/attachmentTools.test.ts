@@ -56,7 +56,7 @@ describe('load_attachment_as_leads', () => {
   it('creates a review set from the sheet with the column overrides and returns the mapping', async () => {
     const answer = { set: { id: 's1' }, column_mapping: { email: 'Work Email' }, unmapped_columns: ['Notes'] }
     const { run, fetch } = setup({ '/api/review-sets': answer })
-    expect(await run('load_attachment_as_leads', { file_id: FILE, sheet: 'Leads', columns: { email: 'Work Email' }, title: 'Q3 list' })).toEqual(answer)
+    expect(await run('load_attachment_as_leads', { file_id: FILE, sheet: 'Leads', columns: { email: 'Work Email' }, title: 'Q3 list' })).toMatchObject(answer)
     const [url, init] = fetch.mock.calls[0] as unknown as [string, { method: string; body: string }]
     expect(url).toBe('https://lume.test/api/review-sets')
     expect(init.method).toBe('POST')

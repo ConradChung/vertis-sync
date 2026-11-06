@@ -32,6 +32,7 @@ import { failStaleRuns, insertAgentRun, updateAgentRun, type AgentRunPatch } fro
 import { buildTools, type ToolDeps } from '@/lib/agent/tools'
 import { WEB_TOOLS, logServerToolUses } from '@/lib/agent/webTools'
 import { STALE_RUN_MS, type ToolCallEntry } from '@/lib/agent/orbState'
+import { leadListLink } from '@/lib/leads/lists/link'
 import { logEvent } from '@/lib/db/service'
 import type { Json } from '@/lib/db/types'
 import { dbErrorResponse } from '@/lib/http/errors'
@@ -625,8 +626,10 @@ async function executeRun({
       const entry = toolCalls.find((c) => c.id === id)
       // Non-blocking SOP lint warnings on a filed sequence edit ride along to the tool log.
       const warnings = ok && Array.isArray(result?.sop_warnings) ? (result.sop_warnings as unknown[]).map(String).filter(Boolean) : []
-      if (entry) Object.assign(entry, { status: ok ? 'ok' : 'error', ms, ...(error ? { error } : {}), ...(warnings.length ? { warnings } : {}) })
-      send({ type: 'tool_end', id, name, tier, ok, ms, ...(error ? { error } : {}), ...(warnings.length ? { warnings } : {}) })
+      // A result naming a lead list puts an "Open in Leads" button under the message.
+      const link = ok ? leadListLink(result) : null
+      if (entry) Object.assign(entry, { status: ok ? 'ok' : 'error', ms, ...(error ? { error } : {}), ...(warnings.length ? { warnings } : {}), ...(link ? { link } : {}) })
+      send({ type: 'tool_end', id, name, tier, ok, ms, ...(error ? { error } : {}), ...(warnings.length ? { warnings } : {}), ...(link ? { link } : {}) })
       if (ok && result?.status === 'auto_approved' && typeof result.action_id === 'string' && result.action_id) {
         // Skip mode already ran it: show the card, but the run does not wait.
         if (entry) entry.action_id = result.action_id
@@ -807,6 +810,7 @@ async function executeRun({
     ...(c.ms !== undefined ? { ms: c.ms } : {}),
     ...(c.error ? { error: c.error } : {}),
     ...(c.warnings?.length ? { warnings: c.warnings } : {}),
+    ...(c.link ? { link: c.link } : {}),
   }))
   if (status === 'failed' && !reply.error && !reply.text) reply.error = outcome || 'The run failed.'
   return reply

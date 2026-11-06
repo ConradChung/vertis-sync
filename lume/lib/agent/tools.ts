@@ -330,6 +330,37 @@ function configured(body: unknown): ToolResult {
 }
 
 // ---------------------------------------------------------------------------
+// Lead lists
+
+const LIST_FIELDS = ['name', 'first_name', 'last_name', 'title', 'company', 'website', 'email', 'phone', 'linkedin_url', 'city', 'state', 'country'] as const
+const InlineLead = z.object(Object.fromEntries(LIST_FIELDS.map((f) => [f, z.string().max(500).optional()])) as Record<(typeof LIST_FIELDS)[number], z.ZodOptional<z.ZodString>>).strict()
+type AppendSourceBody = Record<string, unknown> & { kind: string }
+
+/** The lead_list ref every list tool returns (it also puts "Open in Leads" under the message). */
+const listRef = (r: Record<string, unknown>) => ({
+  list_id: r.list_id,
+  name: r.name,
+  ...(r.added !== undefined ? { added: r.added, duplicates: r.duplicates, skipped: r.skipped, over_cap: r.over_cap, item_count: r.item_count, line: r.line } : {}),
+})
+
+/**
+ * Leads produced in a project's chat go to the project's default list
+ * (created the first time, with dedupe). Outside a project: a hint to offer
+ * saving them. A failed auto-append is reported, never fails the tool.
+ */
+async function autoAppend(call: RouteCall, deps: ToolDeps, source: AppendSourceBody | null): Promise<Record<string, unknown>> {
+  if (!source) return {}
+  if (!deps.projectId) return { lead_list_hint: 'This chat is not in a project, so nothing was saved to a lead list. Offer to save these leads to one (create_lead_list, then append_to_lead_list).' }
+  try {
+    const r = (await call('/api/lead-lists/auto', { method: 'POST', body: { project_id: deps.projectId, conversation_id: deps.conversationId ?? null, source } })) as { appended: Record<string, unknown> | null }
+    if (!r.appended) return {}
+    return { lead_list: listRef(r.appended), lead_list_note: `Auto-saved to the project's lead list. Tell the owner in one line: "${String(r.appended.line)}".` }
+  } catch (err) {
+    return { lead_list_error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // The tools
 
 const SPECS: Built[] = [
@@ -544,15 +575,18 @@ const SPECS: Built[] = [
           title: z.string().max(200).optional(),
         })
         .strict(),
-      run: async ({ file_id, sheet, columns, title }, { call, deps }) =>
-        call('/api/review-sets', {
+      run: async ({ file_id, sheet, columns, title }, { call, deps }) => {
+        const r = (await call('/api/review-sets', {
           method: 'POST',
           body: {
             source: { kind: 'attachment', id: file_id.toLowerCase(), ...(sheet ? { sheet } : {}), ...(columns ? { columns } : {}) },
             conversation_id: deps.conversationId ?? null,
             ...(title ? { title } : {}),
           },
-        }) as Promise<ToolResult>,
+        })) as Record<string, unknown>
+        const setId = (r.set as { id?: string } | undefined)?.id
+        return { ...r, ...(await autoAppend(call, deps, setId ? { kind: 'review_set', set_id: setId } : null)) } as ToolResult
+      },
     },
     'low'
   ),
@@ -605,7 +639,9 @@ const SPECS: Built[] = [
         .refine((v) => [v.run_id, v.dataset_id, v.job_id].filter(Boolean).length === 1, 'exactly one of run_id, dataset_id, job_id'),
       run: async ({ run_id, dataset_id, job_id, title }, { call, deps }) => {
         const source = run_id ? { kind: 'run', id: run_id } : dataset_id ? { kind: 'dataset', id: dataset_id } : { kind: 'job', id: job_id!.toLowerCase() }
-        return call('/api/review-sets', { method: 'POST', body: { source, conversation_id: deps.conversationId ?? null, ...(title ? { title } : {}) } }) as Promise<ToolResult>
+        const r = (await call('/api/review-sets', { method: 'POST', body: { source, conversation_id: deps.conversationId ?? null, ...(title ? { title } : {}) } })) as Record<string, unknown>
+        const setId = (r.set as { id?: string } | undefined)?.id
+        return { ...r, ...(await autoAppend(call, deps, setId ? { kind: 'review_set', set_id: setId } : null)) } as ToolResult
       },
     },
     'low'
@@ -683,6 +719,145 @@ const SPECS: Built[] = [
           steps: APOLLO_STEPS,
           note: 'Give the owner the download link as a Markdown link and the steps. Lume does not send anything to Apollo.',
         }
+      },
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'list_lead_lists',
+      description:
+        'The persistent lead lists in Leads (under Import), by folder (folders are the chat projects; lists without one are Unfiled): each list with its id, row count, how many rows have an email, when it changed and whether it was sent to validation.',
+      inputSchema: z.object({}),
+      run: async (_input, { call }) => {
+        const { folders } = (await call('/api/lead-lists')) as { folders: { id: string | null; name: string; lists: Record<string, unknown>[] }[] }
+        return {
+          folders: folders.map((f) => ({
+            folder_id: f.id,
+            folder: f.name,
+            lists: f.lists.map((l) => ({ list_id: l.id, name: l.name, rows: l.item_count, with_email: l.email_count, updated_at: l.updated_at, project_default: l.project_default, sent_at: l.sent_at })),
+          })),
+        }
+      },
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'view_lead_list',
+      description:
+        'Show one lead list: a page of rows (idx is the row number; name, first/last name, title, company, website, email, phone, LinkedIn, city, state, country, source), with search `q`, sort by a field and page. Use it to preview a list for the owner; the chat shows an Open in Leads button.',
+      inputSchema: z.object({
+        list_id: uuid,
+        q: z.string().max(120).optional(),
+        sort: z.enum(['idx', ...LIST_FIELDS]).optional(),
+        dir: z.enum(['asc', 'desc']).optional(),
+        page: z.number().int().min(0).max(1000).optional(),
+        page_size: z.number().int().min(1).max(100).optional(),
+      }),
+      run: async ({ list_id, q, sort, dir, page, page_size }, { call }) => {
+        const id = list_id.toLowerCase()
+        const params = new URLSearchParams({ page: String(page ?? 0), page_size: String(page_size ?? 25), sort: sort ?? 'idx', dir: dir ?? 'asc' })
+        if (q) params.set('q', q)
+        const { list } = (await call(`/api/lead-lists/${id}`)) as { list: Record<string, unknown> }
+        const items = await call(`/api/lead-lists/${id}/items?${params}`)
+        return { list, page: items, lead_list: { list_id: id, name: list.name } } as ToolResult
+      },
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'create_lead_list',
+      description:
+        'Create a persistent, named lead list (a staging sheet before validation) that the owner sees and edits in Leads. Spends nothing. In a project chat it is filed in that project (pass project_id: null for Unfiled). ' +
+        'Collect leads into a list as you go with append_to_lead_list; the owner validates when ready (send_lead_list_to_validation).',
+      inputSchema: z.object({ name: z.string().min(1).max(200), notes: z.string().max(2000).optional(), project_id: uuid.nullable().optional().describe('folder; default this chat’s project') }),
+      run: async ({ name, notes, project_id }, { call, deps }) => {
+        const r = (await call('/api/lead-lists', {
+          method: 'POST',
+          body: { name, ...(notes ? { notes } : {}), project_id: project_id === undefined ? (deps.projectId ?? null) : project_id ? project_id.toLowerCase() : null },
+        })) as { list: Record<string, unknown> }
+        return { ...r, lead_list: { list_id: r.list.id, name: r.list.name } } as ToolResult
+      },
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'append_to_lead_list',
+      description:
+        'Add leads to a lead list, with dedupe (same email, else same LinkedIn, else same name + company/domain). source: attachment (file_id, sheet?, columns?: a sheet attached in this chat), review_set (set_id: its kept rows), actor_run (run_id or dataset_id), influencer_export (export_id from export_influencer_csv), or inline (rows: up to 200 leads you give, field → value). ' +
+        "Without list_id, in a project chat the rows go to the project's own list. Returns added / duplicates / skipped and a one-line report: quote it. Spends nothing.",
+      inputSchema: z
+        .object({
+          list_id: uuid.optional(),
+          source: z.enum(['attachment', 'review_set', 'actor_run', 'influencer_export', 'inline']),
+          file_id: uuid.optional(),
+          sheet: z.string().min(1).max(200).optional(),
+          columns: z
+            .object(Object.fromEntries(LEAD_FIELDS.map((f) => [f, z.string().min(1).max(200).optional()])) as Record<(typeof LEAD_FIELDS)[number], z.ZodOptional<z.ZodString>>)
+            .strict()
+            .optional(),
+          set_id: uuid.optional(),
+          run_id: z.string().regex(/^[A-Za-z0-9]{8,40}$/).optional(),
+          dataset_id: z.string().regex(/^[A-Za-z0-9]{8,40}$/).optional(),
+          export_id: uuid.optional(),
+          rows: z.array(InlineLead).min(1).max(200).optional(),
+        })
+        .refine(
+          (v) =>
+            v.source === 'attachment' ? !!v.file_id : v.source === 'review_set' ? !!v.set_id : v.source === 'actor_run' ? !!v.run_id !== !!v.dataset_id : v.source === 'influencer_export' ? !!v.export_id : !!v.rows?.length,
+          'the field the source needs: file_id, set_id, run_id or dataset_id, export_id, or rows'
+        ),
+      run: async (v, { call, deps }) => {
+        const source: AppendSourceBody =
+          v.source === 'attachment'
+            ? { kind: 'attachment', file_id: v.file_id!.toLowerCase(), ...(v.sheet ? { sheet: v.sheet } : {}), ...(v.columns ? { columns: v.columns } : {}) }
+            : v.source === 'review_set'
+              ? { kind: 'review_set', set_id: v.set_id!.toLowerCase() }
+              : v.source === 'actor_run'
+                ? { kind: 'actor_run', ...(v.run_id ? { run_id: v.run_id } : { dataset_id: v.dataset_id }) }
+                : v.source === 'influencer_export'
+                  ? { kind: 'influencer_export', export_id: v.export_id!.toLowerCase() }
+                  : { kind: 'inline', rows: v.rows }
+        if (!v.list_id) {
+          if (!deps.projectId) throw new Error('list_id is required outside a project chat: create_lead_list first, or pass the list_id of an existing list (list_lead_lists).')
+          const r = (await call('/api/lead-lists/auto', { method: 'POST', body: { project_id: deps.projectId, conversation_id: deps.conversationId ?? null, source } })) as { appended: Record<string, unknown> | null }
+          if (!r.appended) throw new Error('This chat’s project no longer exists; pass a list_id.')
+          return { ...r.appended, lead_list: listRef(r.appended) } as ToolResult
+        }
+        const r = (await call(`/api/lead-lists/${v.list_id.toLowerCase()}/items`, { method: 'POST', body: { source, conversation_id: deps.conversationId ?? null } })) as Record<string, unknown>
+        return { ...r, lead_list: listRef(r) } as ToolResult
+      },
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'remove_from_lead_list',
+      description: 'Remove rows from a lead list, ONLY when the owner asked: by row numbers (idxs), rows missing a field (missing: email, linkedin, phone, website), or rows matching a search (q). Returns how many went. Cannot be undone.',
+      inputSchema: z
+        .object({ list_id: uuid, idxs: z.array(z.number().int().min(0)).max(5000).optional(), missing: z.array(z.enum(['email', 'linkedin', 'phone', 'website'])).max(4).optional(), q: z.string().min(2).max(120).optional() })
+        .refine((v) => !!v.idxs?.length || !!v.missing?.length || !!v.q, 'idxs, missing or q'),
+      run: async ({ list_id, ...what }, { call }) => {
+        const r = (await call(`/api/lead-lists/${list_id.toLowerCase()}/items`, { method: 'DELETE', body: what })) as Record<string, unknown>
+        return { ...r, lead_list: { list_id: list_id.toLowerCase() } } as ToolResult
+      },
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'rename_lead_list',
+      description: 'Rename a lead list, change its notes, or move it to another folder (project_id; null = Unfiled).',
+      inputSchema: z
+        .object({ list_id: uuid, name: z.string().min(1).max(200).optional(), notes: z.string().max(2000).nullable().optional(), project_id: uuid.nullable().optional() })
+        .refine((v) => v.name !== undefined || v.notes !== undefined || v.project_id !== undefined, 'name, notes or project_id'),
+      run: async ({ list_id, project_id, ...rest }, { call }) => {
+        const body = { ...rest, ...(project_id !== undefined ? { project_id: project_id ? project_id.toLowerCase() : null } : {}) }
+        const r = (await call(`/api/lead-lists/${list_id.toLowerCase()}`, { method: 'PATCH', body })) as { list: Record<string, unknown> }
+        return { ...r, lead_list: { list_id: r.list.id, name: r.list.name } } as ToolResult
       },
     },
     'low'
@@ -1095,6 +1270,25 @@ const SPECS: Built[] = [
   ),
   tiered(
     {
+      name: 'send_lead_list_to_validation',
+      description:
+        "Send a lead list to validation through the Import CSV path: its rows that have an email become a CSV import waiting at the usual Approve / Approve + Enrich / Deny ingest gate (nothing is validated or spent before that gate). Refused when no row has an email. Only when the owner asked to validate the list.",
+      inputSchema: z.object({ list_id: uuid }).strict(),
+      payload: ({ list_id }) => ({ list_id: list_id.toLowerCase() }),
+    },
+    'high'
+  ),
+  tiered(
+    {
+      name: 'delete_lead_list',
+      description: 'Delete a lead list and all its rows (cannot be undone). Only when the owner asked.',
+      inputSchema: z.object({ list_id: uuid }).strict(),
+      payload: ({ list_id }) => ({ list_id: list_id.toLowerCase() }),
+    },
+    'high'
+  ),
+  tiered(
+    {
       name: 'run_apify_actor',
       description:
         'Propose an Apify actor run to source leads. Only after get_actor_input_schema AND the owner has answered with the inputs in this chat: ' +
@@ -1418,7 +1612,7 @@ const SPECS: Built[] = [
         door_count_column: z.boolean().optional(),
         reacted_to_column: z.boolean().optional(),
       }),
-      run: async (input, { call }) => {
+      run: async (input, { call, deps }) => {
         const body = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined))
         if (typeof body.run_id === 'string') body.run_id = body.run_id.toLowerCase()
         let r: Record<string, unknown>
@@ -1433,6 +1627,7 @@ const SPECS: Built[] = [
         return {
           status: 'ready',
           ...r,
+          ...(await autoAppend(call, deps, typeof r.export_id === 'string' ? { kind: 'influencer_export', export_id: r.export_id } : null)),
           steps: r.steps ?? APOLLO_IMPORT_STEPS,
           note:
             'Give Conrad the download link as a Markdown link and the Apollo steps. When he pastes the Apollo people-search URL back, ' +

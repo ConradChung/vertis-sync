@@ -55,6 +55,8 @@ describe('buildTools', () => {
       start_influencer_run: { slugs: ['peter-lohmann'], estimate_shown_to_owner: true },
       approve_reactions: { run_id: JOB },
       stage_attachment_for_validation: { file_id: JOB, sheet: 'Leads' },
+      send_lead_list_to_validation: { list_id: JOB },
+      delete_lead_list: { list_id: JOB },
       lookup_influencer_candidates: { batch_id: JOB },
       approve_influencer_candidates: { ids: [JOB] },
     }

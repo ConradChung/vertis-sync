@@ -239,3 +239,15 @@ describe('send result', () => {
     expect(r).toBe(false)
   })
 })
+
+describe('applyAgentEvent: Open in Leads links', () => {
+  it('tool_end carries a lead-list link onto the tool entry; any other href is dropped', () => {
+    const base: ChatMessage = { id: 'm', role: 'assistant', text: '', tools: [], approvals: [] }
+    let m = applyAgentEvent(base, { type: 'tool_start', id: 't1', name: 'append_to_lead_list', tier: 'low' })
+    m = applyAgentEvent(m, { type: 'tool_end', id: 't1', name: 'append_to_lead_list', tier: 'low', ok: true, ms: 3, link: { label: 'Open in Leads', href: '/import/leads?list=abc' } })
+    expect(m.tools[0].link).toEqual({ label: 'Open in Leads', href: '/import/leads?list=abc' })
+    m = applyAgentEvent(m, { type: 'tool_start', id: 't2', name: 'x', tier: 'low' })
+    m = applyAgentEvent(m, { type: 'tool_end', id: 't2', name: 'x', tier: 'low', ok: true, ms: 3, link: { label: 'Open', href: 'https://evil.example' } })
+    expect(m.tools[1].link).toBeUndefined()
+  })
+})

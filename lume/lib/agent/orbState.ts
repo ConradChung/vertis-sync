@@ -34,6 +34,8 @@ export interface ToolCallEntry {
   error?: string
   /** Non-blocking notes on the call's result (e.g. SOP lint warnings), one per line. */
   warnings?: string[]
+  /** A deep link the chat shows as a button under the message (a lead list: Open in Leads). */
+  link?: { label: string; href: string }
   action_id?: string
 }
 

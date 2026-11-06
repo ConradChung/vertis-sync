@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { ArrowUp, BookMarked, Brain, PanelRight, ChevronRight, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, ShieldCheck, ShieldOff, ShieldX, SquarePen, Wrench } from 'lucide-react'
+import { ArrowUp, BookMarked, Brain, PanelRight, ChevronRight, Table2, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, ShieldCheck, ShieldOff, ShieldX, SquarePen, Wrench } from 'lucide-react'
 import { AgentHistory, useConversationList, useMoveChat } from '@/components/agent/AgentHistory'
 import { ProjectChip } from '@/components/agent/ProjectChip'
 import { useProjectList } from '@/hooks/useProjectList'
@@ -22,12 +22,14 @@ import { htmlLinksToMarkdown } from '@/lib/agent/linkify'
 import { MESSAGE_MAX } from '@/lib/agent/chat'
 import { ToolLog, type ToolLogEntry } from '@/components/orb/ToolLog'
 import { useSpeechRecognition, VoiceInput } from '@/components/orb/VoiceInput'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAgentChat, type ChatMessage, type SkillRef } from '@/hooks/useAgentChat'
 import type { Skill, SkillMode } from '@/lib/agent/skillModel'
 import { cn } from '@/lib/utils'
+import Link from 'next/link'
+import { uniqueLinks } from '@/lib/leads/lists/link'
 
 /** What "Save this chat as a skill" sends: the agent drafts it and waits for the owner's OK. */
 export const SAVE_SKILL_PROMPT =
@@ -816,6 +818,7 @@ function Message({
   return (
     <div className="flex min-w-0 flex-col gap-3">
       {m.tools.length > 0 && <ToolChips tools={m.tools} live={!!m.streaming} />}
+      <ToolLinks tools={m.tools} />
       {m.text && <Markdown text={htmlLinksToMarkdown(m.text)} flow={onViewFlow ? { onView: onViewFlow, active: activeFlow } : undefined} />}
       <ApprovalCard approvals={m.approvals} onDecided={onDecided} />
       {m.notConfigured ? (
@@ -849,6 +852,21 @@ function AutoTurn({ text }: { text: string }) {
       <Icon className="mt-px size-3.5 shrink-0" />
       <span className="min-w-0">{text.replace(/^\[approval\]\s*/, '')}</span>
     </p>
+  )
+}
+
+/** "Open in Leads" for each lead list this message's tools created, showed or appended to. */
+function ToolLinks({ tools }: { tools: ToolLogEntry[] }) {
+  const links = uniqueLinks(tools)
+  if (!links.length) return null
+  return (
+    <div className="flex flex-wrap gap-2">
+      {links.map((l) => (
+        <Link key={l.href} href={l.href} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'w-fit')}>
+          <Table2 className="size-3.5" /> {l.label}
+        </Link>
+      ))}
+    </div>
   )
 }
 
