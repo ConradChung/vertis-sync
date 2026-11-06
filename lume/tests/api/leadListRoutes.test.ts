@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextResponse } from 'next/server'
 import { memdb } from '../stubs/memdb'
 
-let db = memdb({ lead_review_items: ['set_id', 'idx'] })
+const SEARCH = { lead_review_items: (r: Record<string, unknown>) => ({ search_text: ['name', 'first_name', 'last_name', 'company', 'email', 'title', 'city', 'domain'].map((k) => ((r.item as Record<string, unknown> | undefined)?.[k] as string) ?? '').join(' ').toLowerCase() }) }
+
+let db = memdb({ lead_review_items: ['set_id', 'idx'] }, SEARCH)
 const h = vi.hoisted(() => ({ via: 'session' as 'session' | 'internal', getProject: vi.fn(), listProjects: vi.fn(), createIngest: vi.fn() }))
 vi.mock('server-only', () => ({}))
 vi.mock('@/lib/supabase/service', () => ({ createServiceClient: () => db.client }))
@@ -39,7 +41,7 @@ async function newList(name = 'PM owners', body: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  db = memdb({ lead_review_items: ['set_id', 'idx'] })
+  db = memdb({ lead_review_items: ['set_id', 'idx'] }, SEARCH)
   // The claim RPC, as the SQL does it: stamp sent_at only when never sent or changed since.
   db.rpcs.lume_claim_lead_list_send = ({ p_list }) => {
     const set = db.table('lead_review_sets').find((r) => r.id === p_list && r.kind === 'list')

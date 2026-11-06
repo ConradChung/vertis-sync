@@ -314,25 +314,31 @@ export type SortField = string
 const SORTABLE = /^[A-Za-z0-9_]{1,80}$/
 export const isSortable = (column: string) => SORTABLE.test(column)
 
-const SEARCH_FIELDS = ['name', 'first_name', 'last_name', 'company', 'email', 'title', 'city', 'domain']
+/** The generated, trigram-indexed search_text (lume_lead_items_search): name, first / last name, company, email, title, city, domain. */
 const asRow = (r: { idx: number; item: ListItem; cells: Cells | null; source: ItemSource | null }): ListRow => ({ ...r, cells: r.cells ?? labelCells(r.item) })
 
-/** One page of rows; `q` searches name, company, email, title, city; sort by a column or the row order. */
+/**
+ * One page of rows (a range on the (set_id, idx) index); `q` searches the
+ * indexed search_text. Without a search, `knownTotal` (the list's cached
+ * item_count) stands in for an exact count on every page.
+ */
 export async function pageItems(
   listId: string,
-  opts: { page?: number; pageSize?: number; q?: string; sort?: SortField; dir?: 'asc' | 'desc' } = {}
+  opts: { page?: number; pageSize?: number; q?: string; sort?: SortField; dir?: 'asc' | 'desc'; knownTotal?: number } = {}
 ): Promise<{ rows: ListRow[]; total: number }> {
   const page = Math.max(0, opts.page ?? 0)
   const size = Math.min(500, Math.max(1, opts.pageSize ?? 50))
-  let q = items().select('idx,item,cells,source', { count: 'exact' }).eq('set_id', listId)
+  const searching = !!opts.q?.trim()
+  const useKnown = !searching && opts.knownTotal !== undefined
+  let q = items().select('idx,item,cells,source', useKnown ? undefined : { count: 'exact' }).eq('set_id', listId)
   const term = opts.q?.trim().replace(/[%,()*\\]/g, ' ').trim()
-  if (term) q = q.or(SEARCH_FIELDS.map((f) => `item->>${f}.ilike.%${term}%`).join(','))
+  if (term) q = q.ilike('search_text', `%${term.toLowerCase()}%`)
   const sort = opts.sort && opts.sort !== 'idx' && isSortable(opts.sort) ? `cells->>${opts.sort}` : 'idx'
   q = q.order(sort, { ascending: opts.dir !== 'desc' })
   if (sort !== 'idx') q = q.order('idx', { ascending: true })
   const { data, error, count } = await q.range(page * size, page * size + size - 1)
   if (error) throw error
-  return { rows: ((data ?? []) as unknown as Parameters<typeof asRow>[0][]).map(asRow), total: count ?? 0 }
+  return { rows: ((data ?? []) as unknown as Parameters<typeof asRow>[0][]).map(asRow), total: useKnown ? opts.knownTotal! : (count ?? 0) }
 }
 
 /** Edit one cell; a helper field that showed the old value follows it, and so do the dedupe keys and the email count. null when the row is not there. */
@@ -390,7 +396,7 @@ export async function countWhere(listId: string, f: { missing?: (typeof MISSING)
     const { count, error } = await items()
       .select('id', { count: 'exact', head: true })
       .eq('set_id', listId)
-      .or(SEARCH_FIELDS.map((x) => `item->>${x}.ilike.%${term}%`).join(','))
+      .ilike('search_text', `%${term.toLowerCase()}%`)
     if (error) throw error
     n += count ?? 0
   }
@@ -411,7 +417,7 @@ export async function removeWhere(listId: string, f: { missing?: (typeof MISSING
     const { data, error } = await items()
       .delete()
       .eq('set_id', listId)
-      .or(['name', 'first_name', 'last_name', 'company', 'email', 'title', 'city', 'domain'].map((x) => `item->>${x}.ilike.%${term}%`).join(','))
+      .ilike('search_text', `%${term.toLowerCase()}%`)
       .select('idx')
     if (error) throw error
     removed += (data ?? []).length

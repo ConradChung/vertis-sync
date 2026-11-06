@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import useSWR from 'swr'
+import useSWR, { preload } from 'swr'
 import { toast } from 'sonner'
-import { ArrowDown, ArrowUp, ClipboardPaste, Download, FolderPlus, ListPlus, Pencil, Plus, Send, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, ClipboardPaste, Download, FolderPlus, ListPlus, Pencil, Plus, Send, Trash2 } from 'lucide-react'
 import { fetchJson } from '@/hooks/fetcher'
 import { relTime } from '@/components/campaigns/CampaignTable'
 import { GlassCard } from '@/components/ui/glass-card'
@@ -54,7 +54,7 @@ interface Page {
   total: number
 }
 
-const PAGE_SIZE = 50
+const PAGE_SIZE = 100
 /** Columns the server can sort by (plain names; see lib/leads/lists/store.ts isSortable). */
 const SORTABLE = /^[A-Za-z0-9_]{1,80}$/
 const fmt = new Intl.NumberFormat('en-US')
@@ -119,7 +119,14 @@ export function LeadsScreen() {
       </GlassCard>
 
       {selected ? (
-        <ListPanel key={selected.id} list={selected} folders={folders} onChanged={refresh} onDeleted={() => {
+        <ListPanel
+          key={selected.id}
+          list={selected}
+          folders={folders}
+          page={Math.max(0, (Number(params.get('page')) || 1) - 1)}
+          onPage={(p) => router.replace(`${pathname}?list=${selected.id}${p > 0 ? `&page=${p + 1}` : '&page=1'}`, { scroll: false })}
+          onChanged={refresh}
+          onDeleted={() => {
             refresh()
             router.replace(pathname, { scroll: false })
           }} />
@@ -240,8 +247,23 @@ function IconAction({ label, onClick, icon: Icon }: { label: string; onClick: ()
   )
 }
 
-function ListPanel({ list, folders, onChanged, onDeleted }: { list: LeadListRow; folders: Folder[]; onChanged: () => void; onDeleted: () => void }) {
-  const [page, setPage] = useState(0)
+function ListPanel({
+  list,
+  folders,
+  page,
+  onPage,
+  onChanged,
+  onDeleted,
+}: {
+  list: LeadListRow
+  folders: Folder[]
+  /** 0-based; the URL carries it 1-based (`?page=2`) so deep links and refreshes land on it. */
+  page: number
+  onPage: (page: number) => void
+  onChanged: () => void
+  onDeleted: () => void
+}) {
+  const setPage = (p: number) => onPage(Math.max(0, p))
   const [q, setQ] = useState('')
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'idx', dir: 'asc' })
@@ -251,16 +273,29 @@ function ListPanel({ list, folders, onChanged, onDeleted }: { list: LeadListRow;
   const [picked, setPicked] = useState<Set<number>>(new Set())
   const [dialog, setDialog] = useState<null | 'send' | 'delete' | 'rows' | 'paste' | 'add' | 'rename'>(null)
   useEffect(() => {
-    const t = setTimeout(() => (setQuery(q.trim()), setPage(0)), 250)
+    const t = setTimeout(() => {
+      const next = q.trim()
+      if (next === query) return
+      setQuery(next)
+      if (page !== 0) onPage(0)
+    }, 300)
     return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the typed text restarts the debounce
   }, [q])
-  const key = `/api/lead-lists/${list.id}/items?${new URLSearchParams({ page: String(page), page_size: String(PAGE_SIZE), sort: sort.field, dir: sort.dir, ...(query ? { q: query } : {}) })}`
+  const keyFor = (p: number) => `/api/lead-lists/${list.id}/items?${new URLSearchParams({ page: String(p), page_size: String(PAGE_SIZE), sort: sort.field, dir: sort.dir, ...(query ? { q: query } : {}) })}`
+  const key = keyFor(page)
   const rows = useSWR<Page>(key, fetchJson, { keepPreviousData: true })
+  const total = rows.data?.total ?? 0
+  // ▶ should feel instant: fetch the next page in the background.
+  useEffect(() => {
+    if ((page + 1) * PAGE_SIZE < total) void preload(keyFor(page + 1), fetchJson)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyFor is derived from these
+  }, [page, total, query, sort.field, sort.dir, list.id])
   const reload = () => {
     void rows.mutate()
     onChanged()
   }
-  const pages = Math.max(1, Math.ceil((rows.data?.total ?? 0) / PAGE_SIZE))
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const toggleSort = (field: string) => setSort((s) => (s.field === field ? { field, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { field, dir: 'asc' }))
   const folderOptions = folders.map((f) => ({ value: f.id ?? '', label: f.name }))
 
@@ -337,7 +372,19 @@ function ListPanel({ list, folders, onChanged, onDeleted }: { list: LeadListRow;
         </Button>
       </div>
 
-      <div className="overflow-x-auto">
+      <Pager page={page} pages={pages} total={total} onPage={setPage} />
+      <div
+        className="overflow-x-auto outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        role="region"
+        aria-label={`${list.name} table`}
+        tabIndex={0}
+        onKeyDown={(e) => {
+          // ← / → page while the table has focus, never while a cell is being edited.
+          if ((e.target as HTMLElement).tagName === 'INPUT') return
+          if (e.key === 'ArrowLeft' && page > 0) setPage(page - 1)
+          if (e.key === 'ArrowRight' && page + 1 < pages) setPage(page + 1)
+        }}
+      >
         <Table aria-label={`${list.name} rows`} className="min-w-max text-[12.5px]">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
@@ -390,21 +437,7 @@ function ListPanel({ list, folders, onChanged, onDeleted }: { list: LeadListRow;
         {rows.data && !rows.data.rows?.length && <p className="px-4 py-6 text-center text-[12.5px] text-fg-46">{query ? 'No row matches.' : 'This list is empty. Add or paste rows, or ask the agent to fill it.'}</p>}
       </div>
 
-      <footer className="flex items-center justify-between gap-2 border-t border-line px-4 py-2.5 text-[12px] text-fg-46">
-        <span>
-          {fmt.format(rows.data?.total ?? 0)} row{rows.data?.total === 1 ? '' : 's'}
-          {query && ' match'}
-        </span>
-        <span className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-            Previous
-          </Button>
-          {page + 1} / {pages}
-          <Button variant="ghost" size="sm" disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)}>
-            Next
-          </Button>
-        </span>
-      </footer>
+      <Pager page={page} pages={pages} total={total} onPage={setPage} bottom />
 
       <Confirm
         open={dialog === 'send'}
@@ -456,6 +489,28 @@ function ListPanel({ list, folders, onChanged, onDeleted }: { list: LeadListRow;
       <PasteDialog open={dialog === 'paste'} onClose={() => setDialog(null)} onAppend={async (text) => appendReport(await api(`/api/lead-lists/${list.id}/items`, 'POST', { source: { kind: 'paste', text } }), reload)} />
       <AddRowDialog open={dialog === 'add'} onClose={() => setDialog(null)} onAdd={async (row) => appendReport(await api(`/api/lead-lists/${list.id}/items`, 'POST', { source: { kind: 'inline', rows: [row] } }), reload)} />
     </GlassCard>
+  )
+}
+
+/** "Rows 101–200 of 4,312 · page 2 of 44" with first / previous / next / last (disabled at the ends). */
+function Pager({ page, pages, total, onPage, bottom }: { page: number; pages: number; total: number; onPage: (p: number) => void; bottom?: boolean }) {
+  const from = total ? page * PAGE_SIZE + 1 : 0
+  const to = Math.min(total, (page + 1) * PAGE_SIZE)
+  const btn = (label: string, Icon: typeof ChevronLeft, target: number, disabled: boolean) => (
+    <Button variant="ghost" size="icon-sm" aria-label={label} title={label} disabled={disabled} onClick={() => onPage(target)}>
+      <Icon className="size-4" />
+    </Button>
+  )
+  return (
+    <div className={cn('flex items-center justify-between gap-2 px-4 py-2 text-[12px] text-fg-46', bottom ? 'border-t border-line' : 'border-b border-line')}>
+      <span>{total ? `Rows ${fmt.format(from)}–${fmt.format(to)} of ${fmt.format(total)} · page ${fmt.format(page + 1)} of ${fmt.format(pages)}` : 'No rows'}</span>
+      <span className="flex items-center gap-0.5">
+        {btn('First page', ChevronFirst, 0, page === 0)}
+        {btn('Previous page', ChevronLeft, page - 1, page === 0)}
+        {btn('Next page', ChevronRight, page + 1, page + 1 >= pages)}
+        {btn('Last page', ChevronLast, pages - 1, page + 1 >= pages)}
+      </span>
+    </div>
   )
 }
 

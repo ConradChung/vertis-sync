@@ -29,10 +29,11 @@ export async function GET(req: Request, ctx: ListCtx) {
     if (!r.ok) return r.response
     const sp = new URL(req.url).searchParams
     const page = Math.max(0, Number(sp.get('page')) || 0)
-    const pageSize = Math.min(200, Math.max(1, Number(sp.get('page_size')) || 50))
+    const pageSize = Math.min(200, Math.max(1, Number(sp.get('page_size')) || 100))
     const raw = sp.get('sort') ?? 'idx'
     const sort = raw === 'idx' || isSortable(raw) ? raw : 'idx'
-    const out = await pageItems(r.list.id, { page, pageSize, q: sp.get('q') ?? undefined, sort, dir: sp.get('dir') === 'desc' ? 'desc' : 'asc' })
+    // The list's cached row count stands in for an exact count when there is no search.
+    const out = await pageItems(r.list.id, { page, pageSize, q: sp.get('q') ?? undefined, sort, dir: sp.get('dir') === 'desc' ? 'desc' : 'asc', knownTotal: r.list.item_count })
     return NextResponse.json({ ...out, page, page_size: pageSize })
   } catch (err) {
     return dbErrorResponse(err, 'api/lead-lists/[id]/items')

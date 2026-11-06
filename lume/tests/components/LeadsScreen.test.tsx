@@ -12,6 +12,7 @@ import { LeadsScreen } from '@/components/leads/LeadsScreen'
 const P = '33333333-3333-4333-8333-333333333333'
 const L1 = '11111111-1111-4111-8111-111111111111'
 const L2 = '22222222-2222-4222-8222-222222222222'
+const L3 = '44444444-4444-4444-8444-444444444444'
 const list = (id: string, name: string, o: Record<string, unknown> = {}) => ({
   id, name, notes: null, created_by: 'agent', project_id: null, project_default: false, item_count: 120, email_count: 80,
   sent_ingest_id: null, sent_at: null, sent_rows: null, sent_job_id: null, columns: ['title', 'author.name', 'email'], created_at: '2026-11-05T00:00:00Z', updated_at: new Date().toISOString(), ...o,
@@ -24,6 +25,10 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (url === '/api/lead-lists') return Response.json({ folders })
   if (url.startsWith(`/api/lead-lists/${L1}/items?`)) {
     return Response.json({ rows: [{ idx: 0, item: { name: 'Acme', email: 'jane@acme.co' }, cells: { title: 'Acme', 'author.name': 'Jane', email: 'jane@acme.co' }, source: 'actor_run' }, { idx: 1, item: { name: 'Beta', email: null }, cells: { title: 'Beta' }, source: 'actor_run' }], total: 2, page: 0, page_size: 50 })
+  }
+  if (url.startsWith(`/api/lead-lists/${L3}/items?`)) {
+    const page = Number(new URLSearchParams(url.split('?')[1]).get('page'))
+    return Response.json({ rows: [{ idx: page * 100, item: {}, cells: { title: `Row ${page * 100 + 1}` }, source: 'actor_run' }], total: 4312, page, page_size: 100 })
   }
   if (url.startsWith(`/api/lead-lists/${L2}/items?`)) return Response.json({ rows: [], total: 0, page: 0, page_size: 50 })
   if (url === `/api/lead-lists/${L1}/items/1` && method === 'PATCH') return Response.json({ row: { idx: 1, item: { name: 'Beta', email: 'b@beta.co' } } })
@@ -99,5 +104,38 @@ describe('LeadsScreen', () => {
     expect((send as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText('No row has an email yet')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Export CSV' }).getAttribute('href')).toBe(`/api/lead-lists/${L2}/export`)
+  })
+
+  it('pages 100 at a time with a clear pager (both ends disabled), the page in the URL, arrow keys, and the next page prefetched', async () => {
+    folders = [{ id: null, name: 'Unfiled', lists: [list(L3, 'Big', { item_count: 4312, email_count: 4000 })] }]
+    nav.params = new URLSearchParams(`list=${L3}&page=2`)
+    fresh()
+    const table = await screen.findByRole('table', { name: 'Big rows' })
+    expect(await within(table).findByText('Row 101')).toBeTruthy()
+    expect(screen.getAllByText('Rows 101–200 of 4,312 · page 2 of 44')).toHaveLength(2) // above and below
+    const itemCalls = () => calls.filter((c) => c.url.startsWith(`/api/lead-lists/${L3}/items?`)).map((c) => new URLSearchParams(c.url.split('?')[1]))
+    await waitFor(() => expect(itemCalls().some((p) => p.get('page') === '2')).toBe(true)) // the next page (0-based 2 = page 3) prefetched
+    expect(itemCalls().every((p) => p.get('page_size') === '100')).toBe(true)
+    fireEvent.click(screen.getAllByRole('button', { name: 'Next page' })[0])
+    expect(nav.replace).toHaveBeenLastCalledWith(`/import/leads?list=${L3}&page=3`, { scroll: false })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Last page' })[0])
+    expect(nav.replace).toHaveBeenLastCalledWith(`/import/leads?list=${L3}&page=44`, { scroll: false })
+    fireEvent.keyDown(screen.getByRole('region', { name: 'Big table' }), { key: 'ArrowLeft' })
+    expect(nav.replace).toHaveBeenLastCalledWith(`/import/leads?list=${L3}&page=1`, { scroll: false })
+    // While a cell is being edited the arrows move the caret, not the page.
+    fireEvent.click(within(table).getByRole('button', { name: 'Edit title, row 101' }))
+    nav.replace.mockClear()
+    fireEvent.keyDown(within(table).getByRole('textbox', { name: 'title, row 101' }), { key: 'ArrowRight' })
+    expect(nav.replace).not.toHaveBeenCalled()
+  })
+
+  it('the first page disables First / Previous', async () => {
+    folders = [{ id: null, name: 'Unfiled', lists: [list(L3, 'Big', { item_count: 4312 })] }]
+    nav.params = new URLSearchParams(`list=${L3}`)
+    fresh()
+    await screen.findByText('Rows 1–100 of 4,312 · page 1 of 44', undefined, { timeout: 3000 }).catch(() => null)
+    const first = (await screen.findAllByRole('button', { name: 'First page' }))[0] as HTMLButtonElement
+    expect(first.disabled).toBe(true)
+    expect((screen.getAllByRole('button', { name: 'Previous page' })[0] as HTMLButtonElement).disabled).toBe(true)
   })
 })

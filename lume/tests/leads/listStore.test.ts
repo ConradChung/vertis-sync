@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { memdb } from '../stubs/memdb'
 
-let db = memdb({ lead_review_items: ['set_id', 'idx'] })
+const SEARCH = { lead_review_items: (r: Record<string, unknown>) => ({ search_text: ['name', 'first_name', 'last_name', 'company', 'email', 'title', 'city', 'domain'].map((k) => ((r.item as Record<string, unknown> | undefined)?.[k] as string) ?? '').join(' ').toLowerCase() }) }
+
+let db = memdb({ lead_review_items: ['set_id', 'idx'] }, SEARCH)
 vi.mock('@/lib/supabase/service', () => ({ createServiceClient: () => db.client }))
 
 import {
@@ -32,7 +34,7 @@ const row = (o: Partial<ListItem>, source: 'agent' | 'manual' = 'agent') => ({
 })
 
 beforeEach(() => {
-  db = memdb({ lead_review_items: ['set_id', 'idx'] })
+  db = memdb({ lead_review_items: ['set_id', 'idx'] }, SEARCH)
 })
 
 describe('lead list store', () => {
@@ -172,5 +174,35 @@ describe('lead list store: review fixes', () => {
     db.rpcs.lume_claim_lead_list_send = () => (claims++ === 0 ? [{ prev_sent_at: null, content_changed_at: 'x' }] : [])
     expect(await claimSend(list.id)).toEqual({ claimed: true, prev_sent_at: null })
     expect(await claimSend(list.id)).toEqual({ claimed: false, prev_sent_at: null })
+  })
+})
+
+describe('lead list store: scale', () => {
+  it('20k rows: page 150 is the right slice, read as one ranged query; without a search the cached count is used (no count per page)', async () => {
+    const list = await createList({ name: 'Big', created_by: 'owner' })
+    const its = db.table('lead_review_items')
+    for (let i = 0; i < 20_000; i++) its.push({ id: i + 1, set_id: list.id, idx: i, item: { name: `Lead ${i}`, email: `l${i}@x.co` }, cells: { name: `Lead ${i}` }, source: 'manual', search_text: `lead ${i} l${i}@x.co` })
+    const realFrom = db.client.from
+    const ops: string[] = []
+    db.client.from = ((t: string) => {
+      const b = realFrom(t) as Record<string, (...a: unknown[]) => unknown>
+      const wrap = (name: string) => {
+        const f = b[name]
+        b[name] = (...a: unknown[]) => (ops.push(name + (name === 'select' && a[1] ? ':count' : '')), f(...a))
+      }
+      ;['select', 'range'].forEach(wrap)
+      return b
+    }) as typeof db.client.from
+    const page = await pageItems(list.id, { page: 150, pageSize: 100, knownTotal: 20_000 })
+    expect(page.total).toBe(20_000)
+    expect(page.rows).toHaveLength(100)
+    expect([page.rows[0].idx, page.rows[99].idx]).toEqual([15_000, 15_099])
+    expect(ops).toEqual(['select', 'range'])
+    // A search counts its matches (on the indexed search_text) and still reads one page.
+    ops.length = 0
+    const hit = await pageItems(list.id, { q: 'l19999@', pageSize: 100, knownTotal: 20_000 })
+    expect([hit.total, hit.rows[0]?.idx]).toEqual([1, 19_999])
+    expect(ops).toEqual(['select:count', 'range'])
+    db.client.from = realFrom
   })
 })

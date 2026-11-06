@@ -19,7 +19,8 @@ const at = (r: Row, c: string): unknown => {
 }
 const likeRe = (pat: string) => new RegExp(`^${pat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*')}$`, 'is')
 
-export function memdb(uniques: Record<string, string[]>) {
+/** `generated[table](row)`: columns Postgres would compute (GENERATED ALWAYS), applied on insert and update. */
+export function memdb(uniques: Record<string, string[]>, generated: Record<string, (row: Row) => Row> = {}) {
   const tables: Record<string, Row[]> = {}
   let nextId = 1
   const table = (t: string) => (tables[t] ??= [])
@@ -43,7 +44,7 @@ export function memdb(uniques: Record<string, string[]>) {
       if (op === 'select') out = rows.filter((r) => filters.every((f) => f(r)))
       else if (op === 'update') {
         out = rows.filter((r) => filters.every((f) => f(r)))
-        for (const r of out) Object.assign(r, payload)
+        for (const r of out) Object.assign(r, payload, generated[t]?.({ ...r, ...(payload as Row) }) ?? {})
       } else if (op === 'delete') {
         out = rows.filter((r) => filters.every((f) => f(r)))
         tables[t] = rows.filter((r) => !out.includes(r))
@@ -56,7 +57,8 @@ export function memdb(uniques: Record<string, string[]>) {
             Object.assign(hit, p)
             out.push(hit)
           } else {
-            const row = { id: p.id ?? (t === 'lume_slack_channels' ? `00000000-0000-0000-0000-${String(nextId).padStart(12, '0')}` : nextId), ...p }
+            const base = { id: p.id ?? (t === 'lume_slack_channels' ? `00000000-0000-0000-0000-${String(nextId).padStart(12, '0')}` : nextId), ...p }
+            const row = { ...base, ...(generated[t]?.(base) ?? {}) }
             nextId++
             rows.push(row)
             out.push(row)
