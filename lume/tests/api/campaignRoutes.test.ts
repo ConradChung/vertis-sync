@@ -181,7 +181,7 @@ describe('GET /api/campaigns/[id]/flow', () => {
     expect(body.campaign_status).toBe('active')
     const byId = Object.fromEntries(body.stages.map((s: { id: string }) => [s.id, s]))
     expect(Object.keys(byId)).toEqual(['import', 'validate', 'enrich', 'push', 'send', 'reply'])
-    expect(byId.push).toMatchObject({ status: 'waiting', action: { type: 'link', href: `/validate?gate=push_review:${JOB}` } })
+    expect(byId.push).toMatchObject({ status: 'waiting', action: { type: 'link', href: `/progress?gate=push_review:${JOB}` } })
     expect(byId.validate.action.type).toBe('disabled')
     expect(byId.send.action).toEqual({ type: 'pending', kind: 'pause_campaign', label: 'Pause' })
   })

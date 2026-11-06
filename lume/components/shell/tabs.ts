@@ -5,7 +5,7 @@ export const TABS: readonly { href: string; label: string; icon: LucideIcon; pri
   { href: '/overview', label: 'Overview', icon: LayoutDashboard, primary: true },
   { href: '/import', label: 'Import', icon: Upload },
   { href: '/import/leads', label: 'Leads', icon: Sheet },
-  { href: '/validate', label: 'Validate', icon: ShieldCheck },
+  { href: '/progress', label: 'Progress', icon: ShieldCheck },
   { href: '/rotate', label: 'Rotate', icon: Repeat2 },
   { href: '/campaigns', label: 'Campaigns', icon: Megaphone, primary: true },
   { href: '/crm', label: 'CRM', icon: Users, primary: true },

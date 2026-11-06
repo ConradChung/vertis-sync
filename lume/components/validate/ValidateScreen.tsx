@@ -2,24 +2,37 @@
 
 import { useSearchParams } from 'next/navigation'
 import { useValidationQueue } from '@/hooks/useValidationQueue'
-import { RunningJobs } from '@/components/validate/RunningJobs'
+import { useProgress } from '@/hooks/useProgress'
+import { RunningNow } from '@/components/progress/RunningNow'
 import { ValidationHistory } from '@/components/validate/ValidationHistory'
 import { ValidateView } from '@/components/validate/ValidateView'
 
 /**
- * `/validate`: running / recently finished validation jobs (read-only), then
- * the gate queue (SWR + Realtime) and the `?gate=` deep link. The Running
- * section shows even when no gate waits, so a long job is never just
- * "Nothing waiting on you".
+ * `/progress` (was /validate): "Running now" — one queue of every live
+ * process (validation jobs, Apify runs, influencer runs and lookups,
+ * Leadsfriday orders, job-search batches) and the last 24 h's finished ones —
+ * then the validation history and "Waiting on you", the gate queue (SWR +
+ * Realtime) with the `?gate=` deep link.
  */
 export function ValidateScreen() {
   const q = useValidationQueue()
+  const progress = useProgress()
   const params = useSearchParams()
+  const idle = progress.data ? progress.data.running.length === 0 : false
   return (
     <div className="flex flex-col gap-5">
-      <RunningJobs />
+      <RunningNow data={progress.data} />
       <ValidationHistory />
-      <ValidateView gates={q.data} error={q.error} onRefresh={() => void q.mutate()} deepLink={params.get('gate')} />
+      <section aria-label="Waiting on you" className="flex flex-col gap-3">
+        <h2 className="text-[13px] font-semibold text-fg">Waiting on you</h2>
+        <ValidateView
+          gates={q.data}
+          error={q.error}
+          onRefresh={() => void q.mutate()}
+          deepLink={params.get('gate')}
+          emptyText={idle ? 'Nothing running, nothing waiting on you.' : 'Nothing waiting on you'}
+        />
+      </section>
     </div>
   )
 }

@@ -13,6 +13,12 @@ export interface JobSummary {
   valid_count?: number
   invalid_count?: number
   enrich: boolean
+  /** For the Progress queue's stage and bar. */
+  enrich_started?: boolean
+  enriched_rows?: number
+  instantly_status?: string | null
+  eta_seconds?: number | null
+  eta_updated_at?: string | null
   created_at: string
   updated_at: string
   error_message: string | null

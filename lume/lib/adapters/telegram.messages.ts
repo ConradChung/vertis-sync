@@ -27,10 +27,10 @@ export interface OutgoingMessage {
   linkOmitted?: true
 }
 
-/** `${LUME_URL}/validate?gate=<kind>:<id>`; `null` when `LUME_URL` is unset. */
+/** `${LUME_URL}/progress?gate=<kind>:<id>`; `null` when `LUME_URL` is unset. */
 export function deepLink(kind: GateKind | string, id: string): string | null {
   const base = configuredBaseUrl()
-  return base ? `${base}/validate?gate=${kind}:${id}` : null
+  return base ? `${base}/progress?gate=${kind}:${id}` : null
 }
 
 /** `${LUME_URL}/actions/<id>`; `null` when `LUME_URL` is unset. */

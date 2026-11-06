@@ -329,7 +329,7 @@ function ListPanel({
             {list.sent_job_id && (
               <>
                 {' · '}
-                <Link className="text-violet-soft hover:text-fg" href="/validate">
+                <Link className="text-violet-soft hover:text-fg" href="/progress">
                   validation job
                 </Link>
               </>

@@ -236,7 +236,7 @@ function controlOf(gate: GateRow): Control {
       return {
         type: 'push_review',
         job_id: id,
-        validate_link: `/validate?gate=push_review:${id}`,
+        validate_link: `/progress?gate=push_review:${id}`,
         cancel: btn('Cancel push', 'push_cancel', id, 'reject'),
       }
     default: {

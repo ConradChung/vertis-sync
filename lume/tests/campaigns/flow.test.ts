@@ -51,7 +51,7 @@ describe('buildStages', () => {
     const gate = { kind: 'finder_decision', target_table: 'validation_jobs', target_id: 'J', title: 'Decide a.csv' } as unknown as GateRow
     const st = buildStages({ counts: sumCounts(jobs, null), gates: [gate], jobs, campaignStatus: 'draft' })
     expect(status(st)).toMatchObject({ import: 'done', validate: 'waiting', enrich: 'idle', push: 'idle' })
-    expect(st[1].action).toEqual({ type: 'link', href: '/validate?gate=finder_decision:J', label: 'Open gate' })
+    expect(st[1].action).toEqual({ type: 'link', href: '/progress?gate=finder_decision:J', label: 'Open gate' })
   })
 })
 

@@ -74,7 +74,7 @@ describe('telegram adapter — configured', () => {
     expect(url).toBe(`https://api.telegram.org/bot${TOKEN}/sendMessage`)
     const body = JSON.parse(String(init?.body))
     expect(body).toMatchObject({ chat_id: '42', link_preview_options: { is_disabled: true } })
-    expect(body.text).toBe(`🔗 leads.csv — open in Lume\nhttps://lume.example.com/validate?gate=stall:${ID}`)
+    expect(body.text).toBe(`🔗 leads.csv — open in Lume\nhttps://lume.example.com/progress?gate=stall:${ID}`)
   })
 
   it('redacts the bot token from logged errors', async () => {

@@ -128,7 +128,7 @@ export async function createIngestForStoredObject(
   const ingestId = ingest.id
   const sent = (await alert({
     source: 'lume.import', severity: 'urgent', title: titleFrom(promptText), body: promptText,
-    link: alertLink(`/validate?gate=ingest_approval:${ingestId}`), scope: 'validation',
+    link: alertLink(`/progress?gate=ingest_approval:${ingestId}`), scope: 'validation',
     dedupe_key: gateKey(ingestId, 'ingest_approval'),
     telegram: () => sendMessage(promptText, {
       replyMarkup: ingestKeyboard(ingestId, detectedColumn),
@@ -165,7 +165,7 @@ export async function createApolloOrder(apolloUrl: string): Promise<ApolloOrderR
   const orderId = order.id
   const sent = (await alert({
     source: 'lume.import', severity: 'urgent', title: titleFrom(APOLLO_PROMPT_TEXT), body: APOLLO_PROMPT_TEXT,
-    link: alertLink(`/validate?gate=lfo_count:${orderId}`), scope: 'orders',
+    link: alertLink(`/progress?gate=lfo_count:${orderId}`), scope: 'orders',
     dedupe_key: gateKey(orderId, 'lfo_count'),
     telegram: () => sendMessage(APOLLO_PROMPT_TEXT, { replyMarkup: lfoCountKeyboard(orderId), disablePreview: true }),
   })) ?? telegramSkipped

@@ -169,11 +169,11 @@ export function KpiTiles({
 
       <Tile
         label="Pending approvals"
-        href="/validate"
+        href="/progress"
         ariaLabel={
           followups > 0
-            ? `Pending approvals: ${pending}, including ${followups} CRM follow-up${followups === 1 ? '' : 's'} due. Open Validate`
-            : `Pending approvals: ${pending}. Open Validate`
+            ? `Pending approvals: ${pending}, including ${followups} CRM follow-up${followups === 1 ? '' : 's'} due. Open Progress`
+            : `Pending approvals: ${pending}. Open Progress`
         }
         value={<Num value={pending} />}
         delta={followups > 0 ? `${followups} CRM follow-up${followups === 1 ? '' : 's'} due` : pending > 0 ? 'Needs attention' : 'All clear'}

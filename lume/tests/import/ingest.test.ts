@@ -141,7 +141,7 @@ describe('alert feed (G4)', () => {
     expect(feed.rows).toEqual([{
       source: 'lume.import', severity: 'urgent', title: '📥 New CSV from Lume',
       body: '📥 New CSV from Lume\nFile: x.csv\nRows: 1\nEmail column: Email',
-      link: `/validate?gate=ingest_approval:${ID}`, campaign_id: null, scope: 'validation', dedupe_key: `${ID}:ingest_approval`,
+      link: `/progress?gate=ingest_approval:${ID}`, campaign_id: null, scope: 'validation', dedupe_key: `${ID}:ingest_approval`,
       mode: 'reopen',
     }])
   })
@@ -160,7 +160,7 @@ describe('alert feed (G4)', () => {
     await createApolloOrder('https://app.apollo.io/#/people?x=1')
     expect(feed.rows[0]).toMatchObject({
       source: 'lume.import', severity: 'urgent', scope: 'orders',
-      link: `/validate?gate=lfo_count:${ID}`, dedupe_key: `${ID}:lfo_count`,
+      link: `/progress?gate=lfo_count:${ID}`, dedupe_key: `${ID}:lfo_count`,
     })
     expect(svc.setApolloOrderMessageId).toHaveBeenCalledWith(ID, 5)
   })

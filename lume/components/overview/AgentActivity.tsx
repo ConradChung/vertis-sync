@@ -12,7 +12,7 @@ export function AgentActivity({ events }: { events: EventRow[] }) {
     <GlassCard className="gap-0 py-0" aria-label="Agent activity">
       <SectionTitle title="Agent activity" />
       {events.length === 0 ? (
-        <EmptyLine text="No agent or Lume actions yet." action={{ label: 'Approvals', href: '/validate' }} />
+        <EmptyLine text="No agent or Lume actions yet." action={{ label: 'Approvals', href: '/progress' }} />
       ) : (
         <ul className="px-5 pb-3">
           {events.slice(0, 8).map((ev) => (
