@@ -38,6 +38,7 @@ import { formatViolation } from '@/lib/copy/sopLint'
 import { checkRunActor, tightenOptions } from '@/lib/apify/service'
 import { executeInfluencerReactions, executeInfluencerRun } from '@/lib/influencers/actions'
 import { executeStageAttachment } from '@/lib/agent/attachmentAction'
+import { executeInfluencerLookup } from '@/lib/influencers/lookupAction'
 import type { RunOptions } from '@/lib/apify/pricing'
 import type { Json, PendingActionRow } from '@/lib/db/types'
 import { nextRun } from '@/lib/rules/nextRun'
@@ -450,6 +451,13 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
   /** Continue a run past its reactions bill, only if the run still waits with the bill that was approved. */
   async influencer_reactions(p, action) {
     const out = await executeInfluencerReactions(p, action.id)
+    if (!out.ok) throw new ActionFailure(out.error, out.result)
+    return out.result
+  },
+
+  /** The influencer LinkedIn lookup of a candidate batch, after re-checking it is still startable with people pending. */
+  async influencer_lookup(p, action) {
+    const out = await executeInfluencerLookup(p, action.id)
     if (!out.ok) throw new ActionFailure(out.error, out.result)
     return out.result
   },

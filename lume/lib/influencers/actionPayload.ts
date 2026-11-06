@@ -28,3 +28,13 @@ export function influencerPayloadError(kind: 'influencer_run' | 'influencer_reac
 
 /** One awaiting action per key: one run start at a time, one reactions approval per run. */
 export const INFLUENCER_ACTION_KEY = { influencer_run: 'pipeline', influencer_reactions: 'run_id' } as const
+
+/** influencer_lookup (the candidate LinkedIn lookup): one awaiting per batch. */
+export const LOOKUP_ACTION_KEY = 'batch_id'
+
+export function lookupPayloadError(p: Record<string, Json>): string | null {
+  if (typeof p.batch_id !== 'string' || !LOWER_UUID.test(p.batch_id)) return 'payload.batch_id must be a lowercase uuid'
+  if (typeof p.people !== 'number' || !Number.isInteger(p.people) || p.people < 1) return 'payload.people must be a positive integer'
+  if (typeof p.max_usd !== 'number' || !(p.max_usd > 0) || p.max_usd > 50) return 'payload.max_usd must be in (0, 50]'
+  return null
+}

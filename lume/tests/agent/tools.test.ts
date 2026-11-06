@@ -55,6 +55,7 @@ describe('buildTools', () => {
       start_influencer_run: { slugs: ['peter-lohmann'], estimate_shown_to_owner: true },
       approve_reactions: { run_id: JOB },
       stage_attachment_for_validation: { file_id: JOB, sheet: 'Leads' },
+      lookup_influencer_candidates: { batch_id: JOB },
     }
     const { fetch, createAction, tool } = setup()
     for (const [name, tier] of Object.entries(TOOL_TIERS)) {

@@ -183,6 +183,7 @@ export type PendingActionKind =
   | 'influencer_run'
   | 'influencer_reactions'
   | 'stage_attachment'
+  | 'influencer_lookup'
 
 export type PendingActionStatus =
   | 'awaiting'

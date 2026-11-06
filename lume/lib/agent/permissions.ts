@@ -20,16 +20,16 @@ export const TOOL_TIERS = {
   search_apify_store: 'read', get_actor_input_schema: 'read', get_actor_run: 'read', rank_campaigns: 'read',
   get_campaign_sequence: 'read', list_skills: 'read', get_skill: 'read', list_verticals: 'read',
   list_campaign_leads: 'read', contact_usage: 'read', read_project_file: 'read', list_replies: 'read', get_thread: 'read', get_sop: 'read',
-  list_influencers: 'read', estimate_influencer_run: 'read', get_influencer_run: 'read', read_attachment: 'read',
+  list_influencers: 'read', estimate_influencer_run: 'read', get_influencer_run: 'read', read_attachment: 'read', list_influencer_candidates: 'read',
   create_order: 'low', draft_reply: 'low', create_rotation_rule: 'low', notify: 'low', import_actor_run: 'low', save_skill: 'low',
   remember: 'low', forget: 'low', create_vertical: 'low', update_vertical: 'low', create_inbox_project: 'low', create_cycle_out_rule: 'low',
   load_actor_results: 'low', filter_leads: 'low', restore_leads: 'low', export_for_apollo: 'low', label_reply: 'low',
   export_influencer_csv: 'low', add_influencer: 'low', update_influencer: 'low', cancel_influencer_run: 'low',
-  load_attachment_as_leads: 'low',
+  load_attachment_as_leads: 'low', import_influencer_candidates: 'low', approve_influencer_candidates: 'low',
   decide_validation: 'high', assign_leads: 'high', activate_rule: 'high', send_reply: 'high',
   pause_campaign: 'high', resume_campaign: 'high', activate_campaign: 'high', duplicate_campaign: 'high', delete_rule: 'high',
   run_apify_actor: 'high', update_campaign_sequence: 'high', issue_operator_key: 'high', remove_leads: 'high',
-  start_influencer_run: 'high', approve_reactions: 'high', stage_attachment_for_validation: 'high',
+  start_influencer_run: 'high', approve_reactions: 'high', stage_attachment_for_validation: 'high', lookup_influencer_candidates: 'high',
 } as const satisfies Record<string, 'read' | 'low' | 'high'>
 
 export type ToolName = keyof typeof TOOL_TIERS
@@ -40,7 +40,7 @@ export const HIGH_RISK_KIND: Record<string, PendingKind> = {
   duplicate_campaign: 'create_campaign', delete_rule: 'delete_rule', run_apify_actor: 'run_actor',
   update_campaign_sequence: 'update_sequence', issue_operator_key: 'issue_operator_key', remove_leads: 'remove_leads',
   start_influencer_run: 'influencer_run', approve_reactions: 'influencer_reactions',
-  stage_attachment_for_validation: 'stage_attachment',
+  stage_attachment_for_validation: 'stage_attachment', lookup_influencer_candidates: 'influencer_lookup',
   // A low-tier tool that files an approval only for a blocking label (unsubscribe, hostile, BAD + block).
   label_reply: 'label_reply',
 }
@@ -72,7 +72,7 @@ export const SKIPPABLE_KINDS: ReadonlySet<PendingKind> = new Set<PendingKind>([
  */
 export const ALWAYS_ASK_KINDS: ReadonlySet<PendingKind> = new Set<PendingKind>([
   'run_actor', 'send_reply', 'decide_gate', 'launch_campaign', 'resume_campaign', 'label_reply', 'influencer_run', 'influencer_reactions',
-  'stage_attachment',
+  'stage_attachment', 'influencer_lookup',
 ])
 
 export const skippable = (kind: PendingKind): boolean => SKIPPABLE_KINDS.has(kind)

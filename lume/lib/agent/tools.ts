@@ -1326,6 +1326,69 @@ const SPECS: Built[] = [
   ),
   tiered(
     {
+      name: 'import_influencer_candidates',
+      description:
+        'Stage a list of people the owner attached (an .xlsx / .csv in this chat, by file_id; optional sheet) as influencer candidates for the LinkedIn lookup. ' +
+        'Columns are mapped automatically (Name, Title / Role, Company / Organization, Category, Focus / Notes, Source Context); pass `columns` (field -> exact header) to fix one. ' +
+        'People who already are influencers, and repeats in the list, are marked duplicate. Nothing is spent: it returns the batch id, the mapping and the lookup estimate. Show the owner the mapping and the estimate.',
+      inputSchema: z
+        .object({
+          file_id: uuid,
+          sheet: z.string().min(1).max(200).optional(),
+          columns: z
+            .object({ name: z.string().max(200).optional(), title: z.string().max(200).optional(), company: z.string().max(200).optional(), category: z.string().max(200).optional(), notes: z.string().max(200).optional(), source_context: z.string().max(200).optional() })
+            .strict()
+            .optional(),
+          name: z.string().trim().min(1).max(200).optional().describe('a name for this batch'),
+        })
+        .strict(),
+      run: async ({ file_id, sheet, columns, name }, { call, deps }) =>
+        call('/api/influencers/candidates', {
+          method: 'POST',
+          body: { file_id: file_id.toLowerCase(), ...(sheet ? { sheet } : {}), ...(columns ? { columns } : {}), ...(name ? { name } : {}), conversation_id: deps.conversationId ?? null },
+        }) as Promise<ToolResult>,
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'list_influencer_candidates',
+      description:
+        'Influencer candidate batches (without batch_id: the newest, with per-status counts) or one batch: each candidate with the LinkedIn URL the lookup found, ' +
+        'its confidence (high / medium / not_found), evidence (cited source + snippet) and status (pending_lookup, found, not_found, approved, rejected, duplicate), plus the estimate for those still pending. Filter one batch by status.',
+      inputSchema: z
+        .object({ batch_id: uuid.optional(), status: z.enum(['pending_lookup', 'found', 'not_found', 'approved', 'rejected', 'duplicate']).optional() })
+        .strict(),
+      run: async ({ batch_id, status }, { call }) =>
+        (await call(batch_id ? `/api/influencers/candidates/${batch_id.toLowerCase()}${status ? `?status=${status}` : ''}` : '/api/influencers/candidates')) as ToolResult,
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'approve_influencer_candidates',
+      description:
+        'Approve found candidates (ids from list_influencer_candidates) ONLY after the owner chose them (e.g. "approve all high"): each becomes an INACTIVE influencer ' +
+        '(or is linked to the existing one with that profile). Nothing runs or is spent; a run still needs activating and start_influencer_run with its estimate.',
+      inputSchema: z.object({ ids: z.array(uuid).min(1).max(1000) }).strict(),
+      run: async ({ ids }, { call }) =>
+        call('/api/influencers/candidates/review', { method: 'POST', body: { action: 'approve', ids: ids.map((x: string) => x.toLowerCase()) } }) as Promise<ToolResult>,
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'lookup_influencer_candidates',
+      description:
+        "Propose the paid LinkedIn lookup of a staged candidate batch: Perplexity Sonar per person still pending (~$0.0065 each), with a hard cap (max_usd, default the estimate + 25 %, at most 50) it stops at. " +
+        'Only after you quoted the estimate from import_influencer_candidates / list_influencer_candidates in this chat. Results come back for the owner to review.',
+      inputSchema: z.object({ batch_id: uuid, max_usd: z.number().positive().max(50).optional() }).strict(),
+      payload: ({ batch_id, max_usd }) => ({ batch_id: batch_id.toLowerCase(), ...(max_usd !== undefined ? { max_usd } : {}) }),
+    },
+    'high'
+  ),
+  tiered(
+    {
       name: 'approve_reactions',
       description:
         'Propose the reactions scrape of a PM influencer run that is awaiting_approval (get_influencer_run): the approval shows the EXACT bill from top posts ' +

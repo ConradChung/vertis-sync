@@ -100,6 +100,8 @@ const KIND_SCOPE: Record<PendingActionKind, VerticalScope | null> = {
   influencer_reactions: 'orders',
   // A chat spreadsheet sent to the ingest gate: a validation intake.
   stage_attachment: 'validation',
+  // The influencer LinkedIn lookup (Perplexity): a paid data order.
+  influencer_lookup: 'orders',
   decide_gate: null,
   // Owner / master-bot business: never a vertical's item.
   issue_operator_key: null,
