@@ -137,8 +137,12 @@ const STATUS_FOR_PHASE: Record<Phase, string> = { order: 'ordering', poll: 'orde
 
 // ---- Helpers --------------------------------------------------------------
 
-function selfInvoke(payload: Payload): void {
-  fetch(`${SUPABASE_URL}/functions/v1/leadsfriday-order`, {
+// Awaited: a fire-and-forget fetch at the end of a phase can be dropped
+// when the isolate shuts down right after run() returns — that is how poll
+// chains died silently (job batch 22cc8b72 at 02:36 on 2026-11-06, Leadsfriday
+// orders left on 'pending').
+async function selfInvoke(payload: Payload): Promise<void> {
+  await fetch(`${SUPABASE_URL}/functions/v1/leadsfriday-order`, {
     method: 'POST',
     headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -243,7 +247,7 @@ async function phaseOrder(order: ApolloOrder): Promise<void> {
   const mid = (sent?.result as { message_id?: number } | undefined)?.message_id
   if (mid) await supabaseRequest('PATCH', `apollo_orders?id=eq.${order.id}`, { telegram_message_id: mid })
 
-  selfInvoke({ order_id: order.id, phase: 'poll', ordered_at: new Date().toISOString() })
+  await selfInvoke({ order_id: order.id, phase: 'poll', ordered_at: new Date().toISOString() })
 }
 
 // ---- Phase: poll -> ingest ------------------------------------------------
@@ -283,7 +287,7 @@ async function phasePoll(order: ApolloOrder, payload: Payload, startedAt: number
       return
     }
     if (CHUNK_LIMIT_MS - (Date.now() - startedAt) < POLL_SLEEP_MS + 15_000) {
-      selfInvoke({ order_id: order.id, phase: 'poll', ordered_at: orderedAt })
+      await selfInvoke({ order_id: order.id, phase: 'poll', ordered_at: orderedAt })
       return
     }
     await new Promise(r => setTimeout(r, POLL_SLEEP_MS))
