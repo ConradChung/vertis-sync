@@ -93,7 +93,7 @@ const instantly: OverviewInstantly = {
 describe('OverviewView', () => {
   it('renders every card from the fixture', () => {
     render(<OverviewView data={data} instantly={instantly} />)
-    expect(screen.getByRole('link', { name: 'Pending approvals: 2. Open Validate' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Pending approvals: 2. Open Progress' })).toBeTruthy()
     expect(screen.getAllByTestId('kpi-value').map((n) => n.textContent)).toEqual(['684', '3', '2', '4', '—']) // the fixture carries no bounce totals
     // campaign strip: name, rate, violet needs-attention dot with words, plus an icon
     const strip = screen.getByLabelText('Campaigns')

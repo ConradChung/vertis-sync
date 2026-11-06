@@ -51,7 +51,7 @@ describe('KpiTiles', () => {
     expect(screen.queryByText(/Instantly not connected/)).toBeNull()
     // Pending approvals jumps to Validate
     // Pending approvals jumps to Validate and announces its value
-    expect(screen.getByRole('link', { name: 'Pending approvals: 2. Open Validate' }).getAttribute('href')).toBe('/validate')
+    expect(screen.getByRole('link', { name: 'Pending approvals: 2. Open Progress' }).getAttribute('href')).toBe('/progress')
     expect(screen.getByRole('img', { name: 'Approvals opened per day, last 7 days' })).toBeTruthy()
   })
 

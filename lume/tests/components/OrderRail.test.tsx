@@ -63,7 +63,7 @@ describe('OrderRailView', () => {
     expect(screen.getByText('1,234')).toBeTruthy()
     expect(screen.getByRole('columnheader', { name: 'email' })).toBeTruthy()
     expect(screen.getByRole('cell', { name: 'ann@x.com' })).toBeTruthy()
-    expect(screen.getByRole('link', { name: /Open in Validate/ }).getAttribute('href')).toBe(`/validate?gate=${encodeURIComponent(`ingest_approval:${ID}`)}`)
+    expect(screen.getByRole('link', { name: /Open in Validate/ }).getAttribute('href')).toBe(`/progress?gate=${encodeURIComponent(`ingest_approval:${ID}`)}`)
     expect(screen.getByText(/Enrichment is chosen at approval/)).toBeTruthy()
   })
 
@@ -170,6 +170,6 @@ describe('OrderRailView', () => {
     )
     expect(screen.getByText('2026-10-12')).toBeTruthy()
     expect(screen.getByText('31')).toBeTruthy()
-    expect(screen.getByRole('link', { name: /Open in Validate/ }).getAttribute('href')).toBe(`/validate?gate=${encodeURIComponent(`jobs_review:${ID}`)}`)
+    expect(screen.getByRole('link', { name: /Open in Validate/ }).getAttribute('href')).toBe(`/progress?gate=${encodeURIComponent(`jobs_review:${ID}`)}`)
   })
 })

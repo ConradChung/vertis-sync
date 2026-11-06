@@ -19,6 +19,50 @@ const at = (r: Row, c: string): unknown => {
 }
 const likeRe = (pat: string) => new RegExp(`^${pat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*')}$`, 'is')
 
+
+/** Split PostgREST filter terms on top-level commas (not inside parentheses). */
+function splitTerms(expr: string): string[] {
+  const out: string[] = []
+  let depth = 0
+  let cur = ''
+  for (const ch of expr) {
+    if (ch === '(') depth++
+    if (ch === ')') depth--
+    if (ch === ',' && depth === 0) {
+      out.push(cur)
+      cur = ''
+    } else cur += ch
+  }
+  if (cur) out.push(cur)
+  return out
+}
+
+/** One term: col.ilike.%x%, col.in.(a,b), col.eq.v, col.gte.v, col.lt.v, col.is.null, and(…), or(…). */
+function termFilter(t: string): (r: Row) => boolean {
+  const group = /^(and|or)\((.*)\)$/.exec(t)
+  if (group) {
+    const parts = splitTerms(group[2]).map(termFilter)
+    return group[1] === 'and' ? (r) => parts.every((f) => f(r)) : (r) => parts.some((f) => f(r))
+  }
+  const m = /^(.+?)\.(ilike|in|eq|gte|lt|is)\.(.*)$/.exec(t)
+  if (!m) throw new Error(`memdb: unsupported or-term ${t}`)
+  const [, c, op, v] = m
+  if (op === 'ilike') return (r) => likeRe(v).test(String(at(r, c) ?? ''))
+  if (op === 'in') {
+    const set = new Set(v.replace(/^\(|\)$/g, '').split(','))
+    return (r) => set.has(String(at(r, c)))
+  }
+  if (op === 'is') return (r) => (at(r, c) ?? null) === (v === 'null' ? null : v)
+  if (op === 'eq') return (r) => String(at(r, c)) === v
+  if (op === 'gte') return (r) => at(r, c) !== null && at(r, c) !== undefined && String(at(r, c)) >= v
+  return (r) => at(r, c) !== null && at(r, c) !== undefined && String(at(r, c)) < v
+}
+
+const orFilter = (expr: string) => {
+  const parts = splitTerms(expr).map(termFilter)
+  return (r: Row) => parts.some((f) => f(r))
+}
+
 /** `generated[table](row)`: columns Postgres would compute (GENERATED ALWAYS), applied on insert and update. */
 export function memdb(uniques: Record<string, string[]>, generated: Record<string, (row: Row) => Row> = {}) {
   const tables: Record<string, Row[]> = {}
@@ -102,8 +146,8 @@ export function memdb(uniques: Record<string, string[]>, generated: Record<strin
       not: (c: string, operator: string, v: unknown) => (filters.push((r) => !(operator === 'is' ? (at(r, c) ?? null) === v : at(r, c) === v)), b),
       ilike: (c: string, pat: string) => (filters.push((r) => likeRe(pat).test(String(at(r, c) ?? ''))), b),
       or: (expr: string) => {
-        const terms = expr.split(',').map((t) => /^(.+?)\.ilike\.(.*)$/.exec(t)!).map((m) => [m[1], likeRe(m[2])] as const)
-        filters.push((r) => terms.some(([c, re]) => re.test(String(at(r, c) ?? ''))))
+        const test = orFilter(expr)
+        filters.push((r) => test(r))
         return b
       },
       gte: (c: string, v: number) => (filters.push((r) => (at(r, c) as number) >= v), b),

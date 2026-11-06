@@ -18,7 +18,7 @@ describe('Pending approvals counts CRM follow-ups due', () => {
         instantly={{ configured: false, campaigns: [] }}
       />
     )
-    expect(screen.getByRole('link', { name: 'Pending approvals: 5, including 3 CRM follow-ups due. Open Validate' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Pending approvals: 5, including 3 CRM follow-ups due. Open Progress' })).toBeTruthy()
     expect(screen.getByText('3 CRM follow-ups due')).toBeTruthy()
   })
 })

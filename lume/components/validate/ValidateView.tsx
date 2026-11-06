@@ -30,13 +30,15 @@ export interface ValidateViewProps {
   onRefresh: () => void
   /** Raw `?gate=` value. */
   deepLink?: string | null
+  /** The empty state's headline (Progress: "Nothing running, nothing waiting on you." when nothing runs either). */
+  emptyText?: string
 }
 
 /**
  * The gate queue. Every decision lands on the same claim a Telegram tap
  * does; whichever arrives first wins and the other sees "already handled".
  */
-export function ValidateView({ gates, error, onRefresh, deepLink }: ValidateViewProps) {
+export function ValidateView({ gates, error, onRefresh, deepLink, emptyText = 'Nothing waiting on you' }: ValidateViewProps) {
   const ordered = useMemo(() => (gates ? groupByKind(gates).flatMap((g) => g.gates) : []), [gates])
   const keys = useMemo(() => ordered.map(gateKey), [ordered])
 
@@ -264,7 +266,7 @@ export function ValidateView({ gates, error, onRefresh, deepLink }: ValidateView
       </p>
       {gates.length === 0 ? (
         <GlassCard className="items-center gap-2 py-12 text-center">
-          <p className="text-[15px] font-semibold text-fg">Nothing waiting on you</p>
+          <p className="text-[15px] font-semibold text-fg">{emptyText}</p>
           <p className="text-[12px] text-fg-46">New gates show up here and in Telegram the moment a pipeline stops for a decision.</p>
         </GlassCard>
       ) : (

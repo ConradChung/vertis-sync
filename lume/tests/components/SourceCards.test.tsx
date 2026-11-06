@@ -57,7 +57,7 @@ describe('SourceCards — Apify', () => {
       d.resolve(ok({ ok: true, ingest_id: ID, row_count: 1234, email_column: 'email', telegram: 'sent', gate: `ingest_approval:${ID}`, truncated: false }))
     })
     expect(card.getByRole('status').textContent).toMatch(/1,234 rows\. Prompt sent to Telegram/)
-    expect(card.getByRole('link', { name: /Open in Validate/ }).getAttribute('href')).toBe(`/validate?gate=${encodeURIComponent(`ingest_approval:${ID}`)}`)
+    expect(card.getByRole('link', { name: /Open in Validate/ }).getAttribute('href')).toBe(`/progress?gate=${encodeURIComponent(`ingest_approval:${ID}`)}`)
     expect(onCreated).toHaveBeenCalledWith({ kind: 'ingest', id: ID })
   })
 

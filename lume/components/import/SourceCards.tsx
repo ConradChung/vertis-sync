@@ -66,7 +66,7 @@ function StatusLine({ status }: { status: Status }) {
         <span className="text-green">
           {status.text}{' '}
           {status.gate && (
-            <Link href={`/validate?gate=${encodeURIComponent(status.gate)}`} className="text-violet-soft underline-offset-2 hover:text-fg hover:underline">
+            <Link href={`/progress?gate=${encodeURIComponent(status.gate)}`} className="text-violet-soft underline-offset-2 hover:text-fg hover:underline">
               Open in Validate →
             </Link>
           )}

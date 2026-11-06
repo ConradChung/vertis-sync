@@ -38,8 +38,8 @@ describe('links', () => {
     process.env.LUME_URL = 'https://lume.example.com/'
   })
 
-  it('deepLink is ${LUME_URL}/validate?gate=<kind>:<id> with the trailing slash stripped', () => {
-    expect(deepLink('ingest_approval', ID)).toBe(`https://lume.example.com/validate?gate=ingest_approval:${ID}`)
+  it('deepLink is ${LUME_URL}/progress?gate=<kind>:<id> with the trailing slash stripped', () => {
+    expect(deepLink('ingest_approval', ID)).toBe(`https://lume.example.com/progress?gate=ingest_approval:${ID}`)
   })
 
   it('actionLink is ${LUME_URL}/actions/<id>', () => {
@@ -62,10 +62,10 @@ describe('buildGatePing', () => {
 
   it('uses the title when given and the kind otherwise', () => {
     expect(buildGatePing('ingest_approval', ID, 'leads.csv').text).toBe(
-      `🔗 leads.csv — open in Lume\nhttps://lume.example.com/validate?gate=ingest_approval:${ID}`
+      `🔗 leads.csv — open in Lume\nhttps://lume.example.com/progress?gate=ingest_approval:${ID}`
     )
     expect(buildGatePing('finder_decision', ID).text).toBe(
-      `🔗 finder_decision — open in Lume\nhttps://lume.example.com/validate?gate=finder_decision:${ID}`
+      `🔗 finder_decision — open in Lume\nhttps://lume.example.com/progress?gate=finder_decision:${ID}`
     )
     expect(buildGatePing('finder_decision', ID, '   ').text.startsWith('🔗 finder_decision')).toBe(true)
   })

@@ -354,7 +354,7 @@ export async function getValidationHistory(opts: { days?: number; limit?: number
 export async function listRecentJobs(since: Date): Promise<JobSummary[]> {
   const res = await createServiceClient()
     .from('validation_jobs')
-    .select('id,filename,status,total_rows,processed_rows,valid_count,invalid_count,enrich,created_at,updated_at,error_message')
+    .select('id,filename,status,total_rows,processed_rows,valid_count,invalid_count,enrich,enrich_started,enriched_rows,instantly_status,eta_seconds,eta_updated_at,created_at,updated_at,error_message')
     .or(`status.in.(pending,processing),updated_at.gte.${since.toISOString()}`)
     .order('created_at', { ascending: false })
     .limit(50)
@@ -368,6 +368,11 @@ export async function listRecentJobs(since: Date): Promise<JobSummary[]> {
     valid_count: typeof j.valid_count === 'number' ? j.valid_count : 0,
     invalid_count: typeof j.invalid_count === 'number' ? j.invalid_count : 0,
     enrich: j.enrich === true,
+    enrich_started: j.enrich_started === true,
+    enriched_rows: typeof j.enriched_rows === 'number' ? j.enriched_rows : 0,
+    instantly_status: (j.instantly_status as string | null) ?? null,
+    eta_seconds: typeof j.eta_seconds === 'number' ? j.eta_seconds : null,
+    eta_updated_at: (j.eta_updated_at as string | null) ?? null,
     created_at: String(j.created_at),
     updated_at: String(j.updated_at ?? j.created_at),
     error_message: (j.error_message as string | null) ?? null,

@@ -118,7 +118,7 @@ function GateLink({ detail }: { detail: OrderDetail }) {
   if (!detail.gate) return null
   return (
     <Link
-      href={`/validate?gate=${encodeURIComponent(detail.gate.param)}`}
+      href={`/progress?gate=${encodeURIComponent(detail.gate.param)}`}
       className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'self-start')}
     >
       Open in Validate →

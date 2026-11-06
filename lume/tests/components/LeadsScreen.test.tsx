@@ -134,8 +134,7 @@ describe('LeadsScreen', () => {
     folders = [{ id: null, name: 'Unfiled', lists: [list(L3, 'Big', { item_count: 4312 })] }]
     nav.params = new URLSearchParams(`list=${L3}`)
     fresh()
-    await screen.findByText('Rows 1–100 of 4,312 · page 1 of 44', undefined, { timeout: 3000 }).catch(() => null)
-    const first = (await screen.findAllByRole('button', { name: 'First page' }))[0] as HTMLButtonElement
+    const first = (await screen.findAllByRole('button', { name: 'First page' }, { timeout: 10_000 }))[0] as HTMLButtonElement
     expect(first.disabled).toBe(true)
     expect((screen.getAllByRole('button', { name: 'Previous page' })[0] as HTMLButtonElement).disabled).toBe(true)
   })

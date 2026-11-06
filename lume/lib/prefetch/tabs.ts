@@ -11,7 +11,7 @@ export const TAB_KEYS: Record<string, readonly string[]> = {
   '/import': ['/api/orders?limit=100'],
   '/import/leads': ['/api/lead-lists'],
   '/influencers': ['/api/influencers/candidates'],
-  '/validate': ['/api/gates', '/api/instantly/campaigns'],
+  '/progress': ['/api/progress', '/api/gates', '/api/instantly/campaigns'],
   '/rotate': [`/api/lead-bank${leadBankSearchParams({ filter: {}, page: 1, pageSize: 100 })}`, '/api/rules', '/api/campaigns'],
   '/campaigns': ['/api/campaigns?with=analytics'],
   '/crm': ['/api/crm/board?campaign=all'],

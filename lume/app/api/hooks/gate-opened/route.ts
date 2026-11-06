@@ -55,7 +55,7 @@ export async function POST(req: Request) {
   const pingText = buildGatePing(kind, target_id, title).text
   const ping = (await alert({
     source: 'lume.gates', severity: 'urgent', title: titleFrom(pingText), body: pingText,
-    link: alertLink(`/validate?gate=${kind}:${target_id}`), scope: scopeForGateKind(kind),
+    link: alertLink(`/progress?gate=${kind}:${target_id}`), scope: scopeForGateKind(kind),
     dedupe_key: gateKey(target_id, kind), mode: 'touch',
     telegram: () => sendGatePing(kind, target_id, title),
   })) ?? telegramSkipped

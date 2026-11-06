@@ -43,7 +43,7 @@ export function formSameOrigin(req: Request): boolean {
 }
 
 /** Where a form post may send the browser back to: a same-site path under an allowed prefix. */
-const RETURN_PREFIXES = ['/operator', '/settings', '/validate', '/actions']
+const RETURN_PREFIXES = ['/operator', '/settings', '/progress', '/validate', '/actions']
 
 export function safeReturnTo(raw: string | null | undefined): string {
   const v = (raw ?? '').trim()

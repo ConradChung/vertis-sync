@@ -51,7 +51,7 @@ export function sumCounts(
 
 const gateLink = (g: GateRow, label: string): StageAction => ({
   type: 'link',
-  href: `/validate?gate=${g.kind}:${g.target_id}`,
+  href: `/progress?gate=${g.kind}:${g.target_id}`,
   label,
 })
 

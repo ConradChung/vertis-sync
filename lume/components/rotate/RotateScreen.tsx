@@ -173,7 +173,7 @@ export function RotateScreen() {
         />
         <p className="text-[11px] text-fg-46">
           Nothing here assigns or pushes on its own. Pending confirmations are listed in{' '}
-          <Link href="/validate" className="text-violet-soft hover:text-fg">
+          <Link href="/progress" className="text-violet-soft hover:text-fg">
             Validate
           </Link>{' '}
           and sent to Telegram.
