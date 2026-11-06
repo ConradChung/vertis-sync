@@ -7,6 +7,10 @@
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 import { alert, type AlertInput, lumeLink, titleFrom } from '../_shared/alert.ts'
+import { makePacer } from '../_shared/pacer.ts'
+import { runPool } from '../_shared/pool.ts'
+import { fetchWithBackoff } from '../_shared/backoff.ts'
+import { enrichingEta, measuredRate } from '../_shared/eta.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -21,6 +25,17 @@ const PPLX_MODEL = 'sonar'
 const HAIKU_MODEL = 'claude-haiku-4-5'
 const DEFAULT_ICP_DESCRIPTION = 'a property management company that actively manages properties'
 const ENRICHMENT_COLUMNS = ['operating_city', 'secondary_cities', 'city_confidence', 'city_research', 'icp_status']
+
+// Two rows in flight (Perplexity 429s above ~2 concurrent), their vendor-call
+// STARTS spaced by one shared pacer — the email-validator pattern. A 429 / 5xx
+// is retried after these waits while the chunk still has time; a row that
+// stays rate-limited is marked error exactly as before. Exported so tests can
+// shrink the waits; nothing else writes it.
+const CONCURRENCY = 2
+export const timing = { paceMs: 1_000, backoffWaits: [5_000, 10_000, 20_000] as readonly number[] }
+// Rows stop being taken at CHUNK_LIMIT_MS; a retry wait may not run past this
+// (the edge wall clock is 150 s), so the in-flight row still finishes in time.
+const BACKOFF_DEADLINE_MS = 125_000
 
 const REST_HEADERS: Record<string, string> = {
   'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -170,7 +185,7 @@ interface ValidationJob {
   icp_filter: boolean
 }
 
-async function perplexityResearch(company: string, website: string | null, icpDescription: string): Promise<string> {
+async function perplexityResearch(company: string, website: string | null, icpDescription: string, deadline: number): Promise<string> {
   const ctxBits = [`Company name: ${company}`]
   if (website) ctxBits.push(`Website: ${website}`)
   const context = ctxBits.join('\n')
@@ -186,7 +201,7 @@ async function perplexityResearch(company: string, website: string | null, icpDe
     `matches that description (${icpDescription}), say so explicitly. ` +
     `Be concise (2-4 sentences). If you cannot find reliable information, say so explicitly.`
 
-  const res = await fetch(PPLX_URL, {
+  const res = await fetchWithBackoff(() => fetch(PPLX_URL, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${PERPLEXITY_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -195,7 +210,7 @@ async function perplexityResearch(company: string, website: string | null, icpDe
       max_tokens: 300,
       temperature: 0.1,
     }),
-  })
+  }), { waits: timing.backoffWaits, deadline })
   if (!res.ok) {
     const text = await res.text()
     throw new Error(`Perplexity request failed (${res.status}): ${text}`)
@@ -234,8 +249,8 @@ interface HaikuExtraction {
   icp_status: string
 }
 
-async function haikuExtract(company: string, research: string, icpDescription: string): Promise<HaikuExtraction> {
-  const res = await fetch(ANTHROPIC_URL, {
+async function haikuExtract(company: string, research: string, icpDescription: string, deadline: number): Promise<HaikuExtraction> {
+  const res = await fetchWithBackoff(() => fetch(ANTHROPIC_URL, {
     method: 'POST',
     headers: {
       'x-api-key': ANTHROPIC_API_KEY,
@@ -248,7 +263,7 @@ async function haikuExtract(company: string, research: string, icpDescription: s
       system: haikuSystemPrompt(icpDescription),
       messages: [{ role: 'user', content: `Company: ${company}\n\nResearch:\n${research}` }],
     }),
-  })
+  }), { waits: timing.backoffWaits, deadline })
   if (!res.ok) {
     const text = await res.text()
     throw new Error(`Anthropic request failed (${res.status}): ${text}`)
@@ -270,7 +285,7 @@ async function haikuExtract(company: string, research: string, icpDescription: s
   }
 }
 
-async function processJob(jobId: string): Promise<void> {
+export async function processJob(jobId: string): Promise<void> {
   const startTime = Date.now()
   // Re-invoke self after 110s to stay within the edge function wall clock limit.
   const CHUNK_LIMIT_MS = 110_000
@@ -342,7 +357,70 @@ async function processJob(jobId: string): Promise<void> {
   )
 
   let enriched = job.enriched_rows
+  const enrichedAtStart = job.enriched_rows
   let lastMilestonePct = enrichableCount > 0 ? Math.floor((enriched / enrichableCount) * 10) * 10 : 0
+  const pace = makePacer(timing.paceMs)
+  const deadline = startTime + BACKOFF_DEADLINE_MS
+
+  // One row: research, extract, write — unchanged from the serial loop. A
+  // vendor failure becomes an error row; only a database write can throw.
+  const enrichRow = async (row: ValidationRow): Promise<void> => {
+    const rowData = row.row_data ?? {}
+    const company = String(rowData[companyCol] ?? '').trim()
+    const website = websiteCol ? (String(rowData[websiteCol] ?? '').trim() || null) : null
+
+    let enrichment: HaikuExtraction & { research?: string }
+    let newStatus: string
+
+    if (!company) {
+      enrichment = { operating_city: 'UNKNOWN', secondary_cities: [], confidence: 'low', icp_status: 'unconfirmed', research: '' }
+      newStatus = 'unknown'
+    } else {
+      try {
+        const research = await perplexityResearch(company, website, icpDescription, deadline)
+        const extracted = await haikuExtract(company, research, icpDescription, deadline)
+        enrichment = { ...extracted, research }
+        newStatus = extracted.operating_city === 'PARSE_ERROR'
+          ? 'error'
+          : extracted.operating_city === 'UNKNOWN'
+            ? 'unknown'
+            : 'done'
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        enrichment = { operating_city: 'ERROR', secondary_cities: [], confidence: 'low', icp_status: 'unconfirmed', research: message }
+        newStatus = 'error'
+      }
+    }
+
+    const mergedRowData = {
+      ...rowData,
+      operating_city: enrichment.operating_city,
+      secondary_cities: (enrichment.secondary_cities ?? []).join('; '),
+      city_confidence: enrichment.confidence,
+      city_research: enrichment.research ?? '',
+      icp_status: enrichment.icp_status,
+    }
+
+    await supabaseRequest('PATCH', `validation_rows?id=eq.${row.id}`, {
+      enrichment_status: newStatus,
+      enrichment,
+      row_data: mergedRowData,
+    })
+
+    // Workers share the counter; JS is single-threaded, so the increment is
+    // safe. The progress PATCHes can land out of order — settled below.
+    enriched++
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { enriched_rows: enriched })
+
+    if (enrichableCount > 0) {
+      const currentPct = Math.floor((enriched / enrichableCount) * 100)
+      const milestonePct = Math.floor(currentPct / 10) * 10
+      if (milestonePct > lastMilestonePct && milestonePct <= 100) {
+        lastMilestonePct = milestonePct
+        await notify(`City enrichment ${milestonePct}% complete (${enriched}/${enrichableCount}).`, { severity: 'info', ...VALIDATE })
+      }
+    }
+  }
 
   while (true) {
     // Cancellation is only observable here — there is no signal into a running
@@ -358,75 +436,36 @@ async function processJob(jobId: string): Promise<void> {
     )) as ValidationRow[]
     if (!rows || rows.length === 0) break
 
-    for (const row of rows) {
-      const rowData = row.row_data ?? {}
-      const company = String(rowData[companyCol] ?? '').trim()
-      const website = websiteCol ? (String(rowData[websiteCol] ?? '').trim() || null) : null
+    // runPool: no new row once the chunk limit is near, every in-flight row
+    // settles before it returns, and a throw stops the sibling and rethrows
+    // (the job then fails, as the serial loop did). Rows not taken stay
+    // pending for the next invocation.
+    const { stopped } = await runPool(rows, CONCURRENCY, enrichRow, {
+      pace,
+      shouldStop: () => Date.now() - startTime > CHUNK_LIMIT_MS,
+    })
 
-      let enrichment: HaikuExtraction & { research?: string }
-      let newStatus: string
+    // Settle the counter (concurrent PATCHes may have landed out of order) and
+    // the live ETA from this invocation's measured throughput.
+    const rate = measuredRate(enriched - enrichedAtStart, Date.now() - startTime)
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
+      enriched_rows: enriched,
+      ...(rate === null ? {} : {
+        ...enrichingEta({ remaining: enrichableCount - enriched, ratePerSec: rate, validTotal: enrichableCount }),
+        eta_updated_at: new Date().toISOString(),
+      }),
+    })
 
-      if (!company) {
-        enrichment = { operating_city: 'UNKNOWN', secondary_cities: [], confidence: 'low', icp_status: 'unconfirmed', research: '' }
-        newStatus = 'unknown'
-      } else {
-        try {
-          const research = await perplexityResearch(company, website, icpDescription)
-          const extracted = await haikuExtract(company, research, icpDescription)
-          enrichment = { ...extracted, research }
-          newStatus = extracted.operating_city === 'PARSE_ERROR'
-            ? 'error'
-            : extracted.operating_city === 'UNKNOWN'
-              ? 'unknown'
-              : 'done'
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err)
-          enrichment = { operating_city: 'ERROR', secondary_cities: [], confidence: 'low', icp_status: 'unconfirmed', research: message }
-          newStatus = 'error'
-        }
+    if (stopped) {
+      const handedOff = await handOff(jobId)
+      if (!handedOff) {
+        await notify(
+          `⚠️ ${job.filename}: could not start the next enrichment chunk after 4 attempts.\n` +
+          `${enriched}/${enrichableCount} enriched. The stall watchdog will offer a Resume.`,
+          { severity: 'warn', ...VALIDATE },
+        )
       }
-
-      const mergedRowData = {
-        ...rowData,
-        operating_city: enrichment.operating_city,
-        secondary_cities: (enrichment.secondary_cities ?? []).join('; '),
-        city_confidence: enrichment.confidence,
-        city_research: enrichment.research ?? '',
-        icp_status: enrichment.icp_status,
-      }
-
-      await supabaseRequest('PATCH', `validation_rows?id=eq.${row.id}`, {
-        enrichment_status: newStatus,
-        enrichment,
-        row_data: mergedRowData,
-      })
-
-      enriched++
-      await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { enriched_rows: enriched })
-
-      if (enrichableCount > 0) {
-        const currentPct = Math.floor((enriched / enrichableCount) * 100)
-        const milestonePct = Math.floor(currentPct / 10) * 10
-        if (milestonePct > lastMilestonePct && milestonePct <= 100) {
-          lastMilestonePct = milestonePct
-          await notify(`City enrichment ${milestonePct}% complete (${enriched}/${enrichableCount}).`, { severity: 'info', ...VALIDATE })
-        }
-      }
-
-      // Rate-limit cushion between rows (matches the Python script's --sleep default).
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-
-      if (Date.now() - startTime > CHUNK_LIMIT_MS) {
-        const handedOff = await handOff(jobId)
-        if (!handedOff) {
-          await notify(
-            `⚠️ ${job.filename}: could not start the next enrichment chunk after 4 attempts.\n` +
-            `${enriched}/${enrichableCount} enriched. The stall watchdog will offer a Resume.`,
-            { severity: 'warn', ...VALIDATE },
-          )
-        }
-        return
-      }
+      return
     }
   }
 
