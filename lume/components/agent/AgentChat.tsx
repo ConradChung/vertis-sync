@@ -307,23 +307,31 @@ export function AgentChat() {
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`
   }, [draft])
 
-  // Opening a chat lands on the start of the latest exchange (the owner's
-  // last message, then the reply below it), not the bottom of a long reply.
+  // Opening a chat lands at the bottom (the latest reply).
   const openedRef = useRef<string | null>(null)
   useLayoutEffect(() => {
     const id = chat.conversationId ?? null
     if (chat.loading || !messages.length || openedRef.current === id) return
     openedRef.current = id
-    // A chat that just got its id mid-run is the one being typed in: keep following.
-    if (busy) return
     const box = scrollRef.current
-    const items = box?.querySelectorAll<HTMLElement>('[data-role="user"]')
-    const lastAsk = items?.[items.length - 1]
-    if (box && lastAsk) {
-      box.scrollTop += lastAsk.getBoundingClientRect().top - box.getBoundingClientRect().top - 16
-      followRef.current = box.scrollHeight - box.scrollTop - box.clientHeight < 120
-    }
-  }, [chat.conversationId, chat.loading, messages.length, busy])
+    if (!box) return
+    box.scrollTop = box.scrollHeight
+    followRef.current = true
+  }, [chat.conversationId, chat.loading, messages.length])
+
+  // Images, diagrams and tool cards render after the text and grow the list;
+  // stay pinned to the bottom through that while following.
+  const hasMessages = messages.length > 0
+  useEffect(() => {
+    const box = scrollRef.current
+    const content = box?.firstElementChild
+    if (!box || !content || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      if (followRef.current) box.scrollTop = box.scrollHeight
+    })
+    ro.observe(content)
+    return () => ro.disconnect()
+  }, [chat.conversationId, chat.loading, hasMessages])
 
   // Keep the newest message in view while it streams, unless the owner has
   // scrolled up. Sending a new message always follows again.
