@@ -6,6 +6,7 @@ import { NotConnected, SectionTitle, ShimmerBar } from '@/components/overview/pa
 import { campaignStatusText, isProblemStatus } from '@/lib/adapters/instantly.map'
 import type { CampaignTableRow, InstantlyState } from '@/lib/campaigns/types'
 import { cn } from '@/lib/utils'
+import { BOUNCE_HINT, BOUNCE_TONE_TEXT, bounceRate, bounceTone, formatBounceRate } from '@/lib/campaigns/bounce'
 import { ReplyModeSelect } from '@/components/campaigns/ReplyModeSelect'
 import type { ReplyMode } from '@/lib/inbox/replyMode'
 
@@ -34,6 +35,15 @@ export function relTime(iso: string | null, now = Date.now()): string {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`
   if (s < 86_400) return `${Math.floor(s / 3600)}h ago`
   return `${Math.floor(s / 86_400)}d ago`
+}
+
+function BounceCell({ bounced, sent }: { bounced: number | null; sent: number | null }) {
+  const r = bounceRate(bounced, sent)
+  return (
+    <td data-testid="bounce-rate" className={cn('px-2 py-[10px] text-right font-mono tabular-nums', BOUNCE_TONE_TEXT[bounceTone(r)])}>
+      {formatBounceRate(r)}
+    </td>
+  )
 }
 
 export function CampaignTable({
@@ -66,7 +76,7 @@ export function CampaignTable({
         <p className="px-[18px] py-6 text-[13px] text-fg-46">No campaigns yet.</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-[13px]">
+          <table className="w-full min-w-[800px] text-left text-[13px]">
             <thead className="text-[11px] tracking-wide text-fg-46 uppercase">
               <tr className="border-b border-white/8">
                 <th className="px-[18px] py-2 font-medium">Campaign</th>
@@ -75,6 +85,9 @@ export function CampaignTable({
                 <th className="px-2 py-2 text-right font-medium">Replies</th>
                 <th className="px-2 py-2 text-right font-medium">Reply rate</th>
                 <th className="px-2 py-2 text-right font-medium">Interested</th>
+                <th className="px-2 py-2 text-right font-medium" title={BOUNCE_HINT}>
+                  Bounce rate
+                </th>
                 <th className="px-2 py-2 text-right font-medium">Last activity</th>
                 {replyMode && <th className="px-[18px] py-2 font-medium">Reply approval</th>}
               </tr>
@@ -128,6 +141,7 @@ export function CampaignTable({
                   <td className="px-2 py-[10px] text-right font-mono tabular-nums">{n(r.replies)}</td>
                   <td className="px-2 py-[10px] text-right font-mono tabular-nums">{rate(r.reply_rate)}</td>
                   <td className="px-2 py-[10px] text-right font-mono tabular-nums">{n(r.opportunities)}</td>
+                  <BounceCell bounced={r.bounced} sent={r.sent} />
                   <td className="px-2 py-[10px] text-right text-[12px] text-fg-46">{relTime(r.last_activity)}</td>
                   {replyMode && (
                     <td className="px-[18px] py-[10px]">

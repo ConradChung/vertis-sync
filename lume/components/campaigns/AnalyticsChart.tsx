@@ -10,6 +10,7 @@ import { lastNDates, seriesOn } from '@/lib/adapters/instantly.map'
 import type { CampaignAnalyticsResponse } from '@/lib/campaigns/types'
 import { cn } from '@/lib/utils'
 import { allZero, lastActiveDate } from '@/lib/campaigns/chart'
+import { BOUNCE_HINT, BOUNCE_TONE_TEXT, bounceRate, bounceTone, formatBounceRate } from '@/lib/campaigns/bounce'
 
 const config = {
   // Black / white / lime only: sent neutral, replies primary, interested full foreground.
@@ -63,6 +64,12 @@ export function AnalyticsChart({
     ['Reply rate', o.reply_rate === null ? '—' : <AnimatedNumber key="rr" value={o.reply_rate} decimals={1} suffix="%" />],
     ['Interested', <AnimatedNumber key="i" value={o.opportunities} />],
     ['Bounced', <AnimatedNumber key="b" value={o.bounced} />],
+    [
+      'Bounce rate',
+      <span key="br" className={BOUNCE_TONE_TEXT[bounceTone(bounceRate(o.bounced, o.sent))]} title={BOUNCE_HINT}>
+        {formatBounceRate(bounceRate(o.bounced, o.sent))}
+      </span>,
+    ],
   ]
   const maxStep = Math.max(1, ...data.steps.map((s) => s.sent))
   const empty = allZero(points, [...KEYS])
@@ -70,7 +77,7 @@ export function AnalyticsChart({
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {stats.map(([label, value]) => (
           <div key={label} className="rounded-lg border border-line bg-muted px-3 py-2.5">
             <p className="text-[11px] text-fg-46">{label}</p>

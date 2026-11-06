@@ -44,10 +44,10 @@ const camp = (o: Partial<LumeCampaignRow>): LumeCampaignRow => ({
   created_at: '2026-10-01T00:00:00Z',
   ...o,
 })
-const totals = (sent: number, replies: number, opportunities = 0) => ({
+const totals = (sent: number, replies: number, opportunities = 0, bounced = 0) => ({
   sent,
   replies,
-  bounced: 0,
+  bounced,
   opportunities,
   opportunity_value: null,
   reply_rate: sent ? (replies / sent) * 100 : null,
@@ -128,6 +128,17 @@ describe('buildOverviewInstantly', () => {
     expect(kaspen.health.level).toBe('red') // 5 bounces in 24 h
     expect(kaspen.series).toEqual([0, 0, 0, 0, 0, 0, 10])
     expect(out.campaigns.find((c) => c.name === 'Recruiter')!.health.level).toBe('green') // 3%
+  })
+
+  it('bounce rate: workspace-wide on the KPIs, lifetime per campaign on the strip (bounced ÷ sent)', async () => {
+    svc.getCampaigns.mockResolvedValue([camp({ external_id: 'ic-1', name: 'Kaspen' }), camp({ id: 'g', name: 'Gmail', sender_type: 'gmail', external_id: 'gmail:r' })])
+    ad.getAnalyticsOverview.mockImplementation(async (id?: string) => (id ? totals(400, 3, 0, 14) : totals(5000, 80, 7, 115)))
+    const out = await buildOverviewInstantly(NOW)
+    if (!out.configured) throw new Error('expected configured')
+    expect(out.bounce_rate).toBe(2.3)
+    expect(out.bounced).toBe(115)
+    expect(out.campaigns.find((c) => c.name === 'Kaspen')!.bounce_rate).toBe(3.5)
+    expect(out.campaigns.find((c) => c.name === 'Gmail')!.bounce_rate).toBeNull()
   })
 
   it('falls back to Instantly active campaigns when lume_campaigns has none; null value without values', async () => {

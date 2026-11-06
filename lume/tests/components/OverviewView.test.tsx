@@ -86,7 +86,7 @@ const instantly: OverviewInstantly = {
     { email: 'old@kaspen.io', status: 'active', warmup_status: 'banned', warmup_score: 38, daily_limit: 0 },
   ],
   campaigns: [
-    { id: 'ic-1', name: 'Kaspen PM', sender: 'instantly', status: 'active', reply_rate: 0.5, sent: 400, replies: 2, series: [1, 2, 3, 4, 5, 6, 7], bounces_24h: 0, health: { level: 'amber', reason: 'Reply rate 0.5% is under 1%' } },
+    { id: 'ic-1', name: 'Kaspen PM', sender: 'instantly', status: 'active', reply_rate: 0.5, sent: 400, replies: 2, series: [1, 2, 3, 4, 5, 6, 7], bounces_24h: 0, bounce_rate: 1.2, health: { level: 'amber', reason: 'Reply rate 0.5% is under 1%' } },
   ],
 }
 
@@ -94,7 +94,7 @@ describe('OverviewView', () => {
   it('renders every card from the fixture', () => {
     render(<OverviewView data={data} instantly={instantly} />)
     expect(screen.getByRole('link', { name: 'Pending approvals: 2. Open Validate' })).toBeTruthy()
-    expect(screen.getAllByTestId('kpi-value').map((n) => n.textContent)).toEqual(['684', '3', '2', '4'])
+    expect(screen.getAllByTestId('kpi-value').map((n) => n.textContent)).toEqual(['684', '3', '2', '4', '—']) // the fixture carries no bounce totals
     // campaign strip: name, rate, violet needs-attention dot with words, plus an icon
     const strip = screen.getByLabelText('Campaigns')
     expect(within(strip).getByText('Kaspen PM')).toBeTruthy()
@@ -120,7 +120,7 @@ describe('OverviewView', () => {
 
   it('not connected: muted line on the Instantly cards', () => {
     render(<OverviewView data={data} instantly={{ configured: false, campaigns: [] }} />)
-    expect(screen.getAllByText('Instantly not connected — set INSTANTLY_API_KEY')).toHaveLength(3)
+    expect(screen.getAllByText('Instantly not connected — set INSTANTLY_API_KEY')).toHaveLength(4)
     expect(screen.getByText('No campaigns yet.')).toBeTruthy()
   })
 

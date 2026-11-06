@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { EmptyLine, HealthDot, SectionTitle, ShimmerBar, Spark, type Tone } from '@/components/overview/parts'
 import type { CampaignStripItem, HealthLevel } from '@/lib/overview/types'
+import { BOUNCE_HINT, BOUNCE_TONE_TEXT, bounceTone, formatBounceRate } from '@/lib/campaigns/bounce'
 
 /** Campaign sends are a primary series in every state; health is carried by the dot. */
 const SPARK_TONE: Record<HealthLevel, Tone> = { green: 'lime', amber: 'lime', red: 'lime', idle: 'lime' }
@@ -58,6 +59,14 @@ export function CampaignStrip({
                   <div className="mt-0.5 truncate pl-3.5 text-xs text-muted-foreground">
                     {c.sender} · {c.status}
                     {c.sent !== null && <span className="font-mono tabular-nums"> · {c.sent.toLocaleString('en-US')} sent</span>}
+                    {c.bounce_rate != null && (
+                      <>
+                        {' · '}
+                        <span className={`font-mono tabular-nums ${BOUNCE_TONE_TEXT[bounceTone(c.bounce_rate)]}`} title={BOUNCE_HINT}>
+                          {formatBounceRate(c.bounce_rate)} bounced
+                        </span>
+                      </>
+                    )}
                     {c.bounces_24h > 0 && <span className="font-mono text-destructive tabular-nums"> · {c.bounces_24h} bounces/24h</span>}
                   </div>
                 </TableCell>

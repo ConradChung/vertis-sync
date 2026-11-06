@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { bounceRate } from '@/lib/campaigns/bounce'
 import type { Json, PendingActionKind } from '@/lib/db/types'
 import { clientSopText, findClient, loadSopLibrary } from '@/lib/copy/sop'
 import { HIGH_RISK_KIND, TOOL_TIERS, skippable, type ToolName, type ToolTier } from '@/lib/agent/permissions'
@@ -754,7 +755,7 @@ const SPECS: Built[] = [
             replies: c.replies,
             reply_rate_pct: c.reply_rate,
             opportunities: c.opportunities,
-            bounce_rate_pct: c.sent && c.bounced !== null ? Math.round((c.bounced / c.sent) * 1000) / 10 : null,
+            bounce_rate_pct: bounceRate(c.bounced, c.sent),
           })),
           considered: rows.length,
         }

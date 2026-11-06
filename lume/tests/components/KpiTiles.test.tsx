@@ -33,15 +33,19 @@ describe('KpiTiles', () => {
           opportunities: 2,
           opportunities_value_usd: 14800,
           opportunities_7d: [0, 0, 1, 0, 0, 1, 0],
+          bounced: 140,
+          bounce_rate: 2.8,
           accounts: [],
           campaigns: [],
         }}
       />
     )
-    for (const label of ['Sent today', 'Replies today', 'Pending approvals', 'Opportunities']) {
+    for (const label of ['Sent today', 'Replies today', 'Pending approvals', 'Opportunities', 'Bounce rate']) {
       expect(screen.getByText(label)).toBeTruthy()
     }
-    expect(values()).toEqual(['684', '7', '2', '2· $14.8K'])
+    expect(values()).toEqual(['684', '7', '2', '2· $14.8K', '2.8%'])
+    expect(screen.getByText('2.8%').className).toContain('text-amber')
+    expect(screen.getByText('140 bounced, all campaigns')).toBeTruthy()
     expect(screen.getByText('+2 from yesterday')).toBeTruthy()
     expect(screen.getByText('Needs attention')).toBeTruthy()
     expect(screen.queryByText(/Instantly not connected/)).toBeNull()
@@ -53,8 +57,8 @@ describe('KpiTiles', () => {
 
   it('shows the not-connected state on the Instantly tiles only', () => {
     render(<KpiTiles data={base} instantly={{ configured: false, campaigns: [] }} />)
-    expect(screen.getAllByText('Instantly not connected — set INSTANTLY_API_KEY')).toHaveLength(2)
-    expect(values()).toEqual(['—', '7', '2', '—'])
+    expect(screen.getAllByText('Instantly not connected — set INSTANTLY_API_KEY')).toHaveLength(3)
+    expect(values()).toEqual(['—', '7', '2', '—', '—'])
   })
 
   it('shows "unreachable" when Instantly errored', () => {
@@ -64,13 +68,13 @@ describe('KpiTiles', () => {
         instantly={{ configured: true, error: 'instantly_unreachable', campaign_source: 'instantly_list', campaigns: [] }}
       />
     )
-    expect(screen.getAllByText(/Instantly unreachable/)).toHaveLength(2)
+    expect(screen.getAllByText(/Instantly unreachable/)).toHaveLength(3)
     expect(screen.getByText('All clear')).toBeTruthy()
   })
 
   it('shimmers the Instantly tiles while that half loads', () => {
     const { container } = render(<KpiTiles data={base} instantly={undefined} />)
-    expect(container.querySelectorAll('.anim-shimmer').length).toBe(2)
+    expect(container.querySelectorAll('.anim-shimmer').length).toBe(3)
     expect(screen.queryByText(/not connected|unreachable/)).toBeNull()
   })
 })

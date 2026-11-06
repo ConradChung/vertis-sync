@@ -35,6 +35,8 @@ export interface CampaignStripItem {
   /** Daily sends over the last 7 days (Instantly's days), oldest first. Empty when there is no data. */
   series: number[]
   bounces_24h: number
+  /** Lifetime bounced ÷ sent, percent with one decimal (Instantly analytics); null without sends or data. */
+  bounce_rate: number | null
   health: CampaignHealth
 }
 
@@ -74,6 +76,9 @@ export type OverviewInstantly =
       /** Only when `lume_campaigns.opportunity_value_usd` is set for a campaign with opportunities. */
       opportunities_value_usd?: number | null
       opportunities_7d?: number[]
+      /** Workspace-wide lifetime bounces, and bounced ÷ sent as a percent (null when nothing sent). */
+      bounced?: number
+      bounce_rate?: number | null
       /** Present whenever `/accounts` loaded, even if analytics failed. */
       accounts?: InstantlyAccount[]
       campaigns: CampaignStripItem[]

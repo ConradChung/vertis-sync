@@ -18,6 +18,7 @@ import {
 } from '@/lib/db/service'
 import type { LumeCampaignRow } from '@/lib/db/types'
 import { campaignHealth, countByCampaign, countByDay } from '@/lib/overview/compute'
+import { bounceRate } from '@/lib/campaigns/bounce'
 import type { CampaignStripItem, OverviewInstantly, OverviewPayload } from '@/lib/overview/types'
 import { upcoming, withNextRun } from '@/lib/schedule/nextRun'
 import { lastNOwnerDates, ownerDate, ownerDayStart } from '@/lib/time/owner'
@@ -150,6 +151,8 @@ export async function buildOverviewInstantly(now: Date = new Date()): Promise<Ov
       ? valued.reduce((n, p) => n + p.t.valueUsd! * (p.totals?.opportunities ?? 0), 0)
       : null,
     opportunities_7d: seriesOn(dates, 'opportunities', wsDaily),
+    bounced: wsTotals.bounced,
+    bounce_rate: bounceRate(wsTotals.bounced, wsTotals.sent),
     accounts,
     campaigns,
   }
@@ -175,6 +178,7 @@ function otherCampaigns(rows: LumeCampaignRow[], bounces: Map<string, number>): 
         replies: null,
         series: [],
         bounces_24h: b,
+        bounce_rate: null,
         health: campaignHealth({
           bounces24h: b,
           replyRate: null,
@@ -195,6 +199,7 @@ function idleItem(t: Target, b: number, reason: string): CampaignStripItem {
     replies: null,
     series: [],
     bounces_24h: b,
+    bounce_rate: null,
     health: campaignHealth({ bounces24h: b, replyRate: null, idleReason: reason }),
   }
 }
@@ -211,6 +216,7 @@ function stripItem(
     reply_rate: totals?.reply_rate ?? null,
     sent: totals?.sent ?? null,
     replies: totals?.replies ?? null,
+    bounce_rate: totals ? bounceRate(totals.bounced, totals.sent) : null,
     series: daily ? seriesOn(dates, 'sent', daily) : [],
     health: campaignHealth({
       bounces24h: b,

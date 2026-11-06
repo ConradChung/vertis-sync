@@ -52,6 +52,16 @@ describe('AnalyticsChart', () => {
   })
 
   // Regression: stacked areas + an all-zero window rendered nothing (no lines, no Y axis), only the tooltip.
+  it('shows the lifetime bounce rate, coloured by band', () => {
+    const daily = [{ date: day(0), sent: 1, replies: 0, opportunities: 0 }]
+    const data = payload(daily) as unknown as { overview: Record<string, number> }
+    data.overview.bounced = 54 // 54 / 906 = 6.0 % -> red
+    render(<AnalyticsChart data={data as unknown as CampaignAnalyticsResponse} failed={false} days={7} onDays={() => {}} />)
+    const tile = screen.getByText('Bounce rate').parentElement!
+    expect(tile.textContent).toContain('6.0%')
+    expect(tile.querySelector('.text-red')).toBeTruthy()
+  })
+
   it('still draws the series and Y axis when the whole window is zero', () => {
     const daily = [{ date: day(10), sent: 6, replies: 1, opportunities: 0 }]
     const { container } = render(<AnalyticsChart data={payload(daily)} failed={false} days={7} onDays={() => {}} />)

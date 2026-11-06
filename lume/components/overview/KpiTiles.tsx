@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { NotConnected, Num, ShimmerBar, Spark, type Tone } from '@/components/overview/parts'
 import type { OverviewInstantly } from '@/lib/overview/types'
 import { cn } from '@/lib/utils'
+import { BOUNCE_HINT, BOUNCE_TONE_TEXT, bounceTone, formatBounceRate } from '@/lib/campaigns/bounce'
 
 export interface KpiData {
   replies_today: number
@@ -144,7 +145,7 @@ export function KpiTiles({
   const pending = data.pending_gates + followups
 
   return (
-    <section aria-label="Key numbers" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+    <section aria-label="Key numbers" className="grid grid-cols-2 gap-4 lg:grid-cols-5">
       <Tile
         label="Sent today"
         hint={SENT_HINT}
@@ -203,14 +204,30 @@ export function KpiTiles({
       >
         {!live && <InstantlyGap instantly={instantly} failed={instantlyFailed} />}
       </Tile>
+
+      <Tile
+        label="Bounce rate"
+        hint={`Workspace-wide, lifetime. ${BOUNCE_HINT}`}
+        value={
+          live ? (
+            <span className={BOUNCE_TONE_TEXT[bounceTone(live.bounce_rate ?? null)]}>{formatBounceRate(live.bounce_rate ?? null)}</span>
+          ) : (
+            dash
+          )
+        }
+        delta={live && live.bounced != null ? `${live.bounced.toLocaleString('en-US')} bounced, all campaigns` : undefined}
+        deltaTone="muted"
+      >
+        {!live && <InstantlyGap instantly={instantly} failed={instantlyFailed} />}
+      </Tile>
     </section>
   )
 }
 
 export function KpiTilesSkeleton() {
   return (
-    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4" aria-hidden>
-      {[0, 1, 2, 3].map((i) => (
+    <div className="grid grid-cols-2 gap-4 lg:grid-cols-5" aria-hidden>
+      {[0, 1, 2, 3, 4].map((i) => (
         <GlassCard key={i} className="min-h-[176px] gap-3 p-5">
           <ShimmerBar className="h-3 w-24" />
           <ShimmerBar className="h-7 w-16" />
