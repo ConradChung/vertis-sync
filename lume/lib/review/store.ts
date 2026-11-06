@@ -48,8 +48,11 @@ const db = () => createServiceClient()
 const SET_COLS = 'id,title,source_kind,source_id,source_conversation_id,item_count,columns,filters,created_at,updated_at'
 
 export async function createReviewSet(source: ApolloSource, opts: { conversationId?: string | null; title?: string } = {}) {
-  const { rows, label } = await loadSourceRows(source)
-  return createReviewSetFromRows({ kind: source.kind, id: source.id, label, rows }, opts)
+  const { rows, label, item_count } = await loadSourceRows(source)
+  const made = await createReviewSetFromRows({ kind: source.kind, id: source.id, label, rows }, opts)
+  // Apify's own count beats the loaded rows (a dataset can be larger than what was fetched).
+  const total = Math.max(item_count ?? 0, made.source_rows)
+  return { ...made, source_rows: total, truncated: made.truncated || total > made.set.item_count }
 }
 
 /**

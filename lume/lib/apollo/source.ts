@@ -16,7 +16,7 @@ export const DATASET_ID_RE = /^[A-Za-z0-9]{8,40}$/
 export const JOB_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /** Raw rows of an Apify dataset/run or a validation job (≤ 20 000). */
-export async function loadSourceRows(source: ApolloSource, signal?: AbortSignal): Promise<{ rows: Record<string, unknown>[]; label: string }> {
+export async function loadSourceRows(source: ApolloSource, signal?: AbortSignal): Promise<{ rows: Record<string, unknown>[]; label: string; item_count?: number | null }> {
   if (source.kind === 'job') {
     if (!JOB_ID_RE.test(source.id)) throw new SourceError(400, 'bad_job_id')
     const sb = createServiceClient()
@@ -32,12 +32,15 @@ export async function loadSourceRows(source: ApolloSource, signal?: AbortSignal)
   }
   if (!DATASET_ID_RE.test(source.id)) throw new SourceError(400, `bad_${source.kind}_id`)
   let datasetId = source.id
+  // The dataset's own item count (Apify itemCount), so a load past the cap can say how many there were.
+  let itemCount: number | null = null
   if (source.kind === 'run') {
     const run = await getRun(source.id, signal)
     if (!run.datasetId) throw new SourceError(409, 'run_has_no_dataset')
     datasetId = run.datasetId
+    itemCount = run.itemCount
   }
   const { items } = await datasetItems(datasetId, signal)
   if (!items.length) throw new SourceError(422, 'empty_dataset')
-  return { rows: items, label: `Apify dataset ${datasetId}` }
+  return { rows: items, label: `Apify dataset ${datasetId}`, item_count: itemCount }
 }

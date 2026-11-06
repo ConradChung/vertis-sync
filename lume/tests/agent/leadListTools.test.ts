@@ -144,3 +144,35 @@ describe('lead list tools', () => {
     expect(String(ok.lead_list_error)).toMatch(/500/)
   })
 })
+
+describe('actor columns for analysis', () => {
+  it('summarize_lead_set (read) posts the group-by / metrics to the SQL summary, for a set or a list', async () => {
+    expect(TOOL_TIERS.summarize_lead_set).toBe('read')
+    const { run, calls } = setup({ reply: () => ({ total_rows: 3, groups: [] }) })
+    await run('summarize_lead_set', { set_id: SET, group_by: ['author.name'], metrics: [{ op: 'sum', column: 'stats.totalReactions' }, { op: 'count_distinct', column: 'author.profileUrl' }] })
+    await run('summarize_lead_set', { list_id: LIST })
+    expect(calls()[0]).toEqual({ url: '/api/lead-summary', method: 'POST', body: { set_id: SET, group_by: ['author.name'], metrics: [{ op: 'sum', column: 'stats.totalReactions' }, { op: 'count_distinct', column: 'author.profileUrl' }] } })
+    expect(calls()[1].body).toEqual({ set_id: LIST.toLowerCase() })
+    expect(() => setup().tool('summarize_lead_set').inputSchema.parse({ set_id: SET, list_id: LIST })).toThrow()
+  })
+
+  it('review_leads and view_lead_list can return just the chosen raw columns', async () => {
+    const { run } = setup({
+      reply: (url) =>
+        url.includes('/items?')
+          ? { rows: [{ idx: 0, status: 'kept', item: { name: 'x' }, cells: { 'author.name': 'Ann', 'stats.totalReactions': '10', text: 'long' } }], total: 1 }
+          : { set: { id: SET, title: 'posts', columns: ['author.name', 'stats.totalReactions', 'text'] }, list: { id: LIST, name: 'L', columns: ['author.name'] }, summary: {} },
+    })
+    const r = (await run('review_leads', { set_id: SET, columns: ['author.name', 'stats.totalReactions'] })) as { columns: string[]; page: { rows: unknown[] } }
+    expect(r.columns).toEqual(['author.name', 'stats.totalReactions', 'text'])
+    expect(r.page.rows).toEqual([{ idx: 0, status: 'kept', cells: { 'author.name': 'Ann', 'stats.totalReactions': '10' } }])
+    const v = (await run('view_lead_list', { list_id: LIST, columns: ['author.name'] })) as { page: { rows: unknown[] } }
+    expect(v.page.rows).toEqual([{ idx: 0, status: 'kept', cells: { 'author.name': 'Ann' } }])
+  })
+
+  it('load_actor_results says when the run had more items than were loaded', async () => {
+    const { run } = setup({ reply: () => ({ set: { id: SET }, truncated: true, source_rows: 7200, dataset_item_count: 7200, summary: {} }) })
+    const r = (await run('load_actor_results', { run_id: 'abcdefgh12' })) as Record<string, unknown>
+    expect(String(r.cap_note)).toMatch(/5,000 of 7,200/)
+  })
+})

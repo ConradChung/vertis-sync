@@ -3,7 +3,7 @@ import { bounceRate } from '@/lib/campaigns/bounce'
 import type { Json, PendingActionKind } from '@/lib/db/types'
 import { clientSopText, findClient, loadSopLibrary } from '@/lib/copy/sop'
 import { HIGH_RISK_KIND, TOOL_TIERS, skippable, type ToolName, type ToolTier } from '@/lib/agent/permissions'
-import { FilterCriteria } from '@/lib/review/model'
+import { FilterCriteria, REVIEW_MAX_ITEMS } from '@/lib/review/model'
 import { APOLLO_STEPS } from '@/lib/apollo/records'
 import { parseLeadQuery } from '@/lib/adapters/instantlyLeads.map'
 import { EmailId, INTEREST_NAMES, LabelBody } from '@/lib/inbox/schemas'
@@ -338,6 +338,18 @@ type AppendSourceBody = Record<string, unknown> & { kind: string }
 /** More explicit rows than this (or any q / missing) make remove_from_lead_list file a remove_lead_rows approval. */
 const BULK_REMOVE_MAX = 25
 
+/** A page of rows trimmed to the chosen raw columns (the source's own fields), or as returned. */
+function pickColumns(page: unknown, columns: string[] | undefined): unknown {
+  if (!columns?.length || !page || typeof page !== 'object') return page
+  const p = page as { rows?: { idx: number; status?: string; cells?: Record<string, string> | null }[] }
+  return {
+    ...p,
+    rows: (p.rows ?? []).map((r) => ({ idx: r.idx, status: r.status ?? 'kept', cells: Object.fromEntries(columns.map((c) => [c, r.cells?.[c] ?? ''])) })),
+  }
+}
+
+const fmtN = new Intl.NumberFormat('en-US')
+
 /** The lead_list ref every list tool returns (it also puts "Open in Leads" under the message). */
 const listRef = (r: Record<string, unknown>) => ({
   list_id: r.list_id,
@@ -643,7 +655,11 @@ const SPECS: Built[] = [
         const source = run_id ? { kind: 'run', id: run_id } : dataset_id ? { kind: 'dataset', id: dataset_id } : { kind: 'job', id: job_id!.toLowerCase() }
         const r = (await call('/api/review-sets', { method: 'POST', body: { source, conversation_id: deps.conversationId ?? null, ...(title ? { title } : {}) } })) as Record<string, unknown>
         const setId = (r.set as { id?: string } | undefined)?.id
-        return { ...r, ...(await autoAppend(call, deps, setId ? { kind: 'review_set', set_id: setId } : null)) } as ToolResult
+        const total = Number(r.dataset_item_count ?? r.source_rows) || 0
+        const capNote = r.truncated
+          ? { cap_note: `Loaded the first ${fmtN.format(REVIEW_MAX_ITEMS)} of ${fmtN.format(total)} items (the review cap). Say so; summaries and filters cover the loaded rows only.` }
+          : {}
+        return { ...r, ...capNote, ...(await autoAppend(call, deps, setId ? { kind: 'review_set', set_id: setId } : null)) } as ToolResult
       },
     },
     'low'
@@ -652,7 +668,7 @@ const SPECS: Built[] = [
     {
       name: 'review_leads',
       description:
-        'Read a lead review set: a page of rows (name, category, city, state, website/domain, phone, rating, reviews, LinkedIn, email; idx is the row number) plus the summary over kept rows. ' +
+        "Read a lead review set: its own columns (every field the source returned, e.g. an actor's author.name, stats.totalReactions) and a page of rows (cells by column, plus the mapped helper fields; idx is the row number), with the summary over kept rows. Pass `columns` to get only some fields. For counts and totals use summarize_lead_set instead of paging. " +
         'Filter the page by status (kept, excluded, all), a search string, category or city. Use it to show the owner a table and to spot junk (wrong categories, franchises, closed or tiny businesses, duplicates).',
       inputSchema: z.object({
         set_id: uuid,
@@ -662,14 +678,16 @@ const SPECS: Built[] = [
         city: z.string().max(120).optional(),
         page: z.number().int().min(0).max(1000).optional(),
         page_size: z.number().int().min(1).max(100).optional(),
+        columns: z.array(z.string().min(1).max(200)).max(50).optional().describe("only these of the set's own columns (e.g. author.name, stats.totalReactions); see `columns` in the result"),
       }),
-      run: async ({ set_id, status, q, category, city, page, page_size }, { call }) => {
+      run: async ({ set_id, status, q, category, city, page, page_size, columns }, { call }) => {
         const params = new URLSearchParams({ status: status ?? 'kept', page: String(page ?? 0), page_size: String(page_size ?? 25) })
         if (q) params.set('q', q)
         if (category) params.set('category', category)
         if (city) params.set('city', city)
         const [summary, items] = await Promise.all([call(`/api/review-sets/${set_id}`), call(`/api/review-sets/${set_id}/items?${params}`)])
-        return { ...(summary as Record<string, unknown>), page: items } as ToolResult
+        const s = summary as { set?: { columns?: string[] } } & Record<string, unknown>
+        return { ...s, columns: s.set?.columns ?? [], page: pickColumns(items, columns) } as ToolResult
       },
     },
     'read'
@@ -756,14 +774,38 @@ const SPECS: Built[] = [
         dir: z.enum(['asc', 'desc']).optional(),
         page: z.number().int().min(0).max(1000).optional(),
         page_size: z.number().int().min(1).max(100).optional(),
+        columns: z.array(z.string().min(1).max(200)).max(50).optional().describe("only these of the list's columns"),
       }),
-      run: async ({ list_id, q, sort, dir, page, page_size }, { call }) => {
+      run: async ({ list_id, q, sort, dir, page, page_size, columns }, { call }) => {
         const id = list_id.toLowerCase()
         const params = new URLSearchParams({ page: String(page ?? 0), page_size: String(page_size ?? 25), sort: sort ?? 'idx', dir: dir ?? 'asc' })
         if (q) params.set('q', q)
         const { list } = (await call(`/api/lead-lists/${id}`)) as { list: Record<string, unknown> }
         const items = await call(`/api/lead-lists/${id}/items?${params}`)
-        return { list, page: items, lead_list: { list_id: id, name: list.name } } as ToolResult
+        return { list, page: pickColumns(items, columns), lead_list: { list_id: id, name: list.name } } as ToolResult
+      },
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'summarize_lead_set',
+      description:
+        "Count and total a review set's or lead list's own columns in the database (never pages rows into the chat): group_by columns (e.g. ['author.name'] = posts per author) and metrics: count_distinct, sum, avg, min, max of a column (e.g. sum of stats.totalReactions per author, count_distinct of author.profileUrl). " +
+        'Largest groups first, top 100 plus an `other` total. No group_by = one totals row. A review set counts its kept rows unless status says otherwise. Use it for any analysis of actor output.',
+      inputSchema: z
+        .object({
+          set_id: uuid.optional(),
+          list_id: uuid.optional(),
+          group_by: z.array(z.string().min(1).max(200)).max(5).optional(),
+          metrics: z.array(z.object({ op: z.enum(['count_distinct', 'sum', 'avg', 'min', 'max']), column: z.string().min(1).max(200) })).max(10).optional(),
+          status: z.enum(['kept', 'excluded', 'all']).optional(),
+          limit: z.number().int().min(1).max(100).optional(),
+        })
+        .refine((v) => !!v.set_id !== !!v.list_id, 'set_id or list_id'),
+      run: async ({ set_id, list_id, ...rest }, { call }) => {
+        const body = Object.fromEntries(Object.entries({ set_id: (set_id ?? list_id)!.toLowerCase(), ...rest }).filter(([, v]) => v !== undefined))
+        return call('/api/lead-summary', { method: 'POST', body }) as Promise<ToolResult>
       },
     },
     'read'
