@@ -21,8 +21,10 @@ const job = (o: Partial<JobSummary>): JobSummary => ({
   id: RUN, filename: 'pm-leads.csv', status: 'processing', total_rows: 5272, processed_rows: 153, enrich: true,
   created_at: iso(2 * 3600_000), updated_at: iso(60_000), error_message: null, ...o,
 })
+let etaLive: Record<string, unknown> = {}
 const progress = (id: string, status: string) => ({
   id, filename: 'pm-leads.csv', status, total_rows: 5272, processed_rows: 153, eta_seconds: 3600, eta_updated_at: null,
+  eta_stage: null, eta_validate_seconds: null, eta_enrich_seconds: null, ...etaLive,
   enrich: true, enrich_started: false, enriched_rows: 0, finder_status: null, rows_missing_email: null, emails_found: null,
   instantly_status: null, instantly_campaign_id: null, instantly_campaign_name: null, location_barrier: false, company_barrier: true, company_strict: false,
   counts: { pending: 5100, valid: 120, invalid: 30, error: 2, no_email: 1 },
@@ -42,6 +44,7 @@ beforeEach(() => {
   fetchMock.mockClear()
   vi.stubGlobal('fetch', fetchMock)
   jobs = []
+  etaLive = {}
 })
 afterEach(() => {
   cleanup()
@@ -60,6 +63,14 @@ describe('RunningJobs', () => {
     expect(within(card).getByRole('progressbar', { name: 'Enrich queued' })).toBeTruthy()
     expect(within(card).getByLabelText('Row verdicts')).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledWith(`/api/jobs/${RUN}`, expect.anything())
+    expect(within(card).getByText('~1 h (initial estimate)')).toBeTruthy()
+  })
+
+  it('a live ETA names its stage and the enrichment to come', async () => {
+    jobs = [job({})]
+    etaLive = { eta_stage: 'validating', eta_updated_at: new Date().toISOString(), eta_seconds: 12_600, eta_validate_seconds: 5400, eta_enrich_seconds: 7200 }
+    fresh(<RunningJobs />)
+    expect(await screen.findByText('Validating · ~1 h 30 min left, then enrichment ~2 h')).toBeTruthy()
   })
 
   it('lists jobs finished in the last 24 h collapsed; a failed one shows its error; progress loads only when opened', async () => {

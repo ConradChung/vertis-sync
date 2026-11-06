@@ -283,7 +283,7 @@ export async function getEventsByTypePrefix(prefixes: string[], limit = 20): Pro
 // Validate: job progress, per-lead rows, Lume-local push settings
 
 const JOB_PROGRESS_COLS =
-  'id,filename,status,total_rows,processed_rows,eta_seconds,eta_updated_at,enrich,enrich_started,enriched_rows,' +
+  'id,filename,status,total_rows,processed_rows,eta_seconds,eta_updated_at,eta_stage,eta_validate_seconds,eta_enrich_seconds,enrich,enrich_started,enriched_rows,' +
   'finder_status,rows_missing_email,emails_found,instantly_status,instantly_campaign_id,instantly_campaign_name,' +
   'location_barrier,company_barrier,company_strict'
 
@@ -310,6 +310,9 @@ export async function getJobProgress(jobId: string): Promise<JobProgress | null>
     processed_rows: num(j.processed_rows),
     eta_seconds: typeof j.eta_seconds === 'number' ? j.eta_seconds : null,
     eta_updated_at: (j.eta_updated_at as string | null) ?? null,
+    eta_stage: j.eta_stage === 'validating' || j.eta_stage === 'enriching' ? j.eta_stage : null,
+    eta_validate_seconds: typeof j.eta_validate_seconds === 'number' ? j.eta_validate_seconds : null,
+    eta_enrich_seconds: typeof j.eta_enrich_seconds === 'number' ? j.eta_enrich_seconds : null,
     enrich: j.enrich === true,
     enrich_started: j.enrich_started === true,
     enriched_rows: num(j.enriched_rows),

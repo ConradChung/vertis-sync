@@ -302,6 +302,10 @@ export interface JobProgress {
   processed_rows: number
   eta_seconds: number | null
   eta_updated_at: string | null
+  /** Live ETA stage (null = the decision-time quote); see lib/validate/eta.ts. */
+  eta_stage: 'validating' | 'enriching' | null
+  eta_validate_seconds: number | null
+  eta_enrich_seconds: number | null
   enrich: boolean
   enrich_started: boolean
   enriched_rows: number

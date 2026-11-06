@@ -5,7 +5,7 @@ import { AnimatedNumber } from '@/components/ui/animated-number'
 import { GlassCard } from '@/components/ui/glass-card'
 import { SectionTitle, ShimmerBar } from '@/components/overview/parts'
 import { useJobProgress } from '@/hooks/useJob'
-import { formatEta } from '@/lib/validate/client'
+import { liveEta } from '@/lib/validate/eta'
 import type { JobProgress as Job } from '@/lib/db/types'
 import { cn } from '@/lib/utils'
 
@@ -54,8 +54,19 @@ function Bar({ value, total, label, tone = 'bg-primary' }: { value: number; tota
 }
 
 /** Email verification progress for a validation job (the "progress panel inside a job row"). */
+/** Re-render every `ms` so the ETA counts down between polls. */
+function useNow(ms: number): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), ms)
+    return () => clearInterval(t)
+  }, [ms])
+  return now
+}
+
 export function JobProgressView({ job }: { job: Job }) {
-  const eta = job.status === 'processing' || job.status === 'pending' ? formatEta(job.eta_seconds) : null
+  const now = useNow(15_000)
+  const eta = liveEta(job, now)
   const validCount = job.counts.valid
   // The bar counts verdicts on validation_rows (exact); the job's own
   // processed_rows / total_rows counter can lag or drift (live: 43/162 on a
