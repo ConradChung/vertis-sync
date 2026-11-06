@@ -15,6 +15,11 @@ export const SummaryInput = z.object({
   metrics: z.array(Metric).max(10).optional(),
   status: z.enum(['kept', 'excluded', 'all']).optional(),
   limit: z.number().int().min(1).max(100).optional(),
+  /** Equality filters, e.g. { type: 'post' } (≤ 5). */
+  where: z.record(z.string().min(1).max(200), z.string().max(500)).refine((w) => Object.keys(w).length <= 5, 'at most 5').optional(),
+  /** The agent's chat and project (a review set is only summarised from its own chat or project). */
+  conversation_id: z.string().uuid().nullable().optional(),
+  project_id: z.string().uuid().nullable().optional(),
 })
 export type SummaryInput = z.infer<typeof SummaryInput>
 

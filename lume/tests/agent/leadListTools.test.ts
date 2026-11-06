@@ -151,8 +151,8 @@ describe('actor columns for analysis', () => {
     const { run, calls } = setup({ reply: () => ({ total_rows: 3, groups: [] }) })
     await run('summarize_lead_set', { set_id: SET, group_by: ['author.name'], metrics: [{ op: 'sum', column: 'stats.totalReactions' }, { op: 'count_distinct', column: 'author.profileUrl' }] })
     await run('summarize_lead_set', { list_id: LIST })
-    expect(calls()[0]).toEqual({ url: '/api/lead-summary', method: 'POST', body: { set_id: SET, group_by: ['author.name'], metrics: [{ op: 'sum', column: 'stats.totalReactions' }, { op: 'count_distinct', column: 'author.profileUrl' }] } })
-    expect(calls()[1].body).toEqual({ set_id: LIST.toLowerCase() })
+    expect(calls()[0]).toEqual({ url: '/api/lead-summary', method: 'POST', body: { set_id: SET, group_by: ['author.name'], metrics: [{ op: 'sum', column: 'stats.totalReactions' }, { op: 'count_distinct', column: 'author.profileUrl' }], conversation_id: CONV, project_id: null } })
+    expect(calls()[1].body).toEqual({ set_id: LIST.toLowerCase(), conversation_id: CONV, project_id: null })
     expect(() => setup().tool('summarize_lead_set').inputSchema.parse({ set_id: SET, list_id: LIST })).toThrow()
   })
 

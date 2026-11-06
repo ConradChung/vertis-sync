@@ -4,7 +4,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import type { Json } from '@/lib/db/types'
 import type { ApolloSource } from '@/lib/apollo/records'
 import { loadSourceRows } from '@/lib/apollo/source'
-import { flattenRecord, mergeColumns, pickCells } from '@/lib/leads/columns'
+import { chooseColumns, flattenRecord, MAX_CELL_KEYS, mergeColumns, pickCells } from '@/lib/leads/columns'
 import {
   describeCriteria,
   normaliseLead,
@@ -28,6 +28,8 @@ export interface ReviewSet {
   item_count: number
   /** The visible columns: the source's own fields (an actor's output keys, a sheet's headers), first-seen order, ≤ 100. */
   columns: string[]
+  /** Every stored column (≤ 300), what summaries may use. */
+  all_columns: string[]
   filters: AppliedFilter[]
   created_at: string
   updated_at: string
@@ -45,7 +47,7 @@ export interface AppliedFilter {
 }
 
 const db = () => createServiceClient()
-const SET_COLS = 'id,title,source_kind,source_id,source_conversation_id,item_count,columns,filters,created_at,updated_at'
+const SET_COLS = 'id,title,source_kind,source_id,source_conversation_id,item_count,columns,all_columns,filters,created_at,updated_at'
 
 export async function createReviewSet(source: ApolloSource, opts: { conversationId?: string | null; title?: string } = {}) {
   const { rows, label, item_count } = await loadSourceRows(source)
@@ -66,9 +68,11 @@ export async function createReviewSetFromRows(
 ) {
   const { rows, label } = source
   const capped = rows.slice(0, REVIEW_MAX_ITEMS)
-  // What the panel shows: each row's own fields, flattened, in the source's key order.
-  const cells = capped.map((raw) => flattenRecord(raw))
-  const columns = mergeColumns([], cells)
+  // Each row's own fields, flattened (all kept, ≤ 300 keys); the panel shows ≤ 100 chosen by fill rate across row types.
+  const flat = capped.map((raw) => flattenRecord(raw))
+  const all_columns = mergeColumns([], flat, MAX_CELL_KEYS)
+  const cells = flat.map((c) => pickCells(c, all_columns))
+  const columns = chooseColumns(cells)
   const sb = db()
   const { data: set, error } = await sb
     .from('lead_review_sets')
@@ -79,6 +83,7 @@ export async function createReviewSetFromRows(
       source_conversation_id: opts.conversationId ?? null,
       item_count: capped.length,
       columns,
+      all_columns,
     })
     .select(SET_COLS)
     .single()
@@ -89,7 +94,7 @@ export async function createReviewSetFromRows(
       idx: i + k,
       item: normaliseLead(source.normalisable ? source.normalisable(raw) : raw) as unknown as Json,
       raw: raw as Json,
-      cells: pickCells(cells[i + k], columns) as Json,
+      cells: cells[i + k] as Json,
     }))
     const { error: e } = await sb.from('lead_review_items').insert(batch)
     if (e) {
@@ -195,4 +200,33 @@ export async function restore(set: ReviewSet, what: { filter_id?: string; item_i
   await saveFilters(set.id, filters)
   const changed = new Set(idxs)
   return { restored: idxs.length, after: summarise(rows.map((r) => (changed.has(r.idx) ? { ...r, status: 'kept' as const } : r))) }
+}
+
+/**
+ * Sets loaded before cells were stored (no all_columns, rows with raw): flatten
+ * each raw row once, store its cells and the set's columns. Paged; runs once.
+ */
+export async function ensureCells(set: ReviewSet): Promise<ReviewSet> {
+  if ((set.all_columns ?? []).length || !set.item_count) return set
+  const sb = db()
+  const rows: { idx: number; item: Json; raw: Record<string, unknown> | null; status: string; excluded_reason: string | null; filter_id: string | null }[] = []
+  for (let from = 0; from < REVIEW_MAX_ITEMS; from += 1000) {
+    const { data, error } = await sb.from('lead_review_items').select('idx,item,raw,status,excluded_reason,filter_id').eq('set_id', set.id).order('idx').range(from, from + 999)
+    if (error) throw error
+    rows.push(...((data ?? []) as typeof rows))
+    if (!data || data.length < 1000) break
+  }
+  const flat = rows.map((r) => (r.raw ? flattenRecord(r.raw) : {}))
+  const all_columns = mergeColumns([], flat, MAX_CELL_KEYS)
+  if (!all_columns.length) return set
+  const cells = flat.map((c) => pickCells(c, all_columns))
+  const columns = chooseColumns(cells)
+  for (let i = 0; i < rows.length; i += 500) {
+    const batch = rows.slice(i, i + 500).map((r, k) => ({ set_id: set.id, ...r, cells: cells[i + k] as Json }))
+    const { error } = await sb.from('lead_review_items').upsert(batch, { onConflict: 'set_id,idx' })
+    if (error) throw error
+  }
+  const { error } = await sb.from('lead_review_sets').update({ columns, all_columns }).eq('id', set.id)
+  if (error) throw error
+  return { ...set, columns, all_columns }
 }

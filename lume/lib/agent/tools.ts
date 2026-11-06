@@ -814,7 +814,7 @@ const SPECS: Built[] = [
       name: 'summarize_lead_set',
       description:
         "Count and total a review set's or lead list's own columns in the database (never pages rows into the chat): group_by columns (e.g. ['author.name'] = posts per author) and metrics: count_distinct, sum, avg, min, max of a column (e.g. sum of stats.totalReactions per author, count_distinct of author.profileUrl). " +
-        'Largest groups first, top 100 plus an `other` total. No group_by = one totals row. A review set counts its kept rows unless status says otherwise. Use it for any analysis of actor output.',
+        'Any column the rows hold works, not only the shown ones (see all_columns). Add `where` (e.g. { type: \'post\' }) when an actor mixes row kinds. Largest groups first, top 100 plus an `other` total. No group_by = one totals row. A review set counts its kept rows unless status says otherwise. Use it for any analysis of actor output.',
       inputSchema: z
         .object({
           set_id: uuid.optional(),
@@ -823,10 +823,13 @@ const SPECS: Built[] = [
           metrics: z.array(z.object({ op: z.enum(['count_distinct', 'sum', 'avg', 'min', 'max']), column: z.string().min(1).max(200) })).max(10).optional(),
           status: z.enum(['kept', 'excluded', 'all']).optional(),
           limit: z.number().int().min(1).max(100).optional(),
+          where: z.record(z.string().min(1).max(200), z.string().max(500)).optional().describe("equality filters, e.g. { type: 'post' } so profile / company rows don't inflate post counts"),
         })
         .refine((v) => !!v.set_id !== !!v.list_id, 'set_id or list_id'),
-      run: async ({ set_id, list_id, ...rest }, { call }) => {
-        const body = Object.fromEntries(Object.entries({ set_id: (set_id ?? list_id)!.toLowerCase(), ...rest }).filter(([, v]) => v !== undefined))
+      run: async ({ set_id, list_id, ...rest }, { call, deps }) => {
+        const body = Object.fromEntries(
+          Object.entries({ set_id: (set_id ?? list_id)!.toLowerCase(), ...rest, conversation_id: deps.conversationId ?? null, project_id: deps.projectId ?? null }).filter(([, v]) => v !== undefined)
+        )
         return call('/api/lead-summary', { method: 'POST', body }) as Promise<ToolResult>
       },
     },

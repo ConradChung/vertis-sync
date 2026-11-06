@@ -12,7 +12,7 @@ import {
   type ItemSource,
   type ListItem,
 } from '@/lib/leads/lists/model'
-import { cellsCsvHeader, cellsCsvLine, editCell, labelCells, mergeColumns, pickCells, sendHeader, type Cells } from '@/lib/leads/columns'
+import { cellsCsvHeader, cellsCsvLine, chooseColumns, editCell, labelCells, MAX_CELL_KEYS, mergeColumns, pickCells, sendHeader, type Cells } from '@/lib/leads/columns'
 
 /**
  * Lead lists in Supabase: lead_review_sets rows with kind = 'list' and their
@@ -35,6 +35,8 @@ export interface LeadList {
   sent_rows: number | null
   /** The visible columns: the sources' own fields, in first-seen order (≤ 100). */
   columns: string[]
+  /** Every stored column (≤ 300), what summaries may use. */
+  all_columns: string[]
   /** Moves only when rows are added, removed or edited; the resend guard compares sent_at with it. */
   content_changed_at: string
   /** 'influencer_candidates': the sheet shows an influencer candidate batch (influencer_batch_id) instead of lead rows. */
@@ -68,13 +70,13 @@ export interface AppendResult {
 }
 
 const db = () => createServiceClient()
-const COLS = 'id,title,notes,created_by,project_id,project_default,item_count,email_count,sent_ingest_id,sent_at,sent_rows,columns,content_changed_at,sheet_kind,influencer_batch_id,created_at,updated_at'
+const COLS = 'id,title,notes,created_by,project_id,project_default,item_count,email_count,sent_ingest_id,sent_at,sent_rows,columns,all_columns,content_changed_at,sheet_kind,influencer_batch_id,created_at,updated_at'
 const CHUNK = 500
 
 type SetRow = Omit<LeadList, 'name'> & { title: string }
 const toList = (r: SetRow): LeadList => {
   const { title, ...rest } = r
-  return { ...rest, name: title, project_default: !!rest.project_default, item_count: rest.item_count ?? 0, email_count: rest.email_count ?? 0, columns: Array.isArray(rest.columns) ? rest.columns : [], sheet_kind: rest.sheet_kind === 'influencer_candidates' ? 'influencer_candidates' : 'leads', influencer_batch_id: rest.influencer_batch_id ?? null }
+  return { ...rest, name: title, project_default: !!rest.project_default, item_count: rest.item_count ?? 0, email_count: rest.email_count ?? 0, columns: Array.isArray(rest.columns) ? rest.columns : [], all_columns: Array.isArray(rest.all_columns) ? rest.all_columns : [], sheet_kind: rest.sheet_kind === 'influencer_candidates' ? 'influencer_candidates' : 'leads', influencer_batch_id: rest.influencer_batch_id ?? null }
 }
 const lists = () => db().from('lead_review_sets')
 const items = () => db().from('lead_review_items')
@@ -107,6 +109,7 @@ export async function createList(input: {
       item_count: input.item_count ?? 0,
       email_count: 0,
       columns: [],
+      all_columns: [],
       filters: [],
       created_at: now(),
       updated_at: now(),
@@ -280,8 +283,11 @@ async function insertBatch(batch: Record<string, unknown>[]): Promise<{ inserted
 async function appendLocked(listId: string, rows: readonly IncomingRow[], max: number): Promise<AppendResult> {
   const first = await recount(listId)
   let count = first.item_count
-  const before = (await getList(listId))?.columns ?? []
+  const current = await getList(listId)
+  const before = current?.columns ?? []
+  const beforeAll = current?.all_columns?.length ? current.all_columns : before
   let columns = before
+  let allColumns = beforeAll
   let idx = await nextIdx(listId)
   const out: AppendResult = { added: 0, duplicates: 0, skipped: 0, over_cap: 0, item_count: count }
   // Keys added by earlier chunks of this call, so a duplicate across chunks is caught without re-reading.
@@ -303,13 +309,16 @@ async function appendLocked(listId: string, rows: readonly IncomingRow[], max: n
     out.skipped += plan.skipped
     out.over_cap += plan.over_cap
     if (!plan.add.length) continue
-    columns = mergeColumns(columns, plan.add.map((j) => chunk[j].cells))
+    // Rows keep every field (≤ 300 keys); the shown columns take this chunk's best by fill rate across row types.
+    allColumns = mergeColumns(allColumns, plan.add.map((j) => chunk[j].cells), MAX_CELL_KEYS)
+    const chosen = chooseColumns(plan.add.map((j) => pickCells(chunk[j].cells, allColumns)))
+    columns = mergeColumns(columns, [Object.fromEntries(chosen.map((k) => [k, '']))])
     const batch = plan.add.map((j) => {
       const k = keys[j]
       if (k.email_key) added.emails.add(k.email_key)
       if (k.linkedin_key) added.linkedins.add(k.linkedin_key)
       if (k.name_key) added.names.add(k.name_key)
-      return { set_id: listId, idx: idx++, item: chunk[j].item as unknown as Json, raw: (chunk[j].raw ?? null) as Json, cells: pickCells(chunk[j].cells, columns) as Json, status: 'kept', source: chunk[j].source, ...k }
+      return { set_id: listId, idx: idx++, item: chunk[j].item as unknown as Json, raw: (chunk[j].raw ?? null) as Json, cells: pickCells(chunk[j].cells, allColumns) as Json, status: 'kept', source: chunk[j].source, ...k }
     })
     const put = await insertBatch(batch)
     out.added += put.inserted
@@ -317,8 +326,8 @@ async function appendLocked(listId: string, rows: readonly IncomingRow[], max: n
     count += put.inserted
     // idx stays unique even when some rows clashed: the next chunk starts past every idx tried.
   }
-  if (columns.length !== before.length) {
-    const { error } = await lists().update({ columns }).eq('id', listId)
+  if (columns.length !== before.length || allColumns.length !== beforeAll.length) {
+    const { error } = await lists().update({ columns, all_columns: allColumns }).eq('id', listId)
     if (error) throw error
   }
   out.item_count = (await recount(listId, out.added > 0)).item_count

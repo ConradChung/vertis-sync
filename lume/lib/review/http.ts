@@ -1,7 +1,7 @@
 import 'server-only'
 import { NextResponse } from 'next/server'
 import { uuidParam } from '@/lib/http/json'
-import { getReviewSet, type ReviewSet } from '@/lib/review/store'
+import { ensureCells, getReviewSet, type ReviewSet } from '@/lib/review/store'
 
 export type SetCtx = { params: Promise<{ id: string }> }
 
@@ -11,5 +11,6 @@ export async function withSet(ctx: SetCtx): Promise<{ ok: true; set: ReviewSet }
   if (!id) return { ok: false, response: NextResponse.json({ error: 'invalid_id' }, { status: 400 }) }
   const set = await getReviewSet(id)
   if (!set) return { ok: false, response: NextResponse.json({ error: 'not_found' }, { status: 404 }) }
-  return { ok: true, set }
+  // A set loaded before cells were stored gets them (from raw) on first read.
+  return { ok: true, set: await ensureCells(set) }
 }

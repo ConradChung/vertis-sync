@@ -56,3 +56,21 @@ describe('sendHeader', () => {
     expect(cellsCsvLine({ a: '=1+1', c: 'x,y' }, ['a', 'b', 'c'])).toBe(`'=1+1,,"x,y"`)
   })
 })
+
+describe('chooseColumns', () => {
+  it('ranks by fill rate and round-robins over the row types, so profile / company fields are not crowded out by post fields', async () => {
+    const { chooseColumns } = await import('@/lib/leads/columns')
+    const posts = Array.from({ length: 50 }, (_, i) => ({ type: 'post', text: `t${i}`, 'author.name': 'A', 'stats.totalReactions': '3', ...(i < 5 ? { rare: 'x' } : {}) }))
+    const companies = Array.from({ length: 3 }, () => ({ type: 'company', 'company.name': 'Acme', 'company_details.size': '10' }))
+    const cols = chooseColumns([...posts, ...companies], 5)
+    expect(cols).toHaveLength(5)
+    expect(cols).toEqual(expect.arrayContaining(['type', 'company.name', 'company_details.size']))
+    expect(cols).not.toContain('rare')
+    // Shown in the source's first-seen order.
+    expect(cols.indexOf('type')).toBe(0)
+  })
+  it('everything when there are no more keys than the cap', async () => {
+    const { chooseColumns } = await import('@/lib/leads/columns')
+    expect(chooseColumns([{ a: '1' }, { b: '2' }], 100)).toEqual(['a', 'b'])
+  })
+})

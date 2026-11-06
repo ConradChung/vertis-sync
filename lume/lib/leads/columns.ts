@@ -12,7 +12,10 @@ import { leadColumnMapping } from '@/lib/review/columns'
  * validator's email column).
  */
 
+/** Columns shown (the table, the CSV). */
 export const MAX_COLUMNS = 100
+/** Keys stored per row (cells) and listed as the set's all_columns: a safety cap, far above any actor seen. */
+export const MAX_CELL_KEYS = 300
 const MAX_DEPTH = 3
 const MAX_CELL = 5000
 
@@ -108,4 +111,33 @@ export const cellsCsvHeader = (columns: readonly string[]) => columns.map(csvCel
 /** One row in column order (blank where the row lacks a column), formula-safe. */
 export function cellsCsvLine(cells: Cells, columns: readonly string[]): string {
   return columns.map((c) => csvCell(cells[c] ?? '')).join(',')
+}
+
+/**
+ * The columns to show when a set has more keys than `max`: rank keys by how
+ * often they are filled, within each row type (an actor's `type`: post,
+ * profile, company…), and take the best of each type in turn, so one type's
+ * many fields cannot crowd out another's. Shown in first-seen order.
+ */
+export function chooseColumns(rows: readonly Cells[], max = MAX_COLUMNS): string[] {
+  const all = mergeColumns([], rows, Number.MAX_SAFE_INTEGER)
+  if (all.length <= max) return all
+  const byType = new Map<string, Map<string, number>>()
+  for (const r of rows) {
+    const t = r.type ?? ''
+    const fill = byType.get(t) ?? new Map<string, number>()
+    for (const [k, v] of Object.entries(r)) if (v !== '') fill.set(k, (fill.get(k) ?? 0) + 1)
+    byType.set(t, fill)
+  }
+  const queues = [...byType.values()].map((fill) => [...fill.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k))
+  const chosen = new Set<string>()
+  while (chosen.size < max && queues.some((q) => q.length)) {
+    for (const q of queues) {
+      while (q.length && chosen.has(q[0])) q.shift()
+      const k = q.shift()
+      if (k !== undefined) chosen.add(k)
+      if (chosen.size >= max) break
+    }
+  }
+  return all.filter((k) => chosen.has(k))
 }

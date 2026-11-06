@@ -24,6 +24,7 @@ vi.mock('@/lib/review/store', () => ({
   applyFilter: h.applyFilter,
   restore: h.restore,
   setRowsByHand: h.setRowsByHand,
+  ensureCells: async (s: unknown) => s,
   createReviewSetFromRows: h.createReviewSetFromRows,
 }))
 vi.mock('@/lib/review/attachmentSource', () => ({ loadAttachmentLeads: h.loadAttachmentLeads }))
