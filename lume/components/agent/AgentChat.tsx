@@ -116,6 +116,10 @@ export function AgentChat() {
   const [hello, setHello] = useState('Hello')
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  // Follow the stream only while the owner is at the bottom: scrolling up to
+  // read stops the auto-scroll, scrolling back down resumes it.
+  const followRef = useRef(true)
   const { messages, busy, send } = chat
 
   // Split screen: diagrams and lead review sets from this conversation live in the right panel.
@@ -303,11 +307,32 @@ export function AgentChat() {
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`
   }, [draft])
 
-  // Keep the newest message in view while it streams.
+  // Opening a chat lands on the start of the latest exchange (the owner's
+  // last message, then the reply below it), not the bottom of a long reply.
+  const openedRef = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    const id = chat.conversationId ?? null
+    if (chat.loading || !messages.length || openedRef.current === id) return
+    openedRef.current = id
+    // A chat that just got its id mid-run is the one being typed in: keep following.
+    if (busy) return
+    const box = scrollRef.current
+    const items = box?.querySelectorAll<HTMLElement>('[data-role="user"]')
+    const lastAsk = items?.[items.length - 1]
+    if (box && lastAsk) {
+      box.scrollTop += lastAsk.getBoundingClientRect().top - box.getBoundingClientRect().top - 16
+      followRef.current = box.scrollHeight - box.scrollTop - box.clientHeight < 120
+    }
+  }, [chat.conversationId, chat.loading, messages.length, busy])
+
+  // Keep the newest message in view while it streams, unless the owner has
+  // scrolled up. Sending a new message always follows again.
   const last = messages.at(-1)
   useEffect(() => {
+    if (last?.role === 'user') followRef.current = true
+    if (!followRef.current || openedRef.current !== (chat.conversationId ?? null)) return
     endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
-  }, [messages.length, last?.text, last?.tools.length, last?.approvals.length])
+  }, [messages.length, last?.role, last?.text, last?.tools.length, last?.approvals.length, chat.conversationId])
 
   // `/` or ⌘K / Ctrl+K focuses the composer when nothing else is being typed in.
   useEffect(() => {
@@ -416,6 +441,11 @@ export function AgentChat() {
           )}
         >
           <div
+            ref={scrollRef}
+            onScroll={(e) => {
+              const el = e.currentTarget
+              followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+            }}
             className="thin-scroll scroll-fade-bottom min-h-0 flex-1 overflow-y-auto px-4 pt-4 sm:px-8 sm:pt-7"
             aria-live="polite"
             aria-busy={busy || chat.loading}
@@ -429,7 +459,7 @@ export function AgentChat() {
             ) : (
               <ol className="flex flex-col gap-7 pt-2 pb-6" aria-label="Conversation">
                 {messages.map((m) => (
-                  <li key={m.id} className="min-w-0">
+                  <li key={m.id} className="min-w-0" data-role={m.role}>
                     <Message
                       m={m}
                       onDecided={chat.followUp}
