@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server'
 import { requireOwner } from '@/lib/auth/guards'
 import { createServiceClient } from '@/lib/supabase/service'
+import { isApifyConfigured, listAccountRuns } from '@/lib/adapters/apify'
 
 /**
  * `GET /api/apify/runs` — the most recent actor runs the owner approved
  * (executed `run_actor` actions), newest first, with the run id the agent
- * needs for get_actor_run / import_actor_run. Read-only.
+ * needs for get_actor_run / import_actor_run, plus the Apify account's own
+ * recent runs (also those started in the Apify console). Read-only.
  */
 export async function GET(req: Request) {
   const auth = await requireOwner(req)
@@ -32,5 +34,7 @@ export async function GET(req: Request) {
       error: a.error ?? null,
     }
   })
-  return NextResponse.json({ runs })
+  // Best effort: a failed Apify call still returns the approved runs.
+  const account_runs = isApifyConfigured() ? await listAccountRuns(limit + 5).catch(() => null) : null
+  return NextResponse.json({ runs, account_runs })
 }

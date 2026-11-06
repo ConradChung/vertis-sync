@@ -719,8 +719,9 @@ const SPECS: Built[] = [
     {
       name: 'list_actor_runs',
       description:
-        'The most recent Apify actor runs the owner approved (newest first): action id and status, actor_id, run_id, dataset_id, console_url, approval time, error. ' +
-        'Use it right after a run_apify_actor approval, or whenever you need a run_id for get_actor_run / import_actor_run.',
+        'Recent Apify runs, newest first: `runs` = runs the owner approved here (action id/status, actor_id, run_id, dataset_id, console_url, error); ' +
+        '`account_runs` = every recent run on the Apify account, including ones the owner started in the Apify console (run_id, actor_id, status, dataset_id, cost). ' +
+        'Use it whenever you need a run_id for get_actor_run / load_actor_results / import_actor_run. Never ask the owner to export or attach a dataset: load it by run_id.',
       inputSchema: z.object({ limit: z.number().int().min(1).max(20).optional().describe('default 5') }),
       run: async ({ limit }, { call }) => call(`/api/apify/runs?limit=${limit ?? 5}`) as Promise<ToolResult>,
     },
