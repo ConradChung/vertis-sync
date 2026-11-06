@@ -323,6 +323,8 @@ export interface JobProgress {
   company_strict: boolean
   /** Exact per-status counts over validation_rows. */
   counts: { pending: number; valid: number; invalid: number; error: number; no_email: number }
+  /** Status × MailTester reason counts (validation_result.message), largest first. */
+  reasons: { status: string; reason: string | null; n: number }[]
 }
 
 /** `instantly-push` `mode:'preview'` response. */

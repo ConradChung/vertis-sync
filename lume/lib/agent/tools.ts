@@ -4,6 +4,7 @@ import type { Json, PendingActionKind } from '@/lib/db/types'
 import { clientSopText, findClient, loadSopLibrary } from '@/lib/copy/sop'
 import { HIGH_RISK_KIND, TOOL_TIERS, skippable, type ToolName, type ToolTier } from '@/lib/agent/permissions'
 import { FilterCriteria, REVIEW_MAX_ITEMS } from '@/lib/review/model'
+import { validationStats, type ReasonCount } from '@/lib/validate/stats'
 import { APOLLO_STEPS } from '@/lib/apollo/records'
 import { parseLeadQuery } from '@/lib/adapters/instantlyLeads.map'
 import { EmailId, INTEREST_NAMES, LabelBody } from '@/lib/inbox/schemas'
@@ -783,6 +784,27 @@ const SPECS: Built[] = [
         const { list } = (await call(`/api/lead-lists/${id}`)) as { list: Record<string, unknown> }
         const items = await call(`/api/lead-lists/${id}/items?${params}`)
         return { list, page: pickColumns(items, columns), lead_list: { list_id: id, name: list.name } } as ToolResult
+      },
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'get_validation_stats',
+      description:
+        "The validator's quality numbers. With job_id: that job's invalid rate (invalid ÷ (valid + invalid)), errors and rows without an email shown apart, and the breakdown by MailTester reason (Catch-All, No MX, Greylisted, Rejected, Disposable; MX Error, Timeout, SPAM Block as errors). " +
+        'Without job_id: the completed jobs of the last 90 days, newest first, each with its source (e.g. "Leadsfriday (Apollo link)", CSV import), total, valid / invalid / error % and top invalid reason — use it for "what was the invalid rate on the last Leadsfriday list?".',
+      inputSchema: z.object({ job_id: uuid.optional() }),
+      run: async ({ job_id }, { call }) => {
+        if (!job_id) {
+          const h = (await call('/api/validation/history?page=0&page_size=15&days=90')) as { rows: unknown[]; total: number }
+          return { jobs: h.rows, total_completed_90d: h.total, note: 'invalid_rate = invalid ÷ (valid + invalid); error_pct is shown apart.' }
+        }
+        const j = (await call(`/api/jobs/${job_id.toLowerCase()}`)) as Record<string, unknown> & { reasons?: ReasonCount[] }
+        return {
+          job: { id: j.id, filename: j.filename, status: j.status, total_rows: j.total_rows },
+          stats: validationStats(j.reasons ?? []),
+        } as ToolResult
       },
     },
     'read'

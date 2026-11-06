@@ -6,6 +6,7 @@ import { GlassCard } from '@/components/ui/glass-card'
 import { SectionTitle, ShimmerBar } from '@/components/overview/parts'
 import { useJobProgress } from '@/hooks/useJob'
 import { liveEta } from '@/lib/validate/eta'
+import { ValidationBreakdown } from '@/components/validate/ValidationBreakdown'
 import type { JobProgress as Job } from '@/lib/db/types'
 import { cn } from '@/lib/utils'
 
@@ -80,6 +81,7 @@ export function JobProgressView({ job }: { job: Job }) {
       ) : (
         <Bar value={job.processed_rows} total={job.total_rows} label="Verified" />
       )}
+      {job.reasons?.length > 0 && <ValidationBreakdown reasons={job.reasons} />}
       <ul className="grid grid-cols-5 gap-2" aria-label="Row verdicts">
         {COUNT_TONES.map((c) => (
           <li key={c.key} className="rounded-lg border border-line bg-muted px-2.5 py-2">
