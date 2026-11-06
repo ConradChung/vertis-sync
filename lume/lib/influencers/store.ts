@@ -78,6 +78,8 @@ export interface NewInfluencer {
   lookback_days?: number
   max_reactions_per_post?: number
   notes?: string | null
+  /** Default true (the column default); approved lookup candidates are created inactive. */
+  active?: boolean
 }
 
 export async function insertInfluencer(row: NewInfluencer): Promise<InfluencerRow> {
