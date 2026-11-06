@@ -44,7 +44,13 @@ export const PRICES = {
 
 export const TOP_POSTS = 10
 export const APIFY_RUN_MAX_USD = 20
-export const MONTHLY_APIFY_CAP_USD = 29
+/**
+ * Shared monthly Apify budget. Set LUME_RESEARCH_APIFY_CAP_USD on Vercel AND as
+ * an edge secret (influencer-reactions / company-research enforce it) to raise
+ * it; both default to $29.
+ */
+const capEnv = Number(process.env.LUME_RESEARCH_APIFY_CAP_USD)
+export const MONTHLY_APIFY_CAP_USD = Number.isFinite(capEnv) && capEnv > 0 ? capEnv : 29
 
 /** The 2026-10-08 full run (all 26 influencers), from ~/docs/plans/2026-10-06-pm-reactions-pipeline-design.md. */
 export const LAST_RUN = {

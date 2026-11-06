@@ -717,9 +717,21 @@ const SPECS: Built[] = [
   ),
   tiered(
     {
+      name: 'list_actor_runs',
+      description:
+        'The most recent Apify actor runs the owner approved (newest first): action id and status, actor_id, run_id, dataset_id, console_url, approval time, error. ' +
+        'Use it right after a run_apify_actor approval, or whenever you need a run_id for get_actor_run / import_actor_run.',
+      inputSchema: z.object({ limit: z.number().int().min(1).max(20).optional().describe('default 5') }),
+      run: async ({ limit }, { call }) => call(`/api/apify/runs?limit=${limit ?? 5}`) as Promise<ToolResult>,
+    },
+    'read'
+  ),
+  tiered(
+    {
       name: 'get_actor_run',
       description:
-        "Status of an Apify actor run started by an approved run_apify_actor (the run_id is in the action's result; ask the owner or check the action page if unknown): status, items so far, cost so far, limits.",
+        'Status of an Apify actor run started by an approved run_apify_actor: status, items so far, cost so far, limits. ' +
+        'If you do not have the run_id, call list_actor_runs first (never ask the owner for it).',
       inputSchema: z.object({ run_id: z.string().regex(/^[A-Za-z0-9]{8,40}$/, 'Apify run id') }),
       run: async ({ run_id }, { call }) => call(`/api/apify/runs/${encodeURIComponent(run_id)}`) as Promise<ToolResult>,
     },
