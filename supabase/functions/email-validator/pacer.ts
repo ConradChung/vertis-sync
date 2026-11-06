@@ -1,11 +1,2 @@
-// Spaces calls to the returned function at least `intervalMs` apart, however
-// many callers await it concurrently.
-export function makePacer(intervalMs: number, now = () => Date.now(), sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))) {
-  let next = 0
-  return async (): Promise<void> => {
-    const t = now()
-    const wait = Math.max(0, next - t)
-    next = Math.max(t, next) + intervalMs
-    if (wait > 0) await sleep(wait)
-  }
-}
+// The shared pacer (moved to _shared/pacer.ts so operating-city-enricher uses the same one).
+export { makePacer } from '../_shared/pacer.ts'
