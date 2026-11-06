@@ -7,6 +7,7 @@ declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 import { alert, type AlertInput, lumeLink, titleFrom } from '../_shared/alert.ts'
 import { promptForCampaign } from './campaign_prompt.ts'
 import { makePacer } from './pacer.ts'
+import { measuredRate, validatingEta } from '../_shared/eta.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -281,6 +282,8 @@ async function processJob(jobId: string): Promise<void> {
 
   const job = jobs[0]
   let processed = job.processed_rows
+  // Live ETA: this invocation's own throughput (rows it first-decided / time).
+  const processedAtStart = job.processed_rows
   let validCount = job.valid_count
   let invalidCount = job.invalid_count
   const totalRows = job.total_rows
@@ -423,10 +426,24 @@ async function processJob(jobId: string): Promise<void> {
 
     // Concurrent progress PATCHes can land out of order; settle the counters
     // so the next chunk (which reads them back) starts from the true values.
+    // Live ETA rides on the same PATCH once there is enough to measure; a
+    // retry pass decides no new rows, so it leaves the last estimate alone.
+    const rate = isRetry ? null : measuredRate(processed - processedAtStart, Date.now() - startTime)
+    const eta = rate === null ? {} : {
+      ...validatingEta({
+        remaining: totalRows - processed,
+        ratePerSec: rate,
+        enrich: job.enrich === true,
+        valid: validCount,
+        decided: validCount + invalidCount,
+      }),
+      eta_updated_at: new Date().toISOString(),
+    }
     await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
       processed_rows: processed,
       valid_count: validCount,
       invalid_count: invalidCount,
+      ...eta,
     })
 
     // The next invocation resumes from remaining pending rows automatically.
