@@ -74,12 +74,13 @@ describe('lead list routes', () => {
     const page = await (await items.GET(req('GET', undefined, `http://x/api/lead-lists/${id}/items?q=alp`), ctx(id))).json()
     expect(page.rows.map((r: { item: { first_name: string } }) => r.item.first_name)).toEqual(['Alpha'])
     h.via = 'internal'
-    expect((await cell.PATCH(req('PATCH', { email: 'b@b.co' }), ctx(id, 1))).status).toBe(403)
+    expect((await cell.PATCH(req('PATCH', { column: 'Email', value: 'b@b.co' }), ctx(id, 1))).status).toBe(403)
     expect((await one.DELETE(req('DELETE'), ctx(id))).status).toBe(403)
     expect((await send.POST(req('POST'), ctx(id))).status).toBe(403)
     h.via = 'session'
-    const edited = await cell.PATCH(req('PATCH', { email: 'b@b.co' }), ctx(id, 1))
-    expect((await edited.json()).row.item.email).toBe('b@b.co')
+    const edited = await cell.PATCH(req('PATCH', { column: 'Email', value: 'b@b.co' }), ctx(id, 1))
+    const body = await edited.json()
+    expect([body.row.cells.Email, body.row.item.email]).toEqual(['b@b.co', 'b@b.co'])
   })
 
   it('send: refuses a list with no emails; otherwise one CSV ingest and the list records it', async () => {

@@ -15,13 +15,20 @@ import {
   pageItems,
   projectDefaultList,
   removeWhere,
-  updateItem,
+  updateCell,
+  emailCsv,
 } from '@/lib/leads/lists/store'
 import { normaliseLead } from '@/lib/review/model'
 import type { ListItem } from '@/lib/leads/lists/model'
 
 const lead = (o: Partial<ListItem>): ListItem => ({ ...normaliseLead({}), ...o })
-const row = (o: Partial<ListItem>, source: 'agent' | 'manual' = 'agent') => ({ raw: { ...o } as Record<string, unknown>, item: lead(o), source })
+// The row as an actor would have it: its own keys are the cells.
+const row = (o: Partial<ListItem>, source: 'agent' | 'manual' = 'agent') => ({
+  raw: { ...o } as Record<string, unknown>,
+  item: lead(o),
+  source,
+  cells: Object.fromEntries(Object.entries(o).map(([k, v]) => [k, String(v ?? '')])),
+})
 
 beforeEach(() => {
   db = memdb({ lead_review_items: ['set_id', 'idx'] })
@@ -64,15 +71,15 @@ describe('lead list store', () => {
   it('edits a cell (keys and email count follow), deletes rows, removes rows missing an email', async () => {
     const list = await createList({ name: 'L', created_by: 'owner' })
     await appendItems(list.id, [row({ name: 'A', company: 'A Co', email: 'a@a.co' }), row({ name: 'B', company: 'B Co' }), row({ name: 'C', company: 'C Co', email: 'c@c.co' })])
-    const edited = await updateItem(list.id, 1, { email: 'b@b.co' })
-    expect(edited?.item.email).toBe('b@b.co')
+    const edited = await updateCell(list.id, 1, 'email', 'b@b.co')
+    expect(edited?.cells.email).toBe('b@b.co')
     expect(db.table('lead_review_items').find((r) => r.idx === 1)!.email_key).toBe('b@b.co')
     expect((await getList(list.id))!.email_count).toBe(3)
-    await updateItem(list.id, 0, { email: '' })
+    await updateCell(list.id, 0, 'email', '')
     expect(await removeWhere(list.id, { missing: ['email'] })).toBe(1)
     expect(await deleteItems(list.id, [2])).toBe(1)
     expect(await getList(list.id)).toMatchObject({ item_count: 1, email_count: 1 })
-    expect(await updateItem(list.id, 99, { email: 'x@y.co' })).toBeNull()
+    expect(await updateCell(list.id, 99, 'email', 'x@y.co')).toBeNull()
   })
 
   it("a project's default list is created once, named after the project; moving a list out clears the default", async () => {
@@ -91,7 +98,28 @@ describe('lead list store', () => {
     const chunks: string[] = []
     for await (const c of csvChunks(list.id, 2)) chunks.push(c)
     expect(chunks).toHaveLength(3)
-    expect(chunks[0].startsWith('Name,First Name')).toBe(true)
+    expect(chunks[0]).toBe('name,email\n')
     expect(chunks.join('').trim().split('\n')).toHaveLength(4)
+  })
+
+  it("shows the sources' own columns: first-seen order, union across sources, blanks where a row lacks one", async () => {
+    const list = await createList({ name: 'L', created_by: 'owner' })
+    await appendItems(list.id, [row({ name: 'A', email: 'a@a.co', city: 'Austin' })])
+    await appendItems(list.id, [{ ...row({ email: 'b@b.co' }), cells: { email: 'b@b.co', 'author.name': 'Bo' } }])
+    expect((await getList(list.id))!.columns).toEqual(['name', 'email', 'city', 'author.name'])
+    const page = await pageItems(list.id, {})
+    expect(page.rows.map((r) => r.cells)).toEqual([{ name: 'A', email: 'a@a.co', city: 'Austin' }, { email: 'b@b.co', 'author.name': 'Bo' }])
+    const chunks: string[] = []
+    for await (const c of csvChunks(list.id)) chunks.push(c)
+    expect(chunks.join('')).toBe('name,email,city,author.name\nA,a@a.co,Austin,\n,b@b.co,,Bo\n')
+  })
+
+  it('the validator CSV keeps the source columns with one email column; without one it adds Email from the helper; it stops past the size cap', async () => {
+    const list = await createList({ name: 'L', created_by: 'owner' })
+    await appendItems(list.id, [{ ...row({ name: 'A', email: 'a@a.co' }), cells: { name: 'A', contact: 'x' } }, row({ name: 'NoMail', company: 'N Co' })])
+    const out = await emailCsv(list.id)
+    expect(out.email_column).toBe('Email')
+    expect(out.csv).toBe('name,contact,company,Email\nA,x,,a@a.co\n')
+    await expect(emailCsv(list.id, 1000, 10)).rejects.toThrow('too_large')
   })
 })

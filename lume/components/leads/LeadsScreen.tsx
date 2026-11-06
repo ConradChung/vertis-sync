@@ -40,6 +40,8 @@ interface LeadListRow {
   sent_rows: number | null
   sent_ingest_id: string | null
   sent_job_id: string | null
+  /** The sources' own columns (an actor's output fields, a sheet's headers); empty on lists without any. */
+  columns: string[]
   updated_at: string
 }
 interface Folder {
@@ -48,11 +50,13 @@ interface Folder {
   lists: LeadListRow[]
 }
 interface Page {
-  rows: { idx: number; item: Partial<ListItem>; source: string | null }[]
+  rows: { idx: number; item: Partial<ListItem>; cells?: Record<string, string> | null; source: string | null }[]
   total: number
 }
 
 const PAGE_SIZE = 50
+/** Columns the server can sort by (plain names; see lib/leads/lists/store.ts isSortable). */
+const SORTABLE = /^[A-Za-z0-9_]{1,80}$/
 const fmt = new Intl.NumberFormat('en-US')
 const pct = (l: LeadListRow) => (l.item_count ? Math.round((l.email_count / l.item_count) * 100) : 0)
 
@@ -240,7 +244,10 @@ function ListPanel({ list, folders, onChanged, onDeleted }: { list: LeadListRow;
   const [page, setPage] = useState(0)
   const [q, setQ] = useState('')
   const [query, setQuery] = useState('')
-  const [sort, setSort] = useState<{ field: EditableField | 'idx'; dir: 'asc' | 'desc' }>({ field: 'idx', dir: 'asc' })
+  const [sort, setSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'idx', dir: 'asc' })
+  // The list's own columns; a list with none (older rows) shows the readable labels.
+  const columns = list.columns?.length ? list.columns : LIST_COLUMNS.map((c) => c.label)
+  const cellOf = (r: Page['rows'][number], c: string) => r.cells?.[c] ?? (list.columns?.length ? '' : ((r.item[LIST_COLUMNS.find((x) => x.label === c)?.key ?? 'name'] as string | null | undefined) ?? ''))
   const [picked, setPicked] = useState<Set<number>>(new Set())
   const [dialog, setDialog] = useState<null | 'send' | 'delete' | 'rows' | 'paste' | 'add' | 'rename'>(null)
   useEffect(() => {
@@ -254,12 +261,12 @@ function ListPanel({ list, folders, onChanged, onDeleted }: { list: LeadListRow;
     onChanged()
   }
   const pages = Math.max(1, Math.ceil((rows.data?.total ?? 0) / PAGE_SIZE))
-  const toggleSort = (field: EditableField) => setSort((s) => (s.field === field ? { field, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { field, dir: 'asc' }))
+  const toggleSort = (field: string) => setSort((s) => (s.field === field ? { field, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { field, dir: 'asc' }))
   const folderOptions = folders.map((f) => ({ value: f.id ?? '', label: f.name }))
 
-  const saveCell = async (idx: number, field: EditableField, value: string) => {
+  const saveCell = async (idx: number, column: string, value: string) => {
     try {
-      await api(`/api/lead-lists/${list.id}/items/${idx}`, 'PATCH', { [field]: value })
+      await api(`/api/lead-lists/${list.id}/items/${idx}`, 'PATCH', { column, value })
       reload()
     } catch (err) {
       fail(err)
@@ -331,17 +338,21 @@ function ListPanel({ list, folders, onChanged, onDeleted }: { list: LeadListRow;
       </div>
 
       <div className="overflow-x-auto">
-        <Table aria-label={`${list.name} rows`} className="min-w-[1100px] text-[12.5px]">
+        <Table aria-label={`${list.name} rows`} className="min-w-max text-[12.5px]">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-8 pl-4" />
               <TableHead className="w-12 text-fg-46">#</TableHead>
-              {LIST_COLUMNS.map((c) => (
-                <TableHead key={c.key} aria-sort={sort.field === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}>
-                  <button type="button" className="inline-flex items-center gap-1 text-fg-46 hover:text-fg" onClick={() => toggleSort(c.key)}>
-                    {c.label}
-                    {sort.field === c.key && (sort.dir === 'asc' ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />)}
-                  </button>
+              {columns.map((c) => (
+                <TableHead key={c} className="whitespace-nowrap" aria-sort={sort.field === c ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}>
+                  {SORTABLE.test(c) ? (
+                    <button type="button" className="inline-flex items-center gap-1 text-fg-46 hover:text-fg" onClick={() => toggleSort(c)}>
+                      {c}
+                      {sort.field === c && (sort.dir === 'asc' ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />)}
+                    </button>
+                  ) : (
+                    <span className="text-fg-46">{c}</span>
+                  )}
                 </TableHead>
               ))}
               <TableHead className="pr-4 text-fg-46">Source</TableHead>
@@ -366,9 +377,9 @@ function ListPanel({ list, folders, onChanged, onDeleted }: { list: LeadListRow;
                   />
                 </TableCell>
                 <TableCell className="font-mono text-fg-24">{r.idx + 1}</TableCell>
-                {LIST_COLUMNS.map((c) => (
-                  <TableCell key={c.key} className="max-w-[220px]">
-                    <EditableCell label={`${c.label}, row ${r.idx + 1}`} value={(r.item[c.key] as string | null | undefined) ?? ''} onSave={(v) => saveCell(r.idx, c.key, v)} />
+                {columns.map((c) => (
+                  <TableCell key={c} className="max-w-[220px]">
+                    <EditableCell label={`${c}, row ${r.idx + 1}`} value={cellOf(r, c)} onSave={(v) => saveCell(r.idx, c, v)} />
                   </TableCell>
                 ))}
                 <TableCell className="pr-4 text-fg-46">{r.source ?? '—'}</TableCell>

@@ -26,7 +26,7 @@ describe('rowsFromSource', () => {
     m.fileInConversation.mockResolvedValue(true)
     m.loadAttachmentLeads.mockResolvedValue({ label: 'f.xlsx · S1', rows: [{ 'Work Email': 'a@a.co', Co: 'A' }], normalisable: () => ({ email: 'a@a.co', companyname: 'A' }), mapping: { email: 'Work Email', company: 'Co' }, unmapped: [] })
     const r = await rowsFromSource({ kind: 'attachment', file_id: FILE }, { conversationId: CONV, by: 'agent' })
-    expect(r.rows).toEqual([{ raw: { 'Work Email': 'a@a.co', Co: 'A' }, item: expect.objectContaining({ email: 'a@a.co', company: 'A' }), source: 'attachment' }])
+    expect(r.rows).toEqual([{ raw: { 'Work Email': 'a@a.co', Co: 'A' }, item: expect.objectContaining({ email: 'a@a.co', company: 'A' }), source: 'attachment', cells: { 'Work Email': 'a@a.co', Co: 'A' } }])
     expect(r.label).toBe('f.xlsx · S1')
     m.fileInConversation.mockResolvedValue(false)
     await expect(rowsFromSource({ kind: 'attachment', file_id: FILE }, { conversationId: CONV, by: 'agent' })).rejects.toBeInstanceOf(SourceRefused)

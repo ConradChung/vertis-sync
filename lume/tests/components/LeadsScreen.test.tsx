@@ -14,7 +14,7 @@ const L1 = '11111111-1111-4111-8111-111111111111'
 const L2 = '22222222-2222-4222-8222-222222222222'
 const list = (id: string, name: string, o: Record<string, unknown> = {}) => ({
   id, name, notes: null, created_by: 'agent', project_id: null, project_default: false, item_count: 120, email_count: 80,
-  sent_ingest_id: null, sent_at: null, sent_rows: null, sent_job_id: null, created_at: '2026-11-05T00:00:00Z', updated_at: new Date().toISOString(), ...o,
+  sent_ingest_id: null, sent_at: null, sent_rows: null, sent_job_id: null, columns: ['title', 'author.name', 'email'], created_at: '2026-11-05T00:00:00Z', updated_at: new Date().toISOString(), ...o,
 })
 let folders: unknown[] = []
 const calls: { url: string; method: string; body?: unknown }[] = []
@@ -23,7 +23,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined })
   if (url === '/api/lead-lists') return Response.json({ folders })
   if (url.startsWith(`/api/lead-lists/${L1}/items?`)) {
-    return Response.json({ rows: [{ idx: 0, item: { name: 'Acme', first_name: 'Jane', last_name: 'Doe', email: 'jane@acme.co', company: 'Acme' }, source: 'agent' }, { idx: 1, item: { name: 'Beta', email: null, company: 'Beta' }, source: 'manual' }], total: 2, page: 0, page_size: 50 })
+    return Response.json({ rows: [{ idx: 0, item: { name: 'Acme', email: 'jane@acme.co' }, cells: { title: 'Acme', 'author.name': 'Jane', email: 'jane@acme.co' }, source: 'actor_run' }, { idx: 1, item: { name: 'Beta', email: null }, cells: { title: 'Beta' }, source: 'actor_run' }], total: 2, page: 0, page_size: 50 })
   }
   if (url.startsWith(`/api/lead-lists/${L2}/items?`)) return Response.json({ rows: [], total: 0, page: 0, page_size: 50 })
   if (url === `/api/lead-lists/${L1}/items/1` && method === 'PATCH') return Response.json({ row: { idx: 1, item: { name: 'Beta', email: 'b@beta.co' } } })
@@ -61,6 +61,10 @@ describe('LeadsScreen', () => {
     fresh()
     const table = await screen.findByRole('table', { name: 'Roofers TX rows' })
     expect(await within(table).findByText('jane@acme.co')).toBeTruthy()
+    // The actor's own columns, in its order; a nested field is not sortable, a plain one is.
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent).slice(2, 5)).toEqual(['title', 'author.name', 'email'])
+    expect(within(table).getByRole('button', { name: 'title' })).toBeTruthy()
+    expect(within(table).queryByRole('button', { name: 'author.name' })).toBeNull()
     expect((screen.getByText('Roofers TX', { selector: 'summary *' }).closest('details') as HTMLDetailsElement).open).toBe(true)
   })
 
@@ -69,11 +73,11 @@ describe('LeadsScreen', () => {
     fresh()
     const table = await screen.findByRole('table', { name: 'Roofers TX rows' })
     await within(table).findByText('jane@acme.co')
-    fireEvent.click(within(table).getByRole('button', { name: 'Edit Email, row 2' }))
-    const input = within(table).getByRole('textbox', { name: 'Email, row 2' })
+    fireEvent.click(within(table).getByRole('button', { name: 'Edit email, row 2' }))
+    const input = within(table).getByRole('textbox', { name: 'email, row 2' })
     fireEvent.change(input, { target: { value: 'b@beta.co' } })
     fireEvent.keyDown(input, { key: 'Enter' })
-    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')).toEqual({ url: `/api/lead-lists/${L1}/items/1`, method: 'PATCH', body: { email: 'b@beta.co' } }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')).toEqual({ url: `/api/lead-lists/${L1}/items/1`, method: 'PATCH', body: { column: 'email', value: 'b@beta.co' } }))
   })
 
   it('send to validator: the confirm says how many rows have an email; confirming posts once', async () => {

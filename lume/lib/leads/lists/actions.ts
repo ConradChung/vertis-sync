@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { Json, PendingActionKind } from '@/lib/db/types'
 import { createIngest } from '@/lib/import/ingest'
 import { MAX_CSV_BYTES } from '@/lib/import/csv'
-import { deleteList, emailCsv, getList, markSent, type LeadList } from '@/lib/leads/lists/store'
+import { deleteList, emailCsv, getList, markSent, SendTooLarge, type LeadList } from '@/lib/leads/lists/store'
 
 /**
  * send_lead_list: a lead list → the Import CSV path. The rows that carry an
@@ -59,7 +59,14 @@ export async function buildSendLeadList(raw: Record<string, unknown>): Promise<B
 }
 
 async function ingestList(l: LeadList): Promise<Exec> {
-  const { csv, rows } = await emailCsv(l.id)
+  let built
+  try {
+    built = await emailCsv(l.id)
+  } catch (err) {
+    if (err instanceof SendTooLarge) return { ok: false, error: 'too_large: the list is over the 20 MB CSV limit', result: { list_id: l.id } }
+    throw err
+  }
+  const { csv, rows } = built
   const bytes = new TextEncoder().encode(csv)
   if (bytes.byteLength > MAX_CSV_BYTES) return { ok: false, error: 'too_large', result: { list_id: l.id, rows } }
   const filename = `${l.name.replace(/[\\/\u0000-\u001f]+/g, ' ').slice(0, 190)}.csv`

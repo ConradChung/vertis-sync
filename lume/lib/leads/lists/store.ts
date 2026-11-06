@@ -4,14 +4,14 @@ import type { Json } from '@/lib/db/types'
 import {
   applyItemEdit,
   dedupeKeys,
+  LIST_COLUMNS,
   LIST_MAX_ITEMS,
-  listCsvHeader,
-  listCsvLine,
   planAppend,
   type EditableField,
   type ItemSource,
   type ListItem,
 } from '@/lib/leads/lists/model'
+import { cellsCsvHeader, cellsCsvLine, editCell, labelCells, mergeColumns, pickCells, sendHeader, type Cells } from '@/lib/leads/columns'
 
 /**
  * Lead lists in Supabase: lead_review_sets rows with kind = 'list' and their
@@ -32,6 +32,8 @@ export interface LeadList {
   sent_ingest_id: string | null
   sent_at: string | null
   sent_rows: number | null
+  /** The visible columns: the sources' own fields, in first-seen order (≤ 100). */
+  columns: string[]
   created_at: string
   updated_at: string
 }
@@ -39,6 +41,8 @@ export interface LeadList {
 export interface ListRow {
   idx: number
   item: ListItem
+  /** The row's values by column (blank where it lacks one). */
+  cells: Cells
   source: ItemSource | null
 }
 
@@ -46,6 +50,7 @@ export interface IncomingRow {
   raw: Record<string, unknown> | null
   item: ListItem
   source: ItemSource
+  cells: Cells
 }
 
 export interface AppendResult {
@@ -57,13 +62,13 @@ export interface AppendResult {
 }
 
 const db = () => createServiceClient()
-const COLS = 'id,title,notes,created_by,project_id,project_default,item_count,email_count,sent_ingest_id,sent_at,sent_rows,created_at,updated_at'
+const COLS = 'id,title,notes,created_by,project_id,project_default,item_count,email_count,sent_ingest_id,sent_at,sent_rows,columns,created_at,updated_at'
 const CHUNK = 500
 
 type SetRow = Omit<LeadList, 'name'> & { title: string }
 const toList = (r: SetRow): LeadList => {
   const { title, ...rest } = r
-  return { ...rest, name: title, project_default: !!rest.project_default, item_count: rest.item_count ?? 0, email_count: rest.email_count ?? 0 }
+  return { ...rest, name: title, project_default: !!rest.project_default, item_count: rest.item_count ?? 0, email_count: rest.email_count ?? 0, columns: Array.isArray(rest.columns) ? rest.columns : [] }
 }
 const lists = () => db().from('lead_review_sets')
 const items = () => db().from('lead_review_items')
@@ -82,6 +87,7 @@ export async function createList(input: { name: string; notes?: string | null; c
       project_default: !!input.project_default,
       item_count: 0,
       email_count: 0,
+      columns: [],
       filters: [],
       created_at: now(),
       updated_at: now(),
@@ -187,6 +193,8 @@ export async function appendItems(listId: string, rows: readonly IncomingRow[], 
   const max = opts.max ?? LIST_MAX_ITEMS
   const first = await recount(listId)
   let count = first.item_count
+  const before = (await getList(listId))?.columns ?? []
+  let columns = before
   let idx = await nextIdx(listId)
   const out: AppendResult = { added: 0, duplicates: 0, skipped: 0, over_cap: 0, item_count: count }
   // Keys added by earlier chunks of this call, so a duplicate across chunks is caught without re-reading.
@@ -208,52 +216,79 @@ export async function appendItems(listId: string, rows: readonly IncomingRow[], 
     out.skipped += plan.skipped
     out.over_cap += plan.over_cap
     if (!plan.add.length) continue
+    columns = mergeColumns(columns, plan.add.map((j) => chunk[j].cells))
     const batch = plan.add.map((j) => {
       const k = keys[j]
       if (k.email_key) added.emails.add(k.email_key)
       if (k.linkedin_key) added.linkedins.add(k.linkedin_key)
       if (k.name_key) added.names.add(k.name_key)
-      return { set_id: listId, idx: idx++, item: chunk[j].item as unknown as Json, raw: (chunk[j].raw ?? null) as Json, status: 'kept', source: chunk[j].source, ...k }
+      return { set_id: listId, idx: idx++, item: chunk[j].item as unknown as Json, raw: (chunk[j].raw ?? null) as Json, cells: pickCells(chunk[j].cells, columns) as Json, status: 'kept', source: chunk[j].source, ...k }
     })
     const { error } = await items().insert(batch)
     if (error) throw error
     out.added += batch.length
     count += batch.length
   }
+  if (columns.length !== before.length) {
+    const { error } = await lists().update({ columns }).eq('id', listId)
+    if (error) throw error
+  }
   out.item_count = (await recount(listId)).item_count
   return out
 }
 
-export type SortField = EditableField | 'idx'
+/** A sort: the row order, or a column whose name is a plain identifier (PostgREST json path). */
+export type SortField = string
+const SORTABLE = /^[A-Za-z0-9_]{1,80}$/
+export const isSortable = (column: string) => SORTABLE.test(column)
 
-/** One page of rows; `q` searches name, company, email, title, city; sort by a field or the row order. */
+const SEARCH_FIELDS = ['name', 'first_name', 'last_name', 'company', 'email', 'title', 'city', 'domain']
+const asRow = (r: { idx: number; item: ListItem; cells: Cells | null; source: ItemSource | null }): ListRow => ({ ...r, cells: r.cells ?? labelCells(r.item) })
+
+/** One page of rows; `q` searches name, company, email, title, city; sort by a column or the row order. */
 export async function pageItems(
   listId: string,
   opts: { page?: number; pageSize?: number; q?: string; sort?: SortField; dir?: 'asc' | 'desc' } = {}
 ): Promise<{ rows: ListRow[]; total: number }> {
   const page = Math.max(0, opts.page ?? 0)
   const size = Math.min(500, Math.max(1, opts.pageSize ?? 50))
-  let q = items().select('idx,item,source', { count: 'exact' }).eq('set_id', listId)
+  let q = items().select('idx,item,cells,source', { count: 'exact' }).eq('set_id', listId)
   const term = opts.q?.trim().replace(/[%,()*\\]/g, ' ').trim()
-  if (term) q = q.or(['name', 'first_name', 'last_name', 'company', 'email', 'title', 'city', 'domain'].map((f) => `item->>${f}.ilike.%${term}%`).join(','))
-  const sort = !opts.sort || opts.sort === 'idx' ? 'idx' : `item->>${opts.sort}`
+  if (term) q = q.or(SEARCH_FIELDS.map((f) => `item->>${f}.ilike.%${term}%`).join(','))
+  const sort = opts.sort && opts.sort !== 'idx' && isSortable(opts.sort) ? `cells->>${opts.sort}` : 'idx'
   q = q.order(sort, { ascending: opts.dir !== 'desc' })
   if (sort !== 'idx') q = q.order('idx', { ascending: true })
   const { data, error, count } = await q.range(page * size, page * size + size - 1)
   if (error) throw error
-  return { rows: (data ?? []) as unknown as ListRow[], total: count ?? 0 }
+  return { rows: ((data ?? []) as unknown as Parameters<typeof asRow>[0][]).map(asRow), total: count ?? 0 }
 }
 
-/** Edit fields of one row; its dedupe keys and the list's email count follow. null when the row is not there. */
-export async function updateItem(listId: string, idx: number, patch: Partial<Record<EditableField, string | null>>): Promise<ListRow | null> {
-  const { data, error } = await items().select('idx,item,source').eq('set_id', listId).eq('idx', idx).maybeSingle()
+/** Edit one cell; a helper field that showed the old value follows it, and so do the dedupe keys and the email count. null when the row is not there. */
+export async function updateCell(listId: string, idx: number, column: string, value: string): Promise<ListRow | null> {
+  const { data, error } = await items().select('idx,item,cells,source').eq('set_id', listId).eq('idx', idx).maybeSingle()
   if (error) throw error
   if (!data) return null
-  const item = applyItemEdit((data as unknown as ListRow).item, patch)
+  const row = asRow(data as unknown as Parameters<typeof asRow>[0])
+  const next = editCell(row.cells, row.item, column, value)
+  const up = await items().update({ item: next.item as unknown as Json, cells: next.cells as Json, ...dedupeKeys(next.item) }).eq('set_id', listId).eq('idx', idx)
+  if (up.error) throw up.error
+  const list = await getList(listId)
+  if (list && !list.columns.includes(column)) await lists().update({ columns: mergeColumns(list.columns, [{ [column]: value }]) }).eq('id', listId)
+  await recount(listId)
+  return { ...row, item: next.item, cells: next.cells }
+}
+
+/** Edit helper fields of one row (the agent never does this; kept for the model's field edits). */
+export async function updateItem(listId: string, idx: number, patch: Partial<Record<EditableField, string | null>>): Promise<ListRow | null> {
+  const { data, error } = await items().select('idx,item,cells,source').eq('set_id', listId).eq('idx', idx).maybeSingle()
+  if (error) throw error
+  if (!data) return null
+  const row = asRow(data as unknown as Parameters<typeof asRow>[0])
+  const item = applyItemEdit(row.item, patch)
   const up = await items().update({ item: item as unknown as Json, ...dedupeKeys(item) }).eq('set_id', listId).eq('idx', idx)
   if (up.error) throw up.error
   await recount(listId)
-  return { idx, item, source: (data as unknown as ListRow).source }
+  return { ...row, item }
 }
 
 export async function deleteItems(listId: string, idxs: readonly number[]): Promise<number> {
@@ -292,31 +327,71 @@ export async function removeWhere(listId: string, f: { missing?: (typeof MISSING
   return removed
 }
 
-/** The list as CSV, `pageSize` rows at a time: the header, then one chunk per page. */
+/** A list's visible columns (its own, else the readable labels for rows written without a source). */
+async function visibleColumns(listId: string): Promise<string[]> {
+  const cols = (await getList(listId))?.columns ?? []
+  return cols.length ? cols : LIST_COLUMNS.map((c) => c.label)
+}
+
+/** The list as CSV in its own columns, `pageSize` rows at a time: the header, then one chunk per page. */
 export async function* csvChunks(listId: string, pageSize = 1000): AsyncGenerator<string> {
-  yield listCsvHeader() + '\n'
+  const columns = await visibleColumns(listId)
+  yield cellsCsvHeader(columns) + '\n'
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await items().select('idx,item,source').eq('set_id', listId).order('idx', { ascending: true }).range(from, from + pageSize - 1)
+    const { data, error } = await items().select('idx,item,cells,source').eq('set_id', listId).order('idx', { ascending: true }).range(from, from + pageSize - 1)
     if (error) throw error
-    const page = (data ?? []) as unknown as ListRow[]
-    if (page.length) yield page.map((r) => listCsvLine(r.item, r.source)).join('\n') + '\n'
+    const page = ((data ?? []) as unknown as Parameters<typeof asRow>[0][]).map(asRow)
+    if (page.length) yield page.map((r) => cellsCsvLine(r.cells, columns)).join('\n') + '\n'
     if (page.length < pageSize) return
   }
 }
 
-/** Rows that carry an email, in order, as CSV lines (the validator ingest), plus how many. */
-export async function emailCsv(listId: string, pageSize = 1000): Promise<{ csv: string; rows: number }> {
-  const parts: string[] = [listCsvHeader()]
+/** Most bytes the validator CSV may reach (lib/import/csv.ts MAX_CSV_BYTES). */
+export const SEND_MAX_BYTES = 20 * 1024 * 1024
+
+export class SendTooLarge extends Error {
+  constructor() {
+    super('too_large')
+    this.name = 'SendTooLarge'
+  }
+}
+
+/**
+ * The rows that carry an email, as the validator CSV: the list's own columns,
+ * with exactly one email column the ingest gate detects (the source's, its
+ * blanks filled from the helper; or an added Email column). Read page by
+ * page; stops with SendTooLarge as soon as it passes `maxBytes`.
+ */
+export async function emailCsv(listId: string, pageSize = 1000, maxBytes = SEND_MAX_BYTES): Promise<{ csv: string; rows: number; email_column: string }> {
+  const { header, emailColumn, added } = sendHeader(await visibleColumns(listId))
+  const source = added ? null : emailColumn
+  const headerLine = cellsCsvHeader(header)
+  const parts: string[] = [headerLine]
+  let bytes = headerLine.length + 1
   let rows = 0
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await items().select('idx,item,source').eq('set_id', listId).not('email_key', 'is', null).order('idx', { ascending: true }).range(from, from + pageSize - 1)
+    const { data, error } = await items().select('idx,item,cells,source').eq('set_id', listId).not('email_key', 'is', null).order('idx', { ascending: true }).range(from, from + pageSize - 1)
     if (error) throw error
-    const page = (data ?? []) as unknown as ListRow[]
-    for (const r of page) parts.push(listCsvLine(r.item, r.source))
+    const page = ((data ?? []) as unknown as Parameters<typeof asRow>[0][]).map(asRow)
+    for (const r of page) {
+      const cells: Cells = {}
+      header.forEach((h, i) => {
+        if (added && i === header.length - 1) cells[h] = r.item.email ?? ''
+        else {
+          const orig = added ? (Object.keys(r.cells).find((k) => `${k} (source)` === h) ?? h) : h
+          cells[h] = r.cells[orig] ?? ''
+        }
+      })
+      if (source && !cells[source]?.trim()) cells[source] = r.item.email ?? ''
+      const line = cellsCsvLine(cells, header)
+      bytes += Buffer.byteLength(line) + 1
+      if (bytes > maxBytes) throw new SendTooLarge()
+      parts.push(line)
+    }
     rows += page.length
     if (page.length < pageSize) break
   }
-  return { csv: parts.join('\n') + '\n', rows }
+  return { csv: parts.join('\n') + '\n', rows, email_column: emailColumn }
 }
 
 export async function markSent(listId: string, ingestId: string, rows: number): Promise<void> {

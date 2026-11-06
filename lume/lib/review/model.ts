@@ -32,6 +32,8 @@ export interface LeadItem {
 export interface ReviewRow {
   idx: number
   item: LeadItem
+  /** The row's own fields by column (see ReviewSet.columns); absent on rows stored before columns existed. */
+  cells?: Record<string, string> | null
   status: 'kept' | 'excluded'
   excluded_reason: string | null
   filter_id: string | null

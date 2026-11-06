@@ -18,7 +18,7 @@ interface AppliedFilter {
   action: string
 }
 interface SetBody {
-  set: { id: string; title: string; filters: AppliedFilter[] }
+  set: { id: string; title: string; filters: AppliedFilter[]; columns?: string[] }
   summary: ReviewSummary
 }
 type Status = 'kept' | 'excluded' | 'all'
@@ -41,6 +41,8 @@ export function LeadsPanel({ setId, refreshKey }: { setId: string; refreshKey: n
   const [page, setPage] = useState(0)
   // Phones get a card list instead of the six-column table.
   const phone = useMediaQuery(PHONE_QUERY)
+  // The source's own columns (an actor's output fields); older sets without them keep the summary table.
+  const columns = meta?.set.columns ?? []
   const [picked, setPicked] = useState<Set<number>>(new Set())
   const [error, setError] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
@@ -193,7 +195,17 @@ export function LeadsPanel({ setId, refreshKey }: { setId: string; refreshKey: n
 
       {error && <p className="px-4 pb-2 text-[12px] text-destructive" role="alert">{error}</p>}
 
-      {phone ? (
+      {columns.length > 0 ? (
+        <SourceTable
+          columns={columns}
+          rows={rows}
+          picked={picked}
+          toggle={toggle}
+          allOnPage={allOnPage}
+          onAll={(v) => setPicked(v ? new Set(rows.map((r) => r.idx)) : new Set())}
+          empty={meta && rows.length === 0 ? (query ? 'No rows match that search.' : status === 'excluded' ? 'Nothing excluded yet.' : 'No rows.') : null}
+        />
+      ) : phone ? (
         <ul className="thin-scroll min-h-0 flex-1 divide-y divide-line overflow-y-auto" aria-label="Leads">
           {rows.map((r) => (
             <li key={r.idx} className={cn('flex items-start gap-3 px-4 py-3', r.status === 'excluded' && 'opacity-55', picked.has(r.idx) && 'bg-muted/50')}>
@@ -308,6 +320,74 @@ export function LeadsPanel({ setId, refreshKey }: { setId: string; refreshKey: n
           </Button>
         </span>
       </div>
+    </div>
+  )
+}
+
+/** The set in the source's own columns (blank where a row lacks one), plus a compact "has" helper column. */
+function SourceTable({
+  columns,
+  rows,
+  picked,
+  toggle,
+  allOnPage,
+  onAll,
+  empty,
+}: {
+  columns: string[]
+  rows: ReviewRow[]
+  picked: Set<number>
+  toggle: (idx: number) => void
+  allOnPage: boolean
+  onAll: (v: boolean) => void
+  empty: string | null
+}) {
+  return (
+    <div className="thin-scroll min-h-0 flex-1 overflow-auto px-2">
+      <Table className="text-[12.5px]" aria-label="Leads">
+        <TableHeader className="sticky top-0 z-[1] bg-[var(--glass-fill-strong)] backdrop-blur-md">
+          <TableRow>
+            <TableHead className="w-8">
+              <Checkbox checked={allOnPage} onCheckedChange={(v) => onAll(!!v)} aria-label="Select all on this page" />
+            </TableHead>
+            {columns.map((c) => (
+              <TableHead key={c} className="whitespace-nowrap">
+                {c}
+              </TableHead>
+            ))}
+            <TableHead>Has</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((r) => (
+            <TableRow key={r.idx} data-state={picked.has(r.idx) ? 'selected' : undefined} className={cn(r.status === 'excluded' && 'opacity-55')} title={r.status === 'excluded' ? (r.excluded_reason ?? undefined) : undefined}>
+              <TableCell>
+                <Checkbox checked={picked.has(r.idx)} onCheckedChange={() => toggle(r.idx)} aria-label={`Select row ${r.idx + 1}`} />
+              </TableCell>
+              {columns.map((c, i) => (
+                <TableCell key={c} className={cn('max-w-56 truncate text-fg-70', i === 0 && 'font-medium text-fg', i === 0 && r.status === 'excluded' && 'line-through')} title={r.cells?.[c] ?? ''}>
+                  {r.cells?.[c] || <span className="text-fg-24">—</span>}
+                </TableCell>
+              ))}
+              <TableCell>
+                <span className="flex items-center gap-1.5 text-fg-24">
+                  <Globe className={cn('size-3.5', (r.item.website || r.item.domain) && 'text-positive')} aria-label={r.item.domain ? 'website' : 'no website'} />
+                  <Phone className={cn('size-3.5', r.item.phone && 'text-positive')} aria-label={r.item.phone ? 'phone' : 'no phone'} />
+                  <Mail className={cn('size-3.5', r.item.email && 'text-positive')} aria-label={r.item.email ? 'email' : 'no email'} />
+                  <Linkedin className={cn('size-3.5', r.item.linkedin_url && 'text-positive')} aria-label={r.item.linkedin_url ? 'LinkedIn' : 'no LinkedIn'} />
+                </span>
+              </TableCell>
+            </TableRow>
+          ))}
+          {empty && (
+            <TableRow>
+              <TableCell colSpan={columns.length + 2} className="py-10 text-center text-fg-46">
+                {empty}
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
     </div>
   )
 }

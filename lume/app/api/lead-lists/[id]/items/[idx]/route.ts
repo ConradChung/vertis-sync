@@ -3,12 +3,11 @@ import { z } from 'zod'
 import { requireOwnerSession } from '@/lib/auth/guards'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { parseJsonBody, uuidParam } from '@/lib/http/json'
-import { EDITABLE_FIELDS } from '@/lib/leads/lists/model'
-import { getList, updateItem } from '@/lib/leads/lists/store'
+import { getList, updateCell } from '@/lib/leads/lists/store'
 
-/** `PATCH /api/lead-lists/<id>/items/<idx>` `{ field: value }` — the owner's inline cell edit (session only). */
+/** `PATCH /api/lead-lists/<id>/items/<idx>` `{ column, value }` — the owner's inline cell edit (session only). */
 type Ctx = { params: Promise<{ id: string; idx: string }> }
-const Patch = z.partialRecord(z.enum(EDITABLE_FIELDS), z.string().max(500).nullable()).refine((v) => Object.keys(v).length > 0, 'nothing to change')
+const Patch = z.object({ column: z.string().min(1).max(200), value: z.string().max(5000) })
 
 export async function PATCH(req: Request, ctx: Ctx) {
   try {
@@ -21,7 +20,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const body = await parseJsonBody(req, Patch, 8 * 1024)
     if (!body.ok) return body.response
     if (!(await getList(id))) return NextResponse.json({ error: 'not_found' }, { status: 404 })
-    const row = await updateItem(id, idx, body.data)
+    const row = await updateCell(id, idx, body.data.column, body.data.value)
     if (!row) return NextResponse.json({ error: 'row_not_found' }, { status: 404 })
     return NextResponse.json({ row })
   } catch (err) {

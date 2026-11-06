@@ -746,11 +746,11 @@ const SPECS: Built[] = [
     {
       name: 'view_lead_list',
       description:
-        'Show one lead list: a page of rows (idx is the row number; name, first/last name, title, company, website, email, phone, LinkedIn, city, state, country, source), with search `q`, sort by a field and page. Use it to preview a list for the owner; the chat shows an Open in Leads button.',
+        "Show one lead list: its columns (the sources' own fields, e.g. an Apify actor's output) and a page of rows (idx is the row number; cells by column), with search `q` (name, company, email, title, city), sort by a column and page. Use it to preview a list for the owner; the chat shows an Open in Leads button.",
       inputSchema: z.object({
         list_id: uuid,
         q: z.string().max(120).optional(),
-        sort: z.enum(['idx', ...LIST_FIELDS]).optional(),
+        sort: z.string().regex(/^[A-Za-z0-9_]{1,80}$/).optional().describe("'idx' (row order) or one of the list's columns (plain names only)"),
         dir: z.enum(['asc', 'desc']).optional(),
         page: z.number().int().min(0).max(1000).optional(),
         page_size: z.number().int().min(1).max(100).optional(),

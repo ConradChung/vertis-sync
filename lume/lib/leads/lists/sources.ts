@@ -9,6 +9,7 @@ import type { IncomingRow } from '@/lib/leads/lists/store'
 import { loadAttachmentLeads } from '@/lib/review/attachmentSource'
 import { LEAD_FIELDS } from '@/lib/review/columns'
 import { normaliseLead } from '@/lib/review/model'
+import { flattenRecord, labelCells } from '@/lib/leads/columns'
 
 /** Where an append's rows come from (the agent's append_to_lead_list, the auto-append, the Leads page). */
 const InlineRow = z.partialRecord(z.enum(EDITABLE_FIELDS), z.string().max(500))
@@ -39,7 +40,13 @@ export class SourceRefused extends Error {
 
 /** `by`: the agent's bearer or the owner's page (inline / pasted rows are tagged agent or manual). */
 export async function rowsFromSource(src: AppendSource, ctx: { conversationId?: string | null; by: 'agent' | 'owner' }): Promise<{ rows: IncomingRow[]; label: string; mapping?: unknown; unmapped?: string[] }> {
-  const typed = (source: ItemSource) => (r: { raw: Record<string, unknown> | null; item: IncomingRow['item'] }): IncomingRow => ({ ...r, source })
+  // cells: the columns this row shows (the source's own fields); item stays the hidden helper.
+  const typed = (source: ItemSource) => (r: { raw: Record<string, unknown> | null; item: IncomingRow['item']; cells?: IncomingRow['cells'] | null }): IncomingRow => ({
+    raw: r.raw,
+    item: r.item,
+    source,
+    cells: r.cells ?? (r.raw ? flattenRecord(r.raw) : labelCells(r.item)),
+  })
   switch (src.kind) {
     case 'attachment': {
       const fileId = src.file_id.toLowerCase()
@@ -53,7 +60,7 @@ export async function rowsFromSource(src: AppendSource, ctx: { conversationId?: 
       }
     }
     case 'review_set':
-      return { label: 'review set', rows: (await keptRows(src.set_id.toLowerCase())).map(typed('review_set')) }
+      return { label: 'review set', rows: (await keptRows(src.set_id.toLowerCase())).map((r) => typed('review_set')({ raw: r.raw, item: r.item, cells: r.cells })) }
     case 'actor_run': {
       const { rows, label } = await loadSourceRows(src.run_id ? { kind: 'run', id: src.run_id } : { kind: 'dataset', id: src.dataset_id! })
       return { label, rows: rows.map((raw) => typed('actor_run')({ raw, item: normaliseLead(raw) })) }
@@ -65,6 +72,18 @@ export async function rowsFromSource(src: AppendSource, ctx: { conversationId?: 
       return {
         label: 'influencer export',
         rows: reactors.map((r) => {
+          const cells = {
+            Name: r.name ?? '',
+            Title: r.title ?? '',
+            Company: r.company_name ?? '',
+            Website: r.company_website ?? '',
+            LinkedIn: r.linkedin_url ?? '',
+            City: r.city ?? '',
+            State: r.state ?? '',
+            Country: r.country ?? '',
+            'Door Count': r.door_count === null ? '' : String(r.door_count),
+            'Reacted To': (r.reacted_to ?? []).join('; '),
+          }
           const raw = {
             fullname: r.name,
             jobtitle: r.title,
@@ -77,13 +96,19 @@ export async function rowsFromSource(src: AppendSource, ctx: { conversationId?: 
             door_count: r.door_count,
             reacted_to: (r.reacted_to ?? []).join('; '),
           }
-          return typed('influencer_export')({ raw, item: normaliseLead(raw) })
+          return typed('influencer_export')({ raw, item: normaliseLead(raw), cells })
         }),
       }
     }
     case 'inline': {
       if (ctx.by === 'agent' && src.rows.length > INLINE_MAX_ROWS) throw new SourceRefused(400, `too_many_inline_rows: at most ${INLINE_MAX_ROWS} per call`)
-      return { label: 'inline rows', rows: src.rows.map((r) => typed(ctx.by === 'agent' ? 'agent' : 'manual')({ raw: { ...r }, item: inlineItem(r) })) }
+      return {
+        label: 'inline rows',
+        rows: src.rows.map((r) => {
+          const item = inlineItem(r)
+          return typed(ctx.by === 'agent' ? 'agent' : 'manual')({ raw: { ...r }, item, cells: labelCells(item) })
+        }),
+      }
     }
     case 'paste': {
       const p = parsePastedRows(src.text)
