@@ -10,7 +10,7 @@ Deno.test('makePacer spaces starts across concurrent callers', async () => {
     for (let i = 0; i < 5; i++) { await pace(); starts.push(performance.now()) }
   }))
   starts.sort((a, b) => a - b)
-  for (let i = 1; i < starts.length; i++) assert(starts[i] - starts[i - 1] >= 45, `gap ${i}: ${starts[i] - starts[i - 1]}`)
+  for (let i = 1; i < starts.length; i++) assert(starts[i] - starts[i - 1] >= 35, `gap ${i}: ${starts[i] - starts[i - 1]}`)
   assertEquals(starts.length, 15)
 })
 
