@@ -17,6 +17,10 @@ export function leadListLink(result: Record<string, unknown> | null | undefined)
 export function uniqueLinks(tools: readonly { link?: ToolLink }[]): ToolLink[] {
   const seen = new Set<string>()
   const out: ToolLink[] = []
-  for (const t of tools) if (t.link && !seen.has(t.link.href)) (seen.add(t.link.href), out.push(t.link))
+  for (const t of tools) {
+    if (!t.link || seen.has(t.link.href)) continue
+    seen.add(t.link.href)
+    out.push(t.link)
+  }
   return out
 }
