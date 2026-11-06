@@ -1,4 +1,5 @@
 import 'server-only'
+import type { JobSummary } from '@/lib/validate/jobs'
 import { maskOperatorKeys } from '@/lib/operators/mask'
 import type { PostgrestError } from '@supabase/supabase-js'
 import { createServiceClient } from '@/lib/supabase/service'
@@ -324,6 +325,32 @@ export async function getJobProgress(jobId: string): Promise<JobProgress | null>
     company_strict: j.company_strict === true,
     counts: Object.fromEntries(counts) as JobProgress['counts'],
   }
+}
+
+/**
+ * The Validate page's "Running" list: jobs still pending / processing (any
+ * age) and jobs whose last update is at or after `since` (finished ones,
+ * shown collapsed with their error_message). Newest first, at most 50.
+ */
+export async function listRecentJobs(since: Date): Promise<JobSummary[]> {
+  const res = await createServiceClient()
+    .from('validation_jobs')
+    .select('id,filename,status,total_rows,processed_rows,enrich,created_at,updated_at,error_message')
+    .or(`status.in.(pending,processing),updated_at.gte.${since.toISOString()}`)
+    .order('created_at', { ascending: false })
+    .limit(50)
+  if (res.error) throw new DbError('listRecentJobs', res.error)
+  return ((res.data ?? []) as Record<string, unknown>[]).map((j) => ({
+    id: String(j.id),
+    filename: (j.filename as string | null) ?? null,
+    status: (j.status as string | null) ?? null,
+    total_rows: typeof j.total_rows === 'number' ? j.total_rows : 0,
+    processed_rows: typeof j.processed_rows === 'number' ? j.processed_rows : 0,
+    enrich: j.enrich === true,
+    created_at: String(j.created_at),
+    updated_at: String(j.updated_at ?? j.created_at),
+    error_message: (j.error_message as string | null) ?? null,
+  }))
 }
 
 export interface JobRowsPage {

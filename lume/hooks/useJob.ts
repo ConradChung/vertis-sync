@@ -5,6 +5,7 @@ import { fetchJson } from '@/hooks/fetcher'
 import type { JobProgress, PushPreview } from '@/lib/db/types'
 import type { InstantlyCampaign } from '@/lib/adapters/instantly.map'
 import type { ValidationRowView } from '@/lib/validate/rows'
+import { jobsPollInterval, type JobSummary } from '@/lib/validate/jobs'
 
 export const jobKey = (id: string) => `/api/jobs/${id}`
 export const rowsKey = (id: string, page: number) => `/api/jobs/${id}/rows?page=${page}`
@@ -18,6 +19,11 @@ export function useJobProgress(id: string | null) {
     keepPreviousData: true,
     refreshInterval: (data) => (data && RUNNING.has(data.status ?? '') ? 5_000 : 60_000),
   })
+}
+
+/** The Validate page's "Running" list (`GET /api/jobs`); polls like useJobProgress: 5 s while a job runs, else 60 s. */
+export function useRecentJobs() {
+  return useSWR<{ jobs: JobSummary[] }>('/api/jobs', fetchJson, { keepPreviousData: true, refreshInterval: jobsPollInterval })
 }
 
 export interface RowsPage {
