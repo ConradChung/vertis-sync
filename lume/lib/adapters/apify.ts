@@ -327,6 +327,38 @@ export async function getRun(runId: string, signal?: AbortSignal): Promise<RunIn
   return { ...run, itemCount }
 }
 
+export interface AccountRun {
+  run_id: string
+  actor_id: string | null
+  status: string
+  started_at: string | null
+  finished_at: string | null
+  dataset_id: string | null
+  cost_usd: number | null
+  console_url: string
+}
+
+/** The account's most recent actor runs (any actor, started from Lume or the Apify console), newest first. */
+export async function listAccountRuns(limit = 10, signal?: AbortSignal): Promise<AccountRun[]> {
+  const d = await dataOf(await get(`/actor-runs?desc=1&limit=${Math.min(50, Math.max(1, limit))}`, signal), 'runs')
+  const items = Array.isArray((d as { items?: unknown }).items) ? ((d as { items: unknown[] }).items) : []
+  return items.map((raw) => {
+    const r = obj(raw) ?? {}
+    const id = strOr(r.id, '')!
+    const actId = strOr(r.actId)
+    return {
+      run_id: id,
+      actor_id: actId ?? null,
+      status: strOr(r.status, 'UNKNOWN')!,
+      started_at: strOr(r.startedAt) ?? null,
+      finished_at: strOr(r.finishedAt) ?? null,
+      dataset_id: strOr(r.defaultDatasetId) ?? null,
+      cost_usd: numOr(r.usageTotalUsd) ?? null,
+      console_url: actId ? `https://console.apify.com/actors/${actId}/runs/${id}` : `https://console.apify.com/actors/runs/${id}`,
+    }
+  }).filter((r) => r.run_id)
+}
+
 /** The account's plan tier (FREE, BRONZE, …) for tiered event prices; null when unknown. */
 export async function planTier(signal?: AbortSignal): Promise<string | null> {
   try {
