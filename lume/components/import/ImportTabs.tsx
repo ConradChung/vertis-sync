@@ -15,7 +15,7 @@ export function ImportTabs({ active }: { active: 'intake' | 'leads' }) {
   return (
     <nav aria-label="Import views" className="mb-4 flex w-fit rounded-full border border-line p-0.5">
       {tab('intake', '/import', 'Intake & orders')}
-      {tab('leads', '/import/leads', 'Lead lists')}
+      {tab('leads', '/import/leads', 'Leads')}
     </nav>
   )
 }
