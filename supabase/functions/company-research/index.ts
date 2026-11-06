@@ -44,7 +44,7 @@ import {
   crawlEstimateUsd,
   normalizeTarget,
   pagesFromItems,
-  parseCap,
+  resolveCap,
   parseMonthlyUsage,
 } from '../_shared/research/crawl.ts'
 import { buildExtractionRequest, EXTRACT_MODEL, parseExtractionResponse } from '../_shared/research/extract.ts'
@@ -225,7 +225,7 @@ async function start(target: { domain: string; startUrl: string }, waitUntil: (p
   const companyId = companies?.[0]?.id
   if (!companyId) throw new Error('company upsert returned no row')
 
-  const cap = parseCap(Deno.env.get('LUME_RESEARCH_APIFY_CAP_USD'))
+  const cap = await resolveCap(() => rest('GET', 'lume_settings?key=eq.apify_monthly_cap_usd&select=value'), Deno.env.get('LUME_RESEARCH_APIFY_CAP_USD'))
   const estimate = crawlEstimateUsd()
   const account = await apifyMonthlyUsage()
   const gate = (await rest('POST', 'rpc/lume_research_reserve_crawl', {

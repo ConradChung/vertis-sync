@@ -46,7 +46,7 @@
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 import { alert, gateKey, lumeLink } from '../_shared/alert.ts'
 import { isServiceCaller } from '../_shared/lume/serviceAuth.ts'
-import { parseCap, parseMonthlyUsage } from '../_shared/research/crawl.ts'
+import { parseMonthlyUsage, resolveCap } from '../_shared/research/crawl.ts'
 import {
   apifyActualUsd,
   estimateReactions,
@@ -349,7 +349,7 @@ async function startApify(ctx: Ctx, inf: Influencer, kind: 'posts' | 'reactions'
   const actor = kind === 'posts' ? POSTS_ACTOR : REACTIONS_ACTOR
   const gate = (await rpc('lume_influencer_reserve_apify', {
     p_run: ctx.run.id, p_influencer: inf.id, p_kind: kind, p_actor: actor, p_estimate: estimate,
-    p_external_usd: await apifyMonthlyUsage(), p_cap: parseCap(Deno.env.get('LUME_RESEARCH_APIFY_CAP_USD')),
+    p_external_usd: await apifyMonthlyUsage(), p_cap: await resolveCap(() => rest('GET', 'lume_settings?key=eq.apify_monthly_cap_usd&select=value'), Deno.env.get('LUME_RESEARCH_APIFY_CAP_USD')),
   })) as Record<string, unknown>
   if (gate?.error === 'run_not_running') {
     console.log(`[${FN}] ${ctx.run.id}: run is ${String(gate.status)}; no more starts`)

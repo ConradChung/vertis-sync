@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { requireOwner } from '@/lib/auth/guards'
 import { dbErrorResponse } from '@/lib/http/errors'
-import { estimateRun, LAST_RUN, MONTHLY_APIFY_CAP_USD } from '@/lib/influencers/model'
+import { estimateRun, LAST_RUN } from '@/lib/influencers/model'
+import { getApifyCapUsd } from '@/lib/settings/store'
 import { MaxVerifyUsd, Slug } from '@/lib/influencers/schemas'
 import { apifyMonthSpend, getInfluencersBySlugs, listInfluencers } from '@/lib/influencers/store'
 
@@ -25,11 +26,11 @@ export async function GET(req: Request) {
     const unknown = raw.filter((s) => !rows.some((r) => r.slug === s))
     if (unknown.length) return NextResponse.json({ error: 'unknown_influencers', unknown }, { status: 404 })
     const inactive = rows.filter((r) => !r.active).map((r) => r.slug)
-    const spend = await apifyMonthSpend()
+    const [spend, capUsd] = await Promise.all([apifyMonthSpend(), getApifyCapUsd()])
     return NextResponse.json({
       estimate: estimateRun(rows, { maxVerifyUsd: cap.data }),
       inactive,
-      apify_budget: { month_to_date_ledger_usd: spend, monthly_cap_usd: MONTHLY_APIFY_CAP_USD, note: 'Shared with company research; each Apify start is refused if it would pass the cap (Apify account usage + reservations).' },
+      apify_budget: { month_to_date_ledger_usd: spend, monthly_cap_usd: capUsd, note: 'Set in Settings → Budget. Shared with company research; each Apify start is refused if it would pass the cap (Apify account usage + reservations).' },
       benchmarks: LAST_RUN,
     })
   } catch (err) {

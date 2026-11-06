@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
   getApifyRuns: vi.fn(),
 }))
 vi.mock('@/lib/auth/guards', () => ({ requireOwner: h.requireOwner }))
+vi.mock('@/lib/settings/store', () => ({ getApifyCapUsd: async () => 29 }))
 vi.mock('@/lib/influencers/store', () => ({
   listInfluencers: h.listInfluencers,
   listRuns: h.listRuns,

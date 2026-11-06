@@ -9,6 +9,7 @@ const store = vi.hoisted(() => ({
   apifyMonthSpend: vi.fn(),
 }))
 vi.mock('@/lib/influencers/store', () => store)
+vi.mock('@/lib/settings/store', () => ({ getApifyCapUsd: async () => 29 }))
 const fn = vi.hoisted(() => ({ callInfluencerFn: vi.fn() }))
 vi.mock('@/lib/adapters/influencerFn', () => fn)
 
@@ -82,7 +83,7 @@ describe('buildInfluencerReactions (approval 2)', () => {
     expect(b.payload).toMatchObject({ run_id: RUN, reactions: 1558, reactions_usd: 2.34, max_charge_usd: 2.68, max_verify_usd: 10 })
     expect(b.payload.summary).toMatch(/exactly 1,558 reactions on 20 top posts = \$2\.34 \(Apify charge capped at \$2\.68\)/)
     expect(b.payload.summary).toMatch(/Peter Lohmann 1114 \(\$1\.67\); Deb Newell 444 \(\$0\.67\)/)
-    expect(b.payload.summary).toMatch(/Shared Apify cap: \$8\.50 of \$29 left this month \(ledger\); an influencer that would pass it is skipped/)
+    expect(b.payload.summary).toMatch(/Shared Apify cap: \$8\.50 of \$29 left this month \(ledger, Settings → Budget\); an influencer that would pass it is skipped/)
     expect(influencerPayloadError('influencer_reactions', b.payload)).toBeNull()
   })
   it('refuses a run that is not waiting for this approval', async () => {

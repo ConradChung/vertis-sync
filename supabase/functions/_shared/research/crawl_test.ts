@@ -137,3 +137,12 @@ Deno.test('pagesFromItems: html is cut to 200 KB before the link regex; links pa
   }])
   assertEquals(pages[0].links.map((l) => l.href), ['https://early.example.com/'])
 })
+
+Deno.test('resolveCap: Settings value wins, else env, else $29', async () => {
+  const { resolveCap } = await import('./crawl.ts')
+  assertEquals(await resolveCap(async () => [{ value: 75 }], '40'), 75)
+  assertEquals(await resolveCap(async () => [], '40'), 40)
+  assertEquals(await resolveCap(async () => [{ value: 0 }], undefined), 29)
+  assertEquals(await resolveCap(async () => [{ value: 5000 }], undefined), 29)
+  assertEquals(await resolveCap(async () => { throw new Error('db down') }, '33'), 33)
+})

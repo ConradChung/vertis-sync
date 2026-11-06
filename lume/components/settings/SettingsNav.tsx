@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 const PAGES = [
   { href: '/settings/verticals', label: 'Verticals' },
   { href: '/settings/slack', label: 'Slack' },
+  { href: '/settings/budget', label: 'Budget' },
 ] as const
 
 export function SettingsNav({ current }: { current: (typeof PAGES)[number]['href'] }) {

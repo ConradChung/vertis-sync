@@ -2,7 +2,8 @@ import 'server-only'
 import { z } from 'zod'
 import type { Json } from '@/lib/db/types'
 import { callInfluencerFn } from '@/lib/adapters/influencerFn'
-import { estimateRun, MONTHLY_APIFY_CAP_USD, reactionsMaxChargeUsd } from '@/lib/influencers/model'
+import { estimateRun, reactionsMaxChargeUsd } from '@/lib/influencers/model'
+import { getApifyCapUsd } from '@/lib/settings/store'
 import { MaxVerifyUsd, Slug } from '@/lib/influencers/schemas'
 import { activeRun, apifyMonthSpend, getInfluencersByIds, getInfluencersBySlugs, getRun } from '@/lib/influencers/store'
 import { INFLUENCER_PIPELINE, type InfluencerActionBuild } from '@/lib/influencers/actionPayload'
@@ -29,10 +30,10 @@ const fail = (status: number, error: string): InfluencerActionBuild => ({ ok: fa
 
 /** The shared monthly Apify cap left (calendar-month ledger: finished costs + reservations), for the approval card. */
 async function capLeft(): Promise<{ left: number | null; line: string }> {
-  const spend = await apifyMonthSpend()
-  if (spend === null || !Number.isFinite(spend)) return { left: null, line: `Shared Apify cap: $${MONTHLY_APIFY_CAP_USD}/month (month-to-date unreadable).` }
-  const left = Math.max(0, Math.round((MONTHLY_APIFY_CAP_USD - spend) * 100) / 100)
-  return { left, line: `Shared Apify cap: ${fmt(left)} of $${MONTHLY_APIFY_CAP_USD} left this month (ledger); an influencer that would pass it is skipped.` }
+  const [spend, cap] = await Promise.all([apifyMonthSpend(), getApifyCapUsd()])
+  if (spend === null || !Number.isFinite(spend)) return { left: null, line: `Shared Apify cap: $${cap}/month (month-to-date unreadable).` }
+  const left = Math.max(0, Math.round((cap - spend) * 100) / 100)
+  return { left, line: `Shared Apify cap: ${fmt(left)} of $${cap} left this month (ledger, Settings → Budget); an influencer that would pass it is skipped.` }
 }
 
 /** A call whose outcome is unknown (timeout, connection lost): it may have run. */
