@@ -187,8 +187,12 @@ const STATUS_FOR_PHASE: Record<Phase, string> = {
 
 // ---- Small helpers --------------------------------------------------------
 
-function selfInvoke(payload: Payload): void {
-  fetch(`${SUPABASE_URL}/functions/v1/jobsearch-puller`, {
+// Awaited: a fire-and-forget fetch at the end of a phase can be dropped
+// when the isolate shuts down right after run() returns — that is how poll
+// chains died silently (job batch 22cc8b72 at 02:36 on 2026-11-06, Leadsfriday
+// orders left on 'pending').
+async function selfInvoke(payload: Payload): Promise<void> {
+  await fetch(`${SUPABASE_URL}/functions/v1/jobsearch-puller`, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -413,7 +417,7 @@ async function fillRound(batch: JobBatch, mode: 'gate' | 'fill_more' | 'refill')
     await parkWaitingFill(batch, after.resolved, poolLeft)
     return
   }
-  selfInvoke({ batch_id: batch.id, phase: 'resolve', pool_left: poolLeft })
+  await selfInvoke({ batch_id: batch.id, phase: 'resolve', pool_left: poolLeft })
 }
 
 async function parkWaitingFill(batch: JobBatch, resolved: number, poolLeft: number): Promise<void> {
@@ -516,7 +520,7 @@ async function phaseResolve(batch: JobBatch, payload: Payload, startedAt: number
   const counts = await companyCounts(batch.id)
   if (counts.pending > 0) {
     if (rateLimited) await new Promise(r => setTimeout(r, 30_000))
-    selfInvoke({ batch_id: batch.id, phase: 'resolve', rate_limited: rateLimited || undefined, pool_left: payload.pool_left })
+    await selfInvoke({ batch_id: batch.id, phase: 'resolve', rate_limited: rateLimited || undefined, pool_left: payload.pool_left })
     return
   }
 
@@ -527,7 +531,7 @@ async function phaseResolve(batch: JobBatch, payload: Payload, startedAt: number
     const poolLeft = payload.pool_left ?? 1 // unknown -> assume there may be more
     if (poolLeft > 0 && (fresh.fill_rounds ?? 0) < MAX_FILL_ROUNDS) {
       console.log(`[jobsearch-puller] resolve: ${counts.resolved}/${need} resolved, filling more (${poolLeft} left in pool)`)
-      selfInvoke({ batch_id: batch.id, phase: 'fill_more' })
+      await selfInvoke({ batch_id: batch.id, phase: 'fill_more' })
       return
     }
     if (counts.resolved === 0) {
@@ -551,7 +555,7 @@ async function phaseResolve(batch: JobBatch, payload: Payload, startedAt: number
 
   await heartbeat(batch.id, { apollo_url: url, companies_unresolved: counts.unresolved + overflow.length })
   console.log(`[jobsearch-puller] resolve: ${kept.length} resolved, ${counts.unresolved} unresolved${fresh.force_order ? ' (forced order)' : ''}`)
-  selfInvoke({ batch_id: batch.id, phase: 'order' })
+  await selfInvoke({ batch_id: batch.id, phase: 'order' })
 }
 
 // ---- Phase: order ---------------------------------------------------------
@@ -622,7 +626,7 @@ async function phaseOrder(batch: JobBatch): Promise<void> {
     { severity: 'urgent', link: lumeLink('/validate') },
     { inline_keyboard: [[{ text: '⛔ Abort batch', callback_data: `jobs_abort:${batch.id}` }]] },
   )
-  selfInvoke({ batch_id: batch.id, phase: 'poll', ordered_at: orderedAt })
+  await selfInvoke({ batch_id: batch.id, phase: 'poll', ordered_at: orderedAt })
 }
 
 // ---- Phase: poll ----------------------------------------------------------
@@ -664,7 +668,7 @@ async function phasePoll(batch: JobBatch, payload: Payload, startedAt: number): 
       })
       if (!ok) { console.log('[jobsearch-puller] poll: another invocation already stored the delivery'); return }
       console.log(`[jobsearch-puller] poll: delivered ${st.delivered_count ?? '?'} rows, stored ${path}`)
-      selfInvoke({ batch_id: batch.id, phase: 'rank' })
+      await selfInvoke({ batch_id: batch.id, phase: 'rank' })
       return
     }
     if (st.status === 'cancelled') {
@@ -682,7 +686,7 @@ async function phasePoll(batch: JobBatch, payload: Payload, startedAt: number): 
     const elapsed = Date.now() - startedAt
     const budgetLeft = CHUNK_LIMIT_MS - elapsed
     if (budgetLeft < POLL_SLEEP_MS + 15_000) {
-      selfInvoke({ batch_id: batch.id, phase: 'poll', ordered_at: orderedAt })
+      await selfInvoke({ batch_id: batch.id, phase: 'poll', ordered_at: orderedAt })
       return
     }
     await new Promise(r => setTimeout(r, POLL_SLEEP_MS))
