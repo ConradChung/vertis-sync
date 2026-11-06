@@ -800,10 +800,11 @@ const SPECS: Built[] = [
           const h = (await call('/api/validation/history?page=0&page_size=15&days=90')) as { rows: unknown[]; total: number }
           return { jobs: h.rows, total_completed_90d: h.total, note: 'invalid_rate = invalid ÷ (valid + invalid); error_pct is shown apart.' }
         }
-        const j = (await call(`/api/jobs/${job_id.toLowerCase()}`)) as Record<string, unknown> & { reasons?: ReasonCount[] }
+        const id = job_id.toLowerCase()
+        const [j, r] = (await Promise.all([call(`/api/jobs/${id}`), call(`/api/jobs/${id}/reasons`)])) as [Record<string, unknown>, { reasons?: ReasonCount[] }]
         return {
           job: { id: j.id, filename: j.filename, status: j.status, total_rows: j.total_rows },
-          stats: validationStats(j.reasons ?? []),
+          stats: validationStats(r.reasons ?? []),
         } as ToolResult
       },
     },

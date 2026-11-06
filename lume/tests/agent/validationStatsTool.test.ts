@@ -15,12 +15,13 @@ describe('get_validation_stats', () => {
   it('is read tier', () => expect(TOOL_TIERS.get_validation_stats).toBe('read'))
 
   it('one job: invalid rate, errors apart, breakdown by reason', async () => {
-    const { run, fetch } = setup(() => ({
-      id: JOB, filename: 'pm.csv', status: 'processing', total_rows: 5272,
-      reasons: [{ status: 'valid', reason: 'Accepted', n: 90 }, { status: 'invalid', reason: 'Catch-All', n: 10 }, { status: 'error', reason: 'Timeout', n: 5 }],
-    }))
+    const { run, fetch } = setup((url) =>
+      url.endsWith('/reasons')
+        ? { reasons: [{ status: 'valid', reason: 'Accepted', n: 90 }, { status: 'invalid', reason: 'Catch-All', n: 10 }, { status: 'error', reason: 'Timeout', n: 5 }] }
+        : { id: JOB, filename: 'pm.csv', status: 'processing', total_rows: 5272 }
+    )
     const r = (await run({ job_id: JOB })) as { job: Record<string, unknown>; stats: Record<string, unknown> }
-    expect(fetch.mock.calls[0][0]).toBe(`https://lume.test/api/jobs/${JOB}`)
+    expect(fetch.mock.calls.map((c) => c[0])).toEqual([`https://lume.test/api/jobs/${JOB}`, `https://lume.test/api/jobs/${JOB}/reasons`])
     expect(r.job).toMatchObject({ id: JOB, filename: 'pm.csv', status: 'processing', total_rows: 5272 })
     expect(r.stats).toMatchObject({ invalid_rate: 10, error: 5, decided: 100 })
   })

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { AnimatedNumber } from '@/components/ui/animated-number'
 import { GlassCard } from '@/components/ui/glass-card'
 import { SectionTitle, ShimmerBar } from '@/components/overview/parts'
-import { useJobProgress } from '@/hooks/useJob'
+import { useJobProgress, useJobReasons } from '@/hooks/useJob'
 import { liveEta } from '@/lib/validate/eta'
 import { ValidationBreakdown } from '@/components/validate/ValidationBreakdown'
 import type { JobProgress as Job } from '@/lib/db/types'
@@ -65,7 +65,7 @@ function useNow(ms: number): number {
   return now
 }
 
-export function JobProgressView({ job }: { job: Job }) {
+export function JobProgressView({ job, reasons }: { job: Job; reasons?: Job['reasons'] }) {
   const now = useNow(15_000)
   const eta = liveEta(job, now)
   const validCount = job.counts.valid
@@ -81,7 +81,7 @@ export function JobProgressView({ job }: { job: Job }) {
       ) : (
         <Bar value={job.processed_rows} total={job.total_rows} label="Verified" />
       )}
-      {job.reasons?.length > 0 && <ValidationBreakdown reasons={job.reasons} />}
+      {(reasons ?? job.reasons ?? []).length > 0 && <ValidationBreakdown reasons={reasons ?? job.reasons ?? []} />}
       <ul className="grid grid-cols-5 gap-2" aria-label="Row verdicts">
         {COUNT_TONES.map((c) => (
           <li key={c.key} className="rounded-lg border border-line bg-muted px-2.5 py-2">
@@ -125,13 +125,14 @@ export function JobProgressView({ job }: { job: Job }) {
 
 export function JobProgress({ jobId }: { jobId: string }) {
   const { data, error, mutate } = useJobProgress(jobId)
+  const reasons = useJobReasons(jobId, data ? data.status : undefined)
   return (
     <GlassCard className="gap-0 py-0" aria-label="Job progress">
       <SectionTitle title={data?.filename ?? 'Job progress'}>
         <span className="font-mono">{jobId.slice(0, 8)}</span>
       </SectionTitle>
       {data ? (
-        <JobProgressView job={data} />
+        <JobProgressView job={data} reasons={reasons.data?.reasons} />
       ) : error ? (
         <p className="flex items-center gap-3 px-[18px] pb-[18px] text-[12px] text-fg-70" role="alert">
           Couldn&apos;t load this job.

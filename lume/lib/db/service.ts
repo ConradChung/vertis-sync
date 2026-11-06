@@ -301,9 +301,6 @@ export async function getJobProgress(jobId: string): Promise<JobProgress | null>
       return [status, r.count ?? 0] as const
     })
   )
-  // Grouped status × MailTester reason counts (lume_validation_stats): the invalid-rate breakdown.
-  const reasonsRes = await sb.rpc('lume_validation_stats', { p_job: jobId })
-  if (reasonsRes.error) throw new DbError('getJobProgress.reasons', reasonsRes.error)
   const j = jobRes.data as unknown as Record<string, unknown>
   const num = (v: unknown) => (typeof v === 'number' ? v : 0)
   return {
@@ -331,8 +328,14 @@ export async function getJobProgress(jobId: string): Promise<JobProgress | null>
     company_barrier: j.company_barrier !== false,
     company_strict: j.company_strict === true,
     counts: Object.fromEntries(counts) as JobProgress['counts'],
-    reasons: Array.isArray(reasonsRes.data) ? (reasonsRes.data as JobProgress['reasons']) : [],
   }
+}
+
+/** Grouped status × MailTester reason counts for one job (lume_validation_stats): the invalid-rate breakdown. Read on its own cadence, not with every progress poll. */
+export async function getJobReasons(jobId: string): Promise<{ status: string; reason: string | null; n: number }[]> {
+  const res = await createServiceClient().rpc('lume_validation_stats', { p_job: jobId })
+  if (res.error) throw new DbError('getJobReasons', res.error)
+  return Array.isArray(res.data) ? (res.data as { status: string; reason: string | null; n: number }[]) : []
 }
 
 /** Completed validation jobs of the last `days`, newest first, with counts by status and the top invalid reason (lume_validation_history). */

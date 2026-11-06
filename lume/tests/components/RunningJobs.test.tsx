@@ -21,14 +21,15 @@ const job = (o: Partial<JobSummary>): JobSummary => ({
   id: RUN, filename: 'pm-leads.csv', status: 'processing', total_rows: 5272, processed_rows: 153, enrich: true,
   created_at: iso(2 * 3600_000), updated_at: iso(60_000), error_message: null, valid_count: 4562, invalid_count: 391, ...o,
 })
+const REASONS = [
+  { status: 'valid', reason: 'Accepted', n: 4562 }, { status: 'invalid', reason: 'Catch-All', n: 181 }, { status: 'invalid', reason: 'No MX', n: 210 },
+  { status: 'error', reason: 'MX Error', n: 300 }, { status: 'no_email', reason: null, n: 17 },
+]
 let etaLive: Record<string, unknown> = {}
 const progress = (id: string, status: string) => ({
   id, filename: 'pm-leads.csv', status, total_rows: 5272, processed_rows: 153, eta_seconds: 3600, eta_updated_at: null,
   eta_stage: null, eta_validate_seconds: null, eta_enrich_seconds: null, ...etaLive,
-  reasons: [
-    { status: 'valid', reason: 'Accepted', n: 4562 }, { status: 'invalid', reason: 'Catch-All', n: 181 }, { status: 'invalid', reason: 'No MX', n: 210 },
-    { status: 'error', reason: 'MX Error', n: 300 }, { status: 'no_email', reason: null, n: 17 },
-  ],
+
   enrich: true, enrich_started: false, enriched_rows: 0, finder_status: null, rows_missing_email: null, emails_found: null,
   instantly_status: null, instantly_campaign_id: null, instantly_campaign_name: null, location_barrier: false, company_barrier: true, company_strict: false,
   counts: { pending: 5100, valid: 120, invalid: 30, error: 2, no_email: 1 },
@@ -37,6 +38,8 @@ const progress = (id: string, status: string) => ({
 let jobs: JobSummary[] = []
 const fetchMock = vi.fn(async (url: string) => {
   if (url === '/api/jobs') return Response.json({ jobs })
+  const r = /^\/api\/jobs\/([0-9a-f-]{36})\/reasons/.exec(url)
+  if (r) return Response.json({ reasons: REASONS })
   const m = /^\/api\/jobs\/([0-9a-f-]{36})$/.exec(url)
   if (m) return Response.json(progress(m[1], jobs.find((j) => j.id === m[1])?.status ?? 'processing'))
   return Response.json({})
