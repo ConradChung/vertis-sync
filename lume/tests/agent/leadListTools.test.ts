@@ -41,7 +41,7 @@ describe('lead list tools', () => {
   })
 
   it('append maps each source; inline rows capped at 200; returns the report line', async () => {
-    const { run, calls } = setup({ reply: () => ({ list_id: LIST.toLowerCase(), name: 'L', added: 2, duplicates: 1, line: 'added 2, 1 duplicate skipped → L' }) })
+    const { run, calls } = setup({ projectId: PROJECT, reply: () => ({ list_id: LIST.toLowerCase(), name: 'L', added: 2, duplicates: 1, line: 'added 2, 1 duplicate skipped → L' }) })
     await run('append_to_lead_list', { list_id: LIST, source: 'attachment', file_id: FILE, sheet: 'S1' })
     await run('append_to_lead_list', { list_id: LIST, source: 'review_set', set_id: SET })
     await run('append_to_lead_list', { list_id: LIST, source: 'actor_run', run_id: 'abcdefgh12' })
@@ -55,7 +55,7 @@ describe('lead list tools', () => {
       { kind: 'influencer_export', export_id: EXPORT },
       { kind: 'inline', rows: [{ name: 'A', email: 'a@a.co' }] },
     ])
-    expect(calls()[0]).toMatchObject({ url: `/api/lead-lists/${LIST.toLowerCase()}/items`, method: 'POST', body: { conversation_id: CONV } })
+    expect(calls()[0]).toMatchObject({ url: `/api/lead-lists/${LIST.toLowerCase()}/items`, method: 'POST', body: { conversation_id: CONV, project_id: PROJECT } })
     expect(r).toMatchObject({ lead_list: { list_id: LIST.toLowerCase(), line: 'added 2, 1 duplicate skipped → L' } })
     expect(() => setup().tool('append_to_lead_list').inputSchema.parse({ list_id: LIST, source: 'inline', rows: Array.from({ length: 201 }, () => ({ email: 'a@a.co' })) })).toThrow()
   })
@@ -69,10 +69,24 @@ describe('lead list tools', () => {
     await expect(outside.run('append_to_lead_list', { source: 'inline', rows: [{ email: 'a@a.co' }] })).rejects.toThrow(/list_id/)
   })
 
+  it('bulk removal (q, missing, or more than 25 rows) only files an always-ask approval; a few explicit rows go straight through', async () => {
+    expect(HIGH_RISK_KIND.remove_from_lead_list).toBe('remove_lead_rows')
+    expect(ALWAYS_ASK_KINDS.has('remove_lead_rows')).toBe(true)
+    const { run, prepare, fetch, autoApprove } = setup({ skip: true })
+    for (const input of [{ q: 'acme' }, { missing: ['email'] }, { idxs: Array.from({ length: 26 }, (_, i) => i) }]) {
+      const r = (await run('remove_from_lead_list', { list_id: LIST, ...input })) as Record<string, unknown>
+      expect(r.status).toBe('awaiting_approval')
+    }
+    expect(prepare.mock.calls.map((c) => c[0].kind)).toEqual(['remove_lead_rows', 'remove_lead_rows', 'remove_lead_rows'])
+    expect(prepare.mock.calls[0][0].payload).toEqual({ list_id: LIST.toLowerCase(), q: 'acme' })
+    expect(fetch).not.toHaveBeenCalled()
+    expect(autoApprove).not.toHaveBeenCalled()
+  })
+
   it('view pages the list; remove and rename hit the list routes', async () => {
     const { run, calls } = setup({ reply: (url) => (url.includes('/items?') ? { rows: [], total: 0 } : { list: { id: LIST.toLowerCase(), name: 'L' }, removed: 3 }) })
     await run('view_lead_list', { list_id: LIST, q: 'acme', sort: 'company', page: 1, page_size: 20 })
-    await run('remove_from_lead_list', { list_id: LIST, missing: ['email'] })
+    await run('remove_from_lead_list', { list_id: LIST, idxs: [3, 4] })
     await run('rename_lead_list', { list_id: LIST, name: 'New', project_id: null })
     expect(calls().map((c) => [c.method, c.url])).toEqual([
       ['GET', `/api/lead-lists/${LIST.toLowerCase()}`],
@@ -80,6 +94,7 @@ describe('lead list tools', () => {
       ['DELETE', `/api/lead-lists/${LIST.toLowerCase()}/items`],
       ['PATCH', `/api/lead-lists/${LIST.toLowerCase()}`],
     ])
+    expect(calls()[2].body).toEqual({ idxs: [3, 4] })
     expect(calls()[3].body).toEqual({ name: 'New', project_id: null })
   })
 

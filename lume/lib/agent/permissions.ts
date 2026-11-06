@@ -46,6 +46,8 @@ export const HIGH_RISK_KIND: Record<string, PendingKind> = {
   stage_attachment_for_validation: 'stage_attachment', lookup_influencer_candidates: 'influencer_lookup',
   approve_influencer_candidates: 'influencer_approve',
   send_lead_list_to_validation: 'send_lead_list', delete_lead_list: 'delete_lead_list',
+  // A low-tier tool that files an approval only for a bulk removal (q, missing, or > 25 rows).
+  remove_from_lead_list: 'remove_lead_rows',
   // A low-tier tool that files an approval only for a blocking label (unsubscribe, hostile, BAD + block).
   label_reply: 'label_reply',
 }
@@ -78,7 +80,7 @@ export const SKIPPABLE_KINDS: ReadonlySet<PendingKind> = new Set<PendingKind>([
  */
 export const ALWAYS_ASK_KINDS: ReadonlySet<PendingKind> = new Set<PendingKind>([
   'run_actor', 'send_reply', 'decide_gate', 'launch_campaign', 'resume_campaign', 'label_reply', 'influencer_run', 'influencer_reactions',
-  'stage_attachment', 'influencer_lookup', 'influencer_approve', 'send_lead_list', 'delete_lead_list',
+  'stage_attachment', 'influencer_lookup', 'influencer_approve', 'send_lead_list', 'delete_lead_list', 'remove_lead_rows',
 ])
 
 export const skippable = (kind: PendingKind): boolean => SKIPPABLE_KINDS.has(kind)

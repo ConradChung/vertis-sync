@@ -335,6 +335,8 @@ function configured(body: unknown): ToolResult {
 const LIST_FIELDS = ['name', 'first_name', 'last_name', 'title', 'company', 'website', 'email', 'phone', 'linkedin_url', 'city', 'state', 'country'] as const
 const InlineLead = z.object(Object.fromEntries(LIST_FIELDS.map((f) => [f, z.string().max(500).optional()])) as Record<(typeof LIST_FIELDS)[number], z.ZodOptional<z.ZodString>>).strict()
 type AppendSourceBody = Record<string, unknown> & { kind: string }
+/** More explicit rows than this (or any q / missing) make remove_from_lead_list file a remove_lead_rows approval. */
+const BULK_REMOVE_MAX = 25
 
 /** The lead_list ref every list tool returns (it also puts "Open in Leads" under the message). */
 const listRef = (r: Record<string, unknown>) => ({
@@ -827,7 +829,7 @@ const SPECS: Built[] = [
           if (!r.appended) throw new Error('This chat’s project no longer exists; pass a list_id.')
           return { ...r.appended, lead_list: listRef(r.appended) } as ToolResult
         }
-        const r = (await call(`/api/lead-lists/${v.list_id.toLowerCase()}/items`, { method: 'POST', body: { source, conversation_id: deps.conversationId ?? null } })) as Record<string, unknown>
+        const r = (await call(`/api/lead-lists/${v.list_id.toLowerCase()}/items`, { method: 'POST', body: { source, conversation_id: deps.conversationId ?? null, project_id: deps.projectId ?? null } })) as Record<string, unknown>
         return { ...r, lead_list: listRef(r) } as ToolResult
       },
     },
@@ -836,11 +838,17 @@ const SPECS: Built[] = [
   tiered(
     {
       name: 'remove_from_lead_list',
-      description: 'Remove rows from a lead list, ONLY when the owner asked: by row numbers (idxs), rows missing a field (missing: email, linkedin, phone, website), or rows matching a search (q). Returns how many went. Cannot be undone.',
+      description:
+        'Remove rows from a lead list, ONLY when the owner asked: by row numbers (idxs), rows missing a field (missing: email, linkedin, phone, website), or rows matching a search (q). Cannot be undone. ' +
+        'Up to 25 explicit rows go at once; a bulk removal (q, missing, or more than 25 rows) only files an approval the owner always confirms.',
       inputSchema: z
         .object({ list_id: uuid, idxs: z.array(z.number().int().min(0)).max(5000).optional(), missing: z.array(z.enum(['email', 'linkedin', 'phone', 'website'])).max(4).optional(), q: z.string().min(2).max(120).optional() })
         .refine((v) => !!v.idxs?.length || !!v.missing?.length || !!v.q, 'idxs, missing or q'),
-      run: async ({ list_id, ...what }, { call }) => {
+      run: async ({ list_id, ...what }, { call, deps }) => {
+        // A bulk removal could empty a list: it always asks (remove_lead_rows).
+        if (what.q || what.missing?.length || (what.idxs?.length ?? 0) > BULK_REMOVE_MAX) {
+          return requestApproval(deps, 'remove_lead_rows', { list_id: list_id.toLowerCase(), ...what } as unknown as Record<string, Json>)
+        }
         const r = (await call(`/api/lead-lists/${list_id.toLowerCase()}/items`, { method: 'DELETE', body: what })) as Record<string, unknown>
         return { ...r, lead_list: { list_id: list_id.toLowerCase() } } as ToolResult
       },

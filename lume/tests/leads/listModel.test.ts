@@ -102,3 +102,10 @@ describe('CSV', () => {
   })
   it('inline cap is 200', () => expect(INLINE_MAX_ROWS).toBe(200))
 })
+
+describe('linkedinKey', () => {
+  it('a malformed escape in the slug falls back to the raw slug instead of throwing', async () => {
+    const { linkedinKey } = await import('@/lib/leads/lists/model')
+    expect(linkedinKey('https://www.linkedin.com/in/jane%E0%A4%A')).toBe('in/jane%e0%a4%a')
+  })
+})

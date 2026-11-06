@@ -16,7 +16,7 @@ import { appendFromSource, sourceErrorResponse, withList, type ListCtx } from '@
  */
 export const maxDuration = 120
 
-const Post = z.object({ source: AppendSource, conversation_id: z.string().uuid().nullable().optional() })
+const Post = z.object({ source: AppendSource, conversation_id: z.string().uuid().nullable().optional(), project_id: z.string().uuid().nullable().optional() })
 const Delete = z
   .object({ idxs: z.array(z.number().int().min(0)).max(20_000).optional(), missing: z.array(z.enum(MISSING)).max(4).optional(), q: z.string().max(120).optional() })
   .refine((v) => !!v.idxs?.length || !!v.missing?.length || !!v.q?.trim(), 'idxs, missing or q')
@@ -48,7 +48,8 @@ export async function POST(req: Request, ctx: ListCtx) {
     const r = await withList(ctx)
     if (!r.ok) return r.response
     const conversationId = body.data.conversation_id ? uuidParam(body.data.conversation_id) : null
-    const report = await appendFromSource(r.list, body.data.source, { conversationId, by: auth.via === 'internal' ? 'agent' : 'owner' })
+    const projectId = body.data.project_id ? uuidParam(body.data.project_id) : null
+    const report = await appendFromSource(r.list, body.data.source, { conversationId, projectId, by: auth.via === 'internal' ? 'agent' : 'owner' })
     return NextResponse.json(report)
   } catch (err) {
     return sourceErrorResponse(err) ?? dbErrorResponse(err, 'api/lead-lists/[id]/items')

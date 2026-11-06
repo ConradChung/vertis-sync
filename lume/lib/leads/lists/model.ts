@@ -55,7 +55,14 @@ const squash = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}\s.]/gu, ' ')
 
 export function linkedinKey(url: string | null): string | null {
   const m = /linkedin\.com\/(in|company|pub)\/([^/?#\s]+)/i.exec(url ?? '')
-  return m ? `${m[1]}/${decodeURIComponent(m[2])}`.toLowerCase() : null
+  if (!m) return null
+  let slug = m[2]
+  try {
+    slug = decodeURIComponent(slug)
+  } catch {
+    // A malformed escape (%E0%A4%A): key on the slug as written.
+  }
+  return `${m[1]}/${slug}`.toLowerCase()
 }
 
 /** Email first, then LinkedIn, then normalised person (or business) name + domain (or company). */

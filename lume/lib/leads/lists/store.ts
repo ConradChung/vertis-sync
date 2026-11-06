@@ -1,4 +1,5 @@
 import 'server-only'
+import { randomUUID } from 'node:crypto'
 import { createServiceClient } from '@/lib/supabase/service'
 import type { Json } from '@/lib/db/types'
 import {
@@ -34,6 +35,8 @@ export interface LeadList {
   sent_rows: number | null
   /** The visible columns: the sources' own fields, in first-seen order (≤ 100). */
   columns: string[]
+  /** Moves only when rows are added, removed or edited; the resend guard compares sent_at with it. */
+  content_changed_at: string
   created_at: string
   updated_at: string
 }
@@ -62,7 +65,7 @@ export interface AppendResult {
 }
 
 const db = () => createServiceClient()
-const COLS = 'id,title,notes,created_by,project_id,project_default,item_count,email_count,sent_ingest_id,sent_at,sent_rows,columns,created_at,updated_at'
+const COLS = 'id,title,notes,created_by,project_id,project_default,item_count,email_count,sent_ingest_id,sent_at,sent_rows,columns,content_changed_at,created_at,updated_at'
 const CHUNK = 500
 
 type SetRow = Omit<LeadList, 'name'> & { title: string }
@@ -91,6 +94,9 @@ export async function createList(input: { name: string; notes?: string | null; c
       filters: [],
       created_at: now(),
       updated_at: now(),
+      content_changed_at: now(),
+      append_lease_token: null,
+      append_lease_until: null,
       archived_at: null,
     })
     .select(COLS)
@@ -154,14 +160,20 @@ export async function projectDefaultList(projectId: string, projectName: string)
   }
 }
 
-/** item_count, email_count and updated_at from head-only counts. */
-export async function recount(listId: string): Promise<{ item_count: number; email_count: number }> {
+/**
+ * item_count and email_count from head-only counts. `changed` (rows were
+ * actually added, removed or edited) also moves updated_at and
+ * content_changed_at — never a bare recount, or an unchanged list could be
+ * sent again.
+ */
+export async function recount(listId: string, changed = false): Promise<{ item_count: number; email_count: number }> {
   const all = await items().select('id', { count: 'exact', head: true }).eq('set_id', listId)
   if (all.error) throw all.error
   const withEmail = await items().select('id', { count: 'exact', head: true }).eq('set_id', listId).not('email_key', 'is', null)
   if (withEmail.error) throw withEmail.error
   const counts = { item_count: all.count ?? 0, email_count: withEmail.count ?? 0 }
-  const { error } = await lists().update({ ...counts, updated_at: now() }).eq('id', listId)
+  const stamp = now()
+  const { error } = await lists().update({ ...counts, ...(changed ? { updated_at: stamp, content_changed_at: stamp } : {}) }).eq('id', listId)
   if (error) throw error
   return counts
 }
@@ -189,8 +201,67 @@ async function existingKeys(listId: string, column: 'email_key' | 'linkedin_key'
  * against the list and within the batch, CHUNK rows at a time, up to the
  * list's cap.
  */
-export async function appendItems(listId: string, rows: readonly IncomingRow[], opts: { max?: number } = {}): Promise<AppendResult> {
-  const max = opts.max ?? LIST_MAX_ITEMS
+export async function appendItems(
+  listId: string,
+  rows: readonly IncomingRow[],
+  opts: { max?: number; wait?: () => Promise<void>; attempts?: number } = {}
+): Promise<AppendResult> {
+  const token = await claimAppendLease(listId, opts)
+  try {
+    return await appendLocked(listId, rows, opts.max ?? LIST_MAX_ITEMS)
+  } finally {
+    await lists().update({ append_lease_token: null, append_lease_until: null }).eq('id', listId).eq('append_lease_token', token)
+  }
+}
+
+/** How long one append may hold a list (the routes' maxDuration is 120 s). */
+const APPEND_LEASE_MS = 150_000
+
+export class ListBusy extends Error {
+  constructor() {
+    super('list_busy')
+    this.name = 'ListBusy'
+  }
+}
+
+/**
+ * Appends to one list run one at a time: a conditional UPDATE claims the
+ * set row's lease (free, or expired after a crash); a caller that finds it
+ * held waits and retries, then gives up as ListBusy.
+ */
+async function claimAppendLease(listId: string, opts: { wait?: () => Promise<void>; attempts?: number }): Promise<string> {
+  const token = randomUUID()
+  const wait = opts.wait ?? (() => new Promise<void>((r) => setTimeout(r, 500)))
+  for (let attempt = 0; attempt < (opts.attempts ?? 60); attempt++) {
+    const until = new Date(Date.now() + APPEND_LEASE_MS).toISOString()
+    const free = await lists().update({ append_lease_token: token, append_lease_until: until }).eq('id', listId).is('append_lease_token', null).select('id')
+    if (free.error) throw free.error
+    if ((free.data ?? []).length) return token
+    const stale = await lists().update({ append_lease_token: token, append_lease_until: until }).eq('id', listId).lt('append_lease_until', now()).select('id')
+    if (stale.error) throw stale.error
+    if ((stale.data ?? []).length) return token
+    await wait()
+  }
+  throw new ListBusy()
+}
+
+/** Insert a batch; on a unique-key conflict (the backstop indexes) insert row by row and count the clashes as duplicates. */
+async function insertBatch(batch: Record<string, unknown>[]): Promise<{ inserted: number; clashes: number }> {
+  const { error } = await items().insert(batch)
+  if (!error) return { inserted: batch.length, clashes: 0 }
+  if ((error as { code?: string }).code !== '23505') throw error
+  let inserted = 0
+  let clashes = 0
+  for (const one of batch) {
+    const r = await items().insert(one)
+    if (!r.error) inserted++
+    else if ((r.error as { code?: string }).code === '23505') clashes++
+    else throw r.error
+  }
+  return { inserted, clashes }
+}
+
+async function appendLocked(listId: string, rows: readonly IncomingRow[], max: number): Promise<AppendResult> {
   const first = await recount(listId)
   let count = first.item_count
   const before = (await getList(listId))?.columns ?? []
@@ -224,16 +295,17 @@ export async function appendItems(listId: string, rows: readonly IncomingRow[], 
       if (k.name_key) added.names.add(k.name_key)
       return { set_id: listId, idx: idx++, item: chunk[j].item as unknown as Json, raw: (chunk[j].raw ?? null) as Json, cells: pickCells(chunk[j].cells, columns) as Json, status: 'kept', source: chunk[j].source, ...k }
     })
-    const { error } = await items().insert(batch)
-    if (error) throw error
-    out.added += batch.length
-    count += batch.length
+    const put = await insertBatch(batch)
+    out.added += put.inserted
+    out.duplicates += put.clashes
+    count += put.inserted
+    // idx stays unique even when some rows clashed: the next chunk starts past every idx tried.
   }
   if (columns.length !== before.length) {
     const { error } = await lists().update({ columns }).eq('id', listId)
     if (error) throw error
   }
-  out.item_count = (await recount(listId)).item_count
+  out.item_count = (await recount(listId, out.added > 0)).item_count
   return out
 }
 
@@ -274,7 +346,7 @@ export async function updateCell(listId: string, idx: number, column: string, va
   if (up.error) throw up.error
   const list = await getList(listId)
   if (list && !list.columns.includes(column)) await lists().update({ columns: mergeColumns(list.columns, [{ [column]: value }]) }).eq('id', listId)
-  await recount(listId)
+  await recount(listId, true)
   return { ...row, item: next.item, cells: next.cells }
 }
 
@@ -287,7 +359,7 @@ export async function updateItem(listId: string, idx: number, patch: Partial<Rec
   const item = applyItemEdit(row.item, patch)
   const up = await items().update({ item: item as unknown as Json, ...dedupeKeys(item) }).eq('set_id', listId).eq('idx', idx)
   if (up.error) throw up.error
-  await recount(listId)
+  await recount(listId, true)
   return { ...row, item }
 }
 
@@ -298,11 +370,32 @@ export async function deleteItems(listId: string, idxs: readonly number[]): Prom
     if (error) throw error
     removed += (data ?? []).length
   }
-  if (idxs.length) await recount(listId)
+  if (idxs.length) await recount(listId, removed > 0)
   return removed
 }
 
 export const MISSING = ['email', 'linkedin', 'phone', 'website'] as const
+
+/** How many rows a removal by `missing` / `q` would take (head-only counts; rows matching several are counted once per criterion). */
+export async function countWhere(listId: string, f: { missing?: (typeof MISSING)[number][]; q?: string }): Promise<number> {
+  let n = 0
+  for (const m of f.missing ?? []) {
+    const col = m === 'email' ? 'email_key' : m === 'linkedin' ? 'linkedin_key' : `item->>${m}`
+    const { count, error } = await items().select('id', { count: 'exact', head: true }).eq('set_id', listId).is(col, null)
+    if (error) throw error
+    n += count ?? 0
+  }
+  const term = f.q?.trim().replace(/[%,()*\\]/g, ' ').trim()
+  if (term) {
+    const { count, error } = await items()
+      .select('id', { count: 'exact', head: true })
+      .eq('set_id', listId)
+      .or(SEARCH_FIELDS.map((x) => `item->>${x}.ilike.%${term}%`).join(','))
+    if (error) throw error
+    n += count ?? 0
+  }
+  return n
+}
 
 /** Remove rows lacking any of these fields, or matching a search. Returns how many went. */
 export async function removeWhere(listId: string, f: { missing?: (typeof MISSING)[number][]; q?: string }): Promise<number> {
@@ -323,7 +416,7 @@ export async function removeWhere(listId: string, f: { missing?: (typeof MISSING
     if (error) throw error
     removed += (data ?? []).length
   }
-  await recount(listId)
+  await recount(listId, removed > 0)
   return removed
 }
 
@@ -394,7 +487,25 @@ export async function emailCsv(listId: string, pageSize = 1000, maxBytes = SEND_
   return { csv: parts.join('\n') + '\n', rows, email_column: emailColumn }
 }
 
+/**
+ * Claim the send atomically (lume_claim_lead_list_send): only a list never
+ * sent, or changed since it was sent, is claimable — two quick clicks, or the
+ * page and the agent's approval, make one ingest. Release it if the ingest fails.
+ */
+export async function claimSend(listId: string): Promise<{ claimed: boolean; prev_sent_at: string | null }> {
+  const { data, error } = await db().rpc('lume_claim_lead_list_send', { p_list: listId })
+  if (error) throw error
+  const row = ((data ?? []) as { prev_sent_at: string | null }[])[0]
+  return row ? { claimed: true, prev_sent_at: row.prev_sent_at ?? null } : { claimed: false, prev_sent_at: null }
+}
+
+export async function releaseSend(listId: string, prevSentAt: string | null): Promise<void> {
+  const { error } = await lists().update({ sent_at: prevSentAt }).eq('id', listId).is('sent_ingest_id', null)
+  if (error) throw error
+}
+
+/** Record the ingest the claimed send went to (sent_at was stamped by the claim). */
 export async function markSent(listId: string, ingestId: string, rows: number): Promise<void> {
-  const { error } = await lists().update({ sent_ingest_id: ingestId, sent_at: now(), sent_rows: rows }).eq('id', listId)
+  const { error } = await lists().update({ sent_ingest_id: ingestId, sent_rows: rows }).eq('id', listId)
   if (error) throw error
 }

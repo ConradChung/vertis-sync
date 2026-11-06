@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { fileInConversation } from '@/lib/agent/chatFiles'
 import { loadSourceRows } from '@/lib/apollo/source'
 import { exportRows, getExport } from '@/lib/influencers/store'
-import { keptRows } from '@/lib/leads/lists/reviewRows'
+import { keptRows, reviewSetInScope } from '@/lib/leads/lists/reviewRows'
 import { EDITABLE_FIELDS, INLINE_MAX_ROWS, inlineItem, leadFromMapped, parsePastedRows, type ItemSource } from '@/lib/leads/lists/model'
 import type { IncomingRow } from '@/lib/leads/lists/store'
 import { loadAttachmentLeads } from '@/lib/review/attachmentSource'
@@ -39,7 +39,7 @@ export class SourceRefused extends Error {
 }
 
 /** `by`: the agent's bearer or the owner's page (inline / pasted rows are tagged agent or manual). */
-export async function rowsFromSource(src: AppendSource, ctx: { conversationId?: string | null; by: 'agent' | 'owner' }): Promise<{ rows: IncomingRow[]; label: string; mapping?: unknown; unmapped?: string[] }> {
+export async function rowsFromSource(src: AppendSource, ctx: { conversationId?: string | null; projectId?: string | null; by: 'agent' | 'owner' }): Promise<{ rows: IncomingRow[]; label: string; mapping?: unknown; unmapped?: string[] }> {
   // cells: the columns this row shows (the source's own fields); item stays the hidden helper.
   const typed = (source: ItemSource) => (r: { raw: Record<string, unknown> | null; item: IncomingRow['item']; cells?: IncomingRow['cells'] | null }): IncomingRow => ({
     raw: r.raw,
@@ -60,6 +60,9 @@ export async function rowsFromSource(src: AppendSource, ctx: { conversationId?: 
       }
     }
     case 'review_set':
+      if (ctx.by === 'agent' && !(ctx.conversationId && (await reviewSetInScope(src.set_id.toLowerCase(), ctx.conversationId, ctx.projectId ?? null)))) {
+        throw new SourceRefused(404, 'review_set_not_found')
+      }
       return { label: 'review set', rows: (await keptRows(src.set_id.toLowerCase())).map((r) => typed('review_set')({ raw: r.raw, item: r.item, cells: r.cells })) }
     case 'actor_run': {
       const { rows, label } = await loadSourceRows(src.run_id ? { kind: 'run', id: src.run_id } : { kind: 'dataset', id: src.dataset_id! })

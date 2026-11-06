@@ -105,6 +105,7 @@ export function memdb(uniques: Record<string, string[]>) {
         return b
       },
       gte: (c: string, v: number) => (filters.push((r) => (at(r, c) as number) >= v), b),
+      lt: (c: string, v: string | number) => (filters.push((r) => at(r, c) !== null && at(r, c) !== undefined && (at(r, c) as string | number) < v), b),
       neq: (c: string, v: unknown) => (filters.push((r) => r[c] !== v), b),
       is: (c: string, v: unknown) => (filters.push((r) => (at(r, c) ?? null) === v), b),
       in: (c: string, v: unknown[]) => (filters.push((r) => v.includes(at(r, c))), b),
@@ -118,5 +119,11 @@ export function memdb(uniques: Record<string, string[]>) {
     return b
   }
 
-  return { tables, table, client: { from } }
+  // rpc(name, args): handlers registered by the test (db.rpcs[name] = (args) => data).
+  const rpcs: Record<string, (args: Record<string, unknown>) => unknown> = {}
+  const rpc = async (name: string, args: Record<string, unknown>) => {
+    const h = rpcs[name]
+    return h ? { data: h(args), error: null } : { data: null, error: { message: `no rpc ${name}` } }
+  }
+  return { tables, table, rpcs, client: { from, rpc } }
 }

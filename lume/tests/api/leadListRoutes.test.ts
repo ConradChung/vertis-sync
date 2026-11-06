@@ -40,6 +40,15 @@ async function newList(name = 'PM owners', body: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   db = memdb({ lead_review_items: ['set_id', 'idx'] })
+  // The claim RPC, as the SQL does it: stamp sent_at only when never sent or changed since.
+  db.rpcs.lume_claim_lead_list_send = ({ p_list }) => {
+    const set = db.table('lead_review_sets').find((r) => r.id === p_list && r.kind === 'list')
+    if (!set) return []
+    const prev = (set.sent_at as string | null) ?? null
+    if (prev && !(prev < (set.content_changed_at as string))) return []
+    Object.assign(set, { sent_at: new Date().toISOString(), sent_ingest_id: null, sent_rows: null })
+    return [{ prev_sent_at: prev, content_changed_at: set.content_changed_at }]
+  }
   h.via = 'session'
   h.getProject.mockReset().mockImplementation(async (id: string) => (id === PROJECT ? { id: PROJECT, name: 'Roofers TX' } : null))
   h.listProjects.mockReset().mockResolvedValue([{ id: PROJECT, name: 'Roofers TX' }])
@@ -97,6 +106,18 @@ describe('lead list routes', () => {
     expect(csv.trim().split('\n')).toHaveLength(2) // header + the one row with an email
     expect(db.table('lead_review_sets').find((r) => r.id === id)).toMatchObject({ sent_ingest_id: INGEST, sent_rows: 1 })
     expect((await send.POST(req('POST'), ctx(id))).status).toBe(409)
+    // An all-duplicate append changes nothing, so the list still cannot be resent.
+    await items.POST(req('POST', { source: { kind: 'inline', rows: [{ name: 'Mail', email: 'm@m.co' }] } }), ctx(id))
+    expect((await send.POST(req('POST'), ctx(id))).status).toBe(409)
+    expect(h.createIngest).toHaveBeenCalledTimes(1)
+  })
+
+  it('two quick clicks on Send make one ingest', async () => {
+    const { id } = await newList()
+    await items.POST(req('POST', { source: { kind: 'inline', rows: [{ name: 'Mail', email: 'm@m.co' }] } }), ctx(id))
+    const [a, b] = await Promise.all([send.POST(req('POST'), ctx(id)), send.POST(req('POST'), ctx(id))])
+    expect([a.status, b.status].sort()).toEqual([201, 409])
+    expect(h.createIngest).toHaveBeenCalledTimes(1)
   })
 
   it('export streams the CSV; remove by missing email', async () => {

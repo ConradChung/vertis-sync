@@ -155,7 +155,7 @@ export async function createAction(
     // No uniqueness key: approving the same candidates twice is a no-op (only rows still 'found' change).
     const err = approvePayloadError(payload)
     if (err) throw new InvalidActionPayloadError(err)
-  } else if (kind === 'send_lead_list' || kind === 'delete_lead_list') {
+  } else if (kind === 'send_lead_list' || kind === 'delete_lead_list' || kind === 'remove_lead_rows') {
     // One awaiting send / delete per list.
     const err = leadListPayloadError(payload)
     if (err) throw new InvalidActionPayloadError(err)

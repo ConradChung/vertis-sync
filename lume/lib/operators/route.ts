@@ -105,6 +105,7 @@ const KIND_SCOPE: Record<PendingActionKind, VerticalScope | null> = {
   influencer_approve: 'orders',
   send_lead_list: 'validation',
   delete_lead_list: null,
+  remove_lead_rows: null,
   decide_gate: null,
   // Owner / master-bot business: never a vertical's item.
   issue_operator_key: null,

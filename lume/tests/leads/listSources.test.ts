@@ -7,12 +7,13 @@ const m = vi.hoisted(() => ({
   getExport: vi.fn(),
   exportRows: vi.fn(),
   keptRows: vi.fn(),
+  reviewSetInScope: vi.fn(),
 }))
 vi.mock('@/lib/review/attachmentSource', () => ({ loadAttachmentLeads: m.loadAttachmentLeads }))
 vi.mock('@/lib/agent/chatFiles', () => ({ fileInConversation: m.fileInConversation }))
 vi.mock('@/lib/apollo/source', () => ({ loadSourceRows: m.loadSourceRows, SourceError: class extends Error { constructor(public status: number, public code: string) { super(code) } } }))
 vi.mock('@/lib/influencers/store', () => ({ getExport: m.getExport, exportRows: m.exportRows }))
-vi.mock('@/lib/leads/lists/reviewRows', () => ({ keptRows: m.keptRows }))
+vi.mock('@/lib/leads/lists/reviewRows', () => ({ keptRows: m.keptRows, reviewSetInScope: m.reviewSetInScope }))
 
 import { rowsFromSource, SourceRefused } from '@/lib/leads/lists/sources'
 
@@ -34,7 +35,13 @@ describe('rowsFromSource', () => {
 
   it('review set: its kept rows; actor run: the run rows normalised', async () => {
     m.keptRows.mockResolvedValue([{ item: { email: 'k@k.co' }, raw: { x: 1 } }])
-    expect((await rowsFromSource({ kind: 'review_set', set_id: FILE }, { by: 'agent' })).rows[0]).toMatchObject({ source: 'review_set', raw: { x: 1 } })
+    m.reviewSetInScope.mockResolvedValue(true)
+    expect((await rowsFromSource({ kind: 'review_set', set_id: FILE }, { by: 'agent', conversationId: CONV })).rows[0]).toMatchObject({ source: 'review_set', raw: { x: 1 } })
+    expect(m.reviewSetInScope).toHaveBeenCalledWith(FILE, CONV, null)
+    // The agent may only take a review set from this chat (or its project's chats).
+    m.reviewSetInScope.mockResolvedValue(false)
+    await expect(rowsFromSource({ kind: 'review_set', set_id: FILE }, { by: 'agent', conversationId: CONV })).rejects.toBeInstanceOf(SourceRefused)
+    await expect(rowsFromSource({ kind: 'review_set', set_id: FILE }, { by: 'agent' })).rejects.toBeInstanceOf(SourceRefused)
     m.loadSourceRows.mockResolvedValue({ label: 'run abc', rows: [{ title: 'Roofer Co', website: 'roof.co', phone: '555' }] })
     const run = await rowsFromSource({ kind: 'actor_run', run_id: 'abcdefgh12' }, { by: 'agent' })
     expect(m.loadSourceRows).toHaveBeenCalledWith({ kind: 'run', id: 'abcdefgh12' })

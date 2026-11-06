@@ -5,7 +5,7 @@ import { getProject, listProjects } from '@/lib/agent/projects'
 import { SourceError } from '@/lib/apollo/source'
 import { uuidParam } from '@/lib/http/json'
 import { createServiceClient } from '@/lib/supabase/service'
-import { appendItems, getList, listLists, projectDefaultList, type AppendResult, type LeadList } from '@/lib/leads/lists/store'
+import { appendItems, getList, ListBusy, listLists, projectDefaultList, type AppendResult, type LeadList } from '@/lib/leads/lists/store'
 import { rowsFromSource, SourceRefused, type AppendSource } from '@/lib/leads/lists/sources'
 
 export type ListCtx = { params: Promise<{ id: string }> }
@@ -25,6 +25,7 @@ export async function withList(ctx: ListCtx): Promise<{ ok: true; list: LeadList
 /** A source failure as its HTTP answer, or null when it is not one. */
 export function sourceErrorResponse(err: unknown): NextResponse | null {
   if (err instanceof SourceRefused || err instanceof SourceError) return NextResponse.json({ error: err.code }, { status: err.status })
+  if (err instanceof ListBusy) return NextResponse.json({ error: 'list_busy' }, { status: 409 })
   if (err instanceof ApifyError) return NextResponse.json({ error: `apify_${err.code}` }, { status: err.code === 'not_found' ? 404 : err.code === 'not_configured' ? 503 : 502 })
   return null
 }
@@ -44,7 +45,7 @@ export function appendLine(r: AppendResult, name: string): string {
   return `added ${r.added}, ${r.duplicates} duplicate${r.duplicates === 1 ? '' : 's'} skipped${extra.length ? `, ${extra.join(', ')}` : ''} → ${name}`
 }
 
-export async function appendFromSource(list: LeadList, src: AppendSource, ctx: { conversationId?: string | null; by: 'agent' | 'owner' }): Promise<AppendReport> {
+export async function appendFromSource(list: LeadList, src: AppendSource, ctx: { conversationId?: string | null; projectId?: string | null; by: 'agent' | 'owner' }): Promise<AppendReport> {
   const { rows, mapping, unmapped } = await rowsFromSource(src, ctx)
   const r = await appendItems(list.id, rows)
   return { ...r, list_id: list.id, name: list.name, href: leadsHref(list.id), line: appendLine(r, list.name), ...(mapping ? { mapping, unmapped } : {}) }
@@ -55,7 +56,7 @@ export async function autoAppendToProject(projectId: string, src: AppendSource, 
   const project = await getProject(projectId)
   if (!project) return null
   const list = await projectDefaultList(project.id, project.name)
-  return appendFromSource(list, src, { ...ctx, by: 'agent' })
+  return appendFromSource(list, src, { ...ctx, projectId: project.id, by: 'agent' })
 }
 
 export interface Folder {

@@ -187,6 +187,7 @@ export type PendingActionKind =
   | 'influencer_approve'
   | 'send_lead_list'
   | 'delete_lead_list'
+  | 'remove_lead_rows'
 
 export type PendingActionStatus =
   | 'awaiting'
