@@ -4,6 +4,7 @@ import { estimateLookup } from '@/lib/influencers/candidates'
 import { batchCounts, getCandidateBatch, listCandidates } from '@/lib/influencers/candidateStore'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { uuidParam } from '@/lib/http/json'
+import { sheetsForBatches } from '@/lib/leads/lists/influencerSheets'
 
 /** GET `?status=` → one batch, its candidates (list order), per-status counts and the lookup estimate for the people still pending. */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -15,8 +16,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   try {
     const batch = await getCandidateBatch(id)
     if (!batch) return NextResponse.json({ error: 'not_found' }, { status: 404 })
-    const [candidates, counts] = await Promise.all([listCandidates(id, status), batchCounts(id)])
-    return NextResponse.json({ batch, candidates, counts, estimate: estimateLookup(counts.pending_lookup ?? 0) })
+    const [candidates, counts, sheets] = await Promise.all([listCandidates(id, status), batchCounts(id), sheetsForBatches([id])])
+    return NextResponse.json({ batch, list_id: sheets.get(id) ?? null, candidates, counts, estimate: estimateLookup(counts.pending_lookup ?? 0) })
   } catch (err) {
     return dbErrorResponse(err, 'api/influencers/candidates/[id]')
   }

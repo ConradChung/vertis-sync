@@ -30,6 +30,7 @@ const rowsWord = (n: number) => `${fmt.format(n)} row${n === 1 ? '' : 's'}`
 /** Why this list cannot go to validation now, or null. */
 function refusal(list: LeadList | null): Fail | null {
   if (!list) return { ok: false, status: 404, error: 'list_not_found' }
+  if (list.sheet_kind === 'influencer_candidates') return { ok: false, status: 409, error: 'influencer_sheet' }
   if (list.email_count < 1) return { ok: false, status: 422, error: `no_emails: 0 of ${fmt.format(list.item_count)} rows have an email` }
   // Rows unchanged since the last send (content_changed_at moves only on a real add / remove / edit).
   if (list.sent_at && list.sent_at >= list.content_changed_at) return { ok: false, status: 409, error: 'already_sent' }
@@ -126,6 +127,7 @@ export async function buildDeleteLeadList(raw: Record<string, unknown>): Promise
   if (!body.success) return { ok: false, status: 400, error: 'invalid_payload' }
   const list = await getList(body.data.list_id.toLowerCase())
   if (!list) return { ok: false, status: 404, error: 'list_not_found' }
+  if (list.sheet_kind === 'influencer_candidates') return { ok: false, status: 409, error: 'influencer_sheet' }
   return {
     ok: true,
     kind: 'delete_lead_list',
@@ -149,6 +151,7 @@ export async function buildRemoveLeadRows(raw: Record<string, unknown>): Promise
   if (!body.success) return { ok: false, status: 400, error: 'invalid_payload' }
   const list = await getList(body.data.list_id.toLowerCase())
   if (!list) return { ok: false, status: 404, error: 'list_not_found' }
+  if (list.sheet_kind === 'influencer_candidates') return { ok: false, status: 409, error: 'influencer_sheet' }
   const { idxs, missing, q } = body.data
   const matching = (idxs?.length ?? 0) + (missing?.length || q ? await countWhere(list.id, { missing, q }) : 0)
   if (!matching) return { ok: false, status: 422, error: 'nothing_to_remove' }

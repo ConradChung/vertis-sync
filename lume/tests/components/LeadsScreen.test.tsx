@@ -23,6 +23,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   const method = init?.method ?? 'GET'
   calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined })
   if (url === '/api/lead-lists') return Response.json({ folders })
+  if (url.startsWith('/api/influencers/candidates/')) return Response.json({ batch: { id: 'b', name: 'PM Influencers', status: 'done', spent_usd: 0, max_lookup_usd: null }, candidates: [], counts: {}, estimate: { people: 0, usd: 0, default_cap_usd: 0 } })
   if (url.startsWith(`/api/lead-lists/${L1}/items?`)) {
     return Response.json({ rows: [{ idx: 0, item: { name: 'Acme', email: 'jane@acme.co' }, cells: { title: 'Acme', 'author.name': 'Jane', email: 'jane@acme.co' }, source: 'actor_run' }, { idx: 1, item: { name: 'Beta', email: null }, cells: { title: 'Beta' }, source: 'actor_run' }], total: 2, page: 0, page_size: 50 })
   }
@@ -137,5 +138,17 @@ describe('LeadsScreen', () => {
     const first = (await screen.findAllByRole('button', { name: 'First page' }))[0] as HTMLButtonElement
     expect(first.disabled).toBe(true)
     expect((screen.getAllByRole('button', { name: 'Previous page' })[0] as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('an influencer candidate sheet sits in the Influencers folder and opens as the candidate review', async () => {
+    const SH = '55555555-5555-4555-8555-555555555555'
+    folders = [{ id: null, kind: 'influencers', name: 'Influencers', lists: [list(SH, 'PM Influencers', { item_count: 133, sheet_kind: 'influencer_candidates', influencer_batch_id: 'c3a7b8cc-b009-450f-9bf6-3d129e2a06fc' })] }]
+    nav.params = new URLSearchParams(`list=${SH}`)
+    fresh()
+    const tree = await screen.findByRole('navigation', { name: 'Lead lists' })
+    expect(within(tree).getByText(/133 candidates/)).toBeTruthy()
+    expect(within(tree).queryByRole('button', { name: 'New list in Influencers' })).toBeNull()
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/influencers/candidates/c3a7b8cc-b009-450f-9bf6-3d129e2a06fc')).toBe(true))
+    expect(screen.queryByRole('button', { name: 'Send to validator' })).toBeNull()
   })
 })

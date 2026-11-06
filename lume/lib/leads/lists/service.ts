@@ -22,6 +22,11 @@ export async function withList(ctx: ListCtx): Promise<{ ok: true; list: LeadList
   return { ok: true, list }
 }
 
+/** A lead operation on an influencer candidate sheet (reviewed with the influencer actions instead): the 409, or null. */
+export function leadsOnly(list: LeadList): NextResponse | null {
+  return list.sheet_kind === 'influencer_candidates' ? NextResponse.json({ error: 'influencer_sheet: review it with Look up / Approve / Reject' }, { status: 409 }) : null
+}
+
 /** A source failure as its HTTP answer, or null when it is not one. */
 export function sourceErrorResponse(err: unknown): NextResponse | null {
   if (err instanceof SourceRefused || err instanceof SourceError) return NextResponse.json({ error: err.code }, { status: err.status })
@@ -61,6 +66,8 @@ export async function autoAppendToProject(projectId: string, src: AppendSource, 
 
 export interface Folder {
   id: string | null
+  /** project: an Agent project; influencers: candidate sheets outside a project; unfiled: the rest. */
+  kind: 'project' | 'influencers' | 'unfiled'
   name: string
   lists: (LeadList & { sent_job_id: string | null })[]
 }
@@ -77,7 +84,10 @@ export async function folderTree(): Promise<Folder[]> {
   }
   const withJob = (l: LeadList) => ({ ...l, sent_job_id: l.sent_ingest_id ? (jobs.get(l.sent_ingest_id) ?? null) : null })
   const live = new Set(projects.map((p) => p.id))
-  const folders: Folder[] = projects.map((p) => ({ id: p.id, name: p.name, lists: lists.filter((l) => l.project_id === p.id).map(withJob) }))
-  folders.push({ id: null, name: 'Unfiled', lists: lists.filter((l) => !l.project_id || !live.has(l.project_id)).map(withJob) })
+  const folders: Folder[] = projects.map((p) => ({ id: p.id, kind: 'project' as const, name: p.name, lists: lists.filter((l) => l.project_id === p.id).map(withJob) }))
+  const loose = lists.filter((l) => !l.project_id || !live.has(l.project_id))
+  const influencers = loose.filter((l) => l.sheet_kind === 'influencer_candidates')
+  if (influencers.length) folders.push({ id: null, kind: 'influencers', name: 'Influencers', lists: influencers.map(withJob) })
+  folders.push({ id: null, kind: 'unfiled', name: 'Unfiled', lists: loose.filter((l) => l.sheet_kind !== 'influencer_candidates').map(withJob) })
   return folders
 }

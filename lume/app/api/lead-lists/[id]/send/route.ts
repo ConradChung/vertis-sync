@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireOwnerSession } from '@/lib/auth/guards'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { sendLeadListNow } from '@/lib/leads/lists/actions'
-import { withList, type ListCtx } from '@/lib/leads/lists/service'
+import { leadsOnly, withList, type ListCtx } from '@/lib/leads/lists/service'
 
 /**
  * `POST /api/lead-lists/<id>/send` — the Leads page's "Send to validator"
@@ -18,6 +18,8 @@ export async function POST(req: Request, ctx: ListCtx) {
     if (!auth.ok) return auth.response
     const r = await withList(ctx)
     if (!r.ok) return r.response
+    const refused = leadsOnly(r.list)
+    if (refused) return refused
     const out = await sendLeadListNow(r.list.id)
     if (!out.ok) return NextResponse.json({ error: out.error }, { status: 'status' in out ? out.status : 409 })
     return NextResponse.json(out.result, { status: 201 })

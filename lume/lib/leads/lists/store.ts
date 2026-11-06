@@ -37,6 +37,9 @@ export interface LeadList {
   columns: string[]
   /** Moves only when rows are added, removed or edited; the resend guard compares sent_at with it. */
   content_changed_at: string
+  /** 'influencer_candidates': the sheet shows an influencer candidate batch (influencer_batch_id) instead of lead rows. */
+  sheet_kind: 'leads' | 'influencer_candidates'
+  influencer_batch_id: string | null
   created_at: string
   updated_at: string
 }
@@ -65,19 +68,29 @@ export interface AppendResult {
 }
 
 const db = () => createServiceClient()
-const COLS = 'id,title,notes,created_by,project_id,project_default,item_count,email_count,sent_ingest_id,sent_at,sent_rows,columns,content_changed_at,created_at,updated_at'
+const COLS = 'id,title,notes,created_by,project_id,project_default,item_count,email_count,sent_ingest_id,sent_at,sent_rows,columns,content_changed_at,sheet_kind,influencer_batch_id,created_at,updated_at'
 const CHUNK = 500
 
 type SetRow = Omit<LeadList, 'name'> & { title: string }
 const toList = (r: SetRow): LeadList => {
   const { title, ...rest } = r
-  return { ...rest, name: title, project_default: !!rest.project_default, item_count: rest.item_count ?? 0, email_count: rest.email_count ?? 0, columns: Array.isArray(rest.columns) ? rest.columns : [] }
+  return { ...rest, name: title, project_default: !!rest.project_default, item_count: rest.item_count ?? 0, email_count: rest.email_count ?? 0, columns: Array.isArray(rest.columns) ? rest.columns : [], sheet_kind: rest.sheet_kind === 'influencer_candidates' ? 'influencer_candidates' : 'leads', influencer_batch_id: rest.influencer_batch_id ?? null }
 }
 const lists = () => db().from('lead_review_sets')
 const items = () => db().from('lead_review_items')
 const now = () => new Date().toISOString()
 
-export async function createList(input: { name: string; notes?: string | null; created_by: 'agent' | 'owner'; project_id?: string | null; project_default?: boolean }): Promise<LeadList> {
+export async function createList(input: {
+  name: string
+  notes?: string | null
+  created_by: 'agent' | 'owner'
+  project_id?: string | null
+  project_default?: boolean
+  sheet_kind?: LeadList['sheet_kind']
+  influencer_batch_id?: string | null
+  item_count?: number
+  conversation_id?: string | null
+}): Promise<LeadList> {
   const { data, error } = await lists()
     .insert({
       kind: 'list',
@@ -88,7 +101,10 @@ export async function createList(input: { name: string; notes?: string | null; c
       source_id: 'list',
       project_id: input.project_id ?? null,
       project_default: !!input.project_default,
-      item_count: 0,
+      sheet_kind: input.sheet_kind ?? 'leads',
+      influencer_batch_id: input.influencer_batch_id ?? null,
+      source_conversation_id: input.conversation_id ?? null,
+      item_count: input.item_count ?? 0,
       email_count: 0,
       columns: [],
       filters: [],

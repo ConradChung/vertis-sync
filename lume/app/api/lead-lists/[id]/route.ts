@@ -5,7 +5,7 @@ import { dbErrorResponse } from '@/lib/http/errors'
 import { parseJsonBody } from '@/lib/http/json'
 import { getProject } from '@/lib/agent/projects'
 import { deleteList, moveList, updateList } from '@/lib/leads/lists/store'
-import { leadsHref, withList, type ListCtx } from '@/lib/leads/lists/service'
+import { leadsHref, leadsOnly, withList, type ListCtx } from '@/lib/leads/lists/service'
 
 /**
  *  GET    → `{ list, href }`.
@@ -55,6 +55,8 @@ export async function DELETE(req: Request, ctx: ListCtx) {
     if (!auth.ok) return auth.response
     const r = await withList(ctx)
     if (!r.ok) return r.response
+    const refused = leadsOnly(r.list)
+    if (refused) return refused
     await deleteList(r.list.id)
     return NextResponse.json({ deleted: true })
   } catch (err) {

@@ -4,6 +4,7 @@ import { requireOwner } from '@/lib/auth/guards'
 import { fileInConversation, getChatFile, loadParsed } from '@/lib/agent/chatFiles'
 import { CANDIDATE_FIELDS, candidateColumnMapping, estimateLookup, planCandidates, UnknownCandidateColumnError } from '@/lib/influencers/candidates'
 import { createCandidateBatch, existingInfluencerNames, listCandidateBatches } from '@/lib/influencers/candidateStore'
+import { createInfluencerSheet, sheetsForBatches } from '@/lib/leads/lists/influencerSheets'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { parseJsonBody } from '@/lib/http/json'
 import { pickSheet } from '@/lib/sheets/model'
@@ -38,7 +39,9 @@ export async function GET(req: Request) {
   const auth = await requireOwner(req)
   if (!auth.ok) return auth.response
   try {
-    return NextResponse.json({ batches: await listCandidateBatches() })
+    const batches = await listCandidateBatches()
+    const sheets = await sheetsForBatches(batches.map((b) => b.id))
+    return NextResponse.json({ batches: batches.map((b) => ({ ...b, list_id: sheets.get(b.id) ?? null })) })
   } catch (err) {
     return dbErrorResponse(err, 'api/influencers/candidates')
   }
@@ -72,9 +75,13 @@ export async function POST(req: Request) {
       { name: (body.data.name ?? `${file.name} · ${sheet.name}`).slice(0, 200), source_file_id: fileId, source_sheet: sheet.name, conversation_id: conversationId },
       plan.rows
     )
+    // The batch is a sheet in Leads (its chat's project folder, else Influencers).
+    const sheetList = await createInfluencerSheet(batch, plan.rows.length, conversationId)
     return NextResponse.json(
       {
         batch,
+        list_id: sheetList.id,
+        href: `/import/leads?list=${sheetList.id}`,
         staged: plan.rows.length,
         to_look_up: plan.to_look_up,
         duplicates: plan.rows.length - plan.to_look_up,

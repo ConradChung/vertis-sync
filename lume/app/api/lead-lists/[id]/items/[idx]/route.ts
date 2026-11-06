@@ -4,6 +4,7 @@ import { requireOwnerSession } from '@/lib/auth/guards'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { parseJsonBody, uuidParam } from '@/lib/http/json'
 import { getList, updateCell } from '@/lib/leads/lists/store'
+import { leadsOnly } from '@/lib/leads/lists/service'
 
 /** `PATCH /api/lead-lists/<id>/items/<idx>` `{ column, value }` — the owner's inline cell edit (session only). */
 type Ctx = { params: Promise<{ id: string; idx: string }> }
@@ -19,7 +20,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (!id || !Number.isInteger(idx)) return NextResponse.json({ error: 'invalid_id' }, { status: 400 })
     const body = await parseJsonBody(req, Patch, 8 * 1024)
     if (!body.ok) return body.response
-    if (!(await getList(id))) return NextResponse.json({ error: 'not_found' }, { status: 404 })
+    const list = await getList(id)
+    if (!list) return NextResponse.json({ error: 'not_found' }, { status: 404 })
+    const refused = leadsOnly(list)
+    if (refused) return refused
     const row = await updateCell(id, idx, body.data.column, body.data.value)
     if (!row) return NextResponse.json({ error: 'row_not_found' }, { status: 404 })
     return NextResponse.json({ row })

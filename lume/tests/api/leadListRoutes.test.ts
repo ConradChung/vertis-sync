@@ -141,3 +141,18 @@ describe('lead list routes', () => {
     expect(gone.appended).toBeNull()
   })
 })
+
+describe('influencer sheets in the lead list routes', () => {
+  it('append, remove, cell edit, send and delete refuse a candidate sheet (it is reviewed with the influencer actions)', async () => {
+    const { id } = await newList()
+    Object.assign(db.table('lead_review_sets').find((r) => r.id === id)!, { sheet_kind: 'influencer_candidates', influencer_batch_id: 'b-1' })
+    const statuses = [
+      (await items.POST(req('POST', { source: { kind: 'inline', rows: [{ email: 'a@a.co' }] } }), ctx(id))).status,
+      (await items.DELETE(req('DELETE', { idxs: [0] }), ctx(id))).status,
+      (await cell.PATCH(req('PATCH', { column: 'Email', value: 'x' }), ctx(id, 0))).status,
+      (await send.POST(req('POST'), ctx(id))).status,
+      (await one.DELETE(req('DELETE'), ctx(id))).status,
+    ]
+    expect(statuses).toEqual([409, 409, 409, 409, 409])
+  })
+})

@@ -62,4 +62,15 @@ describe('influencer candidate tools', () => {
     expect(autoApprove).not.toHaveBeenCalled()
     expect(fetch).not.toHaveBeenCalled()
   })
+
+  it('import and list carry the sheet so the chat shows Open in Leads', async () => {
+    const SHEET = '5a2b3c4d-1111-4222-8333-444455556666'
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ batch: { id: BATCH, name: 'PM' }, list_id: SHEET }), { status: 200 }))
+    const tools = buildTools({ fetch: fetch as never, createAction: vi.fn(), prepare: vi.fn() as never, agentRunId: 'r', baseUrl: 'https://lume.test', secret: 's', conversationId: CONV })
+    const t = (n: string) => tools.find((x) => x.name === n)!
+    const imp = (await t('import_influencer_candidates').run(t('import_influencer_candidates').inputSchema.parse({ file_id: FILE }))) as Record<string, unknown>
+    expect(imp.lead_list).toEqual({ list_id: SHEET, name: 'PM' })
+    const one = (await t('list_influencer_candidates').run(t('list_influencer_candidates').inputSchema.parse({ batch_id: BATCH }))) as Record<string, unknown>
+    expect(one.lead_list).toEqual({ list_id: SHEET, name: 'PM' })
+  })
 })

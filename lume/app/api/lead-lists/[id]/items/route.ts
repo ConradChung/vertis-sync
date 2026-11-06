@@ -5,7 +5,7 @@ import { dbErrorResponse } from '@/lib/http/errors'
 import { parseJsonBody, uuidParam } from '@/lib/http/json'
 import { deleteItems, isSortable, MISSING, pageItems, removeWhere } from '@/lib/leads/lists/store'
 import { AppendSource } from '@/lib/leads/lists/sources'
-import { appendFromSource, sourceErrorResponse, withList, type ListCtx } from '@/lib/leads/lists/service'
+import { appendFromSource, leadsOnly, sourceErrorResponse, withList, type ListCtx } from '@/lib/leads/lists/service'
 
 /**
  *  GET    ?page&page_size&q&sort&dir → `{ rows, total, page, page_size }`.
@@ -48,6 +48,8 @@ export async function POST(req: Request, ctx: ListCtx) {
     if (!body.ok) return body.response
     const r = await withList(ctx)
     if (!r.ok) return r.response
+    const refused = leadsOnly(r.list)
+    if (refused) return refused
     const conversationId = body.data.conversation_id ? uuidParam(body.data.conversation_id) : null
     const projectId = body.data.project_id ? uuidParam(body.data.project_id) : null
     const report = await appendFromSource(r.list, body.data.source, { conversationId, projectId, by: auth.via === 'internal' ? 'agent' : 'owner' })
@@ -65,6 +67,8 @@ export async function DELETE(req: Request, ctx: ListCtx) {
     if (!body.ok) return body.response
     const r = await withList(ctx)
     if (!r.ok) return r.response
+    const refused = leadsOnly(r.list)
+    if (refused) return refused
     let removed = 0
     if (body.data.idxs?.length) removed += await deleteItems(r.list.id, body.data.idxs)
     if (body.data.missing?.length || body.data.q?.trim()) removed += await removeWhere(r.list.id, { missing: body.data.missing, q: body.data.q })

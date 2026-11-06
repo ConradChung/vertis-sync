@@ -5,7 +5,7 @@ import { SWRConfig } from 'swr'
 
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), info: vi.fn(), error: vi.fn() }) }))
 
-import { InfluencerCandidates } from '@/components/influencers/InfluencerCandidates'
+import { InfluencerSheet } from '@/components/leads/InfluencerSheet'
 
 const B1 = '11111111-1111-4111-8111-111111111111'
 const cand = (o: Record<string, unknown>) => ({
@@ -20,10 +20,15 @@ const CANDS = [
 ]
 
 let fetchMock: ReturnType<typeof vi.fn>
+let pending = 0
+let batchStatus = 'done'
 beforeEach(() => {
+  pending = 0
+  batchStatus = 'done'
   fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (url === '/api/influencers/candidates') return Response.json({ batches: [{ id: B1, name: 'influencers.xlsx · People', status: 'done', spent_usd: 0.9, max_lookup_usd: 1.19, counts: { found: 3, not_found: 1 }, created_at: new Date().toISOString() }] })
-    if (url === `/api/influencers/candidates/${B1}`) return Response.json({ batch: { id: B1, name: 'influencers.xlsx · People', status: 'done', spent_usd: 0.9, max_lookup_usd: 1.19 }, candidates: CANDS, counts: { found: 3, not_found: 1 }, estimate: { people: 0, usd: 0, default_cap_usd: 0.1 } })
+    if (url === `/api/influencers/candidates/${B1}`) return Response.json({ batch: { id: B1, name: 'influencers.xlsx · People', status: batchStatus, spent_usd: 0.9, max_lookup_usd: 1.19 }, candidates: CANDS, counts: { found: 3, not_found: 1, pending_lookup: pending }, estimate: { people: pending, usd: pending * 0.0065, default_cap_usd: 0.1 } })
+    if (url === '/api/actions') return Response.json({ id: 'a1' }, { status: 201 })
     if (url === '/api/influencers/candidates/review') return Response.json(JSON.parse(String(init?.body)).action === 'approve' ? { approved: [], skipped: [] } : { rejected: 1 })
     return Response.json({})
   })
@@ -34,10 +39,37 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const renderIt = () => render(<SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}><InfluencerCandidates /></SWRConfig>)
+const renderIt = () => render(<SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}><InfluencerSheet batchId={B1} name="influencers.xlsx · People" /></SWRConfig>)
 const reviewBodies = () => fetchMock.mock.calls.filter((c) => c[0] === '/api/influencers/candidates/review').map((c) => JSON.parse(String((c[1] as RequestInit).body)))
 
-describe('InfluencerCandidates', () => {
+describe('InfluencerSheet', () => {
+  it('a sheet with the candidate columns', async () => {
+    renderIt()
+    const table = await screen.findByRole('table', { name: 'influencers.xlsx · People candidates' })
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent).slice(1)).toEqual([
+      'Name', 'Title', 'Company', 'Category', 'Notes', 'LinkedIn', 'Confidence', 'Evidence', 'Status', 'Possible duplicate', '',
+    ])
+  })
+
+  it('Approve / Reject selected', async () => {
+    renderIt()
+    await screen.findByText('Mo Lee')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Mo Lee' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Zed Nobody' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reject selected (2)' }))
+    await waitFor(() => expect(reviewBodies()).toEqual([{ action: 'reject', ids: ['c2', 'c3'] }]))
+  })
+
+  it('"Look up LinkedIn (≈$X)" files the influencer_lookup approval (nothing runs until it is confirmed)', async () => {
+    pending = 40
+    batchStatus = 'staged'
+    renderIt()
+    fireEvent.click(await screen.findByRole('button', { name: 'Look up LinkedIn (≈$0.26)' }))
+    await waitFor(() => expect(fetchMock.mock.calls.find((c) => c[0] === '/api/actions')?.[1]).toBeTruthy())
+    const body = JSON.parse(String((fetchMock.mock.calls.find((c) => c[0] === '/api/actions')![1] as RequestInit).body))
+    expect(body).toEqual({ kind: 'influencer_lookup', payload: { batch_id: B1 } })
+  })
+
   it('shows each candidate with the found URL as a link, confidence and the evidence', async () => {
     renderIt()
     const row = (await screen.findByText('Sarah Johnson')).closest('tr')!
@@ -45,7 +77,8 @@ describe('InfluencerCandidates', () => {
     expect(link.href).toBe('https://www.linkedin.com/in/sarah-johnson')
     expect(link.rel).toContain('noopener')
     expect(within(row).getByText('high')).toBeTruthy()
-    expect(within(row).getByText(/Director · Greystar/)).toBeTruthy()
+    expect(within(row).getByText('Director')).toBeTruthy()
+    expect(within(row).getByText('Greystar')).toBeTruthy()
     expect(within(row).getByText('Sarah Johnson - Director - Greystar')).toBeTruthy()
     const mo = screen.getByText('Mo Lee').closest('tr')!
     expect((within(mo).getByRole('link', { name: 'source: acme.com' }) as HTMLAnchorElement).href).toBe('https://acme.com/team')

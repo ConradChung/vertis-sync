@@ -17,6 +17,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { LIST_COLUMNS, type EditableField, type ListItem } from '@/lib/leads/lists/model'
+import { InfluencerSheet } from '@/components/leads/InfluencerSheet'
 import { cn } from '@/lib/utils'
 
 /**
@@ -42,10 +43,14 @@ interface LeadListRow {
   sent_job_id: string | null
   /** The sources' own columns (an actor's output fields, a sheet's headers); empty on lists without any. */
   columns: string[]
+  /** 'influencer_candidates': an influencer candidate batch, reviewed in InfluencerSheet. */
+  sheet_kind?: 'leads' | 'influencer_candidates'
+  influencer_batch_id?: string | null
   updated_at: string
 }
 interface Folder {
   id: string | null
+  kind?: 'project' | 'influencers' | 'unfiled'
   name: string
   lists: LeadListRow[]
 }
@@ -109,7 +114,7 @@ export function LeadsScreen() {
                 folder={f}
                 selectedId={selectedId}
                 onSelect={select}
-                onNewList={() => setDialog({ kind: 'new_list', folderId: f.id })}
+                onNewList={f.kind === 'influencers' ? undefined : () => setDialog({ kind: 'new_list', folderId: f.id })}
                 onRename={f.id ? () => setDialog({ kind: 'rename_folder', folder: f }) : undefined}
                 onDelete={f.id ? () => setDialog({ kind: 'delete_folder', folder: f }) : undefined}
               />
@@ -118,7 +123,9 @@ export function LeadsScreen() {
         </nav>
       </GlassCard>
 
-      {selected ? (
+      {selected?.sheet_kind === 'influencer_candidates' && selected.influencer_batch_id ? (
+        <InfluencerSheet key={selected.id} batchId={selected.influencer_batch_id} name={selected.name} />
+      ) : selected ? (
         <ListPanel
           key={selected.id}
           list={selected}
@@ -186,7 +193,7 @@ function FolderNode({
   folder: Folder
   selectedId: string | null
   onSelect: (id: string) => void
-  onNewList: () => void
+  onNewList?: () => void
   onRename?: () => void
   onDelete?: () => void
 }) {
@@ -201,7 +208,7 @@ function FolderNode({
         <span className="min-w-0 flex-1 truncate">{folder.name}</span>
         <span className="font-mono text-[11px] text-fg-24">{folder.lists.length}</span>
         <span className="hidden gap-0.5 group-hover:flex">
-          <IconAction label={`New list in ${folder.name}`} onClick={onNewList} icon={Plus} />
+          {onNewList && <IconAction label={`New list in ${folder.name}`} onClick={onNewList} icon={Plus} />}
           {onRename && <IconAction label={`Rename ${folder.name}`} onClick={onRename} icon={Pencil} />}
           {onDelete && <IconAction label={`Delete ${folder.name}`} onClick={onDelete} icon={Trash2} />}
         </span>
@@ -218,7 +225,7 @@ function FolderNode({
             >
               <span className="block truncate text-[13px] text-fg">{l.name}</span>
               <span className="block text-[11px] text-fg-46">
-                {fmt.format(l.item_count)} rows · {pct(l)}% email · {relTime(l.updated_at)}
+                {l.sheet_kind === 'influencer_candidates' ? `${fmt.format(l.item_count)} candidates` : `${fmt.format(l.item_count)} rows · ${pct(l)}% email`} · {relTime(l.updated_at)}
                 {l.sent_at && ' · sent'}
               </span>
             </button>

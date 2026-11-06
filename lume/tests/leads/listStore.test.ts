@@ -206,3 +206,12 @@ describe('lead list store: scale', () => {
     db.client.from = realFrom
   })
 })
+
+describe('influencer sheets', () => {
+  it('a sheet linked to a candidate batch carries its kind and batch; lists default to plain leads', async () => {
+    const plain = await createList({ name: 'L', created_by: 'owner' })
+    expect([plain.sheet_kind, plain.influencer_batch_id]).toEqual(['leads', null])
+    const sheet = await createList({ name: 'PM influencers', created_by: 'agent', sheet_kind: 'influencer_candidates', influencer_batch_id: 'b-1', item_count: 133 })
+    expect(sheet).toMatchObject({ sheet_kind: 'influencer_candidates', influencer_batch_id: 'b-1', item_count: 133 })
+  })
+})

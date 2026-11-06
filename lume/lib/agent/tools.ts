@@ -1610,7 +1610,7 @@ const SPECS: Built[] = [
       description:
         'Stage a list of people the owner attached (an .xlsx / .csv in this chat, by file_id; optional sheet) as influencer candidates for the LinkedIn lookup. ' +
         'Columns are mapped automatically (Name, Title / Role, Company / Organization, Category, Focus / Notes, Source Context); pass `columns` (field -> exact header) to fix one. ' +
-        'People who already are influencers, and repeats in the list, are marked duplicate. Nothing is spent: it returns the batch id, the mapping and the lookup estimate. Show the owner the mapping and the estimate.',
+        'People who already are influencers, and repeats in the list, are marked duplicate. Nothing is spent: it returns the batch id, the mapping and the lookup estimate. The batch is a sheet in Leads (the chat shows Open in Leads), where the owner looks up, approves or rejects. Show the owner the mapping and the estimate.',
       inputSchema: z
         .object({
           file_id: uuid,
@@ -1622,11 +1622,14 @@ const SPECS: Built[] = [
           name: z.string().trim().min(1).max(200).optional().describe('a name for this batch'),
         })
         .strict(),
-      run: async ({ file_id, sheet, columns, name }, { call, deps }) =>
-        call('/api/influencers/candidates', {
+      run: async ({ file_id, sheet, columns, name }, { call, deps }) => {
+        const r = (await call('/api/influencers/candidates', {
           method: 'POST',
           body: { file_id: file_id.toLowerCase(), ...(sheet ? { sheet } : {}), ...(columns ? { columns } : {}), ...(name ? { name } : {}), conversation_id: deps.conversationId ?? null },
-        }) as Promise<ToolResult>,
+        })) as Record<string, unknown> & { batch?: { name?: string } }
+        // The batch is a sheet in Leads: the chat shows Open in Leads.
+        return { ...r, ...(r.list_id ? { lead_list: { list_id: r.list_id, name: r.batch?.name } } : {}) } as ToolResult
+      },
     },
     'low'
   ),
@@ -1639,8 +1642,10 @@ const SPECS: Built[] = [
       inputSchema: z
         .object({ batch_id: uuid.optional(), status: z.enum(['pending_lookup', 'found', 'not_found', 'approved', 'rejected', 'duplicate']).optional() })
         .strict(),
-      run: async ({ batch_id, status }, { call }) =>
-        (await call(batch_id ? `/api/influencers/candidates/${batch_id.toLowerCase()}${status ? `?status=${status}` : ''}` : '/api/influencers/candidates')) as ToolResult,
+      run: async ({ batch_id, status }, { call }) => {
+        const r = (await call(batch_id ? `/api/influencers/candidates/${batch_id.toLowerCase()}${status ? `?status=${status}` : ''}` : '/api/influencers/candidates')) as Record<string, unknown> & { batch?: { name?: string } }
+        return { ...r, ...(r.list_id ? { lead_list: { list_id: r.list_id, name: r.batch?.name } } : {}) } as ToolResult
+      },
     },
     'read'
   ),
