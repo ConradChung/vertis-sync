@@ -13,7 +13,8 @@ import { pickSheet } from '@/lib/sheets/model'
  *  GET  → `{ batches }` newest first, each with its per-status counts.
  *  POST `{ file_id, sheet?, columns?, name?, conversation_id? }` → stage one
  *       sheet of an attached spreadsheet as candidates (status pending_lookup;
- *       known influencers and repeats in the list are 'duplicate'). Nothing is
+ *       a name already among influencers is only noted, possible_duplicate_of;
+ *       repeats in the list, same name and company, are 'duplicate'). Nothing is
  *       spent: the lookup is a separate, owner-approved `influencer_lookup`
  *       action. With `conversation_id` the file must belong to that chat.
  *       → 201 `{ batch, staged, to_look_up, duplicates, skipped_no_name,
@@ -77,6 +78,7 @@ export async function POST(req: Request) {
         staged: plan.rows.length,
         to_look_up: plan.to_look_up,
         duplicates: plan.rows.length - plan.to_look_up,
+        possible_duplicates: plan.possible_duplicates,
         skipped_no_name: plan.skipped_no_name,
         column_mapping: mapped.mapping,
         unmapped_columns: mapped.unmapped,

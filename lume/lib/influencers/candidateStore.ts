@@ -35,12 +35,13 @@ export interface CandidateRow extends ReviewCandidate {
   influencer_id: string | null
   lookup_attempts: number
   lookup_error: string | null
+  possible_duplicate_of: string | null
   updated_at: string
 }
 
 const BATCH_COLS = 'id,name,source_file_id,source_sheet,conversation_id,status,max_lookup_usd,spent_usd,error,created_at,updated_at'
 const CAND_COLS =
-  'id,batch_id,row_index,name,title,company,category,notes,source_context,linkedin_url,confidence,evidence,status,influencer_id,lookup_attempts,lookup_error,updated_at'
+  'id,batch_id,row_index,name,title,company,category,notes,source_context,linkedin_url,confidence,evidence,status,influencer_id,lookup_attempts,lookup_error,possible_duplicate_of,updated_at'
 const db = () => createServiceClient()
 
 export async function createCandidateBatch(

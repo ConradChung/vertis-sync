@@ -16,7 +16,7 @@ const CANDS = [
   cand({ id: 'c1', name: 'Sarah Johnson', title: 'Director', company: 'Greystar', linkedin_url: 'https://www.linkedin.com/in/sarah-johnson', confidence: 'high', evidence: { url: 'https://www.linkedin.com/in/sarah-johnson', snippet: 'Sarah Johnson - Director - Greystar' }, status: 'found' }),
   cand({ id: 'c2', name: 'Mo Lee', company: 'Acme', linkedin_url: 'https://www.linkedin.com/in/mo-lee', confidence: 'medium', evidence: { url: 'https://acme.com/team', snippet: 'Mo Lee runs ops at Acme' }, status: 'found' }),
   cand({ id: 'c3', name: 'Zed Nobody', confidence: 'not_found', status: 'not_found' }),
-  cand({ id: 'c4', name: 'Pat High', linkedin_url: 'https://www.linkedin.com/in/pat', confidence: 'high', status: 'found' }),
+  cand({ id: 'c4', name: 'Pat High', linkedin_url: 'https://www.linkedin.com/in/pat', confidence: 'high', status: 'found', possible_duplicate_of: 'inf-9' }),
 ]
 
 let fetchMock: ReturnType<typeof vi.fn>
@@ -49,6 +49,7 @@ describe('InfluencerCandidates', () => {
     expect(within(row).getByText('Sarah Johnson - Director - Greystar')).toBeTruthy()
     const mo = screen.getByText('Mo Lee').closest('tr')!
     expect((within(mo).getByRole('link', { name: 'source: acme.com' }) as HTMLAnchorElement).href).toBe('https://acme.com/team')
+    expect(within(screen.getByText('Pat High').closest('tr')!).getByText(/Same name as an existing influencer/)).toBeTruthy()
     // A not_found row has nothing to approve.
     const zed = screen.getByText('Zed Nobody').closest('tr')!
     expect(within(zed).queryByRole('button', { name: /Approve/ })).toBeNull()

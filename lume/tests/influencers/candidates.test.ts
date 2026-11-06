@@ -40,16 +40,18 @@ describe('planCandidates', () => {
     ['', 'x', 'y', '', '', ''],
     ['Peter Lohmann', 'Founder', 'RL PM', '', '', ''],
     ['sarah johnson', 'Director', 'Greystar', '', '', ''],
+    ['Sarah Johnson', 'Founder', 'Other Co', '', '', ''],
   ]
-  it('stages one row per named person; existing influencers and repeats in the list are duplicates', () => {
+  it('a name already among influencers is only noted (possible_duplicate_of) and still looked up; a repeat in the list needs the same name AND company', () => {
     const plan = planCandidates(header, rows, candidateColumnMapping(header).mapping, [{ id: 'inf-1', name: 'Peter Lohmann' }])
     expect(plan.skipped_no_name).toBe(1)
     expect(plan.rows).toEqual([
-      { row_index: 0, name: 'Sarah Johnson', title: 'Director', company: 'Greystar', category: 'Operator', notes: 'Ops', source_context: 'Podcast', status: 'pending_lookup', influencer_id: null },
-      { row_index: 2, name: 'Peter Lohmann', title: 'Founder', company: 'RL PM', category: null, notes: null, source_context: null, status: 'duplicate', influencer_id: 'inf-1' },
-      { row_index: 3, name: 'sarah johnson', title: 'Director', company: 'Greystar', category: null, notes: null, source_context: null, status: 'duplicate', influencer_id: null },
+      { row_index: 0, name: 'Sarah Johnson', title: 'Director', company: 'Greystar', category: 'Operator', notes: 'Ops', source_context: 'Podcast', status: 'pending_lookup', influencer_id: null, possible_duplicate_of: null },
+      { row_index: 2, name: 'Peter Lohmann', title: 'Founder', company: 'RL PM', category: null, notes: null, source_context: null, status: 'pending_lookup', influencer_id: null, possible_duplicate_of: 'inf-1' },
+      { row_index: 3, name: 'sarah johnson', title: 'Director', company: 'Greystar', category: null, notes: null, source_context: null, status: 'duplicate', influencer_id: null, possible_duplicate_of: null },
+      { row_index: 4, name: 'Sarah Johnson', title: 'Founder', company: 'Other Co', category: null, notes: null, source_context: null, status: 'pending_lookup', influencer_id: null, possible_duplicate_of: null },
     ])
-    expect(plan.to_look_up).toBe(1)
+    expect(plan.to_look_up).toBe(3)
   })
 })
 

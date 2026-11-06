@@ -42,6 +42,7 @@ interface Candidate {
   evidence: { url?: string; snippet?: string } | null
   status: string
   lookup_error: string | null
+  possible_duplicate_of?: string | null
 }
 
 interface BatchDetail {
@@ -175,6 +176,7 @@ export function InfluencerCandidates() {
                     <td className="py-2 pr-3">
                       <div className="text-fg">{c.name}</div>
                       <div className="text-fg-46">{[c.title, c.company].filter(Boolean).join(' · ')}</div>
+                      {c.possible_duplicate_of && <div className="text-amber">Same name as an existing influencer — check it is not the same profile.</div>}
                     </td>
                     <td className="py-2 pr-3">
                       {c.linkedin_url ? (

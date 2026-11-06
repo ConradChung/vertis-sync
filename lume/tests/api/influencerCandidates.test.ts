@@ -42,15 +42,19 @@ beforeEach(() => {
 })
 
 describe('POST /api/influencers/candidates (import)', () => {
-  it('stages the sheet (nothing spent), marks known influencers duplicate, returns the mapping and the lookup estimate', async () => {
+  it('stages the sheet (nothing spent), notes names of known influencers, returns the mapping and the lookup estimate', async () => {
     const res = await importPOST(post('/api/influencers/candidates', { file_id: FILE, conversation_id: CONV }))
     expect(res.status).toBe(201)
     const body = await res.json()
-    expect(body).toMatchObject({ staged: 2, to_look_up: 1, duplicates: 1, skipped_no_name: 1, sheet: 'People', estimate: { people: 1, usd: 0.01, default_cap_usd: 0.1 } })
+    expect(body).toMatchObject({ staged: 2, to_look_up: 2, duplicates: 0, possible_duplicates: 1, skipped_no_name: 1, sheet: 'People', estimate: { people: 2, usd: 0.01, default_cap_usd: 0.1 } })
     expect(body.column_mapping).toMatchObject({ name: 'Name', company: 'Company / Organization' })
     const [meta, rows] = h.createCandidateBatch.mock.calls[0]
     expect(meta).toEqual({ name: 'influencers.xlsx · People', source_file_id: FILE, source_sheet: 'People', conversation_id: CONV })
-    expect(rows.map((r: { name: string; status: string }) => [r.name, r.status])).toEqual([['Sarah Johnson', 'pending_lookup'], ['Peter Lohmann', 'duplicate']])
+    // A known name is only a note: Peter is still looked up (a hard duplicate needs the same LinkedIn URL).
+    expect(rows.map((r: { name: string; status: string; possible_duplicate_of: string | null }) => [r.name, r.status, r.possible_duplicate_of])).toEqual([
+      ['Sarah Johnson', 'pending_lookup', null],
+      ['Peter Lohmann', 'pending_lookup', 'inf-1'],
+    ])
     expect(h.fileInConversation).toHaveBeenCalledWith(FILE, CONV)
   })
   it('404 for a file not attached in that chat; 400 when no name column can be found', async () => {

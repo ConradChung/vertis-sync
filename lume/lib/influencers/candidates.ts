@@ -80,23 +80,28 @@ export interface PlannedCandidate {
   notes: string | null
   source_context: string | null
   status: 'pending_lookup' | 'duplicate'
-  /** The existing influencer a duplicate already is (null for a repeat within the list). */
+  /** Always null at import: a hard duplicate needs the same linkedin_url (set by the lookup / approval). */
   influencer_id: string | null
+  /** An existing influencer with the same name: a note for the review, never a block (a different person may share it). */
+  possible_duplicate_of: string | null
 }
 
 const LIMITS: Record<CandidateField, number> = { name: 200, title: 500, company: 500, category: 500, notes: 2000, source_context: 2000 }
 
 /**
  * One staged row per named person (rows without a name are skipped and
- * counted). An existing influencer with the same normalised name, or an
- * earlier row of this list, makes the row a 'duplicate' (never looked up).
+ * counted). An existing influencer with the same normalised name is only
+ * noted (possible_duplicate_of): the row is still looked up, since a name
+ * alone can be a different person; the lookup marks a hard duplicate when the
+ * LinkedIn URL matches. An earlier row of this list with the same name AND
+ * company is a 'duplicate' (not looked up twice).
  */
 export function planCandidates(
   header: readonly string[],
   rows: readonly (readonly string[])[],
   mapping: CandidateMapping,
   existing: readonly { id: string; name: string }[]
-): { rows: PlannedCandidate[]; skipped_no_name: number; to_look_up: number } {
+): { rows: PlannedCandidate[]; skipped_no_name: number; to_look_up: number; possible_duplicates: number } {
   const col = (f: CandidateField) => (mapping[f] ? header.indexOf(mapping[f]!) : -1)
   const idx = Object.fromEntries(CANDIDATE_FIELDS.map((f) => [f, col(f)])) as Record<CandidateField, number>
   const known = new Map(existing.map((e) => [normalizePersonName(e.name), e.id]))
@@ -115,8 +120,9 @@ export function planCandidates(
       return
     }
     const existingId = known.get(key) ?? null
-    const repeat = seen.has(key)
-    seen.add(key)
+    const repeatKey = `${key}|${normalizePersonName(get('company') ?? '')}`
+    const repeat = seen.has(repeatKey)
+    seen.add(repeatKey)
     out.push({
       row_index: i,
       name,
@@ -125,11 +131,17 @@ export function planCandidates(
       category: get('category'),
       notes: get('notes'),
       source_context: get('source_context'),
-      status: existingId || repeat ? 'duplicate' : 'pending_lookup',
-      influencer_id: existingId,
+      status: repeat ? 'duplicate' : 'pending_lookup',
+      influencer_id: null,
+      possible_duplicate_of: repeat ? null : existingId,
     })
   })
-  return { rows: out, skipped_no_name: skipped, to_look_up: out.filter((r) => r.status === 'pending_lookup').length }
+  return {
+    rows: out,
+    skipped_no_name: skipped,
+    to_look_up: out.filter((r) => r.status === 'pending_lookup').length,
+    possible_duplicates: out.filter((r) => r.possible_duplicate_of).length,
+  }
 }
 
 /** One Perplexity Sonar call (~$0.006) + a small Haiku parse per person (mirrors supabase/functions/_shared/influencer/lookup.ts). */
