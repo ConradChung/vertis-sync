@@ -184,6 +184,7 @@ export type PendingActionKind =
   | 'influencer_reactions'
   | 'stage_attachment'
   | 'influencer_lookup'
+  | 'influencer_approve'
 
 export type PendingActionStatus =
   | 'awaiting'

@@ -39,6 +39,7 @@ import { checkRunActor, tightenOptions } from '@/lib/apify/service'
 import { executeInfluencerReactions, executeInfluencerRun } from '@/lib/influencers/actions'
 import { executeStageAttachment } from '@/lib/agent/attachmentAction'
 import { executeInfluencerLookup } from '@/lib/influencers/lookupAction'
+import { executeInfluencerApprove } from '@/lib/influencers/approveAction'
 import type { RunOptions } from '@/lib/apify/pricing'
 import type { Json, PendingActionRow } from '@/lib/db/types'
 import { nextRun } from '@/lib/rules/nextRun'
@@ -451,6 +452,13 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
   /** Continue a run past its reactions bill, only if the run still waits with the bill that was approved. */
   async influencer_reactions(p, action) {
     const out = await executeInfluencerReactions(p, action.id)
+    if (!out.ok) throw new ActionFailure(out.error, out.result)
+    return out.result
+  },
+
+  /** Found influencer candidates → inactive influencers (only rows still 'found' change). */
+  async influencer_approve(p) {
+    const out = await executeInfluencerApprove(p)
     if (!out.ok) throw new ActionFailure(out.error, out.result)
     return out.result
   },

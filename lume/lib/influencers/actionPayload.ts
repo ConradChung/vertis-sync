@@ -38,3 +38,12 @@ export function lookupPayloadError(p: Record<string, Json>): string | null {
   if (typeof p.max_usd !== 'number' || !(p.max_usd > 0) || p.max_usd > 50) return 'payload.max_usd must be in (0, 50]'
   return null
 }
+
+/** influencer_approve: the agent's approval of found candidates (no unique key: approving twice is a no-op). */
+export function approvePayloadError(p: Record<string, Json>): string | null {
+  const ids = p.candidate_ids
+  if (!Array.isArray(ids) || !ids.length || ids.length > 1000 || !ids.every((x) => typeof x === 'string' && LOWER_UUID.test(x))) {
+    return 'payload.candidate_ids must be 1-1000 lowercase uuids'
+  }
+  return null
+}

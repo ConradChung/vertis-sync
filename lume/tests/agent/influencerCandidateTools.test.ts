@@ -22,12 +22,15 @@ function setup(skip = false) {
 }
 
 describe('influencer candidate tools', () => {
-  it('tiers: import / approve low, list read, the lookup an always-ask approval', () => {
-    expect([TOOL_TIERS.import_influencer_candidates, TOOL_TIERS.approve_influencer_candidates, TOOL_TIERS.list_influencer_candidates]).toEqual(['low', 'low', 'read'])
-    expect(TOOL_TIERS.lookup_influencer_candidates).toBe('high')
+  it('tiers: import low, list read; the lookup and the approval of candidates always ask (sheet / web text reaches the agent)', () => {
+    expect([TOOL_TIERS.import_influencer_candidates, TOOL_TIERS.list_influencer_candidates]).toEqual(['low', 'read'])
+    expect([TOOL_TIERS.lookup_influencer_candidates, TOOL_TIERS.approve_influencer_candidates]).toEqual(['high', 'high'])
     expect(HIGH_RISK_KIND.lookup_influencer_candidates).toBe('influencer_lookup')
-    expect(ALWAYS_ASK_KINDS.has('influencer_lookup')).toBe(true)
-    expect(SKIPPABLE_KINDS.has('influencer_lookup')).toBe(false)
+    expect(HIGH_RISK_KIND.approve_influencer_candidates).toBe('influencer_approve')
+    for (const k of ['influencer_lookup', 'influencer_approve'] as const) {
+      expect(ALWAYS_ASK_KINDS.has(k)).toBe(true)
+      expect(SKIPPABLE_KINDS.has(k)).toBe(false)
+    }
   })
   it('import stages the attachment for this chat with the column overrides', async () => {
     const { run, sent } = setup()
@@ -41,10 +44,14 @@ describe('influencer candidate tools', () => {
     expect(sent(0).url).toBe('https://lume.test/api/influencers/candidates')
     expect(sent(1).url).toBe(`https://lume.test/api/influencers/candidates/${BATCH.toLowerCase()}?status=found`)
   })
-  it('approve posts the ids to the review route', async () => {
-    const { run, sent } = setup()
-    await run('approve_influencer_candidates', { ids: [BATCH] })
-    expect(sent()).toEqual({ url: 'https://lume.test/api/influencers/candidates/review', method: 'POST', body: { action: 'approve', ids: [BATCH.toLowerCase()] } })
+  it('approve only files an approval (never creates influencers itself), even with skip permissions on', async () => {
+    const { run, prepare, createAction, autoApprove, fetch } = setup(true)
+    const r = await run('approve_influencer_candidates', { ids: [BATCH] })
+    expect(prepare).toHaveBeenCalledWith({ kind: 'influencer_approve', payload: { candidate_ids: [BATCH.toLowerCase()] } })
+    expect(createAction.mock.calls[0][0]).toBe('influencer_approve')
+    expect(r).toMatchObject({ status: 'awaiting_approval' })
+    expect(autoApprove).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
   })
   it('the lookup only files an approval, even with skip permissions on', async () => {
     const { run, prepare, createAction, autoApprove, fetch } = setup(true)

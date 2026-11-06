@@ -56,6 +56,7 @@ describe('buildTools', () => {
       approve_reactions: { run_id: JOB },
       stage_attachment_for_validation: { file_id: JOB, sheet: 'Leads' },
       lookup_influencer_candidates: { batch_id: JOB },
+      approve_influencer_candidates: { ids: [JOB] },
     }
     const { fetch, createAction, tool } = setup()
     for (const [name, tier] of Object.entries(TOOL_TIERS)) {
