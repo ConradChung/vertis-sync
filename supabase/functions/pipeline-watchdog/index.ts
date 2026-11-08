@@ -57,31 +57,43 @@ interface Job {
   status: string
   created_at: string
   updated_at: string
+  watchdog_status: string
+  watchdog_notified_at: string | null
 }
 
-async function checkForStalls(): Promise<{ scanned: number; notified: string[] }> {
-  const nowMs = Date.now()
+/**
+ * The candidates' query. Every exclusion is a case where silence is correct:
+ *   processing (any age) — a long job can run past a day, and a stalled one
+ *     must still be flagged (job 16f26ffc sat on processing for two days);
+ *   pending only when created within 24 h — never started, so abandoned, not
+ *     stalled: do not resurrect;
+ *   finder_status <> awaiting_decision (or NULL; neq alone drops NULLs) —
+ *     parked on the owner's answer, by design;
+ *   watchdog_status idle and not notified in the last hour, OR a prompt still
+ *     'awaiting' after an hour — an unanswered prompt goes stale (the job may
+ *     have recovered and stalled again), so it is checked again rather than
+ *     silencing the job for good.
+ */
+export function stallCandidatesPath(nowMs: number): string {
   const abandonedCutoff = new Date(nowMs - ABANDONED_HOURS * 3600_000).toISOString()
   const renotifyCutoff = new Date(nowMs - RENOTIFY_HOURS * 3600_000).toISOString()
-
-  // Candidates only. Every exclusion here is a case where silence is correct:
-  //   status in (pending, processing) — cancelled/failed/completed are not stalls
-  //   finder_status <> awaiting_decision — parked on the owner's answer, by design
-  //   created_at > 24h ago — abandoned, not stalled; do not resurrect
-  //   watchdog_status = idle — a prompt is not already live
-  //   watchdog_notified_at — at most one notification per job per hour
-  const jobs = (await supabaseRequest(
-    'GET',
-    `validation_jobs?status=in.(pending,processing)` +
-    `&finder_status=neq.awaiting_decision` +
-    `&created_at=gt.${abandonedCutoff}` +
-    `&watchdog_status=eq.idle` +
-    `&or=(watchdog_notified_at.is.null,watchdog_notified_at.lt.${renotifyCutoff})` +
-    `&select=id,filename,total_rows,processed_rows,status,created_at,updated_at` +
+  const and = [
+    `or(status.eq.processing,and(status.eq.pending,created_at.gt.${abandonedCutoff}))`,
+    `or(finder_status.is.null,finder_status.neq.awaiting_decision)`,
+    `or(and(watchdog_status.eq.idle,or(watchdog_notified_at.is.null,watchdog_notified_at.lt.${renotifyCutoff})),and(watchdog_status.eq.awaiting,watchdog_notified_at.lt.${renotifyCutoff}))`,
+  ]
+  return (
+    `validation_jobs?and=(${and.join(',')})` +
+    `&select=id,filename,total_rows,processed_rows,status,created_at,updated_at,watchdog_status,watchdog_notified_at` +
     // Explicit bound. PostgREST caps an unbounded GET at 1000 silently, so
     // every multi-row read here states its own limit.
-    `&limit=200`,
-  )) as Job[]
+    `&limit=200`
+  )
+}
+
+export async function checkForStalls(): Promise<{ scanned: number; notified: string[] }> {
+  const nowMs = Date.now()
+  const jobs = (await supabaseRequest('GET', stallCandidatesPath(nowMs))) as Job[]
 
   const notified: string[] = []
 
@@ -110,9 +122,14 @@ async function checkForStalls(): Promise<{ scanned: number; notified: string[] }
 
     // Claim the notification slot before sending. Two overlapping ticks then
     // cannot produce two prompts for the same job.
+    // The claim matches the state this tick read (idle, or the stale prompt it
+    // found), so two overlapping ticks cannot both send.
+    const seen = job.watchdog_status === 'awaiting'
+      ? `&watchdog_status=eq.awaiting&watchdog_notified_at=eq.${encodeURIComponent(job.watchdog_notified_at ?? '')}`
+      : `&watchdog_status=eq.idle`
     const claimed = (await supabaseRequest(
       'PATCH',
-      `validation_jobs?id=eq.${job.id}&watchdog_status=eq.idle`,
+      `validation_jobs?id=eq.${job.id}${seen}`,
       { watchdog_status: 'awaiting', watchdog_notified_at: new Date().toISOString() },
       { returning: true },
     )) as Job[]
