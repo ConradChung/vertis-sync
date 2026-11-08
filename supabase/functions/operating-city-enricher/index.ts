@@ -498,7 +498,9 @@ export async function processJob(jobId: string): Promise<void> {
     { severity: 'info', ...VALIDATE },
   )
 
-  fetch(`${SUPABASE_URL}/functions/v1/email-validator`, {
+  // Awaited: a fire-and-forget hand-off as the last action was dropped when
+  // the isolate shut down (job 16f26ffc sat on 'processing' for 2 days).
+  await fetch(`${SUPABASE_URL}/functions/v1/email-validator`, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_SERVICE_ROLE_KEY,
