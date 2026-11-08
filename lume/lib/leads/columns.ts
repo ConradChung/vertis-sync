@@ -114,30 +114,64 @@ export function cellsCsvLine(cells: Cells, columns: readonly string[]): string {
 }
 
 /**
- * The columns to show when a set has more keys than `max`: rank keys by how
- * often they are filled, within each row type (an actor's `type`: post,
- * profile, company…), and take the best of each type in turn, so one type's
- * many fields cannot crowd out another's. Shown in first-seen order.
+ * Column statistics gathered row by row (so a set can be read page by page):
+ * first-seen key order and fill counts per row type (an actor's `type`).
  */
-export function chooseColumns(rows: readonly Cells[], max = MAX_COLUMNS): string[] {
-  const all = mergeColumns([], rows, Number.MAX_SAFE_INTEGER)
-  if (all.length <= max) return all
-  const byType = new Map<string, Map<string, number>>()
-  for (const r of rows) {
-    const t = r.type ?? ''
-    const fill = byType.get(t) ?? new Map<string, number>()
-    for (const [k, v] of Object.entries(r)) if (v !== '') fill.set(k, (fill.get(k) ?? 0) + 1)
-    byType.set(t, fill)
-  }
-  const queues = [...byType.values()].map((fill) => [...fill.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k))
-  const chosen = new Set<string>()
-  while (chosen.size < max && queues.some((q) => q.length)) {
-    for (const q of queues) {
-      while (q.length && chosen.has(q[0])) q.shift()
-      const k = q.shift()
-      if (k !== undefined) chosen.add(k)
-      if (chosen.size >= max) break
+export class ColumnStats {
+  private order: string[] = []
+  private seen = new Set<string>()
+  private byType = new Map<string, Map<string, number>>()
+
+  add(row: Cells): void {
+    const t = row.type ?? ''
+    const fill = this.byType.get(t) ?? new Map<string, number>()
+    for (const [k, v] of Object.entries(row)) {
+      if (!this.seen.has(k)) {
+        this.seen.add(k)
+        this.order.push(k)
+      }
+      if (v !== '') fill.set(k, (fill.get(k) ?? 0) + 1)
     }
+    this.byType.set(t, fill)
   }
-  return all.filter((k) => chosen.has(k))
+
+  /** Every key in first-seen order, up to `max`. */
+  all(max = MAX_CELL_KEYS): string[] {
+    return this.order.slice(0, max)
+  }
+
+  /**
+   * The columns to show when there are more than `max`: rank keys by how
+   * often they are filled within each row type and take the best of each
+   * type in turn, so one type's many fields cannot crowd out another's.
+   * Only keys within `among` (the stored ones); shown in first-seen order.
+   */
+  choose(max = MAX_COLUMNS, among: readonly string[] = this.order): string[] {
+    const allowed = new Set(among)
+    const all = this.order.filter((k) => allowed.has(k))
+    if (all.length <= max) return all
+    const queues = [...this.byType.values()].map((fill) =>
+      [...fill.entries()]
+        .filter(([k]) => allowed.has(k))
+        .sort((a, b) => b[1] - a[1])
+        .map(([k]) => k)
+    )
+    const chosen = new Set<string>()
+    while (chosen.size < max && queues.some((q) => q.length)) {
+      for (const q of queues) {
+        while (q.length && chosen.has(q[0])) q.shift()
+        const k = q.shift()
+        if (k !== undefined) chosen.add(k)
+        if (chosen.size >= max) break
+      }
+    }
+    return all.filter((k) => chosen.has(k))
+  }
+}
+
+/** chooseColumns over rows in hand (see ColumnStats.choose). */
+export function chooseColumns(rows: readonly Cells[], max = MAX_COLUMNS): string[] {
+  const stats = new ColumnStats()
+  for (const r of rows) stats.add(r)
+  return stats.choose(max)
 }

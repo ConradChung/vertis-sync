@@ -4,7 +4,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import type { Json } from '@/lib/db/types'
 import type { ApolloSource } from '@/lib/apollo/records'
 import { loadSourceRows } from '@/lib/apollo/source'
-import { chooseColumns, flattenRecord, MAX_CELL_KEYS, mergeColumns, pickCells } from '@/lib/leads/columns'
+import { chooseColumns, ColumnStats, flattenRecord, MAX_CELL_KEYS, MAX_COLUMNS, mergeColumns, pickCells } from '@/lib/leads/columns'
 import {
   describeCriteria,
   normaliseLead,
@@ -30,6 +30,8 @@ export interface ReviewSet {
   columns: string[]
   /** Every stored column (≤ 300), what summaries may use. */
   all_columns: string[]
+  /** When a backfill of cells from raw was attempted (sets loaded before cells existed). */
+  cells_backfilled_at?: string | null
   filters: AppliedFilter[]
   created_at: string
   updated_at: string
@@ -47,7 +49,7 @@ export interface AppliedFilter {
 }
 
 const db = () => createServiceClient()
-const SET_COLS = 'id,title,source_kind,source_id,source_conversation_id,item_count,columns,all_columns,filters,created_at,updated_at'
+const SET_COLS = 'id,title,source_kind,source_id,source_conversation_id,item_count,columns,all_columns,cells_backfilled_at,filters,created_at,updated_at'
 
 export async function createReviewSet(source: ApolloSource, opts: { conversationId?: string | null; title?: string } = {}) {
   const { rows, label, item_count } = await loadSourceRows(source)
@@ -203,30 +205,38 @@ export async function restore(set: ReviewSet, what: { filter_id?: string; item_i
 }
 
 /**
- * Sets loaded before cells were stored (no all_columns, rows with raw): flatten
- * each raw row once, store its cells and the set's columns. Paged; runs once.
+ * Sets loaded before cells were stored: flatten each raw row and store its
+ * cells, page by page (never the whole set in memory), writing ONLY the cells
+ * column (lume_set_lead_cells) so a concurrent filter is never reverted. The
+ * attempt is stamped (cells_backfilled_at): a set whose rows have no raw is
+ * not re-scanned on the next read.
  */
-export async function ensureCells(set: ReviewSet): Promise<ReviewSet> {
-  if ((set.all_columns ?? []).length || !set.item_count) return set
+export async function ensureCells(set: ReviewSet, opts: { pageSize?: number } = {}): Promise<ReviewSet> {
+  if (set.cells_backfilled_at || (set.all_columns ?? []).length || !set.item_count) return set
   const sb = db()
-  const rows: { idx: number; item: Json; raw: Record<string, unknown> | null; status: string; excluded_reason: string | null; filter_id: string | null }[] = []
-  for (let from = 0; from < REVIEW_MAX_ITEMS; from += 1000) {
-    const { data, error } = await sb.from('lead_review_items').select('idx,item,raw,status,excluded_reason,filter_id').eq('set_id', set.id).order('idx').range(from, from + 999)
+  const pageSize = opts.pageSize ?? 1000
+  const stats = new ColumnStats()
+  for (let from = 0; from < REVIEW_MAX_ITEMS; from += pageSize) {
+    const { data, error } = await sb.from('lead_review_items').select('idx,raw').eq('set_id', set.id).order('idx').range(from, from + pageSize - 1)
     if (error) throw error
-    rows.push(...((data ?? []) as typeof rows))
-    if (!data || data.length < 1000) break
+    const page = (data ?? []) as { idx: number; raw: Record<string, unknown> | null }[]
+    const rows: { idx: number; cells: Record<string, string> }[] = []
+    for (const r of page) {
+      if (!r.raw) continue
+      const flat = flattenRecord(r.raw)
+      stats.add(flat)
+      rows.push({ idx: r.idx, cells: pickCells(flat, stats.all(MAX_CELL_KEYS)) })
+    }
+    if (rows.length) {
+      const res = await sb.rpc('lume_set_lead_cells', { p_set: set.id, p_rows: rows })
+      if (res.error) throw res.error
+    }
+    if (page.length < pageSize) break
   }
-  const flat = rows.map((r) => (r.raw ? flattenRecord(r.raw) : {}))
-  const all_columns = mergeColumns([], flat, MAX_CELL_KEYS)
-  if (!all_columns.length) return set
-  const cells = flat.map((c) => pickCells(c, all_columns))
-  const columns = chooseColumns(cells)
-  for (let i = 0; i < rows.length; i += 500) {
-    const batch = rows.slice(i, i + 500).map((r, k) => ({ set_id: set.id, ...r, cells: cells[i + k] as Json }))
-    const { error } = await sb.from('lead_review_items').upsert(batch, { onConflict: 'set_id,idx' })
-    if (error) throw error
-  }
-  const { error } = await sb.from('lead_review_sets').update({ columns, all_columns }).eq('id', set.id)
+  const all_columns = stats.all(MAX_CELL_KEYS)
+  const columns = stats.choose(MAX_COLUMNS, all_columns)
+  const cells_backfilled_at = new Date().toISOString()
+  const { error } = await sb.from('lead_review_sets').update({ columns, all_columns, cells_backfilled_at }).eq('id', set.id)
   if (error) throw error
-  return { ...set, columns, all_columns }
+  return { ...set, columns, all_columns, cells_backfilled_at }
 }
