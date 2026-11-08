@@ -10,7 +10,7 @@ vi.mock('@/lib/adapters/apify', () => ap)
 vi.mock('@/lib/db/service', () => svc)
 vi.mock('@/lib/leads/lists/influencerSheets', () => ({ sheetsForBatches: async () => new Map([['b1', 'list-1']]) }))
 
-import { buildProgress, MAX_LIVE_APIFY } from '@/lib/progress/build'
+import { APIFY_CACHE_MS, buildProgress, MAX_LIVE_APIFY, resetApifyCache } from '@/lib/progress/build'
 
 const NOW = new Date('2026-11-06T12:00:00Z')
 const iso = (minAgo: number) => new Date(NOW.getTime() - minAgo * 60_000).toISOString()
@@ -18,6 +18,7 @@ const accountRun = (id: string, status: string, o: Record<string, unknown> = {})
 
 beforeEach(() => {
   vi.clearAllMocks()
+  resetApifyCache()
   db = memdb({})
   ap.isApifyConfigured.mockReturnValue(true)
   ap.listAccountRuns.mockResolvedValue([])
@@ -65,5 +66,24 @@ describe('buildProgress', () => {
     ap.isApifyConfigured.mockReturnValue(false)
     await buildProgress(NOW)
     expect(ap.listAccountRuns).not.toHaveBeenCalled()
+  })
+
+  it('caches the account runs list and each getRun for ~10 s: a 5 s poll makes half the Apify calls', async () => {
+    ap.listAccountRuns.mockResolvedValue([accountRun('r1', 'RUNNING')])
+    ap.getRun.mockResolvedValue({ id: 'r1', actorId: 'a/b', status: 'RUNNING', statusMessage: null, startedAt: iso(10), finishedAt: null, usageTotalUsd: 0.5, itemCount: 42, consoleUrl: 'u' })
+    const realNow = Date.now
+    let t = NOW.getTime()
+    Date.now = () => t
+    try {
+      await buildProgress(NOW)
+      t += 5_000
+      await buildProgress(NOW)
+      expect([ap.listAccountRuns.mock.calls.length, ap.getRun.mock.calls.length]).toEqual([1, 1])
+      t += APIFY_CACHE_MS
+      await buildProgress(NOW)
+      expect([ap.listAccountRuns.mock.calls.length, ap.getRun.mock.calls.length]).toEqual([2, 2])
+    } finally {
+      Date.now = realNow
+    }
   })
 })

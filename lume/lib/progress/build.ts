@@ -26,6 +26,47 @@ import {
 
 const DAY_MS = 24 * 60 * 60 * 1000
 export const MAX_LIVE_APIFY = 10
+
+/**
+ * Apify answers are reused for APIFY_CACHE_MS (per instance): with the 5 s
+ * poll, the account listing and each live run's getRun are fetched about
+ * every other poll instead of every one.
+ */
+export const APIFY_CACHE_MS = 10_000
+let accountCache: { at: number; value: Promise<AccountRun[]> } | null = null
+const runCache = new Map<string, { at: number; value: Promise<Awaited<ReturnType<typeof getRun>>> }>()
+
+/** Tests only: start with empty caches. */
+export function resetApifyCache(): void {
+  accountCache = null
+  runCache.clear()
+}
+
+function cachedAccountRuns(): Promise<AccountRun[]> {
+  const now = Date.now()
+  if (accountCache && now - accountCache.at < APIFY_CACHE_MS) return accountCache.value
+  const value = listAccountRuns(20)
+  accountCache = { at: now, value }
+  // A failure is not cached: the next poll asks again.
+  value.catch(() => {
+    if (accountCache?.value === value) accountCache = null
+  })
+  return value
+}
+
+function cachedRun(id: string) {
+  const now = Date.now()
+  const hit = runCache.get(id)
+  if (hit && now - hit.at < APIFY_CACHE_MS) return hit.value
+  const value = getRun(id)
+  runCache.set(id, { at: now, value })
+  value.catch(() => {
+    if (runCache.get(id)?.value === value) runCache.delete(id)
+  })
+  // Keep the map small: drop entries well past their life.
+  for (const [k, v] of runCache) if (now - v.at > APIFY_CACHE_MS * 6) runCache.delete(k)
+  return value
+}
 const LIVE_APIFY = new Set(['READY', 'RUNNING'])
 
 type Source = { name: string; load: () => Promise<ProgressItem[]> }
@@ -140,7 +181,7 @@ const accountRunItem = (r: AccountRun): ApifyRunLike => ({
 async function apifyItems(since: string): Promise<ProgressItem[]> {
   if (!isApifyConfigured()) return []
   const [account, approved] = await Promise.all([
-    listAccountRuns(20),
+    cachedAccountRuns(),
     createServiceClient().from('pending_actions').select('result').eq('kind', 'run_actor').eq('status', 'executed').gte('updated_at', since).limit(20),
   ])
   if (approved.error) throw approved.error
@@ -152,7 +193,7 @@ async function apifyItems(since: string): Promise<ProgressItem[]> {
   const lumeIds = (approved.data ?? []).map((a) => (a.result as { run_id?: unknown } | null)?.run_id).filter((x): x is string => typeof x === 'string')
   // A Lume run missing from the account page is assumed live until getRun says otherwise.
   const live = [...new Set([...[...byId.values()].filter((r) => LIVE_APIFY.has(r.status)).map((r) => r.id), ...lumeIds.filter((id) => !byId.has(id))])].slice(0, MAX_LIVE_APIFY)
-  const runs = await Promise.allSettled(live.map((id) => getRun(id)))
+  const runs = await Promise.allSettled(live.map((id) => cachedRun(id)))
   runs.forEach((r) => {
     if (r.status === 'fulfilled') byId.set(r.value.id, { ...r.value, itemCount: r.value.itemCount })
   })
