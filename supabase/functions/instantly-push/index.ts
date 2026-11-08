@@ -687,7 +687,7 @@ export async function processJob(jobId: string): Promise<void> {
       await new Promise(resolve => setTimeout(resolve, 250))
 
       if (Date.now() - startTime > CHUNK_LIMIT_MS) {
-        fetch(`${SUPABASE_URL}/functions/v1/instantly-push`, {
+        await fetch(`${SUPABASE_URL}/functions/v1/instantly-push`, {
           method: 'POST',
           headers: {
             'apikey': SUPABASE_SERVICE_ROLE_KEY,

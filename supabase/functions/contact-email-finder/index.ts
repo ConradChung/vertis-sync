@@ -352,7 +352,7 @@ async function processJob(jobId: string): Promise<void> {
       }
 
       if (Date.now() - startTime > CHUNK_LIMIT_MS) {
-        fetch(`${SUPABASE_URL}/functions/v1/contact-email-finder`, {
+        await fetch(`${SUPABASE_URL}/functions/v1/contact-email-finder`, {
           method: 'POST',
           headers: {
             'apikey': SUPABASE_SERVICE_ROLE_KEY,

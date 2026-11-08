@@ -11,6 +11,7 @@ import { normalizeCompanyName, normalizeDomain, optionalHeaderIndex } from '../_
 import { classifyPool, companiesNeeded, LEADSFRIDAY_MIN_CONTACTS, type Pool } from '../_shared/jobsearch/pool.ts'
 import { getAccessToken, readRange, sheetTabLink } from '../_shared/jobsearch/sheets.ts'
 import { alert, gateKey, lumeLink, titleFrom } from '../_shared/alert.ts'
+import { keepAlive } from '../_shared/invoke.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -72,11 +73,11 @@ interface JobBatch {
 }
 
 function invokeBatchFunction(name: string, body: Record<string, unknown>): void {
-  fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+  keepAlive(fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
     method: 'POST',
     headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }).catch(err => console.error(`[jobsearch-notify] ${name} invoke error:`, err))
+  }).catch(err => console.error(`[jobsearch-notify] ${name} invoke error:`, err)))
 }
 
 // Pool summary for the prompt. Best effort: a Sheets failure here must not

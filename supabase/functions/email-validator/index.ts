@@ -509,7 +509,7 @@ async function processJob(jobId: string): Promise<void> {
             `🔎 Enriching ${validCount} rows with operating-city research…`,
             { severity: 'info', ...VALIDATE },
           )
-          fetch(`${SUPABASE_URL}/functions/v1/operating-city-enricher`, {
+          await fetch(`${SUPABASE_URL}/functions/v1/operating-city-enricher`, {
             method: 'POST',
             headers: {
               'apikey': SUPABASE_SERVICE_ROLE_KEY,

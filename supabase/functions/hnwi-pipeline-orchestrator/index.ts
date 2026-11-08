@@ -1,6 +1,7 @@
 // supabase/functions/hnwi-pipeline-orchestrator/index.ts
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 import { alert, lumeLink, titleFrom } from '../_shared/alert.ts'
+import { keepAlive } from '../_shared/invoke.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -167,11 +168,11 @@ async function insertInBatches(rows: unknown[], batchSize = 100): Promise<void> 
 }
 
 function selfInvoke(payload: Payload): void {
-  fetch(`${SUPABASE_URL}/functions/v1/hnwi-pipeline-orchestrator`, {
+  keepAlive(fetch(`${SUPABASE_URL}/functions/v1/hnwi-pipeline-orchestrator`, {
     method: 'POST',
     headers: EDGE_HEADERS,
     body: JSON.stringify(payload),
-  }).catch(err => console.error('[hnwi-pipeline-orchestrator] Self-invoke error:', err))
+  }).catch(err => console.error('[hnwi-pipeline-orchestrator] Self-invoke error:', err)))
 }
 
 async function processRecords(
@@ -198,7 +199,7 @@ async function processRecords(
         row_data: r,
       })),
     )
-    fetch(`${SUPABASE_URL}/functions/v1/email-validator`, {
+    await fetch(`${SUPABASE_URL}/functions/v1/email-validator`, {
       method: 'POST',
       headers: EDGE_HEADERS,
       body: JSON.stringify({ job_id: jobIdA }),
@@ -217,7 +218,7 @@ async function processRecords(
         row_data: r,
       })),
     )
-    fetch(`${SUPABASE_URL}/functions/v1/hnwi-email-finder`, {
+    await fetch(`${SUPABASE_URL}/functions/v1/hnwi-email-finder`, {
       method: 'POST',
       headers: EDGE_HEADERS,
       body: JSON.stringify({ job_id: jobIdB }),

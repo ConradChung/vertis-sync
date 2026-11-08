@@ -106,7 +106,7 @@ async function processJob(jobId: string): Promise<void> {
 
       if (Date.now() - startTime > CHUNK_LIMIT_MS) {
         // Re-invoke self to continue; next invocation resumes from remaining pending+empty-email rows
-        fetch(`${SUPABASE_URL}/functions/v1/hnwi-email-finder`, {
+        await fetch(`${SUPABASE_URL}/functions/v1/hnwi-email-finder`, {
           method: 'POST',
           headers: {
             'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -143,7 +143,7 @@ async function processJob(jobId: string): Promise<void> {
   }
 
   // Fire email-validator to validate the found emails
-  fetch(`${SUPABASE_URL}/functions/v1/email-validator`, {
+  await fetch(`${SUPABASE_URL}/functions/v1/email-validator`, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_SERVICE_ROLE_KEY,

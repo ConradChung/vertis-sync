@@ -5,6 +5,7 @@
 
 import { LUME_MIN_COUNT, LUME_MAX_COUNT, parseLumeAction, secretsMatch } from '../_shared/lume/action.ts'
 import { alert, gateKey, lumeLink, titleFrom } from '../_shared/alert.ts'
+import { keepAlive } from '../_shared/invoke.ts'
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 
@@ -794,7 +795,7 @@ async function showCompanyReview(job: InstantlyJob, edit?: { chatId: number; mes
 
 async function startPush(job: InstantlyJob): Promise<void> {
   await supabaseRequest('PATCH', `validation_jobs?id=eq.${job.id}`, { instantly_status: 'pushing' })
-  fetch(`${SUPABASE_URL}/functions/v1/instantly-push`, {
+  keepAlive(fetch(`${SUPABASE_URL}/functions/v1/instantly-push`, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -802,7 +803,7 @@ async function startPush(job: InstantlyJob): Promise<void> {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ job_id: job.id }),
-  }).catch(err => console.error('[telegram-inbox] instantly-push invoke error:', err))
+  }).catch(err => console.error('[telegram-inbox] instantly-push invoke error:', err)))
 }
 
 // Only while the job still waits for a campaign: Lume can pick one too
@@ -1080,7 +1081,7 @@ interface PipelineJob {
 }
 
 function invokeFunction(name: string, jobId: string): void {
-  fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+  keepAlive(fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -1088,13 +1089,13 @@ function invokeFunction(name: string, jobId: string): void {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ job_id: jobId }),
-  }).catch(err => console.error(`[telegram-inbox] ${name} invoke error:`, err))
+  }).catch(err => console.error(`[telegram-inbox] ${name} invoke error:`, err)))
 }
 
 // Same as invokeFunction, for the job search pipeline whose workers key on a
 // batch rather than a validation job.
 function invokeBatchFunction(name: string, batchId: string): void {
-  fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+  keepAlive(fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -1102,7 +1103,7 @@ function invokeBatchFunction(name: string, batchId: string): void {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ batch_id: batchId }),
-  }).catch(err => console.error(`[telegram-inbox] ${name} invoke error:`, err))
+  }).catch(err => console.error(`[telegram-inbox] ${name} invoke error:`, err)))
 }
 
 // Quote the ETA and persist it. Called AFTER the finder decision, not at
@@ -1426,11 +1427,11 @@ interface ApolloOrderRow {
 }
 
 function invokeOrderFunction(orderId: string): void {
-  fetch(`${SUPABASE_URL}/functions/v1/leadsfriday-order`, {
+  keepAlive(fetch(`${SUPABASE_URL}/functions/v1/leadsfriday-order`, {
     method: 'POST',
     headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ order_id: orderId }),
-  }).catch(err => console.error('[telegram-inbox] leadsfriday-order invoke error:', err))
+  }).catch(err => console.error('[telegram-inbox] leadsfriday-order invoke error:', err)))
 }
 
 function lfoCountKeyboard(orderId: string) {
