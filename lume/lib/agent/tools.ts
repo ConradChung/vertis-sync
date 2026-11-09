@@ -146,6 +146,13 @@ interface HighSpec<S extends z.ZodType> {
 type Built = (deps: ToolDeps, call: RouteCall) => AgentTool
 
 /**
+ * The high-risk tools' input schemas and payload builders, by tool name
+ * (filled as `tiered` declares them). `schedule_task` uses them so a
+ * scheduled action is requested exactly as the immediate tool would.
+ */
+const HIGH_SPECS = new Map<string, { inputSchema: z.ZodType; payload: (input: unknown, deps: ToolDeps) => Record<string, Json> }>()
+
+/**
  * Declare a tool at a tier. The tier must match `TOOL_TIERS` (checked when
  * the module loads). A `high` tool must be a payload spec; a read/low tool
  * must be a run spec.
@@ -160,6 +167,7 @@ export function tiered<S extends z.ZodType>(spec: RunSpec<S> | HighSpec<S>, tier
     if (!('payload' in spec)) throw new Error(`high-risk tool ${spec.name} needs a payload builder`)
     const kind = HIGH_RISK_KIND[spec.name]
     if (!kind) throw new Error(`high-risk tool ${spec.name} has no pending_actions kind`)
+    HIGH_SPECS.set(spec.name, { inputSchema: spec.inputSchema, payload: spec.payload as (input: unknown, deps: ToolDeps) => Record<string, Json> })
     return (deps) => ({
       name: spec.name,
       tier,
@@ -1782,6 +1790,101 @@ const SPECS: Built[] = [
       description: 'Cancel a running or awaiting PM influencer run and abort its live Apify runs. Only stops spending; what was already scraped stays.',
       inputSchema: z.object({ run_id: uuid }),
       run: async ({ run_id }, { call }) => (await call(`/api/influencers/runs/${run_id.toLowerCase()}/cancel`, { method: 'POST', body: {} })) as ToolResult,
+    },
+    'low'
+  ),
+  // calendar (scheduled tasks, mirrored to Linear) ----------------------------
+  tiered(
+    {
+      name: 'list_tasks',
+      description:
+        "Calendar tasks due in a date range (owner's time zone, America/Los_Angeles): title, due, status (scheduled, awaiting_tap, running, done, failed, cancelled), " +
+        'the scheduled action kind and filed action id, and the linked Linear issue. Default range: today and the next 14 days.',
+      inputSchema: z.object({
+        from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD, inclusive'),
+        to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD, exclusive; at most 120 days after from'),
+      }),
+      run: async ({ from, to }, { call }) => {
+        const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date())
+        const start = from ?? today
+        const end = to ?? new Date(Date.parse(`${start}T00:00:00Z`) + 15 * 86_400_000).toISOString().slice(0, 10)
+        return (await call(`/api/tasks?from=${start}&to=${end}`)) as ToolResult
+      },
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'schedule_task',
+      description:
+        'Put a task on the Calendar (also created as an issue in the Linear project "Lume" for sprint planning). due is YYYY-MM-DD (all day, due 09:00 Pacific) or an ISO datetime (no offset = Pacific wall time). ' +
+        'Without action it is a reminder: Conrad gets a Telegram ping when it is due. With action, name one of your approval tools and give exactly the input you would pass it now ' +
+        "(e.g. { tool: 'run_apify_actor', input: { actor_id, input } }): nothing runs and nothing is spent when it falls due — Lume then files that tool's approval (awaiting_approval) " +
+        'with a fresh snapshot, and Conrad still taps Approve in Telegram or Lume. Only schedule after Conrad asked for it.',
+      inputSchema: z.object({
+        title: z.string().min(1).max(200),
+        notes: z.string().max(4000).optional(),
+        due: z.string().min(10).max(40),
+        action: z
+          .object({
+            tool: z.string().min(1).max(60).describe('an approval (high-risk) tool name, e.g. run_apify_actor, assign_leads, start_influencer_run, activate_campaign'),
+            input: z.record(z.string(), z.unknown()).describe("that tool's input, as you would call it now"),
+          })
+          .optional(),
+      }),
+      run: async ({ title, notes, due, action }, { call, deps }) => {
+        let request: { kind: PendingActionKind; payload: Record<string, Json> } | undefined
+        if (action) {
+          const high = HIGH_SPECS.get(action.tool)
+          const kind = HIGH_RISK_KIND[action.tool]
+          if (!high || !kind) throw new Error(`${action.tool} is not an approval tool; schedule a reminder instead, or name one of: ${[...HIGH_SPECS.keys()].join(', ')}`)
+          const parsed = high.inputSchema.safeParse(action.input)
+          if (!parsed.success) {
+            throw new Error(`Invalid input for ${action.tool}: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`)
+          }
+          request = { kind, payload: high.payload(parsed.data, deps) }
+        }
+        const r = (await call('/api/tasks', {
+          method: 'POST',
+          body: { title, ...(notes ? { notes } : {}), due, ...(request ? { action: request } : {}), ...(deps.conversationId ? { conversation_id: deps.conversationId } : {}) },
+        })) as { task: Record<string, unknown> }
+        return {
+          status: 'scheduled',
+          task: r.task,
+          deep_link: `/calendar?task=${String(r.task?.id ?? '')}`,
+          ...(request ? { note: `When due, a ${request.kind} approval is filed for Conrad; it does not run on its own.` } : {}),
+        }
+      },
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'update_task',
+      description:
+        "Edit a Calendar task: title, notes, due (reschedule), or status done / scheduled (re-arm a failed or cancelled task: its action is filed again for approval when due). " +
+        'A task whose action is already filed (awaiting_tap / running) cannot be moved; that action is decided on its own.',
+      inputSchema: z.object({
+        task_id: uuid,
+        title: z.string().min(1).max(200).optional(),
+        notes: z.string().max(4000).optional(),
+        due: z.string().min(10).max(40).optional(),
+        status: z.enum(['done', 'scheduled']).optional(),
+      }),
+      run: async ({ task_id, ...patch }, { call }) => {
+        const body = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))
+        if (!Object.keys(body).length) throw new Error('Nothing to change')
+        return (await call(`/api/tasks/${task_id.toLowerCase()}`, { method: 'PATCH', body })) as ToolResult
+      },
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'cancel_task',
+      description: 'Cancel a Calendar task (and its Linear issue). An action it already filed is not touched: it still awaits its own approval or denial.',
+      inputSchema: z.object({ task_id: uuid }),
+      run: async ({ task_id }, { call }) => (await call(`/api/tasks/${task_id.toLowerCase()}`, { method: 'DELETE' })) as ToolResult,
     },
     'low'
   ),

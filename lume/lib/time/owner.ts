@@ -53,3 +53,18 @@ export function lastNOwnerDates(now: Date, n: number): string[] {
   for (let i = n - 1; i >= 0; i--) out.push(new Date(Date.UTC(y, m - 1, d - i)).toISOString().slice(0, 10))
   return out
 }
+
+/** The UTC instant of wall-clock `hour:minute` on `date` (YYYY-MM-DD) in the owner's zone. */
+export function ownerWallTime(date: string, hour: number, minute = 0): Date {
+  const [y, m, d] = date.split('-').map(Number)
+  const guess = Date.UTC(y, m - 1, d, hour, minute)
+  let t = guess - offsetMs(new Date(guess))
+  t = guess - offsetMs(new Date(t))
+  return new Date(t)
+}
+
+/** Wall-clock hour and minute of an instant in the owner's zone. */
+export function ownerTimeOfDay(at: Date | string | number): { hour: number; minute: number } {
+  const p = Object.fromEntries(partsFmt.formatToParts(new Date(at)).map((x) => [x.type, x.value]))
+  return { hour: +p.hour, minute: +p.minute }
+}

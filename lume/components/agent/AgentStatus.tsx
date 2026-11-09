@@ -25,6 +25,10 @@ const TOOL_LABELS: Record<string, string> = {
   get_skill: 'Opening the skill',
   save_skill: 'Saving the skill',
   draft_reply: 'Drafting a reply',
+  list_tasks: 'Checking the calendar',
+  schedule_task: 'Scheduling a task',
+  update_task: 'Updating a task',
+  cancel_task: 'Cancelling a task',
 }
 
 export function toolLabel(name: string): string {

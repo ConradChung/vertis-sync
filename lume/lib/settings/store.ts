@@ -25,3 +25,19 @@ export async function setApifyCapUsd(usd: number): Promise<number> {
   if (res.error) throw res.error
   return Number(res.data.value)
 }
+
+export const LINEAR_PROJECT_KEY = 'linear_project_id'
+
+/** The Linear project the Calendar files issues in (cached id; null = not resolved yet). */
+export async function getLinearProjectId(): Promise<string | null> {
+  const res = await createServiceClient().from('lume_settings').select('value').eq('key', LINEAR_PROJECT_KEY).maybeSingle()
+  const v = res.data?.value
+  return !res.error && typeof v === 'string' && v ? v : null
+}
+
+export async function setLinearProjectId(id: string): Promise<void> {
+  const res = await createServiceClient()
+    .from('lume_settings')
+    .upsert({ key: LINEAR_PROJECT_KEY, value: id, updated_at: new Date().toISOString() })
+  if (res.error) throw res.error
+}

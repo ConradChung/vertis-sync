@@ -14,7 +14,9 @@ import { runRotationTick } from '@/lib/rules/tick'
  * re-dispatches approved actions whose execute was cut to the execute route
  * (`sweepStuckActions`; fire-and-forget, never inline, so this 60 s function
  * is never killed mid-action) and fails `executing` rows stuck 10 min as
- * interrupted. See lib/rules/tick.ts for the claim order.
+ * interrupted. See lib/rules/tick.ts for the claim order. Last, calendar
+ * tasks (lib/tasks/tick.ts): due ones file their action for a tap (or send a
+ * reminder), filed actions' outcomes are reconciled, and Linear is synced.
  *
  * 200 with per-rule outcomes (a rule that errored is reported, not thrown);
  * 500 only when the rules, expiry or sweep query itself failed.

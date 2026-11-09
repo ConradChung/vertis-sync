@@ -418,3 +418,35 @@ export interface JobSampleSource {
   column_order: unknown
   rows: { row_index: number; row_data: Record<string, unknown> | null }[]
 }
+
+// ---------------------------------------------------------------------------
+// Calendar tasks (lume_tasks, migration 20261109083032_lume_tasks)
+
+export const TASK_STATUSES = ['scheduled', 'awaiting_tap', 'running', 'done', 'failed', 'cancelled'] as const
+export type TaskStatus = (typeof TASK_STATUSES)[number]
+
+export interface LumeTaskRow {
+  id: string
+  title: string
+  notes: string | null
+  due_at: string
+  /** All-day tasks are due at 09:00 America/Los_Angeles on their date. */
+  all_day: boolean
+  /** A requested pending action (the request POST /api/actions takes), filed for a tap when due. */
+  action_kind: PendingActionKind | null
+  action_payload: Record<string, Json> | null
+  status: TaskStatus
+  action_id: string | null
+  last_error: string | null
+  /** A plain task's due reminder went out (sent once). */
+  reminded_at: string | null
+  linear_issue_id: string | null
+  linear_identifier: string | null
+  linear_url: string | null
+  linear_synced_at: string | null
+  linear_error: string | null
+  created_by: 'owner' | 'agent'
+  conversation_id: string | null
+  created_at: string
+  updated_at: string
+}

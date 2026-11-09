@@ -1,5 +1,6 @@
 import { fetchJson } from '@/hooks/fetcher'
 import { leadBankSearchParams } from '@/lib/db/leadBankQuery'
+import { ownerToday, tasksKeyForMonth } from '@/lib/tasks/calendar'
 
 /**
  * The SWR keys each tab reads on first paint — exactly the keys its hooks
@@ -11,6 +12,10 @@ export const TAB_KEYS: Record<string, readonly string[]> = {
   '/import': ['/api/orders?limit=100'],
   '/import/leads': ['/api/lead-lists'],
   '/progress': ['/api/progress', '/api/gates', '/api/instantly/campaigns'],
+  // This month's grid, read when warmed (the key moves with the month).
+  get '/calendar'() {
+    return [tasksKeyForMonth(ownerToday())]
+  },
   '/rotate': [`/api/lead-bank${leadBankSearchParams({ filter: {}, page: 1, pageSize: 100 })}`, '/api/rules', '/api/campaigns'],
   '/campaigns': ['/api/campaigns?with=analytics'],
   '/crm': ['/api/crm/board?campaign=all'],

@@ -19,6 +19,7 @@ import { parseRuleFilter, summarizeFilter } from '@/lib/rules/filter'
 import { nextRun } from '@/lib/rules/nextRun'
 import { buildRemoveLeads } from '@/lib/actions/removeLeads'
 import { parseCycleParams } from '@/lib/rules/cycle'
+import { runTaskTick, type TaskTickResult } from '@/lib/tasks/tick'
 
 /**
  * The rotation tick (`POST /api/cron/rotation-tick`, called by pg_cron's
@@ -69,6 +70,11 @@ export interface TickResult {
   /** `executing` rows cut mid-run, now `failed` (interrupted). */
   interrupted: string[]
   errors: string[]
+  /**
+   * Calendar tasks (lib/tasks/tick.ts), run last and failure-isolated: their
+   * errors are reported here and never fail the rules tick (`ok`).
+   */
+  tasks?: TaskTickResult
 }
 
 const fmt = new Intl.NumberFormat('en-US')
@@ -109,7 +115,16 @@ export async function runRotationTick(now: Date, origin: string): Promise<TickRe
     errors.push(`interrupted: ${msg(err)}`)
     console.error('[rotation-tick] interrupted recovery failed:', msg(err))
   }
-  return { ok: errors.length === 0, expired, rules, swept, interrupted, errors }
+
+  let tasks: TaskTickResult | undefined
+  try {
+    tasks = await runTaskTick(now)
+  } catch (err) {
+    // runTaskTick isolates its own steps; this only guards an unexpected throw.
+    tasks = { due: [], reconciled: [], pulled: 0, pushed: 0, errors: [`tasks: ${msg(err)}`] }
+    console.error('[rotation-tick] tasks failed:', msg(err))
+  }
+  return { ok: errors.length === 0, expired, rules, swept, interrupted, errors, tasks }
 }
 
 async function expireActions(now: Date): Promise<number> {

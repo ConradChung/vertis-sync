@@ -46,6 +46,7 @@ Names only; values live in Vercel (Root Directory `lume`) and `.env.local`.
 | `ANTHROPIC_API_KEY` | Vercel | Orb agent (`/api/agent/run`) |
 | `APIFY_API_TOKEN` | Vercel | Import → Apify pull |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Vercel (copies of the edge values) | Gate pings, approval prompts, ingest prompts; unset = Telegram no-ops with a warning |
+| `LINEAR_API_KEY`, `LINEAR_TEAM_KEY` | Vercel (team key optional, default `GTM`) | Calendar → Linear sync (issues in the team's "Lume" project); unset = tasks stay in Lume, banner on /calendar |
 | `LUME_SMOKE` | shell only | Opt-in for `npm run smoke:db` |
 
 ## Vault entries (Supabase, one-time, as project owner)

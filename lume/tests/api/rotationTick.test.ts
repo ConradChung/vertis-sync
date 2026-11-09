@@ -35,6 +35,10 @@ vi.mock('@/lib/actions/execute', () => ({
 const buildRemove = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/actions/removeLeads', () => ({ buildRemoveLeads: (...a: unknown[]) => buildRemove(...a) }))
 
+// Calendar tasks run last on the tick (lib/tasks/tick.ts, tested in tests/tasks/tick.test.ts).
+const taskTick = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/tasks/tick', () => ({ runTaskTick: (...a: unknown[]) => taskTick(...a) }))
+
 vi.mock('@/lib/supabase/service', async () => (await import('../stubs/feed')).serviceModule)
 import { feed } from '../stubs/feed'
 
@@ -96,6 +100,8 @@ beforeEach(() => {
   sweep.mockResolvedValue([])
   recover.mockReset()
   recover.mockResolvedValue([])
+  taskTick.mockReset()
+  taskTick.mockResolvedValue({ due: [], reconciled: [], pulled: 0, pushed: 0, errors: [] })
   fetchSpy.mockReset()
   vi.stubGlobal('fetch', fetchSpy)
   feed.rows = []
@@ -104,6 +110,17 @@ beforeEach(() => {
 })
 
 describe('POST /api/cron/rotation-tick', () => {
+  it('runs calendar tasks after the rules; a throwing task tick never fails the rules tick', async () => {
+    taskTick.mockRejectedValueOnce(new Error('tasks exploded'))
+    const res = await tick()
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.ok).toBe(true)
+    expect(body.rules).toEqual([expect.objectContaining({ outcome: 'created' })])
+    expect(body.tasks.errors).toEqual(['tasks: tasks exploded'])
+    expect(taskTick.mock.invocationCallOrder[0]).toBeGreaterThan(svc.claimRule.mock.invocationCallOrder[0])
+  })
+
   it('401 without the hook secret, touching nothing', async () => {
     expect((await tick(null)).status).toBe(401)
     expect((await tick('wrong')).status).toBe(401)
