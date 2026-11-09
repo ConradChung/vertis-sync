@@ -18,7 +18,7 @@ describe('MobileNav (phones)', () => {
   })
 
   it('shows the four primary tabs plus More in the bottom bar, marking the current page', () => {
-    render(<MobileNav pathname="/agent" warm={vi.fn()} />)
+    render(<MobileNav pathname="/agent/projects/p1" warm={vi.fn()} />)
     const bar = screen.getByRole('navigation', { name: 'Primary' })
     const links = within(bar).getAllByRole('link').map((a) => a.textContent)
     expect(links).toEqual(TABS.filter((t) => t.primary).map((t) => t.label))
@@ -43,5 +43,18 @@ describe('MobileNav (phones)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
     expect(on).toHaveBeenCalledTimes(1)
     window.removeEventListener('lume:open-palette', on)
+  })
+
+  it('the agent chat (/agent) gets the whole phone screen: no slim header, no bottom bar, and <html data-chat> while there', () => {
+    const { rerender, unmount } = render(<MobileNav pathname="/agent" warm={vi.fn()} />)
+    expect(screen.queryByRole('navigation', { name: 'Primary' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Search' })).toBeNull()
+    expect(document.documentElement.dataset.chat).toBe('1')
+    rerender(<MobileNav pathname="/overview" warm={vi.fn()} />)
+    expect(screen.getByRole('navigation', { name: 'Primary' })).toBeTruthy()
+    expect(document.documentElement.dataset.chat).toBeUndefined()
+    rerender(<MobileNav pathname="/agent" warm={vi.fn()} />)
+    unmount()
+    expect(document.documentElement.dataset.chat).toBeUndefined()
   })
 })

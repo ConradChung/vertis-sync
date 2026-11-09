@@ -79,6 +79,7 @@ export function SkillMenu({
   onPick,
   onSave,
   onManage,
+  compact = false,
 }: {
   list: SkillList
   disabled: boolean
@@ -86,6 +87,8 @@ export function SkillMenu({
   onPick: (skill: Skill) => void
   onSave: () => void
   onManage: () => void
+  /** Phones: a small icon inside the composer row instead of a chip above it. */
+  compact?: boolean
 }) {
   const items = list.items ?? []
   return (
@@ -93,11 +96,21 @@ export function SkillMenu({
       <DropdownMenuTrigger
         disabled={disabled}
         aria-label="Skills"
-        className="inline-flex h-8 items-center gap-1.5 rounded-full border border-(--glass-border) bg-(--glass-fill) px-3 text-[12.5px] text-fg-70 backdrop-blur-md transition-colors outline-none hover:border-primary/50 hover:text-fg focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 data-popup-open:border-primary/60 data-popup-open:text-fg"
+        className={
+          compact
+            ? 'grid size-9 shrink-0 place-items-center rounded-full text-fg-46 outline-none hover:text-fg focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 data-popup-open:text-fg'
+            : 'inline-flex h-8 items-center gap-1.5 rounded-full border border-(--glass-border) bg-(--glass-fill) px-3 text-[12.5px] text-fg-70 backdrop-blur-md transition-colors outline-none hover:border-primary/50 hover:text-fg focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 data-popup-open:border-primary/60 data-popup-open:text-fg'
+        }
       >
-        <BookMarked className="size-3.5" /> Skills
-        {items.length > 0 && <span className="text-fg-46 tabular-nums">{items.length}</span>}
-        <ChevronDown className="size-3.5 text-fg-46" />
+        {compact ? (
+          <BookMarked className="size-[18px]" />
+        ) : (
+          <>
+            <BookMarked className="size-3.5" /> Skills
+            {items.length > 0 && <span className="text-fg-46 tabular-nums">{items.length}</span>}
+            <ChevronDown className="size-3.5 text-fg-46" />
+          </>
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" sideOffset={8} className="w-80 max-w-[calc(100vw-2rem)]">
         <DropdownMenuGroup>

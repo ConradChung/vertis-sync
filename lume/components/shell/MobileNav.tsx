@@ -12,6 +12,9 @@ import { LumeMark } from './LumeMark'
 
 const openPalette = () => window.dispatchEvent(new Event('lume:open-palette'))
 
+/** The agent chat itself (not its project pages): full-screen on phones. */
+export const isChatRoute = (pathname: string) => pathname === '/agent'
+
 /**
  * Phone navigation (below `sm`): a slim glass header (logo, current page,
  * search, theme) and a floating bottom tab bar with the four primary tabs plus
@@ -29,15 +32,20 @@ function useVisualViewport() {
     const root = document.documentElement
     const update = () => {
       root.style.setProperty('--vvh', `${Math.round(vv.height)}px`)
+      // iOS scrolls the layout under the keyboard instead of resizing it: pin fixed layouts to the visible top.
+      root.style.setProperty('--vvtop', `${Math.round(vv.offsetTop)}px`)
       const kb = window.innerHeight - vv.height > 150 && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 639.98px)').matches
       if (kb) root.dataset.kb = '1'
       else delete root.dataset.kb
     }
     update()
     vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
     return () => {
       vv.removeEventListener('resize', update)
+      vv.removeEventListener('scroll', update)
       root.style.removeProperty('--vvh')
+      root.style.removeProperty('--vvtop')
       delete root.dataset.kb
     }
   }, [])
@@ -54,6 +62,17 @@ export function MobileNav({
   operator?: string | null
 }) {
   useVisualViewport()
+  // The agent chat (/agent) takes the whole phone screen: its own slim header
+  // and drawer replace this header and the bottom bar (globals.css html[data-chat]).
+  const chat = isChatRoute(pathname)
+  useEffect(() => {
+    const root = document.documentElement
+    if (chat) root.dataset.chat = '1'
+    else delete root.dataset.chat
+    return () => {
+      delete root.dataset.chat
+    }
+  }, [chat])
   const [more, setMore] = useState(false)
   useEffect(() => setMore(false), [pathname])
   const current = TABS.find((t) => isActiveTab(pathname, t.href))
@@ -63,6 +82,8 @@ export function MobileNav({
 
   return (
     <>
+      {!chat && (
+      <>
       <header className="mobile-top glass fixed inset-x-3 z-30 flex h-12 items-center gap-1 rounded-full bg-(--bar-fill) pr-1.5 pl-4 shadow-(--bar-shadow) backdrop-blur-xl sm:hidden">
         <Link href="/overview" className="brand shrink-0" aria-label="Lume home">
           <LumeMark className="h-3.5 w-auto shrink-0 text-fg" />
@@ -111,6 +132,8 @@ export function MobileNav({
           {restActive ? TABS.find((t) => isActiveTab(pathname, t.href))?.label : 'More'}
         </button>
       </nav>
+      </>
+      )}
 
       <Sheet open={more} onOpenChange={setMore}>
         <SheetContent side="bottom" className="rounded-t-[24px] px-4 pt-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)]">

@@ -434,6 +434,24 @@
   .mobile-bottom {
     bottom: calc(env(safe-area-inset-bottom) + 10px);
   }
+  /* The agent chat (html[data-chat], components/shell/MobileNav.tsx): no app
+     header or bottom bar — the chat's own slim header and drawer — and the page
+     never scrolls; only the message list does. */
+  html[data-chat] {
+    --topbar-h: 0px;
+    --bottombar-h: 0px;
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  html[data-chat] body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  html[data-chat] .shell {
+    padding: 0;
+  }
   /* On-screen keyboard open: drop the bottom bar so the composer gets the room. */
   html[data-kb] {
     --bottombar-h: 0px;

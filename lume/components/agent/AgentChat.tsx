@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { ArrowUp, BookMarked, Brain, PanelRight, ChevronRight, Table2, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, ShieldCheck, ShieldOff, ShieldX, SquarePen, Wrench } from 'lucide-react'
+import { ArrowUp, BookMarked, Brain, Menu, PanelRight, ChevronRight, Table2, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, ShieldCheck, ShieldOff, ShieldX, SquarePen, Wrench } from 'lucide-react'
 import { AgentHistory, useConversationList, useMoveChat } from '@/components/agent/AgentHistory'
 import { ProjectChip } from '@/components/agent/ProjectChip'
 import { useProjectList } from '@/hooks/useProjectList'
@@ -30,6 +30,7 @@ import type { Skill, SkillMode } from '@/lib/agent/skillModel'
 import { cn } from '@/lib/utils'
 import Link from 'next/link'
 import { uniqueLinks } from '@/lib/leads/lists/link'
+import { TABS } from '@/components/shell/tabs'
 
 /** What "Save this chat as a skill" sends: the agent drafts it and waits for the owner's OK. */
 export const SAVE_SKILL_PROMPT =
@@ -306,8 +307,9 @@ export function AgentChat() {
     const el = inputRef.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 220)}px`
-  }, [draft])
+    // Phones: about 5 lines, then it scrolls; desktop about 8.
+    el.style.height = `${Math.min(el.scrollHeight, phone ? COMPOSER_MAX_PHONE : 220)}px`
+  }, [draft, phone])
 
   // Opening a chat lands at the bottom (the latest reply).
   const openedRef = useRef<string | null>(null)
@@ -321,8 +323,9 @@ export function AgentChat() {
     followRef.current = true
   }, [chat.conversationId, chat.loading, messages.length])
 
-  // Images, diagrams and tool cards render after the text and grow the list;
-  // stay pinned to the bottom through that while following.
+  // Images, diagrams and tool cards render after the text and grow the list,
+  // and the phone keyboard shrinks the box: stay pinned to the bottom through
+  // both while following.
   const hasMessages = messages.length > 0
   useEffect(() => {
     const box = scrollRef.current
@@ -332,6 +335,7 @@ export function AgentChat() {
       if (followRef.current) box.scrollTop = box.scrollHeight
     })
     ro.observe(content)
+    ro.observe(box)
     return () => ro.disconnect()
   }, [chat.conversationId, chat.loading, hasMessages])
 
@@ -378,21 +382,88 @@ export function AgentChat() {
 
   return (
     <div className="flex w-full gap-6">
-      {!collapsed && (
+      {!collapsed && !phone && (
         <aside className="glass sticky top-[calc(var(--topbar-h)+2rem)] hidden h-[calc(100dvh-var(--topbar-h)-4rem)] w-64 shrink-0 overflow-hidden rounded-panel p-3 lg:block">
           {history}
         </aside>
       )}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent side="left" className="w-72 p-4 pt-12">
+        <SheetContent side="left" className="flex w-72 flex-col p-4 pt-12 max-sm:w-[86vw] max-sm:pt-[calc(env(safe-area-inset-top)+3rem)]">
           <SheetTitle className="sr-only">Chat history</SheetTitle>
-          {history}
+          {phone && (
+            // Phones: the app's tabs and this chat's options live here (the chat hides the app header and bottom bar).
+            <div className="mb-3 flex shrink-0 flex-col gap-2.5 border-b border-line pb-3">
+              <nav aria-label="App" className="grid grid-cols-3 gap-1">
+                {TABS.map((t) => {
+                  const Icon = t.icon
+                  return (
+                    <Link
+                      key={t.href}
+                      href={t.href}
+                      onClick={() => setSheetOpen(false)}
+                      aria-current={t.href === '/agent' ? 'page' : undefined}
+                      className={cn(
+                        'flex flex-col items-center gap-1 rounded-xl px-1 py-2 text-[11px] text-fg-70 outline-none hover:bg-white/6 focus-visible:ring-2 focus-visible:ring-ring',
+                        t.href === '/agent' && 'bg-primary/15 text-fg'
+                      )}
+                    >
+                      <Icon className="size-[18px]" strokeWidth={1.75} aria-hidden />
+                      {t.label}
+                    </Link>
+                  )
+                })}
+              </nav>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(projects.items?.length ?? 0) > 0 && (
+                  <ProjectChip projects={projects.items ?? []} current={currentProject} disabled={busy} onPick={pickProject} onOpen={openProject} />
+                )}
+                <Button variant="ghost" size="sm" className="h-10" onClick={() => setMemoryOpen(true)} aria-label="Memory">
+                  <Brain className="size-4" /> Memory
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn('h-10', chat.skipPermissions && 'bg-red/10 text-red hover:bg-red/15 hover:text-red')}
+                  onClick={() => chat.setSkipPermissions(!chat.skipPermissions)}
+                  aria-pressed={chat.skipPermissions}
+                  aria-label="Skip permissions"
+                >
+                  <ShieldOff className="size-3.5" /> Skip permissions
+                </Button>
+              </div>
+            </div>
+          )}
+          <div className="min-h-0 flex-1">{history}</div>
         </SheetContent>
       </Sheet>
 
-      <div className="relative min-w-0 flex-1">
-        {/* Toolbar is its own row above the chat panel so it never covers messages. */}
-        <div className={cn('z-10 mb-2 flex items-center gap-1', !(split && desktop) && 'mx-auto max-w-[1200px]')}>
+      <div
+        className={cn(
+          'relative min-w-0 flex-1',
+          // Phones: the chat is the whole visual viewport (it shrinks with the keyboard):
+          // slim header, messages, composer — nothing else.
+          'max-sm:fixed max-sm:inset-x-0 max-sm:top-[var(--vvtop,0px)] max-sm:z-20 max-sm:flex max-sm:h-[var(--vvh,100dvh)] max-sm:flex-col max-sm:bg-background'
+        )}
+      >
+        {phone && (
+          <header role="banner" aria-label="Chat" className="box-content flex h-11 shrink-0 items-center gap-0.5 border-b border-line px-1 pt-[env(safe-area-inset-top)]">
+            <Button variant="ghost" size="icon" className="size-10" onClick={() => setSheetOpen(true)} aria-label="Open menu">
+              <Menu className="size-5" />
+            </Button>
+            <p className="min-w-0 flex-1 truncate px-1 text-center text-[15px] font-medium text-fg">{listed?.title || (messages.length ? 'Chat' : 'New chat')}</p>
+            {hasPanel && (
+              <Button variant="ghost" size="icon" className="size-10" onClick={() => setPanelOpen(true)} aria-label={`Show ${diagrams.length ? 'pipeline' : 'leads'}`}>
+                <PanelRight className="size-5" />
+              </Button>
+            )}
+            <Button variant="ghost" size="icon" className="size-10" onClick={newChat} disabled={busy} aria-label="New chat">
+              <SquarePen className="size-5" />
+            </Button>
+          </header>
+        )}
+        {/* Toolbar is its own row above the chat panel so it never covers messages. Phones use the slim header above. */}
+        {!phone && (
+        <div className={cn('z-10 mb-2 flex items-center gap-1 max-sm:hidden', !(split && desktop) && 'mx-auto max-w-[1200px]')}>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -435,6 +506,7 @@ export function AgentChat() {
             </Button>
           )}
         </div>
+        )}
         <AgentMemory open={memoryOpen} onOpenChange={setMemoryOpen} />
         {/* The conversation sits on its own dense glass panel so text stays readable over the wallpaper. */}
         {(() => {
@@ -444,10 +516,9 @@ export function AgentChat() {
             // Fixed-height rounded panel: only the messages scroll (inside the clip), so the
             // corners stay rounded at any scroll position and nothing passes behind the composer.
             'glass-overlay flex w-full flex-col overflow-hidden rounded-panel',
-            split && desktop
-              ? 'split-chat-in h-full'
-              : // Phones: visual viewport (shrinks with the keyboard) minus header, bottom bar, padding and the toolbar row.
-                'mx-auto h-[calc(var(--vvh,100dvh)-var(--topbar-h)-var(--bottombar-h)-4.75rem)] max-w-[1200px] sm:h-[calc(100dvh-var(--topbar-h)-6.75rem)]'
+            // Phones: no panel around the chat — edge to edge, it fills what the slim header leaves.
+            'max-sm:min-h-0 max-sm:flex-1 max-sm:rounded-none max-sm:border-0 max-sm:bg-transparent max-sm:shadow-none max-sm:backdrop-blur-none',
+            split && desktop ? 'split-chat-in h-full' : 'mx-auto max-w-[1200px] sm:h-[calc(100dvh-var(--topbar-h)-6.75rem)]'
           )}
         >
           <div
@@ -456,7 +527,7 @@ export function AgentChat() {
               const el = e.currentTarget
               followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
             }}
-            className="thin-scroll scroll-fade-bottom min-h-0 flex-1 overflow-y-auto px-4 pt-4 sm:px-8 sm:pt-7"
+            className="thin-scroll scroll-fade-bottom min-h-0 flex-1 overflow-y-auto overscroll-contain px-3.5 pt-3 sm:px-8 sm:pt-7"
             aria-live="polite"
             aria-busy={busy || chat.loading}
           >
@@ -467,7 +538,7 @@ export function AgentChat() {
             ) : messages.length === 0 ? (
               <EmptyState hello={hello} onPick={submit} disabled={busy} />
             ) : (
-              <ol className="flex flex-col gap-7 pt-2 pb-6" aria-label="Conversation">
+              <ol className="flex flex-col gap-5 pt-1 pb-4 sm:gap-7 sm:pt-2 sm:pb-6" aria-label="Conversation">
                 {messages.map((m) => (
                   <li key={m.id} className="min-w-0" data-role={m.role}>
                     <Message
@@ -483,7 +554,7 @@ export function AgentChat() {
             <div ref={endRef} />
           </div>
 
-          <div className="shrink-0 border-t border-line bg-[var(--glass-fill-strong)] px-3 pt-2.5 pb-3 sm:px-8 sm:pt-3 sm:pb-4">
+          <div className="shrink-0 border-t border-line bg-[var(--glass-fill-strong)] px-2.5 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:px-8 sm:pt-3 sm:pb-4">
             {chat.skipPermissions && (
               <div className="mb-3 flex items-center gap-2 rounded-control border border-red/40 bg-red/10 px-3 py-2 text-[13px] text-red" role="status">
                 <ShieldOff className="size-3.5 shrink-0" />
@@ -522,6 +593,7 @@ export function AgentChat() {
                 onClear={clearSkill}
               />
             )}
+            {!phone && (
             <div className="mb-2 flex items-center gap-2">
               <SkillMenu
                 list={skills}
@@ -535,11 +607,12 @@ export function AgentChat() {
                 onManage={() => setManageOpen(true)}
               />
             </div>
+            )}
             <ImageChips items={images.items} onRemove={images.remove} disabled={busy} />
             <FileChips items={sheets.items} onRemove={sheets.remove} disabled={busy} />
             <form
               className={cn(
-                'glass flex items-end gap-2 rounded-2xl p-2 pl-4 transition-colors focus-within:border-primary/60',
+                'glass flex items-end gap-2 rounded-2xl p-2 pl-4 transition-colors focus-within:border-primary/60 max-sm:gap-0.5 max-sm:rounded-[22px] max-sm:p-1.5 max-sm:pl-3',
                 (speech.listening || dragging) && 'border-primary/60',
                 dragging && 'bg-accent'
               )}
@@ -606,8 +679,22 @@ export function AgentChat() {
                         : 'Ask Lume anything — press / to focus'
                 }
                 aria-describedby="agent-composer-hint"
-                className="max-h-[220px] min-h-10 flex-1 resize-none bg-transparent py-2 focus-visible:outline-none! text-[15px] leading-6 text-fg outline-none placeholder:text-fg-24 disabled:opacity-60"
+                className="max-h-[220px] min-h-10 flex-1 resize-none bg-transparent py-2 focus-visible:outline-none! text-[15px] leading-6 text-fg outline-none placeholder:text-fg-24 disabled:opacity-60 max-sm:max-h-[136px] max-sm:text-[16px]"
               />
+              {phone && (
+                <SkillMenu
+                  compact
+                  list={skills}
+                  disabled={busy}
+                  canSave={messages.length > 0 && !busy && !chat.loading}
+                  onPick={(s) => {
+                    setPicked(s)
+                    setAttach(null)
+                  }}
+                  onSave={() => submit(SAVE_SKILL_PROMPT, { withImages: false })}
+                  onManage={() => setManageOpen(true)}
+                />
+              )}
               <AttachButton onFiles={attachFiles} disabled={busy} />
               <VoiceInput speech={speech} onFinal={onVoice} />
               <button
@@ -690,6 +777,9 @@ export function AgentChat() {
     </div>
   )
 }
+
+/** The phone composer grows to about 5 lines (24 px each + padding), then scrolls. */
+const COMPOSER_MAX_PHONE = 136
 
 const onPhone = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 639.98px)').matches
 

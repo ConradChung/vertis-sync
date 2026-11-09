@@ -305,6 +305,49 @@ describe('AgentChat projects', () => {
   })
 })
 
+describe('AgentChat on a phone', () => {
+  const phone = () => {
+    window.matchMedia = ((q: string) => ({ matches: q.includes('max-width'), media: q, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia
+  }
+  it('a slim chat header: menu, the chat title, New chat; the desktop toolbar row is gone', async () => {
+    phone()
+    nav.params = new URLSearchParams({ c: CONV })
+    vi.stubGlobal('fetch', router({
+      list: () => Response.json({ conversations: [{ id: CONV, title: 'Gates today', created_at: today, updated_at: today }] }),
+      conversation: () => Response.json({ conversation: { id: CONV, title: 'Gates today' }, messages: [] }),
+    }))
+    render(<AgentChat />)
+    const header = await screen.findByRole('banner', { name: 'Chat' })
+    expect(within(header).getByRole('button', { name: 'Open menu' })).toBeTruthy()
+    expect(await within(header).findByText('Gates today')).toBeTruthy()
+    expect(within(header).getByRole('button', { name: 'New chat' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Show chat history' })).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'New chat' })).toHaveLength(1)
+  })
+
+  it('the menu opens the history drawer with the app tabs and the chat options', async () => {
+    phone()
+    vi.stubGlobal('fetch', router({ list: () => Response.json({ conversations: [] }) }))
+    render(<AgentChat />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Open menu' }))
+    const nav = await screen.findByRole('navigation', { name: 'App' })
+    expect(within(nav).getByRole('link', { name: 'Overview' }).getAttribute('href')).toBe('/overview')
+    expect(within(nav).getByRole('link', { name: 'Leads' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Memory' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Skip permissions' })).toBeTruthy()
+  })
+
+  it('the skills menu sits inside the composer row as an icon; the 16 px composer caps at about 5 lines', async () => {
+    phone()
+    vi.stubGlobal('fetch', router({ list: () => Response.json({ conversations: [] }) }))
+    render(<AgentChat />)
+    const form = screen.getByRole('textbox', { name: 'Message Lume' }).closest('form')!
+    expect(within(form).getByRole('button', { name: 'Skills' })).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: 'Skills' })).toHaveLength(1)
+    expect(screen.getByRole('textbox', { name: 'Message Lume' }).className).toContain('text-[16px]')
+  })
+})
+
 describe('Markdown', () => {
   it('renders code fences and drops unsafe links', () => {
     const { container } = render(<Markdown text={'See [x](javascript:alert(1)) and [y](/actions/1)\n\n```\nconst a = 1\n```'} />)
