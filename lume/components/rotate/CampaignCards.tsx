@@ -129,8 +129,9 @@ function CampaignCard({
         </div>
       </dl>
       <div className="flex items-center justify-between gap-2">
-        <span className={cn('text-[11px]', c.rotator ? 'text-green' : 'text-fg-46')}>
-          {c.rotator ? 'Drained by instantly-rotate' : 'No rotator for this campaign yet — queued leads wait'}
+        {/* instantly-rotate serves ROTATE_CAMPAIGN_ID plus every campaign with queued bank leads (shared cap, oldest first). */}
+        <span className={cn('text-[11px]', c.rotator || c.queued > 0 ? 'text-green' : 'text-fg-46')}>
+          {c.rotator || c.queued > 0 ? 'Drained by instantly-rotate' : 'Nothing queued — instantly-rotate picks it up once leads are banked'}
         </span>
         <button
           type="button"

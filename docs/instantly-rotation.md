@@ -12,6 +12,12 @@ Keeps the "Scaleport - Fall Mega" campaign (`869d73b3-5bf3-4f1c-ba8c-43ac6d0f529
 | `instantly-rotate` edge function | `supabase/functions/instantly-rotate/index.ts` |
 | Dashboard | `public/dashboard/instantly-rotation.html`, served by the Next app on Vercel at `/dashboard/instantly-rotation.html` (behind the CRM login), and the claude.ai artifact |
 
+## Lead bank routing and multi-campaign rotation (v4, 2026-11-09)
+
+- `instantly-push` reads `lume_settings.bank_threshold` (Lume Settings → Budget; fallback env `BANK_THRESHOLD`, then 1000). A push whose eligible leads (same `decideRow`, same barriers) exceed it is **banked**: every eligible lead is inserted into `lead_bank` as `queued` for its target campaign (main, or the no-location sibling for city-less leads), with `source_job_id`; nothing is created in Instantly. Duplicates within the push, leads already in the bank for that campaign and leads a previous push created in Instantly (`instantly_pushed_emails()`) are filtered with a reason. Rows become `validation_rows.instantly_status = 'banked'`; the job gets `instantly_route = 'bank'`, `instantly_banked`, and ends `done` like a direct push. The route is decided once and kept across self re-invokes. Preview returns `route`, `banked_estimate`, `bank_threshold`.
+- `instantly-rotate` serves `ROTATE_CAMPAIGN_ID` (always) plus every campaign with queued / active / replied bank rows (`lead_bank_rotation_campaigns()`). The cap is workspace-wide (everything Instantly lists counts); free slots (≤ `ROTATE_MAX_PUSH`) go to the oldest queued rows first by `lead_bank.id`, across campaigns, each into its own campaign (`allocate.ts`). Non-primary campaigns only archive / delete leads the bank knows. A campaign whose first 5 pushes in a run all fail is skipped for that run and its slots go to the next oldest queue. One `rotation_runs` row per run (`campaign_id` = primary) with `campaign_ids` and a `per_campaign` breakdown; `lume_campaign_lead_sources()` reads it per campaign. `trim` stays primary-only.
+- The owner's push tap authorises both the banking and the rotation of those leads; there is no tap per rotation run.
+
 ## Lead states
 
 `queued` never pushed · `active` in Instantly, not finished · `completed` / `bounced` / `unsubscribed` / `skipped` archived and deleted from Instantly (status 3 / -1 / -2 / -3) · `replied` kept seven days after the first reply, then deleted.

@@ -99,6 +99,12 @@ export function CompanyReview({ jobId }: { jobId: string }) {
               <span className="text-fg-70">filtered</span>
             </p>
             {notes.length > 0 && <p className="text-[11px] text-fg-46">{notes.join(' · ')}</p>}
+            {preview.route === 'bank' && (
+              <p className="text-[11px] text-fg-70">
+                → lead bank (rotates automatically): {fmt.format(preview.banked_estimate ?? preview.eligible)} leads, over the{' '}
+                {fmt.format(preview.bank_threshold ?? 1000)} threshold, drip into the campaign as slots free.
+              </p>
+            )}
             {job && !job.company_barrier && <p className="text-[11px] text-fg-46">Company barrier off — names push as normalized.</p>}
             {preview.samples.length > 0 ? (
               <ol className="mt-1 flex flex-col gap-0.5 font-mono text-[11px]">

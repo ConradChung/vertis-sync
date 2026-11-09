@@ -3,7 +3,7 @@ import { assertEquals } from 'jsr:@std/assert@1'
 import { json, prepareModule, stubFetch } from '../_shared/test_fetch.ts'
 
 prepareModule({ SUPABASE_URL: 'https://db.test', SUPABASE_SERVICE_ROLE_KEY: 'svc', INSTANTLY_API_KEY: 'ik' })
-const { createLead, decideRow, loadActiveJurisdictions, processJob, verifyFirstLead } = await import('./index.ts')
+const { bankRow, createLead, decideRow, loadActiveJurisdictions, loadBankThreshold, processJob, pushRoute, verifyFirstLead } = await import('./index.ts')
 
 const KASPEN = '869d73b3-5bf3-4f1c-ba8c-43ac6d0f529d'
 // One generic fallback for every client (no per-campaign sentences any more).
@@ -165,6 +165,9 @@ Deno.test('processJob: a no-location lead goes to its campaign with the generic 
     [(u, m) => u.startsWith('https://db.test/rest/v1/validation_jobs?') && m === 'GET', () => json([pushJob])],
     [(u, m) => u.startsWith('https://db.test/rest/v1/validation_jobs?') && m === 'PATCH', () => new Response(null, { status: 204 })],
     [(u, m) => u.startsWith('https://db.test/rest/v1/validation_rows?job_id=eq.j1&limit=1') && m === 'GET', () => json([rowNoCity])],
+    // The route decision's paged count read (1 eligible <= threshold -> direct).
+    [(u, m) => u.startsWith('https://db.test/rest/v1/validation_rows?') && u.includes('&offset=') && m === 'GET', (u) => json(u.endsWith('&offset=0') ? [rowNoCity] : [])],
+    [(u) => u.startsWith('https://db.test/rest/v1/lume_settings?'), () => json([{ value: 1000 }])],
     [(u, m) => u.startsWith('https://db.test/rest/v1/validation_rows?') && m === 'GET', () => json(rowReads++ === 0 ? [rowNoCity] : [])],
     [(u, m) => u.startsWith('https://db.test/rest/v1/validation_rows?') && m === 'PATCH', () => new Response(null, { status: 204 })],
     [(u) => u.startsWith('https://db.test/rest/v1/jurisdictions?'), () => json([])],
@@ -193,4 +196,103 @@ Deno.test('processJob: a no-location lead goes to its campaign with the generic 
     assertEquals(alertBody.includes('compliance_law missing on the first lead'), true)
     assertEquals(warned.length > 0, true)
   } finally { f.restore(); console.warn = warn }
+})
+
+// ---- Lead bank routing ----
+
+Deno.test('pushRoute: strictly more than the threshold banks; at or below goes direct', () => {
+  assertEquals([pushRoute(1001, 1000), pushRoute(1000, 1000), pushRoute(0, 1000), pushRoute(4563, 1000)], ['bank', 'direct', 'direct', 'bank'])
+})
+
+Deno.test('loadBankThreshold: the lume_settings value, else 1000 (bad value or failed read)', async () => {
+  for (const [resp, want] of [[[{ value: 2500 }], 2500], [[], 1000], [[{ value: 'x' }], 1000], [[{ value: 0 }], 1000]] as const) {
+    const f = stubFetch([[(u) => u.startsWith('https://db.test/rest/v1/lume_settings?key=eq.bank_threshold'), () => json(resp)]])
+    try { assertEquals(await loadBankThreshold(), want) } finally { f.restore() }
+  }
+  const err = console.error
+  console.error = () => {}
+  const f = stubFetch([[(u) => u.startsWith('https://db.test/rest/v1/lume_settings?'), () => json({ message: 'boom' }, 500)]])
+  try { assertEquals(await loadBankThreshold(), 1000) } finally { f.restore(); console.error = err }
+})
+
+Deno.test('bankRow: the fields rotateLeadBody reads, lowercased email, blanks as null, law left to the rotation', () => {
+  const lead = keep(decideRow(vrow({ Country: 'Canada', State: 'BC', secondary_cities: 'Burnaby' }), cols, job, ctx))
+  assertEquals(bankRow({ ...lead, email: ' Ann@Acme.com ', website: '' }, KASPEN, 'j1'), {
+    campaign_id: KASPEN, email: 'ann@acme.com', first_name: 'Ann', last_name: 'Lee', company_name: 'Acme Properties',
+    website: null, location: 'Vancouver', operating_cities: 'Vancouver; Burnaby', country: 'CA', region: 'British Columbia',
+    state: 'queued', source_job_id: 'j1',
+  })
+})
+
+Deno.test('processJob: over the threshold, eligible leads are queued in lead_bank (no Instantly call), deduped, rows marked banked', async () => {
+  const NOLOC = 'noloc-campaign'
+  const bankJob = { ...job, instantly_campaign_id_nolocation: NOLOC, instantly_campaign_name_nolocation: 'NoLoc', instantly_banked: 0, instantly_route: null }
+  const r = (id: string, email: string, extra: Record<string, unknown> = {}) =>
+    ({ id, row_index: Number(id.slice(1)), email, row_data: { 'First Name': 'Ann', 'Last Name': 'Lee', 'Company Name': 'Acme LLC', operating_city: 'Vancouver', ...extra } })
+  const rowsAll = [
+    r('r1', 'a@acme.com'),
+    r('r2', 'b@x.com', { operating_city: 'UNKNOWN' }),
+    r('r3', 'c@x.com'),
+    r('r4', 'A@Acme.com'),
+    r('r5', 'e@x.com', { 'Company Name': 'Under Construction' }),
+    r('r6', 'd@x.com'),
+  ]
+  let chunkReads = 0
+  const f = stubFetch([
+    [(u, m) => u.startsWith('https://db.test/rest/v1/validation_jobs?') && m === 'GET', () => json([bankJob])],
+    [(u, m) => u.startsWith('https://db.test/rest/v1/validation_jobs?') && m === 'PATCH', () => new Response(null, { status: 204 })],
+    [(u, m) => u.startsWith('https://db.test/rest/v1/validation_rows?job_id=eq.j1&limit=1') && m === 'GET', () => json([rowsAll[0]])],
+    [(u, m) => u.startsWith('https://db.test/rest/v1/validation_rows?') && u.includes('&offset=') && m === 'GET', (u) => json(u.endsWith('&offset=0') ? rowsAll : [])],
+    [(u, m) => u.startsWith('https://db.test/rest/v1/validation_rows?') && m === 'GET', () => json(chunkReads++ === 0 ? rowsAll : [])],
+    [(u, m) => u.startsWith('https://db.test/rest/v1/validation_rows?') && m === 'PATCH', () => new Response(null, { status: 204 })],
+    [(u) => u.startsWith('https://db.test/rest/v1/lume_settings?'), () => json([{ value: 2 }])],
+    [(u) => u === 'https://db.test/rest/v1/rpc/instantly_pushed_emails', () => json(['c@x.com'])],
+    [(u) => u.startsWith('https://db.test/rest/v1/rpc/'), () => json('alert-id')],
+    [(u, m) => u.startsWith('https://db.test/rest/v1/lead_bank?on_conflict=') && m === 'POST', (_u, body) =>
+      json((JSON.parse(body!) as { campaign_id: string; email: string }[]).filter((x) => x.email !== 'd@x.com').map(({ campaign_id, email }) => ({ campaign_id, email })))],
+    [(u, m) => u.startsWith('https://db.test/rest/v1/lead_bank?source_job_id=eq.j1') && m === 'GET', () => json([])],
+  ])
+  try {
+    await processJob('j1')
+    assertEquals(f.calls.some((c) => c.url.startsWith('https://api.instantly.ai')), false)
+    const inserted = JSON.parse(f.calls.find((c) => c.url.startsWith('https://db.test/rest/v1/lead_bank?on_conflict='))!.body!)
+    assertEquals(inserted.map((x: { email: string; campaign_id: string }) => [x.email, x.campaign_id]), [['a@acme.com', KASPEN], ['b@x.com', NOLOC], ['d@x.com', KASPEN]])
+    assertEquals(inserted[1].location, null)
+    assertEquals(inserted.every((x: { state: string; source_job_id: string }) => x.state === 'queued' && x.source_job_id === 'j1'), true)
+
+    const rowPatches = f.calls.filter((c) => c.url.startsWith('https://db.test/rest/v1/validation_rows?id=in.') && c.method === 'PATCH')
+      .map((c) => ({ ids: decodeURIComponent(c.url).replace(/.*in\.\(|\)$/g, '').split(','), body: JSON.parse(c.body!) }))
+    const byStatus = (s: string, reason?: string) =>
+      rowPatches.filter((p) => p.body.instantly_status === s && (!reason || p.body.instantly_result.reason === reason)).flatMap((p) => p.ids).sort()
+    assertEquals(byStatus('banked'), ['r1', 'r2'])
+    assertEquals(byStatus('filtered', 'already pushed to Instantly'), ['r3'])
+    assertEquals(byStatus('filtered', 'duplicate email in this push'), ['r4'])
+    assertEquals(byStatus('filtered', 'junk company name'), ['r5'])
+    assertEquals(byStatus('filtered', 'already in lead bank'), ['r6'])
+
+    const jobPatches = f.calls.filter((c) => c.url.startsWith('https://db.test/rest/v1/validation_jobs?') && c.method === 'PATCH').map((c) => JSON.parse(c.body!))
+    assertEquals(jobPatches.find((p) => 'instantly_route' in p), { instantly_route: 'bank', instantly_bank_threshold: 2 })
+    assertEquals(jobPatches.find((p) => 'instantly_banked' in p), { instantly_banked: 2, instantly_filtered: 4 })
+    assertEquals(jobPatches.some((p) => p.instantly_status === 'done'), true)
+    const alertBody = f.calls.filter((c) => c.url.startsWith('https://db.test/rest/v1/rpc/') && !c.url.endsWith('instantly_pushed_emails')).map((c) => c.body ?? '').join('\n')
+    assertEquals(alertBody.includes('lead bank'), true)
+  } finally { f.restore() }
+})
+
+Deno.test('processJob: at or under the threshold the route is direct, and a resumed bank push stays banked', async () => {
+  // Resumed: instantly_route already 'bank' -> no count read, no threshold read, straight to the bank loop.
+  const f = stubFetch([
+    [(u, m) => u.startsWith('https://db.test/rest/v1/validation_jobs?') && m === 'GET', () => json([{ ...job, instantly_route: 'bank', instantly_banked: 7 }])],
+    [(u, m) => u.startsWith('https://db.test/rest/v1/validation_jobs?') && m === 'PATCH', () => new Response(null, { status: 204 })],
+    [(u, m) => u.startsWith('https://db.test/rest/v1/validation_rows?job_id=eq.j1&limit=1') && m === 'GET', () => json([vrow({})])],
+    [(u, m) => u.startsWith('https://db.test/rest/v1/validation_rows?') && m === 'GET', () => json([])],
+    [(u) => u.startsWith('https://db.test/rest/v1/rpc/'), () => json('alert-id')],
+  ])
+  try {
+    await processJob('j1')
+    assertEquals(f.calls.some((c) => c.url.includes('lume_settings') || c.url.includes('&offset=') || c.url.startsWith('https://api.instantly.ai')), false)
+    const jobPatches = f.calls.filter((c) => c.url.startsWith('https://db.test/rest/v1/validation_jobs?') && c.method === 'PATCH').map((c) => JSON.parse(c.body!))
+    assertEquals(jobPatches.some((p) => p.instantly_status === 'done'), true)
+    assertEquals(jobPatches.some((p) => 'instantly_route' in p), false)
+  } finally { f.restore() }
 })

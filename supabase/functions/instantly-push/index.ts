@@ -270,6 +270,10 @@ interface ValidationJob {
   location_barrier: boolean
   company_barrier: boolean
   company_strict: boolean
+  // Lead bank routing (20261109100136_instantly_lead_bank_routing.sql). Optional so
+  // rows/fixtures from before the columns existed read as "not decided yet".
+  instantly_banked?: number | null
+  instantly_route?: 'direct' | 'bank' | null
 }
 
 interface Lead {
@@ -391,7 +395,7 @@ export async function loadActiveJurisdictions(): Promise<JurisdictionRow[]> {
 async function loadJob(jobId: string): Promise<ValidationJob> {
   const jobs = (await supabaseRequest(
     'GET',
-    `validation_jobs?id=eq.${jobId}&select=id,filename,icp_filter,column_order,instantly_campaign_id,instantly_campaign_name,instantly_campaign_id_nolocation,instantly_campaign_name_nolocation,instantly_pushed_nolocation,instantly_pushed,instantly_filtered,instantly_errors,location_barrier,company_barrier,company_strict`,
+    `validation_jobs?id=eq.${jobId}&select=id,filename,icp_filter,column_order,instantly_campaign_id,instantly_campaign_name,instantly_campaign_id_nolocation,instantly_campaign_name_nolocation,instantly_pushed_nolocation,instantly_pushed,instantly_filtered,instantly_errors,location_barrier,company_barrier,company_strict,instantly_banked,instantly_route`,
   )) as ValidationJob[]
   if (!jobs || jobs.length === 0) throw new Error(`Job ${jobId} not found`)
   return jobs[0]
@@ -426,6 +430,38 @@ interface PreviewResult {
   // app's Vercel env. Surfacing this in the preview means a missing key shows
   // up on the review screen instead of failing mid-push.
   instantlyKeyPresent: boolean
+  // Lead bank routing: more than bank_threshold eligible leads go to lead_bank
+  // (queued) and instantly-rotate drips them in as slots free; otherwise direct.
+  route: PushRoute
+  banked_estimate: number
+  bank_threshold: number
+}
+
+// ---- Lead bank routing ----
+
+export type PushRoute = 'direct' | 'bank'
+
+const BANK_THRESHOLD_DEFAULT = 1000
+
+/** More than `threshold` eligible leads go to the lead bank; at or below, straight into Instantly. */
+export function pushRoute(eligible: number, threshold: number): PushRoute {
+  return eligible > threshold ? 'bank' : 'direct'
+}
+
+/**
+ * lume_settings.bank_threshold (Lume Settings → Budget), else the
+ * BANK_THRESHOLD env, else 1000. A failed read falls back, never blocks.
+ */
+export async function loadBankThreshold(): Promise<number> {
+  try {
+    const rows = (await supabaseRequest('GET', 'lume_settings?key=eq.bank_threshold&select=value')) as { value: unknown }[] | null
+    const n = Number(Array.isArray(rows) ? rows[0]?.value : undefined)
+    if (Number.isInteger(n) && n >= 1) return n
+  } catch (err) {
+    console.error('[instantly-push] bank_threshold read failed, using the fallback:', err instanceof Error ? err.message : err)
+  }
+  const env = Number(Deno.env.get('BANK_THRESHOLD') ?? '')
+  return Number.isInteger(env) && env >= 1 ? env : BANK_THRESHOLD_DEFAULT
 }
 
 // PostgREST caps an unbounded GET at 1000 rows, which would silently
@@ -454,7 +490,7 @@ async function buildPreview(jobId: string): Promise<PreviewResult> {
   const job = await loadJob(jobId)
   const cols = await resolveColumns(job)
 
-  const rows = await fetchAllPushableRows(jobId)
+  const [rows, threshold] = await Promise.all([fetchAllPushableRows(jobId), loadBankThreshold()])
 
   const result: PreviewResult = {
     eligible: 0, filtered: 0, junk: 0, missingFirstName: 0, blankLocation: 0,
@@ -462,6 +498,7 @@ async function buildPreview(jobId: string): Promise<PreviewResult> {
     noLocationRouted: 0,
     hasNoLocationCampaign: Boolean(job.instantly_campaign_id_nolocation),
     instantlyKeyPresent: INSTANTLY_API_KEY.length > 0,
+    route: 'direct', banked_estimate: 0, bank_threshold: threshold,
   }
 
   for (const row of rows ?? []) {
@@ -484,6 +521,11 @@ async function buildPreview(jobId: string): Promise<PreviewResult> {
       })
     }
   }
+  // A push already under way keeps the route it started with.
+  result.route = job.instantly_route ?? pushRoute(result.eligible, threshold)
+  // An estimate: leads already in the bank for that campaign, or already
+  // pushed to Instantly, are skipped at push time.
+  result.banked_estimate = result.route === 'bank' ? result.eligible : 0
   return result
 }
 
@@ -588,6 +630,21 @@ export async function processJob(jobId: string): Promise<void> {
   await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { instantly_status: 'pushing' })
 
   const cols = await resolveColumns(job)
+
+  // Route, decided once on the first invocation and kept across self
+  // re-invokes (the remaining count shrinks as rows are written). A push that
+  // was already under way before routing existed stays direct.
+  let route = job.instantly_route ?? null
+  if (!route) {
+    const started = job.instantly_pushed > 0 || job.instantly_pushed_nolocation > 0 || job.instantly_errors > 0
+    const threshold = await loadBankThreshold()
+    let eligible = 0
+    if (!started) for (const row of await fetchAllPushableRows(jobId)) if (decideRow(row, cols, job).keep) eligible++
+    route = started ? 'direct' : pushRoute(eligible, threshold)
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { instantly_route: route, instantly_bank_threshold: threshold })
+  }
+  if (route === 'bank') return processBankJob(job, cols, startTime)
+
   const jurisdictionCtx: JurisdictionContext = { rows: await loadActiveJurisdictions() }
   // A lead with no resolved city must never land in a campaign whose subject
   // line interpolates {{location}}. Instantly rotates A/B variants by its own
@@ -734,6 +791,213 @@ export async function processJob(jobId: string): Promise<void> {
       ? { severity: 'urgent', link: lumeLink('/campaigns'), scope: 'campaign', campaign_id: campaignId, dedupe_key: gateKey(jobId, 'camp_launch') }
       : { severity: 'info', link: lumeLink('/campaigns'), scope: 'campaign', campaign_id: campaignId },
     pushed > 0
+      ? { inline_keyboard: [[{ text: '🚀 Launch campaign', callback_data: `camp_launch:${jobId}` }]] }
+      : undefined,
+  )
+}
+
+// ---- Bank route ----
+//
+// Above bank_threshold eligible leads, nothing is created in Instantly here:
+// every eligible lead is queued in lead_bank for its target campaign (main, or
+// the no-location sibling for city-less leads when one is set) and
+// instantly-rotate pushes them twice a day as the shared 1,000-contact
+// workspace cap frees slots, oldest queued first. The owner's push tap is the
+// authorisation for both the banking and that rotation. Same decideRow, same
+// barriers; compliance_law is left null so the rotation resolves it at push
+// time (rotateLeadBody), exactly like Lume's own lead-bank assigns.
+
+const BANK_CHUNK = 500
+const ID_CHUNK = 150
+
+export interface BankRow {
+  campaign_id: string
+  email: string
+  first_name: string | null
+  last_name: string | null
+  company_name: string | null
+  website: string | null
+  location: string | null
+  operating_cities: string | null
+  country: string | null
+  region: string | null
+  state: 'queued'
+  source_job_id: string
+}
+
+/** The lead_bank row instantly-rotate later turns into a POST /leads body (lead.ts rotateLeadBody). */
+export function bankRow(lead: Lead, campaignId: string, jobId: string): BankRow {
+  const v = (s: string) => (s.trim() ? s.trim() : null)
+  return {
+    campaign_id: campaignId,
+    // instantly-rotate matches bank rows by lowercased email.
+    email: lead.email.trim().toLowerCase(),
+    first_name: v(lead.first_name),
+    last_name: v(lead.last_name),
+    company_name: v(lead.company_name),
+    website: v(lead.website),
+    location: v(lead.location),
+    operating_cities: v(lead.operatingCities),
+    country: v(lead.country),
+    region: v(lead.region),
+    state: 'queued',
+    source_job_id: jobId,
+  }
+}
+
+const chunks = <T>(xs: T[], n: number): T[][] => {
+  const out: T[][] = []
+  for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n))
+  return out
+}
+const inList = (xs: string[]) => `(${xs.map(x => `"${encodeURIComponent(x.replace(/"/g, ''))}"`).join(',')})`
+
+/** Emails (lowercased) a previous push already created in Instantly. A failed read means none: the rotation's skip_if_in_workspace still guards. */
+async function alreadyPushed(emails: string[]): Promise<Set<string>> {
+  const out = new Set<string>()
+  for (const part of chunks(emails, 500)) {
+    try {
+      const rows = (await supabaseRequest('POST', 'rpc/instantly_pushed_emails', { p_emails: part })) as unknown[] | null
+      for (const r of rows ?? []) {
+        const e = typeof r === 'string' ? r : Object.values((r ?? {}) as Record<string, unknown>)[0]
+        if (typeof e === 'string') out.add(e.toLowerCase())
+      }
+    } catch (err) {
+      console.error('[instantly-push] pushed-email lookup failed:', err instanceof Error ? err.message : err)
+    }
+  }
+  return out
+}
+
+/** Insert queued rows, `on conflict (campaign_id, email) do nothing`; returns the `campaign|email` keys inserted. */
+async function insertBankRows(rows: BankRow[]): Promise<Set<string>> {
+  const inserted = new Set<string>()
+  for (const part of chunks(rows, BANK_CHUNK)) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/lead_bank?on_conflict=campaign_id,email&select=campaign_id,email`, {
+      method: 'POST',
+      headers: { ...REST_HEADERS, 'Prefer': 'resolution=ignore-duplicates,return=representation' },
+      body: JSON.stringify(part),
+    })
+    if (!res.ok) throw new Error(`Supabase POST lead_bank failed (${res.status}): ${(await res.text()).slice(0, 300)}`)
+    for (const r of (await res.json()) as { campaign_id: string; email: string }[]) inserted.add(`${r.campaign_id}|${r.email}`)
+  }
+  return inserted
+}
+
+/** Of `keys` (campaign|email) that conflicted, the ones this job banked on an earlier, interrupted invocation. */
+async function bankedByJob(jobId: string, keys: string[]): Promise<Set<string>> {
+  const out = new Set<string>()
+  const emails = [...new Set(keys.map(k => k.slice(k.indexOf('|') + 1)))]
+  for (const part of chunks(emails, ID_CHUNK)) {
+    const rows = (await supabaseRequest('GET', `lead_bank?source_job_id=eq.${jobId}&email=in.${inList(part)}&select=campaign_id,email`)) as { campaign_id: string; email: string }[] | null
+    for (const r of rows ?? []) out.add(`${r.campaign_id}|${r.email}`)
+  }
+  return out
+}
+
+async function patchRows(ids: string[], patch: Record<string, unknown>): Promise<void> {
+  for (const part of chunks(ids, ID_CHUNK)) {
+    await supabaseRequest('PATCH', `validation_rows?id=in.(${part.join(',')})`, patch)
+  }
+}
+
+function reinvoke(jobId: string): Promise<void> {
+  return fetch(`${SUPABASE_URL}/functions/v1/instantly-push`, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_SERVICE_ROLE_KEY,
+      'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ job_id: jobId }),
+  }).then(() => undefined).catch(err => console.error('[instantly-push] Self re-invoke error:', err))
+}
+
+export async function processBankJob(job: ValidationJob, cols: Columns, startTime: number): Promise<void> {
+  const CHUNK_LIMIT_MS = 110_000
+  const jobId = job.id
+  const campaignId = job.instantly_campaign_id!
+  const noLocationCampaignId = job.instantly_campaign_id_nolocation
+  let banked = job.instantly_banked ?? 0
+  let filtered = job.instantly_filtered
+
+  while (true) {
+    const rows = (await supabaseRequest(
+      'GET',
+      `validation_rows?job_id=eq.${jobId}&status=eq.valid&instantly_status=eq.skipped&order=row_index.asc&limit=${BANK_CHUNK}&select=id,row_index,email,row_data`,
+    )) as ValidationRow[]
+    if (!rows || rows.length === 0) break
+
+    const drops = new Map<string, string[]>() // reason -> row ids
+    const drop = (reason: string, id: string) => drops.set(reason, [...(drops.get(reason) ?? []), id])
+    const kept: { id: string; key: string; row: BankRow }[] = []
+    const seen = new Set<string>()
+    for (const row of rows) {
+      const decision = decideRow(row, cols, job)
+      if (!decision.keep) { drop(decision.reason, row.id); continue }
+      const target = (!decision.lead.location && noLocationCampaignId) ? noLocationCampaignId : campaignId
+      const b = bankRow(decision.lead, target, jobId)
+      const key = `${b.campaign_id}|${b.email}`
+      if (seen.has(key)) { drop('duplicate email in this push', row.id); continue }
+      seen.add(key)
+      kept.push({ id: row.id, key, row: b })
+    }
+
+    const pushedBefore = await alreadyPushed(kept.map(k => k.row.email))
+    const toBank = kept.filter(k => {
+      if (!pushedBefore.has(k.row.email)) return true
+      drop('already pushed to Instantly', k.id)
+      return false
+    })
+    const inserted = await insertBankRows(toBank.map(k => k.row))
+    const conflicts = toBank.filter(k => !inserted.has(k.key)).map(k => k.key)
+    const mine = conflicts.length ? await bankedByJob(jobId, conflicts) : new Set<string>()
+
+    const bankedIds = new Map<string, string[]>() // campaign -> row ids
+    for (const k of toBank) {
+      if (inserted.has(k.key) || mine.has(k.key)) {
+        bankedIds.set(k.row.campaign_id, [...(bankedIds.get(k.row.campaign_id) ?? []), k.id])
+      } else drop('already in lead bank', k.id)
+    }
+
+    for (const [campaign, ids] of bankedIds) {
+      await patchRows(ids, { instantly_status: 'banked', instantly_result: { banked_to: campaign, routed_to: campaign, route: 'bank' } })
+      banked += ids.length
+    }
+    for (const [reason, ids] of drops) {
+      await patchRows(ids, { instantly_status: 'filtered', instantly_result: { reason } })
+      filtered += ids.length
+    }
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { instantly_banked: banked, instantly_filtered: filtered })
+
+    if (Date.now() - startTime > CHUNK_LIMIT_MS) {
+      await reinvoke(jobId)
+      await new Promise(r => setTimeout(r, 3000))
+      return
+    }
+  }
+
+  await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { instantly_status: 'done' })
+  await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, { eta_seconds: 0, eta_updated_at: new Date().toISOString() })
+
+  await notify(
+    [
+      `📥 Sent to the lead bank — ${job.filename}`,
+      `Campaign: ${job.instantly_campaign_name}`,
+      ``,
+      `Banked: ${banked} leads → lead bank (over the lead bank threshold, so nothing was created in Instantly yet)`,
+      ...(noLocationCampaignId ? [`City-less leads are queued for ${job.instantly_campaign_name_nolocation}`] : []),
+      `Filtered out: ${filtered}`,
+      ``,
+      `The twice-daily rotation pushes them into the campaign as slots free under the workspace contact cap, oldest first.`,
+      `Barriers — location: ${job.location_barrier ? 'ON' : 'OFF'}, company: ${job.company_barrier ? 'ON' : 'OFF'}${job.company_strict ? ' (strict names)' : ''}`,
+      ``,
+      `Ready to launch when your sequence is written.`,
+    ].join('\n'),
+    banked > 0
+      ? { severity: 'urgent', link: lumeLink('/campaigns'), scope: 'campaign', campaign_id: campaignId, dedupe_key: gateKey(jobId, 'camp_launch') }
+      : { severity: 'info', link: lumeLink('/campaigns'), scope: 'campaign', campaign_id: campaignId },
+    banked > 0
       ? { inline_keyboard: [[{ text: '🚀 Launch campaign', callback_data: `camp_launch:${jobId}` }]] }
       : undefined,
   )

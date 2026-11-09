@@ -715,11 +715,12 @@ export async function getPushJob(jobId: string): Promise<{
   company_barrier: boolean | null
   company_strict: boolean | null
   instantly_pushed: number | null
+  instantly_banked: number | null
 } | null> {
   const sb = createServiceClient()
   const res = await sb
     .from('validation_jobs')
-    .select('id,filename,valid_count,instantly_status,instantly_campaign_id,instantly_campaign_name,location_barrier,company_barrier,company_strict,instantly_pushed')
+    .select('id,filename,valid_count,instantly_status,instantly_campaign_id,instantly_campaign_name,location_barrier,company_barrier,company_strict,instantly_pushed,instantly_banked')
     .eq('id', jobId)
     .maybeSingle()
   if (res.error) throw new DbError('getPushJob', res.error)
