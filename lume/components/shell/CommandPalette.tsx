@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
-import { Bot, Kanban, Megaphone, Package, Repeat, User, Workflow } from 'lucide-react'
+import { Bot, Megaphone, Package, Repeat, Settings, User } from 'lucide-react'
 import {
   Command,
   CommandDialog,
@@ -15,6 +15,7 @@ import {
   CommandShortcut,
 } from '@/components/ui/command'
 import { fetchJson } from '@/hooks/fetcher'
+import { FLOW, TOOLS } from '@/components/shell/nav'
 import type { InstantlyCampaign } from '@/lib/adapters/instantly.map'
 import type { LumeCampaignRow, OrderRow } from '@/lib/db/types'
 
@@ -42,6 +43,28 @@ type RuleHit = {
  * sheet), an order (Import) or a rotation rule (Rotate). Lists load when the
  * palette first opens; lead search hits /api/crm/search as you type.
  */
+/** Extra words each tab answers to in ⌘K. */
+const TAB_WORDS: Record<string, string> = {
+  '/import': 'upload csv intake orders leadsfriday apollo',
+  '/import/leads': 'lead lists sheets folders',
+  '/progress': 'validate validation enrich gates runs push',
+  '/rotate': 'lead bank rotation rules queue',
+  '/campaigns': 'instantly sequence inbox replies analytics',
+  '/overview': 'home dashboard today',
+  '/agent': 'chat ai assistant',
+  '/crm': 'pipeline deals board all campaigns',
+  '/calendar': 'tasks schedule linear sprint',
+  '/playground': 'pipelines diagrams flows showcase',
+  '/operator': 'grok bot operator',
+  '/settings': 'preferences',
+}
+
+const SETTINGS_PAGES = [
+  { href: '/settings/budget', label: 'Budget', words: 'apify cap spend lead bank threshold' },
+  { href: '/settings/verticals', label: 'Verticals & tags', words: 'tags verticals grok keys' },
+  { href: '/settings/slack', label: 'Slack', words: 'client slack workspaces channels' },
+]
+
 export function CommandPalette() {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -122,16 +145,24 @@ export function CommandPalette() {
               ))}
             </CommandGroup>
           )}
+          {/* Every tab, in menu order: the numbered flow, then the tools, then settings pages. */}
           <CommandGroup heading="Go to">
-            <CommandItem value="crm all campaigns pipeline" onSelect={() => go('/crm')}>
-              <Kanban strokeWidth={1.75} /> CRM — all campaigns
-            </CommandItem>
-            <CommandItem value="campaigns list" onSelect={() => go('/campaigns')}>
-              <Megaphone strokeWidth={1.75} /> Campaigns
-            </CommandItem>
-            <CommandItem value="playground pipelines diagrams showcase" onSelect={() => go('/playground')}>
-              <Workflow strokeWidth={1.75} /> Playground — pipelines
-            </CommandItem>
+            {[...FLOW, ...TOOLS].map((t) => {
+              const Icon = t.icon
+              return (
+                <CommandItem key={t.href} value={`go ${t.label} ${t.step ? `step ${t.step}` : ''} ${TAB_WORDS[t.href] ?? ''}`} onSelect={() => go(t.href)}>
+                  <Icon strokeWidth={1.75} />
+                  {t.step ? <span className="w-3 font-mono text-xs text-muted-foreground">{t.step}</span> : null}
+                  {t.label}
+                  {t.key && <CommandShortcut>⌥{t.key}</CommandShortcut>}
+                </CommandItem>
+              )
+            })}
+            {SETTINGS_PAGES.map((p) => (
+              <CommandItem key={p.href} value={`go settings ${p.label} ${p.words}`} onSelect={() => go(p.href)}>
+                <Settings strokeWidth={1.75} /> Settings — {p.label}
+              </CommandItem>
+            ))}
           </CommandGroup>
           {campaigns.size > 0 && (
             <CommandGroup heading="Campaigns">

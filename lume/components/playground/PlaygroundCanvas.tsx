@@ -185,7 +185,7 @@ export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { dia
   return (
     <div
       ref={box}
-      className={cn('diagram-switch glass-overlay relative overflow-hidden rounded-panel', fullscreen && 'rounded-none bg-(--bg)', className)}
+      className={cn('diagram-switch glass-overlay relative overflow-hidden rounded-panel dark:border-0 dark:bg-black dark:backdrop-blur-none', fullscreen && 'rounded-none bg-(--bg) dark:bg-black', className)}
       aria-label={diagram.title ? `Pipeline: ${diagram.title}` : 'Pipeline'}
       role="figure"
     >
@@ -215,7 +215,7 @@ export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { dia
             variant={BackgroundVariant.Lines}
             gap={16}
             lineWidth={1}
-            color={resolvedTheme === 'light' ? 'rgba(15,26,18,0.06)' : 'rgba(255,255,255,0.045)'}
+            color={resolvedTheme === 'light' ? 'rgba(15,26,18,0.07)' : '#161616'}
           />
           <Controls fullscreen={fullscreen} onFullscreen={toggleFullscreen} />
           <FocusSelected id={selected} boxWidth={boxWidth} />
