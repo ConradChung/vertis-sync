@@ -13,28 +13,14 @@ const GRAIN =
 export function AppBackground() {
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
-      {/* Dark — "gamer": #050505, topo contours, faint lime/neutral glow, grain, grid. Black + lime only. */}
+      {/* Dark: #050505 under a slow, blurred lime gradient (owner, 2026-11-09: no wallpaper, no grid).
+          Three soft fields drift over minutes; the grain only breaks up gradient banding. */}
       <div className="absolute inset-0 hidden bg-[#050505] dark:block">
-        <Image
-          src="/bg/dark-topo.jpg"
-          alt=""
-          fill
-          priority
-          sizes="100vw"
-          className="scale-105 object-cover object-[70%_center] opacity-25 blur-[3px]"
-        />
-        <div className="anim-blob absolute -top-[22vw] -left-[18vw] size-[52vw] rounded-full bg-lime/10 blur-[120px] [animation:blob-drift-a_80s_ease-in-out_infinite]" />
-        <div className="anim-blob absolute -top-[16vw] -right-[20vw] size-[46vw] rounded-full bg-white/[0.04] blur-[120px] [animation:blob-drift-b_90s_ease-in-out_infinite]" />
-        <div className="anim-blob absolute -right-[14vw] -bottom-[26vw] size-[58vw] rounded-full bg-lime/[0.06] blur-[120px] [animation:blob-drift-c_70s_ease-in-out_infinite]" />
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage:
-              'linear-gradient(to right, rgba(255,255,255,0.022) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.022) 1px, transparent 1px)',
-            backgroundSize: '48px 48px',
-          }}
-        />
-        <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: GRAIN }} />
+        <div className="absolute -top-[30vw] -left-[20vw] size-[70vw] rounded-full bg-[radial-gradient(circle,rgba(198,255,51,0.16),transparent_65%)] will-change-transform [animation:blob-drift-a_140s_ease-in-out_infinite]" />
+        <div className="absolute -right-[25vw] -bottom-[35vw] size-[75vw] rounded-full bg-[radial-gradient(circle,rgba(74,107,0,0.30),transparent_65%)] will-change-transform [animation:blob-drift-c_170s_ease-in-out_infinite]" />
+        <div className="absolute top-[25vh] left-[35vw] size-[45vw] rounded-full bg-[radial-gradient(circle,rgba(198,255,51,0.06),transparent_70%)] will-change-transform [animation:blob-drift-b_200s_ease-in-out_infinite]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_40%,rgba(0,0,0,0.55)_100%)]" />
+        <div className="absolute inset-0 opacity-[0.025]" style={{ backgroundImage: GRAIN }} />
       </div>
 
       {/* Light — "nature": moss branch as texture under a white veil + vignette. */}

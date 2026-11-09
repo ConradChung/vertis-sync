@@ -9,7 +9,7 @@ export default function ImportPage() {
   return (
     <>
       <PageHead
-        eyebrow="Stage 1"
+        eyebrow="Step 1"
         title="Import & Orders"
         sub="Apify, CSV and Apollo intake — every one waits at the same approval gate as Telegram."
       />

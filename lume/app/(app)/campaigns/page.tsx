@@ -11,7 +11,7 @@ export default async function CampaignsPage() {
   const canChangeReplyMode = !(await cookies()).get(OPERATOR_COOKIE)?.value
   return (
     <>
-      <PageHead eyebrow="Stage 4" title="Campaigns" sub="Every campaign, its pipeline, and its replies — sends only after you confirm." />
+      <PageHead eyebrow="Step 5" title="Campaigns" sub="Every campaign, its pipeline, and its replies — sends only after you confirm." />
       <CampaignsScreen canChangeReplyMode={canChangeReplyMode} />
     </>
   )

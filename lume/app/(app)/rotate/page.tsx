@@ -8,7 +8,7 @@ export default function RotatePage() {
   return (
     <>
       <PageHead
-        eyebrow="Stage 3"
+        eyebrow="Step 4"
         title="Rotate"
         sub="Lead bank, campaign capacity and rotation rules — every assignment waits for your tap."
       />

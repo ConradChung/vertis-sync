@@ -111,7 +111,7 @@ export function LeadsScreen() {
           ) : (
             folders.map((f) => (
               <FolderNode
-                key={f.id ?? 'unfiled'}
+                key={f.id ?? f.kind ?? 'unfiled'}
                 folder={f}
                 selectedId={selectedId}
                 onSelect={select}

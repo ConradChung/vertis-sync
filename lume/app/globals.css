@@ -128,13 +128,13 @@
   --lime-edge: transparent;
 
   /* Glass recipe */
-  --glass-fill: rgba(255, 255, 255, 0.05);
-  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-fill: rgba(255, 255, 255, 0.06);
+  --glass-border: rgba(255, 255, 255, 0.13);
   --glass-highlight: rgba(255, 255, 255, 0.12);
   --glass-shadow: 0 0 #0000;
   /* Overlays (popovers, dialogs, sheets) sit over content, not the
      background, so they use a denser fill of the same recipe. */
-  --glass-fill-strong: rgba(14, 14, 14, 0.72);
+  --glass-fill-strong: rgba(14, 14, 14, 0.86);
   --primary-glow: 0 0 24px -6px var(--lime);
   /* Floating tab bar */
   --bar-fill: rgba(255, 255, 255, 0.07);
@@ -149,11 +149,12 @@
 
   /* Neutrals: white at alpha */
   --fg: #ffffff;
-  --fg-70: rgba(255, 255, 255, 0.7);
-  --fg-46: rgba(255, 255, 255, 0.55); /* muted */
-  --fg-24: rgba(255, 255, 255, 0.3); /* faint */
-  --fg-35: rgba(255, 255, 255, 0.35); /* disabled / idle */
-  --line: rgba(255, 255, 255, 0.1);
+  /* Raised for readability (owner, 2026-11-09). */
+  --fg-70: rgba(255, 255, 255, 0.82);
+  --fg-46: rgba(255, 255, 255, 0.66); /* muted */
+  --fg-24: rgba(255, 255, 255, 0.42); /* faint */
+  --fg-35: rgba(255, 255, 255, 0.42); /* disabled / idle */
+  --line: rgba(255, 255, 255, 0.13);
 
   /* Legacy names → palette */
   --bg: #050505;
@@ -166,7 +167,7 @@
   --red: var(--destructive);
 
   --radius: 0.5rem;
-  --topbar-h: 72px; /* floating bar: 16 px offset + 56 px pill */
+  --topbar-h: 60px; /* corner controls: 16 px offset + 44 px square */
 
   /* shadcn semantic */
   --background: #050505;
@@ -180,12 +181,12 @@
   --secondary: rgba(255, 255, 255, 0.08);
   --secondary-foreground: #ffffff;
   --muted: rgba(255, 255, 255, 0.05);
-  --muted-foreground: rgba(255, 255, 255, 0.55);
+  --muted-foreground: rgba(255, 255, 255, 0.66);
   --accent: color-mix(in oklab, var(--lime) 12%, transparent);
   --accent-foreground: #ffffff;
   --destructive: oklch(0.704 0.191 22.216);
-  --border: rgba(255, 255, 255, 0.1);
-  --input: rgba(255, 255, 255, 0.15);
+  --border: rgba(255, 255, 255, 0.13);
+  --input: rgba(255, 255, 255, 0.18);
   --ring: var(--lime);
   --chart-1: var(--lime);
   --chart-2: rgba(255, 255, 255, 0.6);
@@ -235,11 +236,11 @@
   --chart-glow: none;
 
   --fg: #0f1a12;
-  --fg-70: rgba(15, 26, 18, 0.72);
-  --fg-46: rgba(15, 26, 18, 0.6);
-  --fg-24: rgba(15, 26, 18, 0.4);
+  --fg-70: rgba(15, 26, 18, 0.8);
+  --fg-46: rgba(15, 26, 18, 0.68);
+  --fg-24: rgba(15, 26, 18, 0.5);
   --fg-35: rgba(15, 26, 18, 0.35);
-  --line: rgba(15, 26, 18, 0.1);
+  --line: rgba(15, 26, 18, 0.14);
 
   --bg: #f3f6f0;
   --panel: rgba(255, 255, 255, 0.78);
@@ -259,11 +260,11 @@
   --secondary-foreground: #0f1a12;
   --muted: rgba(15, 26, 18, 0.05);
   /* Brief: ink/55. Measured 4.2:1 on the glass → raised to /60 for AA. */
-  --muted-foreground: rgba(15, 26, 18, 0.6);
+  --muted-foreground: rgba(15, 26, 18, 0.68);
   --accent: color-mix(in oklab, var(--lime) 22%, transparent);
   --accent-foreground: #0f1a12;
   --destructive: oklch(0.577 0.245 27.325);
-  --border: rgba(15, 26, 18, 0.1);
+  --border: rgba(15, 26, 18, 0.14);
   --input: rgba(15, 26, 18, 0.12);
   /* Slightly deeper lime so the keyboard ring reads on white glass. */
   --ring: #a8e01a;
@@ -337,7 +338,7 @@
     width: 100%;
     max-width: 1920px;
     margin: 0 auto;
-    padding: calc(var(--topbar-h) + 2rem) 2.5rem 2rem;
+    padding: calc(var(--topbar-h) + 1.25rem) 2.5rem 2rem;
   }
   @media (max-width: 1023px) {
     .shell {

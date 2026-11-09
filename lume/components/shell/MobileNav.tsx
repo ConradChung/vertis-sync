@@ -7,6 +7,7 @@ import { ThemeToggle } from '@/components/theme/ThemeToggle'
 import { OperatorChip } from '@/components/shell/OperatorChip'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { TABS, isActiveTab } from '@/components/shell/tabs'
+import { FLOW, TOOLS, type NavTab } from '@/components/shell/nav'
 import { cn } from '@/lib/utils'
 import { LumeMark } from './LumeMark'
 
@@ -75,7 +76,7 @@ export function MobileNav({
   }, [chat])
   const [more, setMore] = useState(false)
   useEffect(() => setMore(false), [pathname])
-  const current = TABS.find((t) => isActiveTab(pathname, t.href))
+  const current: NavTab | undefined = [...FLOW, ...TOOLS].find((t) => isActiveTab(pathname, t.href))
   const primary = TABS.filter((t) => t.primary)
   const rest = TABS.filter((t) => !t.primary)
   const restActive = rest.some((t) => isActiveTab(pathname, t.href))
@@ -89,7 +90,12 @@ export function MobileNav({
           <LumeMark className="h-3.5 w-auto shrink-0 text-fg" />
           <span>lume</span>
         </Link>
-        {current && <span className="ml-2 truncate border-l border-border pl-2.5 text-[14px] text-fg-70">{current.label}</span>}
+        {current && (
+          <span className="ml-2 truncate border-l border-border pl-2.5 text-[14px] text-fg-70">
+            {current.step && <span aria-hidden className="mr-1 font-mono text-fg-46">{current.step}</span>}
+            {current.label}
+          </span>
+        )}
         <span className="flex-1" />
         {operator && <OperatorChip label={operator} className="max-w-[9rem]" />}
         <button type="button" onClick={openPalette} aria-label="Search" className="grid size-10 place-items-center rounded-full text-fg-70 outline-none hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring">
@@ -137,31 +143,44 @@ export function MobileNav({
 
       <Sheet open={more} onOpenChange={setMore}>
         <SheetContent side="bottom" className="rounded-t-[24px] px-4 pt-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)]">
-          <SheetTitle className="px-1 text-[13px] font-medium tracking-wide text-fg-46 uppercase">More</SheetTitle>
-          <ul className="grid grid-cols-2 gap-2">
-            {rest.map((t) => {
-              const active = isActiveTab(pathname, t.href)
-              const Icon = t.icon
-              return (
-                <li key={t.href}>
-                  <Link
-                    href={t.href}
-                    onPointerDown={() => warm(t.href)}
-                    aria-current={active ? 'page' : undefined}
-                    className={cn(
-                      'flex h-14 items-center gap-3 rounded-2xl border border-line px-4 text-[15px] text-fg outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                      active && 'border-transparent bg-primary text-primary-foreground'
-                    )}
-                  >
-                    <Icon className="size-5" strokeWidth={1.75} aria-hidden />
-                    {t.label}
-                  </Link>
-                </li>
-              )
-            })}
-          </ul>
+          <SheetTitle className="sr-only">Navigate</SheetTitle>
+          <NavGroup title="Flow" tabs={FLOW.filter((t) => !t.primary)} pathname={pathname} warm={warm} />
+          <NavGroup title="Tools" tabs={TOOLS.filter((t) => !t.primary)} pathname={pathname} warm={warm} />
         </SheetContent>
       </Sheet>
     </>
+  )
+}
+
+/** One labelled group of the More sheet; flow tabs show their step number. */
+function NavGroup({ title, tabs, pathname, warm }: { title: string; tabs: NavTab[]; pathname: string; warm: (href: string) => void }) {
+  if (!tabs.length) return null
+  return (
+    <section className="mb-3 last:mb-0">
+      <p className="px-1 pb-2 text-[12px] font-medium tracking-[0.12em] text-fg-46 uppercase">{title}</p>
+      <ul className="grid grid-cols-2 gap-2">
+        {tabs.map((t) => {
+          const active = isActiveTab(pathname, t.href)
+          const Icon = t.icon
+          return (
+            <li key={t.href}>
+              <Link
+                href={t.href}
+                onPointerDown={() => warm(t.href)}
+                aria-current={active ? 'page' : undefined}
+                className={cn(
+                  'flex h-14 items-center gap-3 rounded-2xl border border-line px-4 text-[15px] text-fg outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  active && 'border-transparent bg-primary text-primary-foreground'
+                )}
+              >
+                {t.step ? <span aria-hidden className="font-mono text-[13px] opacity-70">{t.step}</span> : null}
+                <Icon className="size-5" strokeWidth={1.75} aria-hidden />
+                {t.label}
+              </Link>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }

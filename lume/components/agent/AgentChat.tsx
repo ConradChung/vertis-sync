@@ -30,7 +30,7 @@ import type { Skill, SkillMode } from '@/lib/agent/skillModel'
 import { cn } from '@/lib/utils'
 import Link from 'next/link'
 import { uniqueLinks } from '@/lib/leads/lists/link'
-import { TABS } from '@/components/shell/tabs'
+import { FLOW, TOOLS } from '@/components/shell/nav'
 
 /** What "Save this chat as a skill" sends: the agent drafts it and waits for the owner's OK. */
 export const SAVE_SKILL_PROMPT =
@@ -391,7 +391,7 @@ export function AgentChat() {
   return (
     <div className="flex w-full gap-6">
       {!collapsed && !phone && (
-        <aside className="glass sticky top-[calc(var(--topbar-h)+2rem)] hidden h-[calc(100dvh-var(--topbar-h)-4rem)] w-64 shrink-0 overflow-hidden rounded-panel p-3 lg:block">
+        <aside className="glass sticky top-[calc(var(--topbar-h)+1.25rem)] hidden h-[calc(100dvh-var(--topbar-h)-3.25rem)] w-64 shrink-0 overflow-hidden rounded-panel p-3 lg:block">
           {history}
         </aside>
       )}
@@ -402,7 +402,7 @@ export function AgentChat() {
             // Phones: the app's tabs and this chat's options live here (the chat hides the app header and bottom bar).
             <div className="mb-3 flex shrink-0 flex-col gap-2.5 border-b border-line pb-3">
               <nav aria-label="App" className="grid grid-cols-3 gap-1">
-                {TABS.map((t) => {
+                {[...FLOW, ...TOOLS].map((t) => {
                   const Icon = t.icon
                   return (
                     <Link
@@ -416,7 +416,10 @@ export function AgentChat() {
                       )}
                     >
                       <Icon className="size-[18px]" strokeWidth={1.75} aria-hidden />
-                      {t.label}
+                      <span>
+                        {t.step && <span aria-hidden className="mr-1 font-mono text-fg-46">{t.step}</span>}
+                        {t.label}
+                      </span>
                     </Link>
                   )
                 })}
@@ -469,9 +472,10 @@ export function AgentChat() {
             </Button>
           </header>
         )}
-        {/* Toolbar is its own row above the chat panel so it never covers messages. Phones use the slim header above. */}
+        {/* Desktop: the chat's controls float in the top row between the corner controls, so the
+            conversation gets the full height (like the phone header). Phones use the slim header above. */}
         {!phone && (
-        <div className={cn('z-10 mb-2 flex items-center gap-1 max-sm:hidden', !(split && desktop) && 'mx-auto max-w-[1200px]')}>
+        <div className="glass fixed top-4 left-1/2 z-30 flex h-11 max-w-[calc(100vw-24rem)] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-2xl bg-(--bar-fill) px-1.5 shadow-(--bar-shadow) backdrop-blur-xl [scrollbar-width:none] max-sm:hidden">
           <Button
             variant="ghost"
             size="icon-sm"
@@ -526,7 +530,7 @@ export function AgentChat() {
             'glass-overlay flex w-full flex-col overflow-hidden rounded-panel',
             // Phones: no panel around the chat — edge to edge, it fills what the slim header leaves.
             'max-sm:min-h-0 max-sm:flex-1 max-sm:rounded-none max-sm:border-0 max-sm:bg-transparent max-sm:shadow-none max-sm:backdrop-blur-none',
-            split && desktop ? 'split-chat-in h-full' : 'mx-auto max-w-[1200px] sm:h-[calc(100dvh-var(--topbar-h)-6.75rem)]'
+            split && desktop ? 'split-chat-in h-full' : 'mx-auto max-w-[1200px] sm:h-[calc(100dvh-var(--topbar-h)-3.25rem)]'
           )}
         >
           <div className="relative flex min-h-0 flex-1 flex-col">
@@ -783,7 +787,7 @@ export function AgentChat() {
               </>
             )
           return (
-            <div className="h-[calc(100dvh-var(--topbar-h)-6.5rem)]">
+            <div className="h-[calc(100dvh-var(--topbar-h)-3.25rem)]">
               <ResizablePanelGroup orientation="horizontal" className="gap-0">
                 <ResizablePanel defaultSize="45" minSize="28">
                   {column}
