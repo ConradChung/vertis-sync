@@ -300,6 +300,9 @@ export interface LumeExternalScheduleRow {
 export interface JobProgress {
   id: string
   filename: string | null
+  /** The owner's name for the list; null = the filename. */
+  display_name?: string | null
+  created_at?: string | null
   status: string | null
   total_rows: number
   processed_rows: number

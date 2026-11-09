@@ -1,4 +1,4 @@
-import { jobTitle } from '@/lib/validate/jobs'
+import { jobName } from '@/lib/validate/jobs'
 
 /**
  * Progress: one queue of every live process (pure mappers). Each source
@@ -50,6 +50,7 @@ const base = (o: Partial<ProgressItem> & Pick<ProgressItem, 'key' | 'kind' | 'la
 export interface ValidationJobLike {
   id: string
   filename: string | null
+  display_name?: string | null
   status: string | null
   total_rows: number
   processed_rows: number
@@ -79,7 +80,7 @@ export function fromValidationJob(j: ValidationJobLike): ProgressItem {
     key: `validation:${j.id}`,
     kind: 'validation',
     label: 'Validation',
-    title: jobTitle(j),
+    title: jobName(j),
     status: j.status ?? 'unknown',
     stage,
     done,

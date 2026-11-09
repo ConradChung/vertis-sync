@@ -90,7 +90,22 @@ export async function getGates(): Promise<GateRow[]> {
     .select('*')
     .order('created_at', { ascending: true })
     .order('target_id', { ascending: true })
-  return unwrap('getGates', res) as GateRow[]
+  return withJobNames(unwrap('getGates', res) as GateRow[])
+}
+
+/**
+ * A validation job's gate is titled by the owner's name for the list when it
+ * has one (validation_jobs.display_name). Resolved here, not in lume_gates,
+ * so the view stays untouched; the subtitle keeps the filename.
+ */
+async function withJobNames(gates: GateRow[]): Promise<GateRow[]> {
+  const ids = [...new Set(gates.filter((g) => g.target_table === 'validation_jobs').map((g) => g.target_id))]
+  if (!ids.length) return gates
+  const res = await createServiceClient().from('validation_jobs').select('id,display_name').in('id', ids).not('display_name', 'is', null)
+  // A label only: on failure the gates keep their view titles.
+  if (res.error) return gates
+  const names = new Map(((res.data ?? []) as { id: string; display_name: string | null }[]).filter((r) => r.display_name?.trim()).map((r) => [r.id, r.display_name!.trim()]))
+  return names.size ? gates.map((g) => (g.target_table === 'validation_jobs' && names.has(g.target_id) ? { ...g, title: names.get(g.target_id)! } : g)) : gates
 }
 
 /** `null` when the gate is no longer open (already handled, or never was). */
@@ -284,7 +299,7 @@ export async function getEventsByTypePrefix(prefixes: string[], limit = 20): Pro
 // Validate: job progress, per-lead rows, Lume-local push settings
 
 const JOB_PROGRESS_COLS =
-  'id,filename,status,total_rows,processed_rows,eta_seconds,eta_updated_at,eta_stage,eta_validate_seconds,eta_enrich_seconds,enrich,enrich_started,enriched_rows,' +
+  'id,filename,display_name,created_at,status,total_rows,processed_rows,eta_seconds,eta_updated_at,eta_stage,eta_validate_seconds,eta_enrich_seconds,enrich,enrich_started,enriched_rows,' +
   'finder_status,rows_missing_email,emails_found,instantly_status,instantly_campaign_id,instantly_campaign_name,' +
   'location_barrier,company_barrier,company_strict'
 
@@ -306,6 +321,8 @@ export async function getJobProgress(jobId: string): Promise<JobProgress | null>
   return {
     id: String(j.id),
     filename: (j.filename as string | null) ?? null,
+    display_name: (j.display_name as string | null) ?? null,
+    created_at: (j.created_at as string | null) ?? null,
     status: (j.status as string | null) ?? null,
     total_rows: num(j.total_rows),
     processed_rows: num(j.processed_rows),
@@ -354,7 +371,7 @@ export async function getValidationHistory(opts: { days?: number; limit?: number
 export async function listRecentJobs(since: Date): Promise<JobSummary[]> {
   const res = await createServiceClient()
     .from('validation_jobs')
-    .select('id,filename,status,total_rows,processed_rows,valid_count,invalid_count,enrich,enrich_started,enriched_rows,instantly_status,eta_seconds,eta_updated_at,created_at,updated_at,error_message')
+    .select('id,filename,display_name,status,total_rows,processed_rows,valid_count,invalid_count,enrich,enrich_started,enriched_rows,instantly_status,eta_seconds,eta_updated_at,created_at,updated_at,error_message')
     .or(`status.in.(pending,processing),updated_at.gte.${since.toISOString()}`)
     .order('created_at', { ascending: false })
     .limit(50)
@@ -362,6 +379,7 @@ export async function listRecentJobs(since: Date): Promise<JobSummary[]> {
   return ((res.data ?? []) as Record<string, unknown>[]).map((j) => ({
     id: String(j.id),
     filename: (j.filename as string | null) ?? null,
+    display_name: (j.display_name as string | null) ?? null,
     status: (j.status as string | null) ?? null,
     total_rows: typeof j.total_rows === 'number' ? j.total_rows : 0,
     processed_rows: typeof j.processed_rows === 'number' ? j.processed_rows : 0,

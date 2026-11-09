@@ -7,6 +7,7 @@ import { SectionTitle, ShimmerBar } from '@/components/overview/parts'
 import { useJobProgress, useJobReasons } from '@/hooks/useJob'
 import { liveEta } from '@/lib/validate/eta'
 import { ValidationBreakdown } from '@/components/validate/ValidationBreakdown'
+import { PreviewLeadsButton, RenamableName } from '@/components/validate/ValidatedPreview'
 import type { JobProgress as Job } from '@/lib/db/types'
 import { cn } from '@/lib/utils'
 
@@ -128,8 +129,9 @@ export function JobProgress({ jobId }: { jobId: string }) {
   const reasons = useJobReasons(jobId, data ? data.status : undefined)
   return (
     <GlassCard className="gap-0 py-0" aria-label="Job progress">
-      <SectionTitle title={data?.filename ?? 'Job progress'}>
+      <SectionTitle title={data ? <RenamableName jobId={jobId} name={data.display_name?.trim() || data.filename || 'Job progress'} /> : 'Job progress'}>
         <span className="font-mono">{jobId.slice(0, 8)}</span>
+        <PreviewLeadsButton jobId={jobId} name={data?.display_name ?? data?.filename ?? undefined} />
       </SectionTitle>
       {data ? (
         <JobProgressView job={data} reasons={reasons.data?.reasons} />

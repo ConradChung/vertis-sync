@@ -6,6 +6,8 @@
 export interface JobSummary {
   id: string
   filename: string | null
+  /** The owner's name for the list (validation_jobs.display_name); null = the size title. */
+  display_name?: string | null
   status: string | null
   total_rows: number
   processed_rows: number
@@ -53,4 +55,9 @@ export function showsError(j: Pick<JobSummary, 'status' | 'error_message'>): str
 export function jobTitle(j: Pick<JobSummary, 'total_rows' | 'created_at'>): string {
   const day = new Date(j.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
   return `${j.total_rows.toLocaleString('en-US')} leads · ${day}`
+}
+
+/** What Lume calls a job: the owner's name for it (display_name), else the size title. */
+export function jobName(j: Pick<JobSummary, 'total_rows' | 'created_at'> & { display_name?: string | null }): string {
+  return j.display_name?.trim() || jobTitle(j)
 }

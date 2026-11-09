@@ -4,11 +4,9 @@ import useSWR from 'swr'
 import { fetchJson } from '@/hooks/fetcher'
 import type { JobProgress, PushPreview } from '@/lib/db/types'
 import type { InstantlyCampaign } from '@/lib/adapters/instantly.map'
-import type { ValidationRowView } from '@/lib/validate/rows'
 import { jobsPollInterval, type JobSummary } from '@/lib/validate/jobs'
 
 export const jobKey = (id: string) => `/api/jobs/${id}`
-export const rowsKey = (id: string, page: number) => `/api/jobs/${id}/rows?page=${page}`
 export const previewKey = (id: string) => `/api/gates/campaign/${id}`
 
 const RUNNING = new Set(['pending', 'processing'])
@@ -38,19 +36,6 @@ export function useJobReasons(id: string | null, status: string | null | undefin
 /** The Validate page's "Running" list (`GET /api/jobs`); polls like useJobProgress: 5 s while a job runs, else 60 s. */
 export function useRecentJobs() {
   return useSWR<{ jobs: JobSummary[] }>('/api/jobs', fetchJson, { keepPreviousData: true, refreshInterval: jobsPollInterval })
-}
-
-export interface RowsPage {
-  rows: ValidationRowView[]
-  total: number
-  page: number
-  pageSize: number
-  editable: boolean
-  edit_block_reason: string | null
-}
-
-export function useJobRows(id: string | null, page: number) {
-  return useSWR<RowsPage>(id ? rowsKey(id, page) : null, fetchJson, { keepPreviousData: true })
 }
 
 /** `instantly-push` preview — computed from the barriers on the job row. */
