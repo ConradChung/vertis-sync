@@ -855,7 +855,7 @@ const SPECS: Built[] = [
       name: 'get_validation_stats',
       description:
         "The validator's quality numbers. With job_id: that job's invalid rate (invalid ÷ (valid + invalid)), errors and rows without an email shown apart, and the breakdown by MailTester reason (Catch-All, No MX, Greylisted, Rejected, Disposable; MX Error, Timeout, SPAM Block as errors). " +
-        'Without job_id: the completed jobs of the last 90 days, newest first, each with its source (e.g. "Leadsfriday (Apollo link)", CSV import), total, valid / invalid / error % and top invalid reason — use it for "what was the invalid rate on the last Leadsfriday list?".',
+        'Without job_id: the completed jobs of the last 90 days, newest first, each with its title (the owner\'s name for the list when renamed, in display_name; match a list the owner names against it), its source (e.g. "Leadsfriday (Apollo link)", CSV import), total, valid / invalid / error % and top invalid reason — use it for "what was the invalid rate on the last Leadsfriday list?".',
       inputSchema: z.object({ job_id: uuid.optional() }),
       run: async ({ job_id }, { call }) => {
         if (!job_id) {
@@ -865,7 +865,7 @@ const SPECS: Built[] = [
         const id = job_id.toLowerCase()
         const [j, r] = (await Promise.all([call(`/api/jobs/${id}`), call(`/api/jobs/${id}/reasons`)])) as [Record<string, unknown>, { reasons?: ReasonCount[] }]
         return {
-          job: { id: j.id, filename: j.filename, status: j.status, total_rows: j.total_rows },
+          job: { id: j.id, name: j.display_name ?? null, filename: j.filename, status: j.status, total_rows: j.total_rows },
           stats: validationStats(r.reasons ?? []),
         } as ToolResult
       },

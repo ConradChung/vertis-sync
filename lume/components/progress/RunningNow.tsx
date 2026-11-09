@@ -6,6 +6,7 @@ import { Bot, Briefcase, ChevronRight, ExternalLink, Search, ShieldCheck, Shoppi
 import { JobProgress } from '@/components/validate/JobProgress'
 import { TagChip } from '@/components/tags/TagChip'
 import { PROGRESS_KEY } from '@/hooks/useProgress'
+import { PreviewLeadsButton } from '@/components/validate/ValidatedPreview'
 import { ago } from '@/lib/import/format'
 import { formatEta } from '@/lib/validate/client'
 import type { ProgressItem, ProgressKind, ProgressPayload } from '@/lib/progress/model'
@@ -74,6 +75,7 @@ export function ProgressCard({ item, now }: { item: ProgressItem; now: number })
             {item.title}
           </p>
         </div>
+        {item.kind === 'validation' && item.job_id && <PreviewLeadsButton jobId={item.job_id} name={item.title} />}
         <OpenLink item={item} />
       </header>
       <p className="text-[12px] text-fg-70">

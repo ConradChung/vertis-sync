@@ -8,6 +8,7 @@ import { GlassCard } from '@/components/ui/glass-card'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import type { historyRow } from '@/lib/validate/stats'
+import { PreviewLeadsButton, RenamableName } from '@/components/validate/ValidatedPreview'
 
 type Row = ReturnType<typeof historyRow>
 interface Page {
@@ -63,7 +64,10 @@ export function ValidationHistory() {
                   {q.data.rows.map((r) => (
                     <TableRow key={r.id}>
                       <TableCell className="pl-[18px]">
-                        <span className="block font-medium text-fg">{r.title}</span>
+                        <span className="flex items-center gap-1 font-medium text-fg">
+                          <RenamableName jobId={r.id} name={r.title} />
+                          <PreviewLeadsButton jobId={r.id} name={r.title} />
+                        </span>
                         {r.filename && <span className="block max-w-56 truncate text-[11px] text-fg-46">{r.filename}</span>}
                       </TableCell>
                       <TableCell className="text-fg-70">{r.source}</TableCell>

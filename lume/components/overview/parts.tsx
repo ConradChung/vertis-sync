@@ -170,7 +170,7 @@ export function SrOnly({ children, ...props }: { children: ReactNode } & HTMLAtt
   )
 }
 
-export function SectionTitle({ title, children }: { title: string; children?: ReactNode }) {
+export function SectionTitle({ title, children }: { title: ReactNode; children?: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-3 px-5 pt-5 pb-3">
       <h2 className="text-sm font-medium text-foreground">{title}</h2>

@@ -14,6 +14,7 @@ import { FlowView } from '@/components/campaigns/FlowView'
 import { InboxPane } from '@/components/campaigns/InboxPane'
 import { SequenceEditor } from '@/components/campaigns/SequenceEditor'
 import { CrmWorkspace } from '@/components/crm/CrmWorkspace'
+import { ValidatedLists } from '@/components/campaigns/ValidatedLists'
 import {
   requestCampaignAction,
   useCampaignAnalytics,
@@ -158,6 +159,7 @@ function CampaignDetail({ row }: { row: CampaignTableRow }) {
             <InboxPane data={inbox.data} failed={!!inbox.error} campaignId={id} campaignName={row.name} />
           </TabsContent>
           <TabsContent value="crm" className="pt-3">
+            {tab === 'crm' && <ValidatedLists campaignId={id} />}
             {tab === 'crm' && (
               <CrmWorkspace
                 campaignId={id}

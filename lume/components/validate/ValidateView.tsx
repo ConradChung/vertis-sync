@@ -11,7 +11,7 @@ import { CompanyReview } from '@/components/validate/CompanyReview'
 import { GateList } from '@/components/validate/GateList'
 import { JobProgress } from '@/components/validate/JobProgress'
 import { KeyboardHints } from '@/components/validate/KeyboardHints'
-import { RowTable } from '@/components/validate/RowTable'
+import { LeadsPreview } from '@/components/validate/ValidatedPreview'
 import { buildCallbackData } from '@/lib/adapters/pipeline.actions'
 import type { GateRow } from '@/lib/db/types'
 import { buttonsFor, countChips, groupByKind, hotkeyTarget, KIND_LABEL, type ButtonSpec } from '@/lib/validate/actions'
@@ -297,7 +297,9 @@ export function ValidateView({ gates, error, onRefresh, deepLink, emptyText = 'N
               </div>
             )}
           </div>
-          {focused && isJob && <RowTable jobId={focused.target_id} editRequest={editTick} />}
+          {focused && isJob && (
+            <LeadsPreview jobId={focused.target_id} editRequest={editTick} heading={<h3 className="mr-2 text-[13px] font-medium text-fg">Leads</h3>} />
+          )}
         </>
       )}
       <KeyboardHints />

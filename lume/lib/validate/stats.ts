@@ -1,4 +1,4 @@
-import { jobTitle } from '@/lib/validate/jobs'
+import { jobName } from '@/lib/validate/jobs'
 
 /**
  * Validator quality (pure). Grouped counts come from lume_validation_stats /
@@ -69,6 +69,8 @@ export function sourceLabel(j: { sender_name: string | null; source: string | nu
 export interface HistoryJob {
   id: string
   filename: string | null
+  /** Overlaid in TS from validation_jobs.display_name (the history RPC does not read it). */
+  display_name?: string | null
   source: string | null
   total_rows: number
   created_at: string
@@ -88,7 +90,8 @@ export function historyRow(j: HistoryJob) {
   const checked = j.valid + j.invalid + j.error
   return {
     id: j.id,
-    title: jobTitle(j),
+    title: jobName(j),
+    display_name: j.display_name?.trim() || null,
     filename: j.ingest_filename ?? j.filename,
     source: sourceLabel(j),
     total: j.total_rows,
