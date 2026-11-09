@@ -8,7 +8,7 @@ import Image from 'next/image'
  */
 export function AppBackground() {
   return (
-    <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+    <div aria-hidden data-app-bg className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
       {/* Dark: the owner's lime-on-black gradient (2026-11-09), drifting slowly; a dark veil
           keeps text readable over the bright side. */}
       <div className="absolute inset-0 hidden bg-[#050505] dark:block">

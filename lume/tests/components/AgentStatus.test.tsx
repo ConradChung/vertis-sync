@@ -12,11 +12,12 @@ describe('AgentStatus', () => {
     expect(toolLabel('some_new_tool')).toBe('Running some new tool')
   })
 
-  it('shows a spinner pill only while active', () => {
+  it('shows a loader pill only while active', () => {
     const { rerender } = render(<AgentStatus active={false} label="Thinking" />)
     expect(screen.queryByText(/Thinking/)).toBeNull()
     rerender(<AgentStatus active label="Thinking" />)
     expect(screen.getByText('Thinking…')).toBeTruthy()
-    expect(screen.getByLabelText('Loading')).toBeTruthy()
+    // The Lume loader is decorative: the pill's own text is what's announced.
+    expect(screen.getByRole('status').querySelector('[aria-hidden]')).toBeTruthy()
   })
 })

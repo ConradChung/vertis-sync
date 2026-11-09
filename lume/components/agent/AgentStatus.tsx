@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Spinner } from '@/components/ui/spinner'
+import { LumeLoader } from '@/components/agent/LumeLoader'
 import { cn } from '@/lib/utils'
 
 /** Friendly labels for tool names shown while a run is live. */
@@ -69,7 +69,7 @@ export function AgentStatus({ active, label, className }: { active: boolean; lab
         className
       )}
     >
-      <Spinner className="size-3.5 text-positive" />
+      <LumeLoader size="sm" />
       <span className="truncate font-medium text-fg">{label}…</span>
       <span className="font-mono text-[11px] text-fg-46 tabular-nums">{secs}s</span>
     </div>

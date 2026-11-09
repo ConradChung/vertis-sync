@@ -14,6 +14,7 @@ import { ManageSkills, SkillCard, SkillMenu, useSkillList } from '@/components/a
 import { Markdown } from '@/components/agent/Markdown'
 import { Waveform } from '@/components/agent/Waveform'
 import { AgentStatus, statusLabel } from '@/components/agent/AgentStatus'
+import { LumeLoader } from '@/components/agent/LumeLoader'
 import { AgentMemory } from '@/components/agent/AgentMemory'
 import { AgentSidePanel, type ReviewSetRef, type SideTab } from '@/components/agent/AgentSidePanel'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
@@ -24,7 +25,6 @@ import { ToolLog, type ToolLogEntry } from '@/components/orb/ToolLog'
 import { useSpeechRecognition, VoiceInput } from '@/components/orb/VoiceInput'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
-import { Skeleton } from '@/components/ui/skeleton'
 import { useAgentChat, type ChatMessage, type SkillRef } from '@/hooks/useAgentChat'
 import type { Skill, SkillMode } from '@/lib/agent/skillModel'
 import { cn } from '@/lib/utils'
@@ -389,9 +389,10 @@ export function AgentChat() {
   )
 
   return (
-    <div className="flex w-full gap-6">
+    // Desktop: the agent takes the whole window below the corner controls, on a solid background.
+    <div className="flex w-full gap-6 sm:fixed sm:inset-0 sm:z-10 sm:gap-0 sm:bg-background sm:pt-[72px] sm:after:pointer-events-none sm:after:absolute sm:after:inset-x-0 sm:after:top-[72px] sm:after:h-px sm:after:bg-line">
       {!collapsed && !phone && (
-        <aside className="glass sticky top-[calc(var(--topbar-h)+1.25rem)] hidden h-[calc(100dvh-var(--topbar-h)-3.25rem)] w-64 shrink-0 overflow-hidden rounded-panel p-3 lg:block">
+        <aside className="hidden h-full w-64 shrink-0 overflow-hidden border-r border-line bg-(--glass-fill) p-3 lg:block">
           {history}
         </aside>
       )}
@@ -450,7 +451,7 @@ export function AgentChat() {
 
       <div
         className={cn(
-          'relative min-w-0 flex-1',
+          'relative min-w-0 flex-1 sm:h-full',
           // Phones: the chat is the whole visual viewport (it shrinks with the keyboard):
           // slim header, messages, composer — nothing else.
           'max-sm:fixed max-sm:inset-x-0 max-sm:top-[var(--vvtop,0px)] max-sm:z-20 max-sm:flex max-sm:h-[var(--vvh,100dvh)] max-sm:flex-col max-sm:bg-background'
@@ -525,12 +526,9 @@ export function AgentChat() {
           const column = (
         <div
           className={cn(
-            // Fixed-height rounded panel: only the messages scroll (inside the clip), so the
-            // corners stay rounded at any scroll position and nothing passes behind the composer.
-            'glass-overlay flex w-full flex-col overflow-hidden rounded-panel',
-            // Phones: no panel around the chat — edge to edge, it fills what the slim header leaves.
-            'max-sm:min-h-0 max-sm:flex-1 max-sm:rounded-none max-sm:border-0 max-sm:bg-transparent max-sm:shadow-none max-sm:backdrop-blur-none',
-            split && desktop ? 'split-chat-in h-full' : 'mx-auto max-w-[1200px] sm:h-[calc(100dvh-var(--topbar-h)-3.25rem)]'
+            // Edge to edge at every width: only the messages scroll; nothing passes behind the composer.
+            'flex w-full flex-col overflow-hidden max-sm:min-h-0 max-sm:flex-1',
+            split && desktop ? 'split-chat-in h-full' : 'sm:h-full'
           )}
         >
           <div className="relative flex min-h-0 flex-1 flex-col">
@@ -550,11 +548,11 @@ export function AgentChat() {
             {chat.notFound ? (
               <MissingConversation onNew={newChat} />
             ) : chat.loading ? (
-              <LoadingConversation />
+              <LumeLoader label="Loading conversation" className="h-full min-h-[50vh]" />
             ) : messages.length === 0 ? (
               <EmptyState hello={hello} onPick={submit} disabled={busy} />
             ) : (
-              <ol className="flex flex-col gap-5 pt-1 pb-4 sm:gap-7 sm:pt-2 sm:pb-6" aria-label="Conversation">
+              <ol className="flex flex-col gap-5 pt-1 pb-4 sm:mx-auto sm:w-full sm:max-w-[880px] sm:gap-7 sm:pt-2 sm:pb-6" aria-label="Conversation">
                 {messages.map((m) => (
                   <li key={m.id} className="min-w-0" data-role={m.role}>
                     <Message
@@ -581,7 +579,7 @@ export function AgentChat() {
           )}
           </div>
 
-          <div className="shrink-0 border-t border-line bg-[var(--glass-fill-strong)] px-2.5 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:px-8 sm:pt-3 sm:pb-4">
+          <div className="shrink-0 border-t border-line bg-[var(--glass-fill-strong)] px-2.5 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:px-8 sm:pt-3 sm:pb-4 sm:[&>*]:mx-auto sm:[&>*]:max-w-[880px]">
             {chat.skipPermissions && (
               <div className="mb-3 flex items-center gap-2 rounded-control border border-red/40 bg-red/10 px-3 py-2 text-[13px] text-red" role="status">
                 <ShieldOff className="size-3.5 shrink-0" />
@@ -787,7 +785,7 @@ export function AgentChat() {
               </>
             )
           return (
-            <div className="h-[calc(100dvh-var(--topbar-h)-3.25rem)]">
+            <div className="h-full">
               <ResizablePanelGroup orientation="horizontal" className="gap-0">
                 <ResizablePanel defaultSize="45" minSize="28">
                   {column}
@@ -855,19 +853,6 @@ function MissingConversation({ onNew }: { onNew: () => void }) {
       <Button className="mt-5" onClick={onNew}>
         Start a new chat
       </Button>
-    </div>
-  )
-}
-
-function LoadingConversation() {
-  return (
-    <div className="flex flex-col gap-7 pt-2" aria-label="Loading conversation">
-      <Skeleton className="ml-auto h-10 w-2/5 rounded-2xl" />
-      <div className="flex flex-col gap-2">
-        <Skeleton className="h-4 w-4/5" />
-        <Skeleton className="h-4 w-3/5" />
-        <Skeleton className="h-4 w-2/3" />
-      </div>
     </div>
   )
 }

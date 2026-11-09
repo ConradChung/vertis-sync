@@ -500,6 +500,49 @@
     transform: translateY(0);
   }
 }
+/* The agent's loader (components/agent/LumeLoader.tsx). */
+@keyframes lume-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes lume-breathe {
+  0%, 100% { transform: scale(0.82); opacity: 0.85; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+@keyframes lume-ripple {
+  0% { transform: scale(0.45); opacity: 0.9; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+@keyframes lume-sheen {
+  to { background-position: -200% 0; }
+}
+
+/* The agent page (html[data-chat], set on /agent by MobileNav) is solid and full-page at
+   every width (owner, 2026-11-09): no wallpaper, no translucent glass, no page scroll. */
+html[data-chat] {
+  --glass-fill: #0c0c0c;
+  --glass-fill-strong: #0e0e0e;
+  --glass-highlight: transparent;
+  --bar-fill: #111111;
+  --bar-shadow: 0 0 #0000;
+  --popover: #111111;
+  overflow: hidden;
+}
+html.light[data-chat] {
+  --glass-fill: #ffffff;
+  --glass-fill-strong: #f7f9f5;
+  --bar-fill: #ffffff;
+  --popover: #ffffff;
+}
+html[data-chat] [data-app-bg] {
+  display: none;
+}
+html[data-chat] .glass,
+html[data-chat] .glass-overlay,
+html[data-chat] .bg-surface {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 /* The dark background image: a slow pan and breathe (components/theme/AppBackground.tsx). */
 @keyframes bg-drift {
   0% { transform: scale(1.08) translate3d(0, 0, 0); }
