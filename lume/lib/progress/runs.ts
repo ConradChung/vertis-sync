@@ -124,16 +124,23 @@ export function ingestRuns(gates: readonly GateRow[]): RunSummary[] {
     })
 }
 
-/** Jobs plus waiting ingests, latest activity first, one entry per id. */
-export function mergeRuns(jobs: readonly RunSummary[], ingests: readonly RunSummary[], extra: readonly RunSummary[] = []): RunSummary[] {
+/** CSVs older than this are done with (owner, 2026-11-09): the run picker leaves them out. */
+export const RUN_MAX_AGE_MS = 122 * 24 * 3600_000
+
+/**
+ * Jobs plus waiting ingests from the last 4 months, newest CSV first, one
+ * entry per id. `extra` (a deep-linked run) is kept whatever its age.
+ */
+export function mergeRuns(jobs: readonly RunSummary[], ingests: readonly RunSummary[], extra: readonly RunSummary[] = [], now = Date.now()): RunSummary[] {
   const seen = new Set<string>()
   const out: RunSummary[] = []
-  for (const r of [...ingests, ...jobs, ...extra]) {
+  const recent = (r: RunSummary) => now - Date.parse(r.created_at) <= RUN_MAX_AGE_MS
+  for (const r of [...ingests.filter(recent), ...jobs.filter(recent), ...extra]) {
     if (seen.has(r.id)) continue
     seen.add(r.id)
     out.push(r)
   }
-  return out.sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
+  return out.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
 }
 
 export function runStatus(run: Pick<RunSummary, 'id' | 'status' | 'instantly_status'>, gates: readonly GateRow[]): RunStatus {

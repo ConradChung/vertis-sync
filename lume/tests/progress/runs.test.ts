@@ -84,3 +84,13 @@ describe('?run / ?gate', () => {
     expect(selectRun({ clicked: null, runParam: null, gate: null, runs, gates: [] })).toEqual({ runId: A, source: 'default' })
   })
 })
+
+describe('the picker window', () => {
+  const now = Date.parse('2026-11-09T00:00:00Z')
+  const at = (id: string, created: string) => fromRunRow(row(id, { created_at: created, updated_at: created }))
+  it('lists the last 4 months only, newest CSV first; a deep-linked older run is kept', () => {
+    const jobs = [at(A, '2026-10-01T00:00:00Z'), at(B, '2026-11-08T00:00:00Z'), at(C, '2026-06-01T00:00:00Z')]
+    expect(mergeRuns(jobs, [], [], now).map((r) => r.id)).toEqual([B, A])
+    expect(mergeRuns(jobs, [], [at(C, '2026-06-01T00:00:00Z')], now).map((r) => r.id)).toEqual([B, A, C])
+  })
+})

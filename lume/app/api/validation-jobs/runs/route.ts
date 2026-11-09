@@ -4,7 +4,7 @@ import { listRuns } from '@/lib/db/service'
 import { dbErrorResponse } from '@/lib/http/errors'
 
 /**
- * `GET /api/validation-jobs/runs?limit=20&offset=0&q=<name>` → `{ runs }`:
+ * `GET /api/validation-jobs/runs?limit=100&offset=0&q=<name>` → `{ runs }`:
  * validation jobs of any status, latest activity first — Progress's run
  * switcher (and its "More runs" search). Read-only; owner or the agent's bearer.
  */

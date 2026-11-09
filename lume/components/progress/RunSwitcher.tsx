@@ -1,12 +1,11 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { Search } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { ChevronDown, Search } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
 import { TagChip } from '@/components/tags/TagChip'
-import { useRunSearch } from '@/hooks/useRuns'
-import { fromRunRow, type RunStatus, type RunSummary } from '@/lib/progress/runs'
+import type { RunStatus, RunSummary } from '@/lib/progress/runs'
 import { cn } from '@/lib/utils'
 
 const fmt = new Intl.NumberFormat('en-US')
@@ -43,115 +42,108 @@ export interface RunSwitcherProps {
   loaded?: boolean
 }
 
+const monthOf = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+
 /**
- * The runs, newest activity first, as one scrollable row of tiles: name,
- * date, rows, tag and a status dot. Older runs: "More runs" (search).
+ * The CSV picker (owner, 2026-11-09): one dropdown, newest CSV first, the last
+ * 4 months only (lib/progress/runs.ts). The trigger shows the selected run;
+ * the list is grouped by month with a filter box.
  */
 export function RunSwitcher({ runs, selectedId, statusOf, onSelect, loaded = true }: RunSwitcherProps) {
-  const rowRef = useRef<HTMLDivElement>(null)
-  // Keep the selected tile in view (deep links can select one far right).
-  useEffect(() => {
-    if (!selectedId) return
-    const el = rowRef.current?.querySelector<HTMLElement>(`[data-run="${selectedId}"]`)
-    if (el && rowRef.current) {
-      const box = rowRef.current
-      const left = el.offsetLeft - box.offsetLeft
-      if (left < box.scrollLeft || left + el.offsetWidth > box.scrollLeft + box.clientWidth) box.scrollTo({ left: Math.max(0, left - 16), behavior: 'smooth' })
-    }
-  }, [selectedId, runs.length])
-
-  return (
-    <nav aria-label="Runs" className="flex min-w-0 items-stretch gap-2">
-      <div ref={rowRef} className="flex min-w-0 flex-1 snap-x gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {loaded && runs.length === 0 && (
-          <p className="rounded-xl bg-(--glass-fill) px-4 py-3 text-[12.5px] text-fg-46 backdrop-blur-xl">No CSV runs yet — import one and it shows up here.</p>
-        )}
-        {runs.map((r) => {
-          const selected = r.id === selectedId
-          const status = statusOf(r)
-          return (
-            <div key={r.id} data-run={r.id} className="relative shrink-0 snap-start">
-              <button
-                type="button"
-                aria-pressed={selected}
-                aria-label={`${r.title} — ${STATUS_WORD[status]}`}
-                onClick={() => onSelect(r.id)}
-                className={cn(
-                  'flex h-full w-[212px] flex-col gap-1.5 rounded-xl px-3.5 pt-3 pb-8 text-left backdrop-blur-xl transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  selected ? 'bg-(--glass-fill-strong)' : 'bg-(--glass-fill) hover:bg-(--glass-fill-strong)'
-                )}
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <RunDot status={status} />
-                  <span className={cn('truncate text-[13px] font-medium', selected ? 'text-fg' : 'text-fg-70')}>{r.title}</span>
-                </span>
-                <span className="font-mono text-[11px] text-fg-46 tabular-nums">
-                  {day(r.created_at)} · {fmt.format(r.total_rows)} rows{r.kind === 'ingest' ? ' · new' : ''}
-                </span>
-                {selected && <span className="absolute bottom-0 left-3.5 h-0.5 w-8 rounded-full bg-fg" aria-hidden />}
-              </button>
-              {/* The tag sits over the tile (a button can't hold the tag picker). */}
-              <TagChip
-                table={r.kind === 'job' ? 'validation_jobs' : 'telegram_ingests'}
-                id={r.kind === 'job' ? r.id : r.id.slice('ingest:'.length)}
-                verticalId={r.vertical_id}
-                name={r.vertical_name}
-                revalidate={['/api/validation-jobs/runs?limit=20', '/api/gates']}
-                className="absolute bottom-3 left-[34px] max-w-[150px]"
-              />
-            </div>
-          )
-        })}
-      </div>
-      <MoreRuns onSelect={onSelect} />
-    </nav>
-  )
-}
-
-function MoreRuns({ onSelect }: { onSelect: (id: string) => void }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
-  const [debounced, setDebounced] = useState('')
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(q.trim()), 250)
-    return () => clearTimeout(t)
-  }, [q])
-  const { data, error } = useRunSearch(open ? debounced : null)
-  const results = (data?.runs ?? []).map(fromRunRow)
+  const selected = runs.find((r) => r.id === selectedId) ?? null
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return needle ? runs.filter((r) => `${r.title} ${r.filename ?? ''}`.toLowerCase().includes(needle)) : runs
+  }, [runs, q])
+
+  if (loaded && runs.length === 0) {
+    return <p className="rounded-xl bg-(--glass-fill) px-4 py-3 text-[12.5px] text-fg-46 backdrop-blur-xl">No CSV runs in the last 4 months — import one and it shows up here.</p>
+  }
+
+  let lastMonth = ''
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        className="flex w-[92px] shrink-0 flex-col items-center justify-center gap-1 rounded-xl bg-(--glass-fill) px-2 text-[11.5px] text-fg-70 backdrop-blur-xl outline-none hover:text-fg focus-visible:ring-2 focus-visible:ring-ring"
-        aria-label="More runs"
+    <nav aria-label="Runs" className="flex min-w-0 items-center gap-3">
+      <Popover
+        open={open}
+        onOpenChange={(o) => {
+          setOpen(o)
+          if (!o) setQ('')
+        }}
       >
-        <Search className="size-4" aria-hidden />
-        More runs
-      </PopoverTrigger>
-      <PopoverContent align="end" sideOffset={8} className="w-80 gap-2 rounded-xl bg-black/75 p-2 ring-0 backdrop-blur-2xl">
-        <Input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a run by name or file…" aria-label="Find a run" className="h-8 text-[12.5px]" />
-        <ul className="flex max-h-80 flex-col overflow-y-auto" aria-label="Runs found">
-          {error && !data && <li className="px-2 py-2 text-[12px] text-fg-46">Couldn&apos;t load runs.</li>}
-          {!data && !error && <li className="px-2 py-2 text-[12px] text-fg-46">Loading…</li>}
-          {data && results.length === 0 && <li className="px-2 py-2 text-[12px] text-fg-46">No run matches “{debounced}”.</li>}
-          {results.map((r) => (
-            <li key={r.id}>
-              <button
-                type="button"
-                className="flex w-full flex-col rounded-lg px-2 py-1.5 text-left outline-none hover:bg-white/8 focus-visible:bg-white/8"
-                onClick={() => {
-                  onSelect(r.id)
-                  setOpen(false)
-                }}
-              >
-                <span className="truncate text-[12.5px] text-fg">{r.title}</span>
-                <span className="font-mono text-[11px] text-fg-46 tabular-nums">
-                  {day(r.created_at)} · {fmt.format(r.total_rows)} rows · {r.status ?? '—'}
+        <PopoverTrigger
+          aria-label={selected ? `CSV: ${selected.title}. Change CSV` : 'Choose a CSV'}
+          className="flex h-12 max-w-full min-w-0 items-center gap-3 rounded-2xl bg-(--glass-fill) pr-3 pl-4 text-left backdrop-blur-xl outline-none transition-colors hover:bg-(--glass-fill-strong) focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-(--glass-fill-strong) sm:min-w-[380px]"
+        >
+          {selected ? (
+            <>
+              <RunDot status={statusOf(selected)} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[14px] font-medium text-fg">{selected.title}</span>
+                <span className="block font-mono text-[11px] text-fg-46 tabular-nums">
+                  {day(selected.created_at)} · {fmt.format(selected.total_rows)} rows · {STATUS_WORD[statusOf(selected)]}
                 </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </PopoverContent>
-    </Popover>
+              </span>
+            </>
+          ) : (
+            <span className="flex-1 text-[13px] text-fg-46">{loaded ? 'Choose a CSV' : 'Loading CSVs…'}</span>
+          )}
+          <span className="font-mono text-[11px] text-fg-46 tabular-nums">{runs.length}</span>
+          <ChevronDown className="size-4 shrink-0 text-fg-46" aria-hidden />
+        </PopoverTrigger>
+        <PopoverContent align="start" sideOffset={8} className="w-[min(440px,calc(100vw-2rem))] gap-2 rounded-2xl bg-black/75 p-2 ring-0 backdrop-blur-2xl">
+          <div className="relative">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-fg-46" aria-hidden />
+            <Input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter CSVs…" aria-label="Filter CSVs" className="h-9 pl-8 text-[12.5px]" />
+          </div>
+          <ul className="flex max-h-[60vh] flex-col overflow-y-auto overscroll-contain" aria-label="CSVs, newest first">
+            {shown.length === 0 && <li className="px-2.5 py-2 text-[12px] text-fg-46">No CSV matches “{q.trim()}”.</li>}
+            {shown.map((r) => {
+              const month = monthOf(r.created_at)
+              const header = month !== lastMonth
+              lastMonth = month
+              const status = statusOf(r)
+              const isSel = r.id === selectedId
+              return (
+                <li key={r.id}>
+                  {header && <p className="px-2.5 pt-2.5 pb-1 text-[10.5px] font-medium tracking-[0.12em] text-fg-46 uppercase">{month}</p>}
+                  <button
+                    type="button"
+                    aria-current={isSel ? 'true' : undefined}
+                    onClick={() => {
+                      onSelect(r.id)
+                      setOpen(false)
+                    }}
+                    className={cn(
+                      'flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left outline-none hover:bg-white/8 focus-visible:bg-white/8',
+                      isSel && 'bg-white/10'
+                    )}
+                  >
+                    <RunDot status={status} />
+                    <span className="min-w-0 flex-1">
+                      <span className={cn('block truncate text-[13px]', isSel ? 'font-medium text-fg' : 'text-fg-70')}>{r.title}</span>
+                      <span className="block font-mono text-[11px] text-fg-46 tabular-nums">
+                        {day(r.created_at)} · {fmt.format(r.total_rows)} rows{r.kind === 'ingest' ? ' · new' : ''}
+                      </span>
+                    </span>
+                    <span className={cn('shrink-0 text-[11px]', status === 'needs_you' ? 'text-lime' : status === 'failed' ? 'text-red' : 'text-fg-46')}>{STATUS_WORD[status]}</span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </PopoverContent>
+      </Popover>
+      {selected && (
+        <TagChip
+          table={selected.kind === 'job' ? 'validation_jobs' : 'telegram_ingests'}
+          id={selected.kind === 'job' ? selected.id : selected.id.slice('ingest:'.length)}
+          verticalId={selected.vertical_id}
+          name={selected.vertical_name}
+          revalidate={['/api/validation-jobs/runs?limit=100', '/api/gates']}
+        />
+      )}
+    </nav>
   )
 }

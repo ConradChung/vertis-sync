@@ -85,7 +85,7 @@ describe('Progress: runs', () => {
   it('opens on the most recent run that is running or waiting on you, at its active step; no "All" view', async () => {
     fresh()
     const nav_ = await screen.findByRole('navigation', { name: 'Runs' })
-    await waitFor(() => expect(within(nav_).getByRole('button', { name: /PM leads/, pressed: true })).toBeTruthy())
+    await waitFor(() => expect(within(nav_).getByRole('button', { name: /CSV: PM leads/ })).toBeTruthy())
     expect(within(nav_).queryByRole('button', { name: /^All/ })).toBeNull()
     const step = await screen.findByRole('button', { name: 'Validate: Running', current: 'step' })
     expect(step).toBeTruthy()
@@ -98,30 +98,31 @@ describe('Progress: runs', () => {
     queue.gates = [gate('campaign_choice', PICK)]
     runs = RUNS.map((r) => (r.id === RUNNING ? { ...r, status: 'completed' } : r))
     fresh()
-    await waitFor(() => expect(screen.getByRole('button', { name: /UK agents — Needs you/, pressed: true })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /CSV: UK agents/ })).toBeTruthy())
     expect(await screen.findByRole('button', { name: 'Campaign: Your move', current: 'step' })).toBeTruthy()
   })
 
-  it('?run= selects that run; picking another tile writes ?run= to the URL', async () => {
+  it('?run= selects that run; picking another CSV in the dropdown writes ?run= to the URL', async () => {
     nav.params = new URLSearchParams(`run=${DONE}`)
     fresh()
-    await waitFor(() => expect(screen.getByRole('button', { name: /Finished list/, pressed: true })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /PM leads/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /CSV: Finished list/ })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /Change CSV/ }))
+    fireEvent.click(await within(await screen.findByRole('list', { name: 'CSVs, newest first' })).findByRole('button', { name: /PM leads/ }))
     expect(nav.replace).toHaveBeenCalledWith(`/progress?run=${RUNNING}`, { scroll: false })
-    await waitFor(() => expect(screen.getByRole('button', { name: /PM leads/, pressed: true })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /CSV: PM leads/ })).toBeTruthy())
   })
 
-  it('?run= for a run older than the switcher adds it as a tile', async () => {
+  it('?run= for a run older than the picker list still opens it', async () => {
     nav.params = new URLSearchParams(`run=${OLD}`)
     fresh()
-    await waitFor(() => expect(screen.getByRole('button', { name: /Old list/, pressed: true })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /CSV: Old list/ })).toBeTruthy())
   })
 
   it('?gate= opens the gate’s run at its step; its buttons render only in the step panel', async () => {
     queue.gates = [gate('campaign_choice', PICK), gate('jobs_review', BATCH, { target_table: 'job_batches', title: 'GTM batch' })]
     nav.params = new URLSearchParams(`gate=campaign_choice:${PICK}`)
     fresh()
-    await waitFor(() => expect(screen.getByRole('button', { name: /UK agents/, pressed: true })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /CSV: UK agents/ })).toBeTruthy())
     const panel = await detail()
     expect(within(panel).getByRole('heading', { name: 'Campaign' })).toBeTruthy()
     expect(within(panel).getByRole('button', { name: 'Cancel push' })).toBeTruthy()
@@ -137,7 +138,7 @@ describe('Progress: runs', () => {
   it('a closed gate link still opens its run, with a note', async () => {
     nav.params = new URLSearchParams(`gate=campaign_choice:${DONE}`)
     fresh()
-    await waitFor(() => expect(screen.getByRole('button', { name: /Finished list/, pressed: true })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /CSV: Finished list/ })).toBeTruthy())
     expect(await screen.findByText('This gate is already closed — handled here or in Telegram.')).toBeTruthy()
   })
 

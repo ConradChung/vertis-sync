@@ -56,6 +56,12 @@ export function TopBar({ operator = null }: { operator?: string | null } = {}) {
     <>
     {/* Phones get a slim header + bottom tab bar (MobileNav); the corner controls below are sm and up. */}
     <MobileNav pathname={pathname} warm={warm} operator={operator} />
+    {/* A frosted band under the corner controls so page text scrolling up fades out behind them
+        instead of running under the page name (owner, 2026-11-09). */}
+    <div
+      aria-hidden
+      className="pointer-events-none fixed inset-x-0 top-0 z-20 h-[calc(var(--topbar-h)+20px)] bg-gradient-to-b from-(--background) via-(--background)/80 to-transparent backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_55%,transparent)]"
+    />
     <Launcher pathname={pathname} warm={warm} />
     <div className="glass fixed top-4 right-4 z-30 flex h-11 items-center gap-0.5 rounded-2xl bg-(--bar-fill) px-1 shadow-(--bar-shadow) backdrop-blur-xl max-sm:hidden">
       <button

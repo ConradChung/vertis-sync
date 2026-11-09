@@ -312,7 +312,7 @@ function RunHeader({ run, job, status }: { run: RunSummary; job: JobProgress | n
           id={isIngestRun(run.id) ? run.id.slice('ingest:'.length) : run.id}
           verticalId={run.vertical_id ?? job?.vertical_id}
           name={run.vertical_name}
-          revalidate={['/api/validation-jobs/runs?limit=20', '/api/gates']}
+          revalidate={['/api/validation-jobs/runs?limit=100', '/api/gates']}
         />
       </p>
       <h2 className="min-w-0 text-[22px] leading-tight font-semibold tracking-tight text-fg sm:text-[26px]">

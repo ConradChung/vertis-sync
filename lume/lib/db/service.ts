@@ -417,10 +417,12 @@ export async function listRuns(opts: { limit?: number; offset?: number; q?: stri
   let query = createServiceClient()
     .from('validation_jobs')
     .select('id,filename,display_name,status,total_rows,processed_rows,valid_count,enrich,finder_status,instantly_status,source,created_at,updated_at,vertical_id')
-    .order('updated_at', { ascending: false })
+    .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1)
   const q = (opts.q ?? '').replace(/[^\p{L}\p{N} ._-]/gu, '').trim()
   if (q) query = query.or(`filename.ilike.*${q}*,display_name.ilike.*${q}*`)
+  // The picker lists the last 4 months only (lib/progress/runs.ts RUN_MAX_AGE_MS).
+  else query = query.gte('created_at', new Date(Date.now() - 122 * 24 * 3600_000).toISOString())
   const res = await query
   if (res.error) throw new DbError('listRuns', res.error)
   const n = (v: unknown) => (typeof v === 'number' ? v : 0)
