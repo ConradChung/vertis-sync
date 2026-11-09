@@ -303,7 +303,7 @@ const JOB_PROGRESS_COLS =
   'id,filename,display_name,created_at,status,total_rows,processed_rows,eta_seconds,eta_updated_at,eta_stage,eta_validate_seconds,eta_enrich_seconds,enrich,enrich_started,enriched_rows,' +
   'finder_status,rows_missing_email,emails_found,instantly_status,instantly_campaign_id,instantly_campaign_name,' +
   'location_barrier,company_barrier,company_strict,instantly_campaign_id_nolocation,instantly_campaign_name_nolocation,' +
-  'instantly_pushed,instantly_pushed_nolocation,source,vertical_id'
+  'instantly_pushed,instantly_pushed_nolocation,instantly_banked,instantly_route,source,vertical_id'
 
 /** `null` when the job does not exist. Status counts are head-only exact counts (no rows move). */
 export async function getJobProgress(jobId: string): Promise<JobProgress | null> {
