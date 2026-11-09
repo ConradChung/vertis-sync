@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
-import { Kanban, Megaphone, Package, Repeat, User, Workflow } from 'lucide-react'
+import { Bot, Kanban, Megaphone, Package, Repeat, User, Workflow } from 'lucide-react'
 import {
   Command,
   CommandDialog,
@@ -95,8 +95,16 @@ export function CommandPalette() {
   return (
     <CommandDialog open={open} onOpenChange={setOpen} title="Jump to" description="Campaigns, leads, orders and rules">
       <Command>
-        <CommandInput placeholder="Jump to a campaign, lead, order or rule…" value={q} onValueChange={setQ} />
+        <CommandInput placeholder="Ask the agent, or jump to a campaign, lead, order or rule…" value={q} onValueChange={setQ} />
         <CommandList>
+          {/* Always first, whatever is typed (owner, 2026-11-09): Enter asks the agent in a new chat. */}
+          <CommandGroup heading="Agent" forceMount>
+            <CommandItem forceMount value="__ask_agent__" onSelect={() => go(q.trim() ? `/agent?ask=${encodeURIComponent(q.trim())}` : '/agent')}>
+              <Bot strokeWidth={1.75} />
+              <span className="truncate">{q.trim() ? <>Ask the agent: <span className="text-foreground">“{q.trim()}”</span></> : 'Ask the agent…'}</span>
+              <CommandShortcut>↵</CommandShortcut>
+            </CommandItem>
+          </CommandGroup>
           <CommandEmpty>{term.length >= 2 && deals.isLoading ? 'Searching…' : 'Nothing found.'}</CommandEmpty>
           {(deals.data?.deals.length ?? 0) > 0 && term.length >= 2 && (
             <CommandGroup heading="Leads">

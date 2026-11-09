@@ -48,4 +48,22 @@ describe('CommandPalette', () => {
     fireEvent.click(screen.getByText('Kaspen Q4'))
     expect(push).toHaveBeenCalledWith('/crm?campaign=c-1')
   })
+
+  it('"Ask the agent" stays first whatever is typed, and asks it in a new chat', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(respond(url)), { status: 200 })))
+    render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <CommandPalette />
+      </SWRConfig>
+    )
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'k', metaKey: true })
+    })
+    fireEvent.change(await screen.findByRole('combobox'), { target: { value: 'zzz no match' } })
+    const options = await screen.findAllByRole('option')
+    expect(options[0].textContent).toContain('Ask the agent')
+    expect(options[0].textContent).toContain('zzz no match')
+    fireEvent.click(options[0])
+    expect(push).toHaveBeenCalledWith('/agent?ask=zzz%20no%20match')
+  })
 })

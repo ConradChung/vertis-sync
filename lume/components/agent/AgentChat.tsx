@@ -282,6 +282,17 @@ export function AgentChat() {
     [busy, chat.loading, send, sendWith, picked, attach, clearSkill, attachments.any, attachments.pending]
   )
 
+  // `/agent?ask=…` (the ⌘K "Ask the agent" row): send it once as the first message of a new chat.
+  const ask = params.get('ask')
+  const askedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!ask || urlId || askedRef.current === ask || busy || chat.loading) return
+    // Opened from inside another chat: start fresh first (this effect runs again once it's reset).
+    if (chat.conversationId) return chat.reset()
+    askedRef.current = ask
+    if (!submit(ask)) setDraft(ask)
+  }, [ask, urlId, busy, chat, submit])
+
   /** A finished voice transcript: sent when it can be, else kept in the draft (never dropped). */
   const onVoice = useCallback(
     (text: string) => {
