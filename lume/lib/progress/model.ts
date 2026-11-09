@@ -29,6 +29,11 @@ export interface ProgressItem {
   external: boolean
   /** Validation jobs: the job, for its progress panel. */
   job_id?: string
+  /** The item's tag (lib/tags); vertical_name is filled by buildProgress. */
+  vertical_id?: string | null
+  vertical_name?: string | null
+  /** The table its tag lives in (retaggable from the card); null: shown, not editable. */
+  tag_table?: 'validation_jobs' | 'apollo_orders' | 'job_batches' | null
 }
 
 const RECENT_MS = 24 * 60 * 60 * 1000
@@ -63,6 +68,7 @@ export interface ValidationJobLike {
   created_at: string
   updated_at: string
   error_message: string | null
+  vertical_id?: string | null
 }
 
 const LIVE_JOB = new Set(['pending', 'processing'])
@@ -92,6 +98,8 @@ export function fromValidationJob(j: ValidationJobLike): ProgressItem {
     error: j.status === 'failed' || j.status === 'cancelled' ? (j.error_message?.trim() || 'No reason recorded.') : (j.error_message?.trim() || null),
     href: `/progress?job=${j.id}`,
     job_id: j.id,
+    vertical_id: j.vertical_id ?? null,
+    tag_table: 'validation_jobs',
   })
 }
 
@@ -201,6 +209,7 @@ export interface ApolloOrderLike {
   error: string | null
   created_at: string
   updated_at: string
+  vertical_id?: string | null
 }
 
 const LIVE_ORDER = new Set(['ordering', 'ordered'])
@@ -218,6 +227,8 @@ export function fromApolloOrder(o: ApolloOrderLike): ProgressItem {
     finished: !LIVE_ORDER.has(o.status),
     error: o.error,
     href: '/import',
+    vertical_id: o.vertical_id ?? null,
+    tag_table: 'apollo_orders',
   })
 }
 
@@ -231,6 +242,7 @@ export interface JobBatchLike {
   error: string | null
   created_at: string
   updated_at: string
+  vertical_id?: string | null
 }
 
 const LIVE_BATCH = new Set(['resolving', 'ordered', 'delivered'])
@@ -250,6 +262,8 @@ export function fromJobBatch(b: JobBatchLike): ProgressItem {
     finished: !LIVE_BATCH.has(b.status),
     error: b.error,
     href: '/import',
+    vertical_id: b.vertical_id ?? null,
+    tag_table: 'job_batches',
   })
 }
 
@@ -267,6 +281,22 @@ export function partitionProgress(items: readonly ProgressItem[], now = Date.now
     .filter((i) => i.finished && now - Date.parse(i.updated_at) <= RECENT_MS)
     .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
   return { running, recent }
+}
+
+/**
+ * Names for the tags (buildProgress): every item with a vertical_id gets its
+ * vertical's name; influencer runs and lookups (PM reactions by nature, no
+ * column of their own) get `pmReactions`, read-only.
+ */
+export function withTagNames(items: readonly ProgressItem[], verticals: readonly { id: string; name: string; key?: string | null }[]): ProgressItem[] {
+  const byId = new Map(verticals.map((v) => [v.id, v.name]))
+  const pm = verticals.find((v) => v.key === 'pm_reactions') ?? null
+  return items.map((i) => {
+    if (i.kind === 'influencer_run' || i.kind === 'influencer_lookup') {
+      return pm ? { ...i, vertical_id: pm.id, vertical_name: pm.name, tag_table: null } : i
+    }
+    return i.vertical_id ? { ...i, vertical_name: byId.get(i.vertical_id) ?? null } : i
+  })
 }
 
 /** 5 s while anything runs, else 60 s. */

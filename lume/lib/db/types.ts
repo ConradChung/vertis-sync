@@ -67,6 +67,9 @@ export interface GateRow {
   counts: Record<string, Json>
   telegram_message_id: number | null
   created_at: string
+  /** The item's tag (lume_verticals), null when untagged (lib/tags). */
+  vertical_id?: string | null
+  vertical_name?: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +88,9 @@ export interface OrderRow {
   created_by: string | null
   validation_job_id: string | null
   created_at: string
+  /** The order's tag (lib/tags). */
+  vertical_id?: string | null
+  vertical_name?: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -449,4 +455,6 @@ export interface LumeTaskRow {
   conversation_id: string | null
   created_at: string
   updated_at: string
+  /** The task's tag (lib/tags): its chat's vertical, else its filed action's. */
+  vertical_id?: string | null
 }

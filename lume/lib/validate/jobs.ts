@@ -22,6 +22,8 @@ export interface JobSummary {
   created_at: string
   updated_at: string
   error_message: string | null
+  /** The job's tag (lib/tags). */
+  vertical_id?: string | null
 }
 
 export const RUNNING_STATUSES: ReadonlySet<string> = new Set(['pending', 'processing'])

@@ -354,7 +354,7 @@ export async function getValidationHistory(opts: { days?: number; limit?: number
 export async function listRecentJobs(since: Date): Promise<JobSummary[]> {
   const res = await createServiceClient()
     .from('validation_jobs')
-    .select('id,filename,status,total_rows,processed_rows,valid_count,invalid_count,enrich,enrich_started,enriched_rows,instantly_status,eta_seconds,eta_updated_at,created_at,updated_at,error_message')
+    .select('id,filename,status,total_rows,processed_rows,valid_count,invalid_count,enrich,enrich_started,enriched_rows,instantly_status,eta_seconds,eta_updated_at,created_at,updated_at,error_message,vertical_id')
     .or(`status.in.(pending,processing),updated_at.gte.${since.toISOString()}`)
     .order('created_at', { ascending: false })
     .limit(50)
@@ -376,6 +376,7 @@ export async function listRecentJobs(since: Date): Promise<JobSummary[]> {
     created_at: String(j.created_at),
     updated_at: String(j.updated_at ?? j.created_at),
     error_message: (j.error_message as string | null) ?? null,
+    vertical_id: (j.vertical_id as string | null) ?? null,
   }))
 }
 

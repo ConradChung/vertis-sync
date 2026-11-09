@@ -44,6 +44,8 @@ export interface LeadList {
   influencer_batch_id: string | null
   created_at: string
   updated_at: string
+  /** The list's tag (lib/tags): its project's vertical unless the owner retagged it. */
+  vertical_id?: string | null
 }
 
 export interface ListRow {
@@ -70,7 +72,7 @@ export interface AppendResult {
 }
 
 const db = () => createServiceClient()
-const COLS = 'id,title,notes,created_by,project_id,project_default,item_count,email_count,sent_ingest_id,sent_at,sent_rows,columns,all_columns,content_changed_at,sheet_kind,influencer_batch_id,created_at,updated_at'
+const COLS = 'id,title,notes,created_by,project_id,project_default,item_count,email_count,sent_ingest_id,sent_at,sent_rows,columns,all_columns,content_changed_at,sheet_kind,influencer_batch_id,created_at,updated_at,vertical_id'
 const CHUNK = 500
 
 type SetRow = Omit<LeadList, 'name'> & { title: string }

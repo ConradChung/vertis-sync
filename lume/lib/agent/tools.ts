@@ -14,6 +14,7 @@ import { LinkedinProfileUrlRaw, profileUrl, LookbackDays, MaxReactionsPerPost, M
 import { APOLLO_IMPORT_STEPS } from '@/lib/influencers/model'
 import { LEAD_FIELDS } from '@/lib/review/columns'
 import { describeStep, newSkillSchema, placeholdersIn, skillStepSchema, skillVariableSchema, type NewSkill, type Skill } from '@/lib/agent/skillModel'
+import { findVertical, scopeByTag, TAG_TABLES, UNTAGGED, type Tagged, type TagVertical } from '@/lib/tags/model'
 
 /**
  * The orb agent's tools. Each one is declared once with `tiered(spec, tier)`:
@@ -80,6 +81,12 @@ export interface ToolDeps {
    * names a project.
    */
   projectId?: string | null
+  /**
+   * This chat's tag (its own vertical, else its project's; server-set). The
+   * to-do tools (get_validation_queue, get_progress, list_tasks) default to
+   * it; null keeps everything, grouped by tag.
+   */
+  tag?: TagVertical | null
   /**
    * The Grok Bot running this chat, if any. A vertical (non-master) bot does
    * not get the vertical-management tools (MASTER_ONLY_TOOLS); list_verticals stays.
@@ -384,6 +391,33 @@ async function autoAppend(call: RouteCall, deps: ToolDeps, source: AppendSourceB
 }
 
 // ---------------------------------------------------------------------------
+// Tag scoping (lib/tags/model.ts): the to-do tools default to the chat's tag.
+
+const TagScopeInput = z.object({
+  vertical: z.string().min(1).max(120).optional().describe("one tag (vertical) by name, e.g. 'kaspen', or 'untagged'; default: this chat's tag"),
+  all: z.boolean().optional().describe('everything, grouped by tag (only when Conrad asks for all of it)'),
+})
+
+const asArray = (v: unknown): Tagged[] => (Array.isArray(v) ? (v as Tagged[]) : [])
+const pick = (o: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]))
+const briefGate = (g: Tagged) => pick(g as Record<string, unknown>, ['kind', 'target_table', 'target_id', 'title'])
+const briefProgress = (p: Tagged) => pick(p as Record<string, unknown>, ['key', 'label', 'title', 'status'])
+const briefTask = (t: Tagged) => pick(t as Record<string, unknown>, ['id', 'title', 'due_at', 'status'])
+
+async function scoped(
+  call: RouteCall,
+  deps: ToolDeps,
+  input: { vertical?: string; all?: boolean },
+  items: Tagged[],
+  brief: (item: Tagged) => Record<string, unknown>,
+  noun: string
+) {
+  // Names come with the items (vertical_name); the list is needed only to resolve a typed tag.
+  const verticals = input.vertical && !input.all ? (asArray(((await call('/api/tags')) as { tags?: unknown })?.tags) as unknown as TagVertical[]) : []
+  return scopeByTag(items, { focus: deps.tag ?? null, all: input.all, vertical: input.vertical ?? null, verticals, brief, noun })
+}
+
+// ---------------------------------------------------------------------------
 // The tools
 
 const SPECS: Built[] = [
@@ -400,9 +434,29 @@ const SPECS: Built[] = [
   tiered(
     {
       name: 'get_validation_queue',
-      description: 'The open validation gates (decisions waiting on the owner), each with its kind, target id and the gate buttons (callback_data) it accepts.',
-      inputSchema: z.object({}),
-      run: async (_i, { call }) => ({ gates: await call('/api/gates') }),
+      description:
+        'The open gates and approvals (decisions waiting on the owner: his to-dos), each with its kind, target_table, target id, tag (vertical_name) and the gate buttons (callback_data) it accepts. ' +
+        "In a tagged chat it returns that tag's items in full, untagged ones briefly and other tags as one count line each; pass vertical (a tag name, or 'untagged') for another tag, or all: true for everything grouped by tag.",
+      inputSchema: TagScopeInput,
+      run: async (input, { call, deps }) => ({ gates: await scoped(call, deps, input, asArray(await call('/api/gates')), briefGate, 'waiting') }),
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'get_progress',
+      description:
+        'What is running now and what finished in the last 24 h (validation jobs, Apify runs, influencer runs, LinkedIn lookups, Leadsfriday orders, job-search batches), with stage, counts, ETA and tag. ' +
+        'Scoped to the chat\'s tag like get_validation_queue (vertical / all to widen).',
+      inputSchema: TagScopeInput,
+      run: async (input, { call, deps }) => {
+        const p = (await call('/api/progress')) as { running?: unknown; recent?: unknown; unavailable?: unknown }
+        return {
+          running: await scoped(call, deps, input, asArray(p?.running), briefProgress, 'running'),
+          recent: await scoped(call, deps, input, asArray(p?.recent), briefProgress, 'finished recently'),
+          ...(Array.isArray(p?.unavailable) && p.unavailable.length ? { unavailable: p.unavailable } : {}),
+        }
+      },
     },
     'read'
   ),
@@ -1800,15 +1854,17 @@ const SPECS: Built[] = [
       description:
         "Calendar tasks due in a date range (owner's time zone, America/Los_Angeles): title, due, status (scheduled, awaiting_tap, running, done, failed, cancelled), " +
         'the scheduled action kind and filed action id, and the linked Linear issue. Default range: today and the next 14 days.',
-      inputSchema: z.object({
+      inputSchema: TagScopeInput.extend({
         from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD, inclusive'),
         to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD, exclusive; at most 120 days after from'),
       }),
-      run: async ({ from, to }, { call }) => {
+      run: async ({ from, to, vertical, all }, { call, deps }) => {
         const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date())
         const start = from ?? today
         const end = to ?? new Date(Date.parse(`${start}T00:00:00Z`) + 15 * 86_400_000).toISOString().slice(0, 10)
-        return (await call(`/api/tasks?from=${start}&to=${end}`)) as ToolResult
+        const r = (await call(`/api/tasks?from=${start}&to=${end}`)) as ToolResult
+        if (!Array.isArray(r?.tasks)) return r
+        return { ...r, tasks: await scoped(call, deps, { vertical, all }, r.tasks as Tagged[], briefTask, 'tasks') }
       },
     },
     'read'
@@ -1885,6 +1941,33 @@ const SPECS: Built[] = [
       description: 'Cancel a Calendar task (and its Linear issue). An action it already filed is not touched: it still awaits its own approval or denial.',
       inputSchema: z.object({ task_id: uuid }),
       run: async ({ task_id }, { call }) => (await call(`/api/tasks/${task_id.toLowerCase()}`, { method: 'DELETE' })) as ToolResult,
+    },
+    'low'
+  ),
+  // tags (an item's vertical) -------------------------------------------------
+  tiered(
+    {
+      name: 'tag_item',
+      description:
+        "Set an item's tag (the line of business it belongs to: one of the verticals, e.g. 'Kaspen / Zenport', 'Job search / GTM roles'), or 'untagged' to clear it, when Conrad says so (\"tag that job pull as recruiting\"). " +
+        'table is the item\'s table: a gate\'s target_table, lead_review_sets for a lead list, lume_tasks for a Calendar task, pending_actions for an approval. ' +
+        'Items that inherited the old tag (a list\'s import and validation job, an action\'s task) follow. Changes nothing else and spends nothing.',
+      inputSchema: z.object({
+        table: z.enum(TAG_TABLES),
+        id: uuid,
+        tag: z.string().min(1).max(120).describe("a tag (vertical) name or id, or 'untagged'"),
+      }),
+      run: async ({ table, id: itemId, tag }, { call }) => {
+        let verticalId: string | null = null
+        if (tag.trim().toLowerCase() !== UNTAGGED.toLowerCase()) {
+          const tags = asArray(((await call('/api/tags')) as { tags?: unknown })?.tags) as TagVertical[]
+          const v = findVertical(tag, tags)
+          if (!v) throw new Error(`No single tag matches "${tag}". Tags: ${tags.map((t) => t.name).join(', ') || 'none'}. Ask Conrad which one, or create_vertical first.`)
+          verticalId = v.id
+        }
+        const r = (await call('/api/tags', { method: 'PATCH', body: { table, id: itemId.toLowerCase(), vertical_id: verticalId } })) as { item?: { vertical_name?: string | null } }
+        return { status: 'tagged', table, id: itemId.toLowerCase(), tag: r?.item?.vertical_name ?? UNTAGGED }
+      },
     },
     'low'
   ),

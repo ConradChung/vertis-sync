@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { LIST_COLUMNS, type EditableField, type ListItem } from '@/lib/leads/lists/model'
 import { InfluencerSheet } from '@/components/leads/InfluencerSheet'
+import { TagChip } from '@/components/tags/TagChip'
 import { ExpandButton, SheetOverlay, scrollBoxClass, useSheetExpand } from '@/components/leads/SheetFrame'
 import { cn } from '@/lib/utils'
 
@@ -48,6 +49,7 @@ interface LeadListRow {
   sheet_kind?: 'leads' | 'influencer_candidates'
   influencer_batch_id?: string | null
   updated_at: string
+  vertical_id?: string | null
 }
 interface Folder {
   id: string | null
@@ -325,7 +327,8 @@ function ListPanel({
             {list.name}
             <IconAction label="Rename list" onClick={() => setDialog('rename')} icon={Pencil} />
           </h2>
-          <p className="text-[11.5px] text-fg-46">
+          <p className="flex flex-wrap items-center gap-x-1 text-[11.5px] text-fg-46">
+            <TagChip table="lead_review_sets" id={list.id} verticalId={list.vertical_id} onChanged={onChanged} className="mr-1.5 text-[11.5px]" />
             {fmt.format(list.item_count)} rows · {fmt.format(list.email_count)} with an email
             {list.sent_at && ` · sent ${relTime(list.sent_at)} (${fmt.format(list.sent_rows ?? 0)} rows)`}
             {list.sent_job_id && (

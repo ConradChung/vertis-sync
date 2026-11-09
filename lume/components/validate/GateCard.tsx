@@ -6,6 +6,7 @@ import { Loader2 } from 'lucide-react'
 import { AnimatedNumber } from '@/components/ui/animated-number'
 import { Button } from '@/components/ui/button'
 import { GlassCard } from '@/components/ui/glass-card'
+import { TagChip } from '@/components/tags/TagChip'
 import { Input } from '@/components/ui/input'
 import { LFO_MAX_COUNT, LFO_MIN_COUNT } from '@/lib/adapters/pipeline.actions'
 import type { GateRow } from '@/lib/db/types'
@@ -77,9 +78,12 @@ export function GateCard({ gate, focused, busy, countOpen, onAction, onCountOpen
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           {/* The group header already names the kind; the card shows the age. */}
-          <time dateTime={gate.created_at} className="font-mono text-[10px] text-fg-46" suppressHydrationWarning>
-            opened {age(gate.created_at)}
-          </time>
+          <div className="flex items-center gap-2.5">
+            <time dateTime={gate.created_at} className="font-mono text-[10px] text-fg-46" suppressHydrationWarning>
+              opened {age(gate.created_at)}
+            </time>
+            <TagChip table={gate.target_table} id={gate.target_id} verticalId={gate.vertical_id} name={gate.vertical_name} revalidate={['/api/gates']} disabled={busy} />
+          </div>
           <h3 id={titleId} className="mt-1 truncate text-[14px] font-semibold text-fg">
             {gate.title ?? gate.kind}
           </h3>

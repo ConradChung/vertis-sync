@@ -41,6 +41,8 @@ import { internalOrigin } from '@/lib/http/origin'
 import { operatorPromptLine, verticalPromptLine } from '@/lib/operators/context'
 import { currentOperator } from '@/lib/operators/session'
 import { getVertical } from '@/lib/operators/store'
+import { tagPromptLine, type TagVertical } from '@/lib/tags/model'
+import { conversationTag } from '@/lib/tags/store'
 import { MASTER_ONLY_ERROR } from '@/lib/operators/guard'
 import { requestOrigin } from '@/lib/http/origin'
 import type { Operator } from '@/lib/operators/types'
@@ -336,9 +338,16 @@ export async function POST(req: Request) {
       })
       // This conversation's project only: its row and its own items, never another's.
       const project = projectId ? await loadProjectBlock(projectId, scope) : null
+      // The chat's tag (its vertical, else its project's) scopes the to-do tools; a failed read keeps everything.
+      const tag = await conversationTag(conversationId).catch((err) => {
+        console.error('[api/agent/run] tag load failed:', err instanceof Error ? err.message : err)
+        return null
+      })
+      const tagLine = tagPromptLine(tag)
       const reply = await executeRun({
         runId,
-        prompt: withKnowledge(knowledge, prompt),
+        prompt: withKnowledge(knowledge, tagLine ? `${tagLine}\n\n${prompt}` : prompt),
+        tag,
         history,
         images: { current: currentImages, loaded: loadedHistory, currentFiles, loadedFiles },
         title: message || titleFromMessage(message, currentImages, currentFiles),
@@ -559,10 +568,13 @@ async function executeRun({
   project,
   sopContext,
   skipPermissions,
+  tag,
   send: emit,
 }: {
   runId: string
   prompt: string
+  /** The chat's tag (lib/tags): the to-do tools default to it. */
+  tag: TagVertical | null
   /** The conversation's earlier stored turns (replayed in full by buildMessages). */
   history: ContextTurn[]
   /** The current message's images and files, and the history ones loaded for replay (images by path, files by id). */
@@ -660,6 +672,7 @@ async function executeRun({
       baseUrl: origin,
       conversationId,
       projectId: project?.id ?? null,
+      tag,
       skipPermissions,
       autoApprove: makeAutoApprove({ operator, publicOrigin }),
       operator,

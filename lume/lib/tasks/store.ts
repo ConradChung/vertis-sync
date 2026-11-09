@@ -13,7 +13,7 @@ import type { Json, LumeTaskRow, TaskStatus } from '@/lib/db/types'
 
 const COLS =
   'id, title, notes, due_at, all_day, action_kind, action_payload, status, action_id, last_error, reminded_at, ' +
-  'linear_issue_id, linear_identifier, linear_url, linear_synced_at, linear_error, created_by, conversation_id, created_at, updated_at'
+  'linear_issue_id, linear_identifier, linear_url, linear_synced_at, linear_error, created_by, conversation_id, created_at, updated_at, vertical_id'
 
 const rows = (data: unknown) => (data ?? []) as unknown as LumeTaskRow[]
 

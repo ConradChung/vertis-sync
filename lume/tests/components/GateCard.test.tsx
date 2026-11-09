@@ -30,7 +30,10 @@ describe('GateCard', () => {
 
   it('ingest_approval with no email column shows Deny only', () => {
     render(<GateCard gate={gate('ingest_approval', { actions: ['deny'] })} focused={false} busy={false} onAction={() => {}} />)
-    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Deny'])
+    // The tag chip (a quiet button) is not a gate choice.
+    const choices = screen.getAllByRole('button').filter((b) => !b.getAttribute('aria-label')?.startsWith('Tag:'))
+    expect(choices.map((b) => b.textContent)).toEqual(['Deny'])
+    expect(screen.getByRole('button', { name: /Tag: Untagged/ })).toBeTruthy()
   })
 
   it('reject-like buttons use the red (destructive) tone', () => {

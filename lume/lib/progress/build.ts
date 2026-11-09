@@ -11,6 +11,7 @@ import {
   fromLookupBatch,
   fromValidationJob,
   partitionProgress,
+  withTagNames,
   type ApifyRunLike,
   type ProgressItem,
   type ProgressPayload,
@@ -111,7 +112,7 @@ export async function buildProgress(now = new Date()): Promise<ProgressPayload> 
       load: async () => {
         const { data, error } = await sb
           .from('apollo_orders')
-          .select('id,status,contact_count,leadsfriday_status,error,created_at,updated_at')
+          .select('id,status,contact_count,leadsfriday_status,error,created_at,updated_at,vertical_id')
           .or(`status.in.(ordering,ordered),updated_at.gte.${since}`)
           .order('created_at', { ascending: false })
           .limit(20)
@@ -124,7 +125,7 @@ export async function buildProgress(now = new Date()): Promise<ProgressPayload> 
       load: async () => {
         const { data, error } = await sb
           .from('job_batches')
-          .select('id,status,batch_date,companies_pulled,companies_added,contacts_total,error,created_at,updated_at')
+          .select('id,status,batch_date,companies_pulled,companies_added,contacts_total,error,created_at,updated_at,vertical_id')
           .or(`status.in.(resolving,ordered,delivered),updated_at.gte.${since}`)
           .order('created_at', { ascending: false })
           .limit(20)
@@ -134,7 +135,15 @@ export async function buildProgress(now = new Date()): Promise<ProgressPayload> 
     },
   ]
 
-  const settled = await Promise.allSettled(sources.map((s) => s.load()))
+  // Tag names (a failure only leaves the chips unnamed).
+  const verticalsQuery = sb.from('lume_verticals').select('id,name,key')
+  const [settled, verticals] = await Promise.all([
+    Promise.allSettled(sources.map((s) => s.load())),
+    Promise.resolve(verticalsQuery).then(
+      (r) => ((r.error ? [] : (r.data ?? [])) as { id: string; name: string; key: string | null }[]),
+      () => []
+    ),
+  ])
   const items: ProgressItem[] = []
   const unavailable: string[] = []
   settled.forEach((r, i) => {
@@ -144,7 +153,7 @@ export async function buildProgress(now = new Date()): Promise<ProgressPayload> 
       console.error(`[progress] ${sources[i].name}:`, r.reason instanceof Error ? r.reason.message : r.reason)
     }
   })
-  const out = partitionProgress(items, now.getTime())
+  const out = partitionProgress(withTagNames(items, verticals), now.getTime())
   return unavailable.length ? { ...out, unavailable } : out
 }
 

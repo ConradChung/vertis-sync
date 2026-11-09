@@ -4,6 +4,8 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { Bot, Briefcase, ChevronRight, ExternalLink, Search, ShieldCheck, ShoppingCart, Users, type LucideIcon } from 'lucide-react'
 import { JobProgress } from '@/components/validate/JobProgress'
+import { TagChip } from '@/components/tags/TagChip'
+import { PROGRESS_KEY } from '@/hooks/useProgress'
 import { ago } from '@/lib/import/format'
 import { formatEta } from '@/lib/validate/client'
 import type { ProgressItem, ProgressKind, ProgressPayload } from '@/lib/progress/model'
@@ -62,7 +64,12 @@ export function ProgressCard({ item, now }: { item: ProgressItem; now: number })
       <header className="flex items-start gap-2.5">
         <Icon className="mt-0.5 size-4 shrink-0 text-fg-46" aria-hidden />
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] text-fg-46">{item.label}</p>
+          <p className="flex items-center gap-2 text-[11px] text-fg-46">
+            {item.label}
+            {(item.tag_table || item.vertical_id) && (
+              <TagChip table={item.tag_table ?? null} id={item.key.slice(item.key.indexOf(':') + 1)} verticalId={item.vertical_id} name={item.vertical_name} revalidate={[PROGRESS_KEY]} />
+            )}
+          </p>
           <p className="truncate text-[13.5px] font-medium text-fg" title={item.title}>
             {item.title}
           </p>

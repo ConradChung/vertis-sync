@@ -4,7 +4,9 @@ import { AnimatedNumber } from '@/components/ui/animated-number'
 import type { KeyboardEvent } from 'react'
 import { ShimmerBar, useNow } from '@/components/overview/parts'
 import { StatusBadge } from '@/components/import/StatusBadge'
+import { TagChip } from '@/components/tags/TagChip'
 import type { OrderKind, OrderRow } from '@/lib/db/types'
+import type { TagTable } from '@/lib/tags/model'
 import { ago, costLabel, sourceLabel, summaryLabel } from '@/lib/import/format'
 import { cn } from '@/lib/utils'
 
@@ -14,6 +16,14 @@ export interface OrdersTableProps {
   selected: { kind: OrderKind; id: string } | null
   onSelect: (o: { kind: OrderKind; id: string }) => void
   onRetry?: () => void
+}
+
+/** Where each order kind's tag lives. */
+const TAG_TABLE: Record<OrderKind, TagTable> = {
+  ingest: 'telegram_ingests',
+  apollo_order: 'apollo_orders',
+  job_batch: 'job_batches',
+  dashboard_job: 'validation_jobs',
 }
 
 const COLS = ['Source', 'Summary', 'Rows', 'Status', 'Cost', 'Created by', 'When'] as const
@@ -96,8 +106,9 @@ export function OrdersTable({ orders, error, selected, onSelect, onRetry }: Orde
                     )}
                   >
                     <td className="px-3 py-2.5 pl-[18px] whitespace-nowrap">{sourceLabel(o.source)}</td>
-                    <td className="max-w-[130px] truncate px-3 py-2.5 text-fg sm:max-w-[260px]" title={o.summary ?? undefined}>
-                      {summaryLabel(o)}
+                    <td className="max-w-[130px] px-3 py-2.5 text-fg sm:max-w-[260px]" title={o.summary ?? undefined}>
+                      <span className="block truncate">{summaryLabel(o)}</span>
+                      <TagChip table={TAG_TABLE[o.kind]} id={o.id} verticalId={o.vertical_id} name={o.vertical_name} onChanged={onRetry ? () => onRetry() : undefined} className="mt-1" />
                     </td>
                     <td className="px-3 py-2.5 text-right font-mono tabular-nums">{o.row_count == null ? '—' : <AnimatedNumber value={o.row_count} />}</td>
                     <td className="px-3 py-2.5">

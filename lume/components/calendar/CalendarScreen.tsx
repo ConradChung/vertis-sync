@@ -12,6 +12,7 @@ import { GlassCard } from '@/components/ui/glass-card'
 import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
+import { TagChip } from '@/components/tags/TagChip'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { fetchJson } from '@/hooks/fetcher'
 import { PHONE_QUERY, useMediaQuery } from '@/hooks/useMediaQuery'
@@ -363,6 +364,10 @@ function TaskDetail({ task, onSaved }: { task: LumeTaskRow; onSaved: () => void 
         <dt className="text-fg-46">Status</dt>
         <dd>
           <span className={cn('rounded-full border px-2 py-0.5 text-[11px]', STATUS_TONE[task.status])}>{STATUS_LABEL[task.status]}</span>
+        </dd>
+        <dt className="text-fg-46">Tag</dt>
+        <dd>
+          <TagChip table="lume_tasks" id={task.id} verticalId={task.vertical_id} onChanged={onSaved} className="text-[12px]" />
         </dd>
         {task.notes && (
           <>

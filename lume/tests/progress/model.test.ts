@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fromApifyRun, fromApolloOrder, fromInfluencerRun, fromJobBatch, fromLookupBatch, fromValidationJob, partitionProgress, pollInterval } from '@/lib/progress/model'
+import { fromApifyRun, fromApolloOrder, fromInfluencerRun, fromJobBatch, fromLookupBatch, fromValidationJob, partitionProgress, pollInterval, withTagNames } from '@/lib/progress/model'
 
 const NOW = Date.parse('2026-11-06T12:00:00Z')
 const iso = (minAgo: number) => new Date(NOW - minAgo * 60_000).toISOString()
@@ -50,5 +50,22 @@ describe('partitionProgress / pollInterval', () => {
     expect(p.recent.map((x) => x.key)).toEqual(['c'])
     expect(pollInterval({ running: [a] } as never)).toBe(5_000)
     expect(pollInterval({ running: [] } as never)).toBe(60_000)
+  })
+})
+
+describe('withTagNames', () => {
+  const V = [
+    { id: 'v-jobs', name: 'Job search / GTM roles', key: 'jobs' },
+    { id: 'v-pm', name: 'PM reactions', key: 'pm_reactions' },
+  ]
+  const at = '2026-11-06T12:00:00Z'
+  it('names tagged items, keeps untagged ones, and marks influencer work PM reactions (read-only)', () => {
+    const batch = fromJobBatch({ id: 'b', status: 'ordered', batch_date: null, companies_pulled: 1, companies_added: 1, contacts_total: null, error: null, created_at: at, updated_at: at, vertical_id: 'v-jobs' })
+    const order = fromApolloOrder({ id: 'o', status: 'ordered', contact_count: 500, leadsfriday_status: null, error: null, created_at: at, updated_at: at })
+    const run = fromInfluencerRun({ id: 'r', status: 'running', stage: null, influencer_ids: [], cost: null, counts: null, error: null, created_at: at, updated_at: at, finished_at: null })
+    const [b, o, r] = withTagNames([batch, order, run], V)
+    expect(b).toMatchObject({ vertical_id: 'v-jobs', vertical_name: 'Job search / GTM roles', tag_table: 'job_batches' })
+    expect(o).toMatchObject({ vertical_id: null, tag_table: 'apollo_orders' })
+    expect(r).toMatchObject({ vertical_id: 'v-pm', vertical_name: 'PM reactions', tag_table: null })
   })
 })

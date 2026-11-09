@@ -30,6 +30,8 @@ export const TOOL_TIERS = {
   create_lead_list: 'low', append_to_lead_list: 'low', remove_from_lead_list: 'low', rename_lead_list: 'low',
   // Calendar: scheduling spends nothing; a scheduled action is filed for a tap when due (lib/tasks/tick.ts).
   list_tasks: 'read', schedule_task: 'low', update_task: 'low', cancel_task: 'low',
+  // Tags: reading progress; retagging an item (its vertical) changes no pipeline state.
+  get_progress: 'read', tag_item: 'low',
   decide_validation: 'high', assign_leads: 'high', activate_rule: 'high', send_reply: 'high',
   pause_campaign: 'high', resume_campaign: 'high', activate_campaign: 'high', duplicate_campaign: 'high', delete_rule: 'high',
   run_apify_actor: 'high', update_campaign_sequence: 'high', issue_operator_key: 'high', remove_leads: 'high',
