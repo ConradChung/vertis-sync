@@ -128,16 +128,17 @@
   --lime-edge: transparent;
 
   /* Glass recipe */
-  --glass-fill: rgba(255, 255, 255, 0.06);
-  --glass-border: rgba(255, 255, 255, 0.13);
+  /* Glass is tinted near-black so text stays readable over the bright gradient (owner, 2026-11-09). */
+  --glass-fill: rgba(0, 0, 0, 0.62);
+  --glass-border: rgba(255, 255, 255, 0.1);
   --glass-highlight: rgba(255, 255, 255, 0.12);
   --glass-shadow: 0 0 #0000;
   /* Overlays (popovers, dialogs, sheets) sit over content, not the
      background, so they use a denser fill of the same recipe. */
-  --glass-fill-strong: rgba(14, 14, 14, 0.86);
+  --glass-fill-strong: rgba(6, 6, 6, 0.9);
   --primary-glow: 0 0 24px -6px var(--lime);
   /* Floating tab bar */
-  --bar-fill: rgba(255, 255, 255, 0.07);
+  --bar-fill: rgba(0, 0, 0, 0.6);
   --bar-shadow: inset 0 1px 0 0 var(--glass-highlight), 0 12px 32px -12px rgba(0, 0, 0, 0.7);
   --dot-glow: 0 0 8px currentColor;
 
@@ -159,7 +160,7 @@
   /* Legacy names → palette */
   --bg: #050505;
   --panel: rgba(8, 8, 8, 0.82);
-  --surface: rgba(16, 16, 16, 0.82); /* sticky headers: dense + blurred so rows hide */
+  --surface: rgba(6, 6, 6, 0.9); /* sticky headers: dense + blurred so rows hide */
   --violet-soft: rgba(255, 255, 255, 0.82);
   --green: var(--lime);
   --amber: var(--violet);
@@ -516,29 +517,40 @@
   to { background-position: -200% 0; }
 }
 
-/* The agent page (html[data-chat], set on /agent by MobileNav) is solid and full-page at
-   every width (owner, 2026-11-09): no wallpaper, no translucent glass, no page scroll. */
-html[data-chat] {
-  --glass-fill: #0c0c0c;
-  --glass-fill-strong: #0e0e0e;
+/* The agent page (html[data-chat], set on /agent by MobileNav) is full-page at every
+   width (owner, 2026-11-09): pure black, no wallpaper, no outlines, one colour for
+   every part — controls are a faint fill, not a box. Popovers keep their blur. */
+:root[data-chat] {
+  --background: #000000;
+  --bg: #000000;
+  --glass-fill: rgba(255, 255, 255, 0.05);
+  --glass-border: transparent;
   --glass-highlight: transparent;
-  --bar-fill: #111111;
+  --glass-shadow: 0 0 #0000;
+  --glass-fill-strong: rgba(16, 16, 16, 0.6);
+  --bar-fill: rgba(255, 255, 255, 0.06);
   --bar-shadow: 0 0 #0000;
-  --popover: #111111;
+  --border: rgba(255, 255, 255, 0.07);
+  --line: rgba(255, 255, 255, 0.07);
+  --input: rgba(255, 255, 255, 0.06);
   overflow: hidden;
 }
-html.light[data-chat] {
-  --glass-fill: #ffffff;
-  --glass-fill-strong: #f7f9f5;
-  --bar-fill: #ffffff;
-  --popover: #ffffff;
+:root.light[data-chat] {
+  --background: #ffffff;
+  --bg: #ffffff;
+  --glass-fill: rgba(15, 26, 18, 0.04);
+  --glass-fill-strong: rgba(255, 255, 255, 0.6);
+  --bar-fill: rgba(15, 26, 18, 0.05);
+  --border: rgba(15, 26, 18, 0.08);
+  --line: rgba(15, 26, 18, 0.08);
+}
+html[data-chat] body {
+  background: var(--background);
 }
 html[data-chat] [data-app-bg] {
   display: none;
 }
-html[data-chat] .glass,
-html[data-chat] .glass-overlay,
-html[data-chat] .bg-surface {
+html[data-chat] .glass {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }

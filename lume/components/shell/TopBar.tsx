@@ -117,7 +117,7 @@ function Launcher({ pathname, warm }: { pathname: string; warm: (href: string) =
         >
           <LumeMark className="h-3.5 w-auto" />
         </PopoverTrigger>
-        <PopoverContent align="start" sideOffset={8} className="w-[400px] gap-0 rounded-2xl p-2">
+        <PopoverContent align="start" sideOffset={8} className="w-[400px] gap-0 rounded-2xl bg-black/55 p-2 ring-white/10 backdrop-blur-2xl backdrop-saturate-150 light:bg-white/55 light:ring-black/10">
           <p className="px-2.5 pt-1.5 pb-1 text-[11px] font-medium tracking-[0.12em] text-fg-46 uppercase">Flow</p>
           <nav aria-label="Flow" className="flex flex-col">
             {FLOW.map((t) => {
@@ -131,7 +131,7 @@ function Launcher({ pathname, warm }: { pathname: string; warm: (href: string) =
                   onPointerEnter={() => warm(t.href)}
                   onFocus={() => warm(t.href)}
                   className={cn(
-                    'group flex h-10 items-center gap-3 rounded-xl px-2.5 text-[14px] text-fg outline-none hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring',
+                    'group flex h-10 items-center gap-3 rounded-xl px-2.5 text-[14px] text-fg outline-none hover:bg-secondary focus-visible:bg-secondary',
                     active && 'bg-primary text-primary-foreground hover:bg-primary light:ring-1 light:ring-(--lime-edge)'
                   )}
                 >
@@ -158,7 +158,7 @@ function Launcher({ pathname, warm }: { pathname: string; warm: (href: string) =
                   onFocus={() => warm(t.href)}
                   title={t.key ? `${t.label} (⌥${t.key})` : t.label}
                   className={cn(
-                    'flex flex-col items-center gap-1.5 rounded-xl px-1 py-2.5 text-[12px] text-fg-70 outline-none hover:bg-secondary hover:text-fg focus-visible:ring-2 focus-visible:ring-ring',
+                    'flex flex-col items-center gap-1.5 rounded-xl px-1 py-2.5 text-[12px] text-fg-70 outline-none hover:bg-secondary hover:text-fg focus-visible:bg-secondary focus-visible:text-fg',
                     active && 'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground light:ring-1 light:ring-(--lime-edge)'
                   )}
                 >

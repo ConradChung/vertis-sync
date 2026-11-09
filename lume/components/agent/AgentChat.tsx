@@ -390,9 +390,9 @@ export function AgentChat() {
 
   return (
     // Desktop: the agent takes the whole window below the corner controls, on a solid background.
-    <div className="flex w-full gap-6 sm:fixed sm:inset-0 sm:z-10 sm:gap-0 sm:bg-background sm:pt-[72px] sm:after:pointer-events-none sm:after:absolute sm:after:inset-x-0 sm:after:top-[72px] sm:after:h-px sm:after:bg-line">
+    <div className="flex w-full gap-6 sm:fixed sm:inset-0 sm:z-10 sm:gap-0 sm:bg-background sm:pt-[72px]">
       {!collapsed && !phone && (
-        <aside className="hidden h-full w-64 shrink-0 overflow-hidden border-r border-line bg-(--glass-fill) p-3 lg:block">
+        <aside className="hidden h-full w-[17rem] shrink-0 overflow-hidden px-3 pt-1 pb-3 lg:block">
           {history}
         </aside>
       )}
@@ -458,7 +458,7 @@ export function AgentChat() {
         )}
       >
         {phone && (
-          <header role="banner" aria-label="Chat" className="box-content flex h-11 shrink-0 items-center gap-0.5 border-b border-line px-1 pt-[env(safe-area-inset-top)]">
+          <header role="banner" aria-label="Chat" className="box-content flex h-11 shrink-0 items-center gap-0.5 px-1 pt-[env(safe-area-inset-top)]">
             <Button variant="ghost" size="icon" className="size-10" onClick={() => setSheetOpen(true)} aria-label="Open menu">
               <Menu className="size-5" />
             </Button>
@@ -579,7 +579,7 @@ export function AgentChat() {
           )}
           </div>
 
-          <div className="shrink-0 border-t border-line bg-[var(--glass-fill-strong)] px-2.5 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:px-8 sm:pt-3 sm:pb-4 sm:[&>*]:mx-auto sm:[&>*]:max-w-[880px]">
+          <div className="shrink-0 px-2.5 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:px-8 sm:pt-3 sm:pb-4 sm:[&>*]:mx-auto sm:[&>*]:max-w-[880px]">
             {chat.skipPermissions && (
               <div className="mb-3 flex items-center gap-2 rounded-control border border-red/40 bg-red/10 px-3 py-2 text-[13px] text-red" role="status">
                 <ShieldOff className="size-3.5 shrink-0" />
@@ -637,8 +637,8 @@ export function AgentChat() {
             <FileChips items={sheets.items} onRemove={sheets.remove} disabled={busy} />
             <form
               className={cn(
-                'glass flex items-end gap-2 rounded-2xl p-2 pl-4 transition-colors focus-within:border-primary/60 max-sm:gap-0.5 max-sm:rounded-[22px] max-sm:p-1.5 max-sm:pl-3',
-                (speech.listening || dragging) && 'border-primary/60',
+                'glass flex items-end gap-2 rounded-[26px] p-2 pl-5 transition-colors focus-within:bg-white/[0.075] max-sm:gap-0.5 max-sm:rounded-[22px] max-sm:p-1.5 max-sm:pl-3',
+                (speech.listening || dragging) && 'ring-1 ring-primary/50',
                 dragging && 'bg-accent'
               )}
               onSubmit={(e) => {

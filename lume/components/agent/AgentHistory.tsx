@@ -325,10 +325,10 @@ export function AgentHistory({
   return (
     <nav aria-label="Chat history" className={cn('flex min-h-0 flex-col', className)}>
       <div className="flex gap-1.5">
-        <Button variant="outline" className="h-9 min-w-0 flex-1 justify-start gap-2" onClick={onNew} disabled={busy}>
+        <Button variant="ghost" className="h-10 min-w-0 flex-1 justify-start gap-2.5 rounded-xl bg-(--glass-fill) px-3 text-[13.5px] font-medium hover:bg-white/10" onClick={onNew} disabled={busy}>
           <SquarePen className="size-4" /> New chat
         </Button>
-        <Button variant="outline" size="icon" className="size-9 shrink-0" onClick={() => setCreating(true)} aria-label="New project" title="New project">
+        <Button variant="ghost" size="icon" className="size-10 shrink-0 rounded-xl text-fg-70 hover:bg-white/10" onClick={() => setCreating(true)} aria-label="New project" title="New project">
           <FolderPlus className="size-4" />
         </Button>
       </div>
@@ -377,7 +377,7 @@ export function AgentHistory({
                       onDrop={(e) => onProjectDrop(e, p)}
                     />
                     {expanded && (
-                      <ul className="mt-0.5 ml-3 flex flex-col gap-0.5 border-l border-line pl-1.5" aria-label={`Chats in ${p.name}`}>
+                      <ul className="mt-0.5 ml-3 flex flex-col gap-0.5 pl-1.5" aria-label={`Chats in ${p.name}`}>
                         {chats.length === 0 ? (
                           <li className="px-2 py-1.5 text-[12px] text-fg-24">Drop chats or files here</li>
                         ) : (
@@ -577,7 +577,7 @@ function ProjectRow({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       className={cn(
-        'group relative flex h-8 items-center rounded-control text-[13px] text-fg-70 transition-colors hover:bg-secondary hover:text-fg',
+        'group relative flex h-9 items-center rounded-xl text-[13.5px] text-fg-70 transition-colors hover:bg-white/[0.06] hover:text-fg',
         over === 'into' && 'bg-primary/10 text-fg ring-1 ring-primary'
       )}
     >
@@ -701,18 +701,18 @@ function HistoryItem({
         e.dataTransfer.effectAllowed = 'move'
       }}
       className={cn(
-        'group relative flex h-8 items-center rounded-control text-[13px] text-fg-70 transition-colors hover:bg-secondary hover:text-fg',
-        active && 'bg-secondary font-medium text-fg'
+        'group relative flex h-9 items-center rounded-xl text-[13.5px] text-fg-70 transition-colors hover:bg-white/[0.06] hover:text-fg',
+        active && 'bg-white/[0.08] font-medium text-fg'
       )}
     >
-      {active && <span className="absolute top-1.5 bottom-1.5 left-0 w-[3px] rounded-full bg-primary" aria-hidden />}
+      {active && <span className="absolute top-1/2 left-1.5 size-1.5 -translate-y-1/2 rounded-full bg-primary shadow-[0_0_8px_var(--lime)]" aria-hidden />}
       <button
         type="button"
         onClick={onSelect}
         disabled={disabled}
         aria-current={active ? 'page' : undefined}
         title={c.title}
-        className="h-full min-w-0 flex-1 truncate rounded-control pr-1 pl-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        className="h-full min-w-0 flex-1 truncate rounded-xl pr-1 pl-5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
       >
         {c.title}
       </button>
