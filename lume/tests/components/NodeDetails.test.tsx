@@ -5,6 +5,8 @@ import type { ReactNode } from 'react'
 
 vi.mock('next-themes', () => ({ useTheme: () => ({ resolvedTheme: 'dark' }) }))
 vi.mock('@xyflow/react', () => ({
+  Background: () => null,
+  BackgroundVariant: { Lines: 'lines', Dots: 'dots', Cross: 'cross' },
   ReactFlow: ({
     nodes,
     onNodeClick,
