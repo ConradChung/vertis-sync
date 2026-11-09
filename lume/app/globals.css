@@ -500,6 +500,12 @@
     transform: translateY(0);
   }
 }
+/* The dark background image: a slow pan and breathe (components/theme/AppBackground.tsx). */
+@keyframes bg-drift {
+  0% { transform: scale(1.08) translate3d(0, 0, 0); }
+  50% { transform: scale(1.16) translate3d(-3vw, 2vh, 0); }
+  100% { transform: scale(1.1) translate3d(2vw, -2vh, 0); }
+}
 @keyframes blob-drift-a {
   0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
   50% { transform: translate3d(8vw, 6vh, 0) scale(1.08); }
