@@ -7,9 +7,11 @@ import { TagChip, TagFilter } from '@/components/tags/TagChip'
 const KAS = { id: '466d9a53-6450-49df-a063-8e66437efa8b', name: 'Kaspen / Zenport' }
 const JOBS = { id: '5b54bc53-ac4a-49a3-b13a-a299b2d6b38f', name: 'Job search / GTM roles' }
 const ROW = '0b0c1d2e-3f40-4a5b-8c6d-7e8f90a1b2c3'
+const NEW_ID = '9a9a9a9a-1111-4111-8111-111111111111'
 
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (url === '/api/tags' && (init?.method ?? 'GET') === 'GET') return Response.json({ tags: [JOBS, KAS] })
+  if (url === '/api/verticals' && init?.method === 'POST') return Response.json({ vertical: { id: NEW_ID, name: JSON.parse(String(init.body)).name } }, { status: 201 })
   if (url === '/api/tags') {
     const b = JSON.parse(String(init?.body))
     return Response.json({ item: { id: b.id, vertical_id: b.vertical_id } })
@@ -63,6 +65,30 @@ describe('TagChip', () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([, i]) => i?.method === 'PATCH')).toBe(true))
     const patch = fetchMock.mock.calls.find(([, i]) => i?.method === 'PATCH')!
     expect(JSON.parse(String(patch[1]!.body)).vertical_id).toBeNull()
+  })
+
+  it('New tag creates the tag and tags the item with it; an existing name is reused', async () => {
+    wrap(<TagChip table="validation_jobs" id={ROW} verticalId={null} />)
+    fireEvent.click(screen.getByRole('button', { name: /Tag: Untagged/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'New tag' }))
+    fireEvent.change(screen.getByLabelText('New tag name'), { target: { value: 'Recruiting' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, i]) => i?.method === 'PATCH')).toBe(true))
+    const post = fetchMock.mock.calls.find(([u, i]) => u === '/api/verticals' && i?.method === 'POST')!
+    expect(JSON.parse(String(post[1]!.body))).toEqual({ name: 'Recruiting' })
+    const patch = fetchMock.mock.calls.find(([, i]) => i?.method === 'PATCH')!
+    expect(JSON.parse(String(patch[1]!.body))).toEqual({ table: 'validation_jobs', id: ROW, vertical_id: NEW_ID })
+
+    cleanup()
+    fetchMock.mockClear()
+    wrap(<TagChip table="validation_jobs" id={ROW} verticalId={null} />)
+    fireEvent.click(screen.getByRole('button', { name: /Tag: Untagged/ }))
+    await screen.findByRole('button', { name: 'Kaspen / Zenport' })
+    fireEvent.click(screen.getByRole('button', { name: 'New tag' }))
+    fireEvent.change(screen.getByLabelText('New tag name'), { target: { value: 'kaspen / zenport' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, i]) => i?.method === 'PATCH')).toBe(true))
+    expect(fetchMock.mock.calls.some(([u]) => u === '/api/verticals')).toBe(false)
   })
 })
 

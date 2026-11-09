@@ -2,9 +2,9 @@
 
 import { useState } from 'react'
 import { useSWRConfig } from 'swr'
-import { Check, Tag } from 'lucide-react'
+import { Check, Plus, Tag } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { useTags } from '@/hooks/useTags'
+import { TAGS_KEY, useTags } from '@/hooks/useTags'
 import { tagName, UNTAGGED, type TagTable } from '@/lib/tags/model'
 import { sendJson } from '@/lib/validate/client'
 import { cn } from '@/lib/utils'
@@ -36,12 +36,14 @@ export function TagChip({ table, id, verticalId, name, onChanged, revalidate, di
   const { tags } = useTags(opened || (!!verticalId && !name))
   const setOpen = (o: boolean) => {
     if (o) setOpened(true)
+    else setDraft(null)
     setOpenState(o)
   }
   const { mutate } = useSWRConfig()
   const [current, setCurrent] = useState<{ id: string | null; for: string | null | undefined } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [draft, setDraft] = useState<string | null>(null)
   // A local pick shows until the row itself reports a new tag.
   const shown = current && current.for === verticalId ? current.id : (verticalId ?? null)
   const label = shown === (verticalId ?? null) ? tagName(shown, tags, name) : tagName(shown, tags)
@@ -76,6 +78,24 @@ export function TagChip({ table, id, verticalId, name, onChanged, revalidate, di
     } else setError(r.body?.error ?? 'not saved')
   }
 
+  /** "New tag": creates the vertical (POST /api/verticals), then tags this item with it. An existing name is reused. */
+  async function create(raw: string) {
+    const nameIn = raw.trim()
+    if (!nameIn) return
+    const existing = tags.find((t) => t.name.toLowerCase() === nameIn.toLowerCase())
+    if (existing) return pick(existing.id)
+    setBusy(true)
+    const r = await sendJson<{ vertical?: { id: string }; error?: string }>('/api/verticals', { name: nameIn })
+    setBusy(false)
+    if (r.status !== 201 || !r.body?.vertical) {
+      setError(r.body?.error ?? 'tag not created')
+      return
+    }
+    void mutate(TAGS_KEY)
+    setDraft(null)
+    await pick(r.body.vertical.id)
+  }
+
   const options: { id: string | null; name: string }[] = [...tags.map((t) => ({ id: t.id, name: t.name })), { id: null, name: UNTAGGED }]
   // Clicks and keys (the popup's too: React bubbles through the portal) stay here, so a clickable row or card doesn't open.
   return (
@@ -107,6 +127,39 @@ export function TagChip({ table, id, verticalId, name, onChanged, revalidate, di
             </li>
           ))}
         </ul>
+        <div className="mt-1 border-t border-white/8 pt-1">
+          {draft === null ? (
+            <button
+              type="button"
+              onClick={() => setDraft('')}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-fg-70 hover:bg-white/8 hover:text-fg"
+            >
+              <Plus className="size-3.5" aria-hidden /> New tag
+            </button>
+          ) : (
+            <form
+              className="flex items-center gap-1 px-1 py-0.5"
+              onSubmit={(e) => {
+                e.preventDefault()
+                void create(draft)
+              }}
+            >
+              <input
+                autoFocus
+                value={draft}
+                maxLength={80}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => e.key === 'Escape' && (e.stopPropagation(), setDraft(null))}
+                placeholder="Tag name, e.g. Recruiting"
+                aria-label="New tag name"
+                className="h-8 min-w-0 flex-1 rounded-lg bg-white/8 px-2.5 text-[12.5px] text-fg outline-none placeholder:text-fg-46"
+              />
+              <button type="submit" disabled={!draft.trim() || busy} className="h-8 rounded-lg bg-primary px-2.5 text-[12px] font-medium text-primary-foreground disabled:opacity-50">
+                Add
+              </button>
+            </form>
+          )}
+        </div>
       </PopoverContent>
     </Popover>
     </span>
