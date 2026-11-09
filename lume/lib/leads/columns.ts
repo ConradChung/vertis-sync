@@ -2,6 +2,7 @@ import { csvCell } from '@/lib/csv/cell'
 import { detectedEmailColumn, normalizeHeader } from '@/lib/import/csv'
 import { applyItemEdit, EDITABLE_FIELDS, LIST_COLUMNS, type EditableField, type ListItem } from '@/lib/leads/lists/model'
 import { leadColumnMapping } from '@/lib/review/columns'
+import { clip } from '@/lib/text/wellFormed'
 
 /**
  * The columns a lead set or list shows (pure): the source's own fields, not
@@ -23,7 +24,7 @@ export type Cells = Record<string, string>
 
 const isPlain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const scalar = (v: unknown) => v === null || v === undefined || ['string', 'number', 'boolean'].includes(typeof v)
-const cap = (s: string) => (s.length > MAX_CELL ? s.slice(0, MAX_CELL) : s)
+const cap = (s: string) => clip(s, MAX_CELL)
 
 export function flattenRecord(obj: Record<string, unknown>, prefix = '', depth = 1, out: Cells = {}): Cells {
   for (const [k, v] of Object.entries(obj)) {

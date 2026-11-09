@@ -1,4 +1,5 @@
 import 'server-only'
+import { deepWellFormed } from '@/lib/text/wellFormed'
 import { randomUUID } from 'node:crypto'
 import { createServiceClient } from '@/lib/supabase/service'
 import type { Json } from '@/lib/db/types'
@@ -267,7 +268,8 @@ async function claimAppendLease(listId: string, opts: { wait?: () => Promise<voi
 }
 
 /** Insert a batch; on a unique-key conflict (the backstop indexes) insert row by row and count the clashes as duplicates. */
-async function insertBatch(batch: Record<string, unknown>[]): Promise<{ inserted: number; clashes: number }> {
+async function insertBatch(rows: Record<string, unknown>[]): Promise<{ inserted: number; clashes: number }> {
+  const batch = rows.map(deepWellFormed)
   const { error } = await items().insert(batch)
   if (!error) return { inserted: batch.length, clashes: 0 }
   if ((error as { code?: string }).code !== '23505') throw error

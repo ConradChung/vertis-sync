@@ -1,4 +1,5 @@
 import 'server-only'
+import { deepWellFormed } from '@/lib/text/wellFormed'
 import { randomUUID } from 'node:crypto'
 import { createServiceClient } from '@/lib/supabase/service'
 import type { Json } from '@/lib/db/types'
@@ -94,9 +95,9 @@ export async function createReviewSetFromRows(
     const batch = capped.slice(i, i + 500).map((raw, k) => ({
       set_id: set.id,
       idx: i + k,
-      item: normaliseLead(source.normalisable ? source.normalisable(raw) : raw) as unknown as Json,
-      raw: raw as Json,
-      cells: cells[i + k] as Json,
+      item: deepWellFormed(normaliseLead(source.normalisable ? source.normalisable(raw) : raw)) as unknown as Json,
+      raw: deepWellFormed(raw) as Json,
+      cells: deepWellFormed(cells[i + k]) as Json,
     }))
     const { error: e } = await sb.from('lead_review_items').insert(batch)
     if (e) {
