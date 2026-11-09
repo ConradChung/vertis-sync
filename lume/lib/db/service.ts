@@ -286,7 +286,7 @@ export async function getEventsByTypePrefix(prefixes: string[], limit = 20): Pro
 const JOB_PROGRESS_COLS =
   'id,filename,status,total_rows,processed_rows,eta_seconds,eta_updated_at,eta_stage,eta_validate_seconds,eta_enrich_seconds,enrich,enrich_started,enriched_rows,' +
   'finder_status,rows_missing_email,emails_found,instantly_status,instantly_campaign_id,instantly_campaign_name,' +
-  'location_barrier,company_barrier,company_strict'
+  'location_barrier,company_barrier,company_strict,instantly_campaign_id_nolocation,instantly_campaign_name_nolocation'
 
 /** `null` when the job does not exist. Status counts are head-only exact counts (no rows move). */
 export async function getJobProgress(jobId: string): Promise<JobProgress | null> {
@@ -558,6 +558,48 @@ export async function setBarriers(jobId: string, patch: BarrierPatch): Promise<B
     .in('instantly_status', [...PUSH_REVIEW_STATUSES])
     .select('id')
   if (res.error) throw new DbError('setBarriers', res.error)
+  return (res.data ?? []).length > 0 ? 'ok' : 'moved'
+}
+
+/**
+ * Valid rows with no resolved operating city (blank / unknown / error / n/a):
+ * the leads instantly-push routes to the no-location campaign. Same test as
+ * telegram-inbox's countLocationlessValid.
+ */
+export async function countLocationlessValid(jobId: string): Promise<number> {
+  const sb = createServiceClient()
+  const res = await sb
+    .from('validation_rows')
+    .select('id', { count: 'exact', head: true })
+    .eq('job_id', jobId)
+    .eq('status', 'valid')
+    .or('row_data->>operating_city.is.null,row_data->>operating_city.eq.,row_data->>operating_city.ilike.unknown,row_data->>operating_city.ilike.error,row_data->>operating_city.ilike.n/a')
+  if (res.error) throw new DbError('countLocationlessValid', res.error)
+  return res.count ?? 0
+}
+
+export async function listCampaignTemplates(): Promise<{ id: string; name: string; sequences: unknown }[]> {
+  const sb = createServiceClient()
+  const res = await sb.from('campaign_templates').select('id,name,sequences').order('name')
+  if (res.error) throw new DbError('listCampaignTemplates', res.error)
+  return (res.data ?? []) as { id: string; name: string; sequences: unknown }[]
+}
+
+/**
+ * Points the job's city-less leads at a sibling campaign. Only while the push
+ * is being reviewed, no sibling is set yet, and no push confirmation is open.
+ */
+export async function setNoLocationCampaign(jobId: string, campaign: { id: string; name: string }): Promise<BarrierResult> {
+  if (await findAwaitingAction('push_to_instantly', jobId)) return 'push_awaiting_confirmation'
+  const sb = createServiceClient()
+  const res = await sb
+    .from('validation_jobs')
+    .update({ instantly_campaign_id_nolocation: campaign.id, instantly_campaign_name_nolocation: campaign.name })
+    .eq('id', jobId)
+    .is('instantly_campaign_id_nolocation', null)
+    .in('instantly_status', [...PUSH_REVIEW_STATUSES])
+    .select('id')
+  if (res.error) throw new DbError('setNoLocationCampaign', res.error)
   return (res.data ?? []).length > 0 ? 'ok' : 'moved'
 }
 

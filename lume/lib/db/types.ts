@@ -324,6 +324,9 @@ export interface JobProgress {
   instantly_status: string | null
   instantly_campaign_id: string | null
   instantly_campaign_name: string | null
+  /** Sibling campaign for leads with no resolved city (lib/validate/noLocation.ts). */
+  instantly_campaign_id_nolocation?: string | null
+  instantly_campaign_name_nolocation?: string | null
   location_barrier: boolean
   company_barrier: boolean
   company_strict: boolean

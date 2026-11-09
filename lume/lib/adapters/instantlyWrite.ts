@@ -78,14 +78,19 @@ export async function sendReply(input: { eaccount: string; reply_to_uuid: string
   )) as { id?: string }
 }
 
-/** Duplicate: same inboxes, sending window, cap and sequence as the source. */
-export async function createCampaignFrom(sourceId: string, name: string): Promise<{ id: string; name: string }> {
+/**
+ * Duplicate: same inboxes, sending window, cap and sequence as the source.
+ * `sequences` replaces the copy (the no-location sibling: lib/validate/noLocation.ts).
+ * Instantly creates it as a draft; nothing sends until it is launched.
+ */
+export async function createCampaignFrom(sourceId: string, name: string, sequences?: unknown): Promise<{ id: string; name: string }> {
   const src = await getCampaignDetail(sourceId)
   const body: Record<string, unknown> = { name }
   if (src.email_list) body.email_list = src.email_list
   if (src.campaign_schedule) body.campaign_schedule = src.campaign_schedule
   if (typeof src.daily_limit === 'number') body.daily_limit = src.daily_limit
-  if (src.sequences) body.sequences = src.sequences
+  if (sequences !== undefined) body.sequences = sequences
+  else if (src.sequences) body.sequences = src.sequences
   if (typeof src.stop_on_reply === 'boolean') body.stop_on_reply = src.stop_on_reply
   const created = (await request('POST', '/campaigns', body)) as { id?: string }
   if (!created.id) throw new InstantlyError(0, 'Instantly returned no campaign id')

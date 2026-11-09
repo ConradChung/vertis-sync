@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useSWRConfig } from 'swr'
+import useSWR, { useSWRConfig } from 'swr'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { SimpleSelect } from '@/components/ui/simple-select'
@@ -11,6 +11,7 @@ import { Switch } from '@/components/validate/Switch'
 import { jobKey, previewKey, useInstantlyCampaigns, useJobProgress } from '@/hooks/useJob'
 import type { GateRow } from '@/lib/db/types'
 import { sendJson } from '@/lib/validate/client'
+import { fetchJson } from '@/hooks/fetcher'
 
 /**
  * Lume-local push settings (plain PATCHes, not entrypoint claims):
@@ -23,7 +24,10 @@ export function BarrierPanel({ gate, pickerFocusTick = 0 }: { gate: GateRow; pic
   return gate.kind === 'campaign_choice' ? (
     <CampaignPick gate={gate} focusTick={pickerFocusTick} />
   ) : (
-    <Barriers jobId={gate.target_id} />
+    <>
+      <Barriers jobId={gate.target_id} />
+      <NoLocation jobId={gate.target_id} />
+    </>
   )
 }
 
@@ -143,6 +147,102 @@ function Barriers({ jobId }: { jobId: string }) {
             />
           </>
         )}
+      </div>
+    </GlassCard>
+  )
+}
+
+type NoLocationInfo = {
+  locationless: number
+  main: { id: string; name: string | null } | null
+  sibling: { id: string; name: string | null } | null
+  suggested_name: string | null
+  strip: { ok: boolean; removed?: number; kept?: number; reason?: string; step?: number } | null
+  templates: { id: string; name: string }[]
+}
+
+const noLocationKey = (jobId: string) => `/api/gates/campaign/${jobId}/nolocation`
+
+/**
+ * Valid leads with no resolved city would send with a blank where {{location}}
+ * goes, and Instantly picks variants itself. Recommend a sibling campaign with
+ * location-free copy (or an existing one); instantly-push routes them there.
+ */
+function NoLocation({ jobId }: { jobId: string }) {
+  const { mutate } = useSWRConfig()
+  const { data, mutate: reload } = useSWR<NoLocationInfo>(noLocationKey(jobId), fetchJson)
+  const { data: campaigns } = useInstantlyCampaigns(true)
+  const { data: job } = useJobProgress(jobId)
+  const [source, setSource] = useState('')
+  const [existing, setExisting] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  if (!data || (!data.locationless && !data.sibling)) return null
+  const n = data.locationless.toLocaleString()
+
+  if (data.sibling) {
+    return (
+      <GlassCard className="gap-1 px-[18px] py-4" aria-label="No-location campaign">
+        <p className="text-[13px] font-medium text-fg">No-location campaign: {data.sibling.name}</p>
+        <p className="text-[12px] text-fg-46">
+          {job?.location_barrier
+            ? `Location barrier is on, so the ${n} lead${data.locationless === 1 ? '' : 's'} without a city are dropped — turn it off to send them here.`
+            : `${n} valid lead${data.locationless === 1 ? '' : 's'} without a city go there on push.`}{' '}
+          It&apos;s a draft until you launch it in Instantly.
+        </p>
+      </GlassCard>
+    )
+  }
+
+  const options = [
+    ...(data.strip?.ok ? [{ value: '', label: `Copy of ${data.main?.name ?? 'the main campaign'} without its {{location}} variants (${data.strip.removed} removed)` }] : []),
+    ...data.templates.map((t) => ({ value: `tpl:${t.id}`, label: `Template: ${t.name}` })),
+    { value: 'existing', label: 'Use a campaign I already have…' },
+  ]
+  const pick = source || options[0]?.value || ''
+  const others = campaigns && campaigns.configured ? campaigns.campaigns.filter((c) => c.id !== data.main?.id) : []
+
+  async function go() {
+    setSaving(true)
+    const body =
+      pick === 'existing' ? { mode: 'existing', campaign_id: existing } : pick.startsWith('tpl:') ? { mode: 'create', template_id: pick.slice(4) } : { mode: 'create' }
+    const r = await sendJson(noLocationKey(jobId), body)
+    setSaving(false)
+    const err = (r.body as { error?: string } | null)?.error
+    if (r.status === 200) toast.success(pick === 'existing' ? 'No-location campaign set' : `Created “${data?.suggested_name}” (draft)`, { description: `${n} city-less leads will go there on push.` })
+    else if (err === 'needs_template') toast.error('Every variant of a step uses {{location}} — pick a template instead')
+    else if (err === 'push_awaiting_confirmation') toast.info('A push confirmation is waiting — settings are locked')
+    else toast.error("Couldn't set up the no-location campaign", { description: err ?? undefined })
+    void reload()
+    void mutate(previewKey(jobId))
+    void mutate(jobKey(jobId))
+  }
+
+  return (
+    <GlassCard className="gap-3 px-[18px] py-4" aria-label="No-location campaign">
+      <div>
+        <p className="text-[13px] font-medium text-fg">Recommended: a no-location campaign</p>
+        <p className="mt-1 text-[12px] leading-5 text-fg-46">
+          {n} valid lead{data.locationless === 1 ? ' has' : 's have'} no resolved city. Instantly chooses variants itself, so they could get copy with a blank
+          where {'{{location}}'} goes. Send them to a sibling campaign that never mentions a city — same inboxes, schedule and limits.
+          {job?.location_barrier && ' (The Location barrier is on and drops them today; turn it off once this is set.)'}
+        </p>
+      </div>
+      <SimpleSelect aria-label="No-location copy" value={pick} onValueChange={setSource} className="h-9 text-[12px]" options={options} />
+      {pick === 'existing' && (
+        <SimpleSelect
+          aria-label="Existing campaign"
+          value={existing}
+          onValueChange={setExisting}
+          className="h-9 text-[12px]"
+          options={[{ value: '', label: `Select a campaign… (${others.length})` }, ...others.map((c) => ({ value: c.id, label: c.name }))]}
+        />
+      )}
+      <div className="flex items-center gap-2">
+        <Button size="sm" disabled={saving || (pick === 'existing' && !existing)} onClick={() => void go()}>
+          {saving ? 'Working…' : pick === 'existing' ? 'Use this campaign' : `Create “${data.suggested_name ?? 'No Location'}”`}
+        </Button>
+        <span className="text-[11px] text-fg-46">Created as a draft — nothing sends until you launch it.</span>
       </div>
     </GlassCard>
   )
