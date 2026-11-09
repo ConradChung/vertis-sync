@@ -5,7 +5,11 @@ import type { GateKind, GateRow } from '@/lib/db/types'
 
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), info: vi.fn(), error: vi.fn() }) }))
 
-import { ValidateView } from '@/components/validate/ValidateView'
+import { ProgressBoard, type ProgressBoardProps } from '@/components/progress/ProgressBoard'
+
+const ValidateView = ({ gates, onRefresh }: Pick<ProgressBoardProps, 'gates' | 'onRefresh'>) => (
+  <ProgressBoard gates={gates} onRefresh={onRefresh} runs={[]} runsLoaded selectedId={null} onSelectRun={() => {}} job={null} progress={undefined} />
+)
 
 beforeAll(() => {
   Element.prototype.scrollIntoView = () => {}
@@ -48,7 +52,7 @@ const focusOn = async (el: HTMLElement) => {
   })
 }
 
-describe('Validate keyboard', () => {
+describe('Progress keyboard (gates outside a run, in Also needs you)', () => {
   it('A with no explicitly focused card does nothing', async () => {
     render(<ValidateView gates={GATES} onRefresh={() => {}} />)
     await press('a', document.body)

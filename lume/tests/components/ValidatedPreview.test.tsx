@@ -7,7 +7,7 @@ import type { ReactNode } from 'react'
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), info: vi.fn(), error: vi.fn() }) }))
 
 import { LeadsPreview, PreviewLeadsButton, RenamableName } from '@/components/validate/ValidatedPreview'
-import { ProgressCard } from '@/components/progress/RunningNow'
+import { ProgressCard } from '@/components/progress/OtherActivity'
 import type { ProgressItem } from '@/lib/progress/model'
 
 const JOB = '16f26ffc-f8e5-47a5-9e1b-7532f61dad75'

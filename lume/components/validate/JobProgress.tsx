@@ -2,12 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { AnimatedNumber } from '@/components/ui/animated-number'
-import { GlassCard } from '@/components/ui/glass-card'
-import { SectionTitle, ShimmerBar } from '@/components/overview/parts'
-import { useJobProgress, useJobReasons } from '@/hooks/useJob'
 import { liveEta } from '@/lib/validate/eta'
 import { ValidationBreakdown } from '@/components/validate/ValidationBreakdown'
-import { PreviewLeadsButton, RenamableName } from '@/components/validate/ValidatedPreview'
 import type { JobProgress as Job } from '@/lib/db/types'
 import { cn } from '@/lib/utils'
 
@@ -19,7 +15,7 @@ const COUNT_TONES: { key: keyof Job['counts']; label: string; tone: string }[] =
   { key: 'pending', label: 'pending', tone: 'text-cyan' },
 ]
 
-function Bar({ value, total, label, tone = 'bg-primary' }: { value: number; total: number; label: string; tone?: string }) {
+export function Bar({ value, total, label, tone = 'bg-primary' }: { value: number; total: number; label: string; tone?: string }) {
   const pct = total > 0 ? Math.min(100, Math.round((value / total) * 100)) : 0
   // Grow in from 0 on mount (CSS transition; instant under reduced motion).
   const [shown, setShown] = useState(false)
@@ -55,7 +51,6 @@ function Bar({ value, total, label, tone = 'bg-primary' }: { value: number; tota
   )
 }
 
-/** Email verification progress for a validation job (the "progress panel inside a job row"). */
 /** Re-render every `ms` so the ETA counts down between polls. */
 function useNow(ms: number): number {
   const [now, setNow] = useState(() => Date.now())
@@ -66,17 +61,17 @@ function useNow(ms: number): number {
   return now
 }
 
+/** Email verification for one validation job: verified bar, invalid rate by reason, verdict counts, status and ETA (Progress → Validate step). */
 export function JobProgressView({ job, reasons }: { job: Job; reasons?: Job['reasons'] }) {
   const now = useNow(15_000)
   const eta = liveEta(job, now)
-  const validCount = job.counts.valid
   // The bar counts verdicts on validation_rows (exact); the job's own
   // processed_rows / total_rows counter can lag or drift (live: 43/162 on a
   // completed job with 165 rows, 0 pending), so it is shown as a second line.
   const rowsTotal = COUNT_TONES.reduce((n, c) => n + job.counts[c.key], 0)
   const verified = rowsTotal - job.counts.pending
   return (
-    <div className="flex flex-col gap-4 px-[18px] pb-[18px]">
+    <div className="flex flex-col gap-4">
       {rowsTotal > 0 ? (
         <Bar value={verified} total={rowsTotal} label="Verified" />
       ) : (
@@ -85,7 +80,7 @@ export function JobProgressView({ job, reasons }: { job: Job; reasons?: Job['rea
       {(reasons ?? job.reasons ?? []).length > 0 && <ValidationBreakdown reasons={reasons ?? job.reasons ?? []} />}
       <ul className="grid grid-cols-5 gap-2" aria-label="Row verdicts">
         {COUNT_TONES.map((c) => (
-          <li key={c.key} className="rounded-lg border border-line bg-muted px-2.5 py-2">
+          <li key={c.key} className="rounded-lg bg-white/[0.05] px-2.5 py-2">
             <AnimatedNumber value={job.counts[c.key]} className={cn('block font-mono text-[15px]', c.tone)} />
             <div className="text-[10px] text-fg-46">{c.label}</div>
           </li>
@@ -112,43 +107,7 @@ export function JobProgressView({ job, reasons }: { job: Job; reasons?: Job['rea
             </dd>
           </>
         )}
-        {job.instantly_campaign_name && (
-          <>
-            <dt className="text-fg-46">Campaign</dt>
-            <dd className="truncate text-right text-fg-70">{job.instantly_campaign_name}</dd>
-          </>
-        )}
       </dl>
-      {job.enrich && <Bar value={job.enriched_rows} total={validCount} label={job.enrich_started ? 'Enriched (of valid)' : 'Enrich queued'} tone="bg-cyan" />}
     </div>
-  )
-}
-
-export function JobProgress({ jobId }: { jobId: string }) {
-  const { data, error, mutate } = useJobProgress(jobId)
-  const reasons = useJobReasons(jobId, data ? data.status : undefined)
-  return (
-    <GlassCard className="gap-0 py-0" aria-label="Job progress">
-      <SectionTitle title={data ? <RenamableName jobId={jobId} name={data.display_name?.trim() || data.filename || 'Job progress'} /> : 'Job progress'}>
-        <span className="font-mono">{jobId.slice(0, 8)}</span>
-        <PreviewLeadsButton jobId={jobId} name={data?.display_name ?? data?.filename ?? undefined} />
-      </SectionTitle>
-      {data ? (
-        <JobProgressView job={data} reasons={reasons.data?.reasons} />
-      ) : error ? (
-        <p className="flex items-center gap-3 px-[18px] pb-[18px] text-[12px] text-fg-70" role="alert">
-          Couldn&apos;t load this job.
-          <button type="button" className="text-violet-soft hover:text-fg" onClick={() => void mutate()}>
-            Retry
-          </button>
-        </p>
-      ) : (
-        <div className="flex flex-col gap-3 px-[18px] pb-[18px]" aria-busy="true">
-          <ShimmerBar className="h-3 w-full" />
-          <ShimmerBar className="h-10 w-full" />
-          <ShimmerBar className="h-3 w-2/3" />
-        </div>
-      )}
-    </GlassCard>
   )
 }

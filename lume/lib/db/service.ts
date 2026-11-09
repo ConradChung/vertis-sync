@@ -17,6 +17,7 @@ import type {
   ApolloOrderRow,
   JobBatchRow,
   JobProgress,
+  RunRow,
   JobSampleSource,
   LeadBankRow,
   LumeCampaignRow,
@@ -301,7 +302,8 @@ export async function getEventsByTypePrefix(prefixes: string[], limit = 20): Pro
 const JOB_PROGRESS_COLS =
   'id,filename,display_name,created_at,status,total_rows,processed_rows,eta_seconds,eta_updated_at,eta_stage,eta_validate_seconds,eta_enrich_seconds,enrich,enrich_started,enriched_rows,' +
   'finder_status,rows_missing_email,emails_found,instantly_status,instantly_campaign_id,instantly_campaign_name,' +
-  'location_barrier,company_barrier,company_strict,instantly_campaign_id_nolocation,instantly_campaign_name_nolocation'
+  'location_barrier,company_barrier,company_strict,instantly_campaign_id_nolocation,instantly_campaign_name_nolocation,' +
+  'instantly_pushed,instantly_pushed_nolocation,source,vertical_id'
 
 /** `null` when the job does not exist. Status counts are head-only exact counts (no rows move). */
 export async function getJobProgress(jobId: string): Promise<JobProgress | null> {
@@ -344,6 +346,12 @@ export async function getJobProgress(jobId: string): Promise<JobProgress | null>
     location_barrier: j.location_barrier === true,
     company_barrier: j.company_barrier !== false,
     company_strict: j.company_strict === true,
+    instantly_campaign_id_nolocation: (j.instantly_campaign_id_nolocation as string | null) ?? null,
+    instantly_campaign_name_nolocation: (j.instantly_campaign_name_nolocation as string | null) ?? null,
+    instantly_pushed: num(j.instantly_pushed),
+    instantly_pushed_nolocation: num(j.instantly_pushed_nolocation),
+    source: (j.source as string | null) ?? null,
+    vertical_id: (j.vertical_id as string | null) ?? null,
     counts: Object.fromEntries(counts) as JobProgress['counts'],
   }
 }
@@ -395,6 +403,43 @@ export async function listRecentJobs(since: Date): Promise<JobSummary[]> {
     updated_at: String(j.updated_at ?? j.created_at),
     error_message: (j.error_message as string | null) ?? null,
     vertical_id: (j.vertical_id as string | null) ?? null,
+  }))
+}
+
+/**
+ * Progress's run switcher: validation jobs of any status (one per CSV run),
+ * latest activity first. `q` matches the name or filename (letters, digits,
+ * spaces and . _ - only, so it is safe inside a PostgREST `or`).
+ */
+export async function listRuns(opts: { limit?: number; offset?: number; q?: string | null } = {}): Promise<RunRow[]> {
+  const limit = Math.min(100, Math.max(1, opts.limit ?? 20))
+  const offset = Math.max(0, opts.offset ?? 0)
+  let query = createServiceClient()
+    .from('validation_jobs')
+    .select('id,filename,display_name,status,total_rows,processed_rows,valid_count,enrich,finder_status,instantly_status,source,created_at,updated_at,vertical_id')
+    .order('updated_at', { ascending: false })
+    .range(offset, offset + limit - 1)
+  const q = (opts.q ?? '').replace(/[^\p{L}\p{N} ._-]/gu, '').trim()
+  if (q) query = query.or(`filename.ilike.*${q}*,display_name.ilike.*${q}*`)
+  const res = await query
+  if (res.error) throw new DbError('listRuns', res.error)
+  const n = (v: unknown) => (typeof v === 'number' ? v : 0)
+  const s = (v: unknown) => (typeof v === 'string' ? v : null)
+  return ((res.data ?? []) as Record<string, unknown>[]).map((j) => ({
+    id: String(j.id),
+    filename: s(j.filename),
+    display_name: s(j.display_name),
+    status: s(j.status),
+    total_rows: n(j.total_rows),
+    processed_rows: n(j.processed_rows),
+    valid_count: n(j.valid_count),
+    enrich: j.enrich === true,
+    finder_status: s(j.finder_status),
+    instantly_status: s(j.instantly_status),
+    source: s(j.source),
+    created_at: String(j.created_at),
+    updated_at: String(j.updated_at ?? j.created_at),
+    vertical_id: s(j.vertical_id),
   }))
 }
 

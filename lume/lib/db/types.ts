@@ -333,10 +333,36 @@ export interface JobProgress {
   location_barrier: boolean
   company_barrier: boolean
   company_strict: boolean
+  /** Leads instantly-push placed in the main / no-location campaign. */
+  instantly_pushed?: number
+  instantly_pushed_nolocation?: number
+  /** Leads routed to the lead bank instead (lead-bank routing; absent before that lands). */
+  instantly_banked?: number | null
+  /** Where the list came from (validation_jobs.source). */
+  source?: string | null
+  vertical_id?: string | null
   /** Exact per-status counts over validation_rows. */
   counts: { pending: number; valid: number; invalid: number; error: number; no_email: number }
   /** Status × MailTester reason counts; read separately (GET /api/jobs/[id]/reasons), absent here. */
   reasons?: { status: string; reason: string | null; n: number }[]
+}
+
+/** `listRuns()`: one validation job as a run in Progress's switcher. */
+export interface RunRow {
+  id: string
+  filename: string | null
+  display_name: string | null
+  status: string | null
+  total_rows: number
+  processed_rows: number
+  valid_count: number
+  enrich: boolean
+  finder_status: string | null
+  instantly_status: string | null
+  source: string | null
+  created_at: string
+  updated_at: string
+  vertical_id: string | null
 }
 
 /** `instantly-push` `mode:'preview'` response. */

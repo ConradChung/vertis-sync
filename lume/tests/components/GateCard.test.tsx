@@ -4,7 +4,6 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { GATE_KINDS, type GateKind, type GateRow } from '@/lib/db/types'
 import { BUTTON_SPECS } from '@/lib/validate/actions'
 import { GateCard } from '@/components/validate/GateCard'
-import { GateList } from '@/components/validate/GateList'
 
 afterEach(cleanup)
 
@@ -99,25 +98,5 @@ describe('GateCard', () => {
   it('lume_action links to the action page', () => {
     render(<GateCard gate={gate('lume_action', { target_table: 'pending_actions' })} focused busy={false} onAction={() => {}} />)
     expect(screen.getByRole('link', { name: /Details/ }).getAttribute('href')).toBe(`/actions/${ID}`)
-  })
-})
-
-describe('GateList', () => {
-  it('groups by kind with a count header, in pipeline order', () => {
-    const gates = [
-      gate('jobs_review', { target_id: '22cc8b72-5e8b-43de-90c8-4e4b8021755a', target_table: 'job_batches' }),
-      gate('campaign_choice'),
-      gate('jobs_review', { target_id: '33cc8b72-5e8b-43de-90c8-4e4b8021755a', target_table: 'job_batches' }),
-    ]
-    const { container } = render(
-      <GateList gates={gates} focusedKey={`campaign_choice:${ID}`} busyKeys={new Set()} onAction={() => {}} onFocusGate={() => {}} />
-    )
-    const sections = [...container.querySelectorAll('section[data-group]')]
-    expect(sections.map((s) => s.getAttribute('data-group'))).toEqual(['campaign_choice', 'jobs_review'])
-    const headers = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
-    expect(headers).toEqual(['Pick a campaign1', 'Job scrape review2'])
-    expect(within(sections[1] as HTMLElement).getAllByRole('group')).toHaveLength(2)
-    // Only the focused card is tabbable.
-    expect(container.querySelectorAll('[role="group"][tabindex="0"]')).toHaveLength(1)
   })
 })

@@ -25,6 +25,7 @@ const showsJobName = (id: string) => (key: unknown) =>
   typeof key === 'string' &&
   (key.startsWith(`/api/validation-jobs/${id}`) ||
     key.startsWith('/api/validation-jobs?') ||
+    key.startsWith('/api/validation-jobs/runs') ||
     key.startsWith(`/api/jobs/${id}`) ||
     key === '/api/jobs' ||
     key.startsWith('/api/validation/history') ||
@@ -217,7 +218,7 @@ export function LeadsPreview({ jobId, variant = 'panel', editRequest = 0, expand
     <>
       <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
         {heading}
-        <div role="group" aria-label="Filter by status" className="flex items-center gap-0.5 rounded-lg bg-white/4 p-0.5">
+        <div role="group" aria-label="Filter by status" className="flex max-w-full items-center gap-0.5 overflow-x-auto whitespace-nowrap rounded-lg bg-white/4 p-0.5 [scrollbar-width:none]">
           {FILTERS.map((f) => (
             <button
               key={f.key}

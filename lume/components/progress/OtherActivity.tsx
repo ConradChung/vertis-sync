@@ -3,7 +3,6 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { Bot, Briefcase, ChevronRight, ExternalLink, Search, ShieldCheck, ShoppingCart, Users, type LucideIcon } from 'lucide-react'
-import { JobProgress } from '@/components/validate/JobProgress'
 import { TagChip } from '@/components/tags/TagChip'
 import { PROGRESS_KEY } from '@/hooks/useProgress'
 import { PreviewLeadsButton } from '@/components/validate/ValidatedPreview'
@@ -61,7 +60,7 @@ export function ProgressCard({ item, now }: { item: ProgressItem; now: number })
     `started ${ago(item.started_at)}`,
   ].filter(Boolean)
   return (
-    <article role="group" aria-label={`${item.label}: ${item.title}`} className="flex flex-col gap-2 rounded-panel border border-line bg-white/4 px-4 py-3">
+    <article role="group" aria-label={`${item.label}: ${item.title}`} className="flex flex-col gap-1.5 rounded-xl px-3 py-2.5 hover:bg-white/[0.04]">
       <header className="flex items-start gap-2.5">
         <Icon className="mt-0.5 size-4 shrink-0 text-fg-46" aria-hidden />
         <div className="min-w-0 flex-1">
@@ -98,48 +97,42 @@ export function ProgressCard({ item, now }: { item: ProgressItem; now: number })
 }
 
 /**
- * Progress → "Running now": one card per live process, newest first
- * (validation jobs with their progress panel), then the last 24 h's
- * finished ones, collapsed, with any error.
+ * Progress → "Other activity": everything running that isn't a CSV run
+ * (Apify runs, influencer runs and lookups, Leadsfriday orders, job-search
+ * batches), then the last 24 h's finished ones. Secondary: collapsed into
+ * one line until opened.
  */
-export function RunningNow({ data }: { data: ProgressPayload | undefined }) {
+export function OtherActivity({ data }: { data: ProgressPayload | undefined }) {
   const now = useNow()
   if (!data) return null
-  const { running, recent } = data
+  const running = data.running.filter((i) => i.kind !== 'validation')
+  const recent = data.recent.filter((i) => i.kind !== 'validation')
   if (!running.length && !recent.length) return null
   return (
-    <section aria-label="Running now" className="flex flex-col gap-3">
-      <h2 className="text-[13px] font-semibold text-fg">Running now</h2>
-      {running.length ? (
-        <div className="grid items-start gap-3 lg:grid-cols-2">
-          {running.map((i) =>
-            i.kind === 'validation' && i.job_id ? (
-              <div key={i.key} className="flex flex-col gap-2">
-                <ProgressCard item={i} now={now} />
-                <JobProgress jobId={i.job_id} />
-              </div>
-            ) : (
-              <ProgressCard key={i.key} item={i} now={now} />
-            )
+    <section aria-label="Other activity" className="flex flex-col">
+      <details className="group" open={running.length > 0 && running.length <= 2 ? true : undefined}>
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-[12.5px] font-medium text-fg-70 select-none hover:text-fg [&::-webkit-details-marker]:hidden">
+          <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden />
+          Other activity
+          <span className="font-mono text-[11px] font-normal text-fg-46 tabular-nums">
+            {running.length} running{recent.length ? ` · ${recent.length} finished today` : ''}
+          </span>
+        </summary>
+        <div className="flex flex-col">
+          {running.map((i) => (
+            <ProgressCard key={i.key} item={i} now={now} />
+          ))}
+          {recent.length > 0 && (
+            <>
+              <p className="px-3 pt-3 pb-1 text-[11px] text-fg-46">Finished in the last 24 h</p>
+              {recent.map((i) => (
+                <ProgressCard key={i.key} item={i} now={now} />
+              ))}
+            </>
           )}
         </div>
-      ) : (
-        <p className="text-[12px] text-fg-46">Nothing is running right now.</p>
-      )}
-      {recent.length > 0 && (
-        <details className="group rounded-panel border border-line bg-white/4 px-4 py-2.5">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[12px] text-fg-70 select-none hover:text-fg [&::-webkit-details-marker]:hidden">
-            <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden />
-            Finished in the last 24 h ({recent.length})
-          </summary>
-          <div className="mt-2.5 grid gap-2.5 lg:grid-cols-2">
-            {recent.map((i) => (
-              <ProgressCard key={i.key} item={i} now={now} />
-            ))}
-          </div>
-        </details>
-      )}
-      {data.unavailable?.length ? <p className="text-[11px] text-fg-24">Couldn&apos;t read: {data.unavailable.join(', ')} (retrying).</p> : null}
+      </details>
+      {data.unavailable?.length ? <p className="px-3 text-[11px] text-fg-24">Couldn&apos;t read: {data.unavailable.join(', ')} (retrying).</p> : null}
     </section>
   )
 }

@@ -9,7 +9,7 @@ import { StatusBadge } from '@/components/import/StatusBadge'
 import { OrdersTable } from '@/components/import/OrdersTable'
 import { OverviewView } from '@/components/overview/OverviewView'
 import { GateCard } from '@/components/validate/GateCard'
-import { ValidateSkeleton, ValidateView } from '@/components/validate/ValidateView'
+import { ProgressBoard, ProgressSkeleton } from '@/components/progress/ProgressBoard'
 import { ActionPlan, type ActionView } from '@/components/actions/ActionPlan'
 import { PlanCard } from '@/components/orb/PlanCard'
 import { ToolLog } from '@/components/orb/ToolLog'
@@ -220,13 +220,13 @@ export default function DesignPage() {
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
           <State label="queue · loading">
-            <ValidateSkeleton />
+            <ProgressSkeleton />
           </State>
           <State label="queue · empty">
-            <ValidateView gates={[]} onRefresh={noop} />
+            <ProgressBoard gates={[]} onRefresh={noop} runs={[]} runsLoaded selectedId={null} onSelectRun={noop} job={null} progress={undefined} />
           </State>
           <State label="queue · error">
-            <ValidateView gates={undefined} error={new Error('fixture')} onRefresh={noop} />
+            <ProgressBoard gates={undefined} gatesError={new Error('fixture')} onRefresh={noop} runs={[]} runsLoaded={false} selectedId={null} onSelectRun={noop} job={undefined} progress={undefined} />
           </State>
         </div>
       </Section>
