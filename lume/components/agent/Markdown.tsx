@@ -1,4 +1,5 @@
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
+import { Check } from 'lucide-react'
 import { DiagramCard, DiagramChip } from '@/components/agent/DiagramCard'
 import { parseDiagram } from '@/lib/agent/diagram'
 
@@ -6,7 +7,9 @@ import { parseDiagram } from '@/lib/agent/diagram'
  * A tiny, safe Markdown subset for streamed agent replies: paragraphs, `-`/`*`
  * and `1.` lists, ``` fences (an unclosed fence renders as code while it
  * streams), `#` headings, inline `code`, **bold**, *italic* and [links](url)
- * (http(s) and same-site paths only), and GFM | tables |. Builds React nodes — never raw HTML.
+ * (http(s) and same-site paths only), GFM | tables |, and checklists: `- [ ] task` / `- [x] done`
+ * with indented lines under each as its action steps (owner, 2026-11-09: "what's next" answers are
+ * checklists, steps signalled with →). Every → renders in the accent. Builds React nodes — never raw HTML.
  */
 
 type Block =
@@ -15,6 +18,17 @@ type Block =
   | { kind: 'code'; text: string; lang: string; closed: boolean }
   | { kind: 'h'; level: number; text: string }
   | { kind: 'table'; head: string[]; align: Align[]; rows: string[][] }
+  | { kind: 'check'; items: CheckItem[] }
+
+export interface CheckItem {
+  done: boolean
+  text: string
+  /** The indented lines under it (its action steps), list markers and leading → stripped. */
+  steps: string[]
+}
+
+const CHECK = /^\s*[-*•]\s+\[( |x|X)\]\s+/
+const STEP = /^\s{2,}\S|^\t\S/
 
 type Align = 'left' | 'center' | 'right'
 
@@ -68,6 +82,21 @@ export function parseBlocks(src: string): Block[] {
         rows.push(head.map((_, k) => cells[k] ?? ''))
       }
       out.push({ kind: 'table', head, align, rows })
+      continue
+    }
+    if (CHECK.test(line) && !/^\s{2,}/.test(line)) {
+      const items: CheckItem[] = []
+      while (i < lines.length && CHECK.test(lines[i]) && !/^\s{2,}/.test(lines[i])) {
+        const m = CHECK.exec(lines[i])!
+        const item: CheckItem = { done: m[1].toLowerCase() === 'x', text: lines[i].slice(m[0].length), steps: [] }
+        i++
+        while (i < lines.length && STEP.test(lines[i])) {
+          const step = lines[i++].trim().replace(/^([-*•]|\d+[.)])\s+/, '').replace(/^(→|->)\s*/, '')
+          if (step) item.steps.push(step)
+        }
+        items.push(item)
+      }
+      out.push({ kind: 'check', items })
       continue
     }
     if (/^\s*[-*•]\s+/.test(line) || /^\s*\d+[.)]\s+/.test(line)) {
@@ -129,8 +158,66 @@ export function renderInline(text: string): ReactNode[] {
         </a>
       )
     }
-    return <Fragment key={i}>{part}</Fragment>
+    return <Fragment key={i}>{arrows(part)}</Fragment>
   })
+}
+
+/** → (and a typed ->) in the accent, so a flow reads at a glance. */
+function arrows(text: string): ReactNode {
+  if (!text.includes('→') && !text.includes('->')) return text
+  return text.split(/(→|->)/).map((t, k) =>
+    t === '→' || t === '->' ? (
+      <span key={k} className="text-positive">
+        →
+      </span>
+    ) : (
+      t
+    )
+  )
+}
+
+/** A checklist: round ticks (tap to tick off locally), each item's action steps under it as → lines. */
+function Checklist({ items }: { items: CheckItem[] }) {
+  const [ticked, setTicked] = useState<Record<number, boolean>>({})
+  return (
+    <ul className="flex flex-col gap-2.5" aria-label="Checklist">
+      {items.map((it, j) => {
+        const done = ticked[j] ?? it.done
+        return (
+          <li key={j} className="flex gap-3">
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={done}
+              aria-label={done ? 'Mark not done' : 'Mark done'}
+              onClick={() => setTicked((t) => ({ ...t, [j]: !done }))}
+              className={
+                'mt-[3px] grid size-[18px] shrink-0 place-items-center rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring ' +
+                (done ? 'bg-primary text-primary-foreground' : 'ring-[1.5px] ring-fg-46 ring-inset hover:ring-primary')
+              }
+            >
+              {done && <Check className="size-3" strokeWidth={3} />}
+            </button>
+            <div className="min-w-0 flex-1">
+              <p className={done ? 'text-fg-46 line-through decoration-fg-24' : 'font-medium text-fg'}>{renderInline(it.text)}</p>
+              {it.steps.length > 0 && (
+                <ul className={'mt-1 flex flex-col gap-0.5 text-[14px] ' + (done ? 'text-fg-24' : 'text-fg-70')}>
+                  {it.steps.map((st, k) => (
+                    <li key={k} className="flex gap-2">
+                      <span className="text-positive" aria-hidden>
+                        →
+                      </span>
+                      <span className="min-w-0">{renderInline(st)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </li>
+        )
+      })}
+    </ul>
+  )
 }
 
 /** In the Agent chat, diagrams live in the side panel: the reply shows a chip that focuses it. */
@@ -202,6 +289,8 @@ export function Markdown({ text, flow }: { text: string; flow?: FlowChips }) {
                 {renderInline(b.text)}
               </p>
             )
+          case 'check':
+            return <Checklist key={i} items={b.items} />
           case 'ul':
           case 'ol': {
             const List = b.kind
