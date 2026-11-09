@@ -1,4 +1,4 @@
-import { Bot, ClipboardCheck, FlaskConical, LayoutDashboard, Megaphone, Repeat2, Settings, ShieldCheck, Sheet, Upload, UserSearch, Users, type LucideIcon } from 'lucide-react'
+import { Bot, ClipboardCheck, FlaskConical, LayoutDashboard, Megaphone, Repeat2, Settings, ShieldCheck, Sheet, Upload, Users, type LucideIcon } from 'lucide-react'
 
 /** Primary navigation. `primary` tabs sit in the phone bottom bar; the rest live under More. */
 export const TABS: readonly { href: string; label: string; icon: LucideIcon; primary?: boolean }[] = [
@@ -10,7 +10,6 @@ export const TABS: readonly { href: string; label: string; icon: LucideIcon; pri
   { href: '/campaigns', label: 'Campaigns', icon: Megaphone, primary: true },
   { href: '/crm', label: 'CRM', icon: Users, primary: true },
   { href: '/agent', label: 'Agent', icon: Bot, primary: true },
-  { href: '/influencers', label: 'Influencers', icon: UserSearch },
   { href: '/playground', label: 'Playground', icon: FlaskConical },
   { href: '/operator', label: 'Operator', icon: ClipboardCheck },
   { href: '/settings', label: 'Settings', icon: Settings },

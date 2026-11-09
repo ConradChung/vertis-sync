@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { ArrowUp, BookMarked, Brain, Menu, PanelRight, ChevronRight, Table2, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, ShieldCheck, ShieldOff, ShieldX, SquarePen, Wrench } from 'lucide-react'
+import { ArrowDown, ArrowUp, BookMarked, Brain, Menu, PanelRight, ChevronRight, Table2, KeyRound, MessageSquareDashed, PanelLeft, RotateCcw, ShieldCheck, ShieldOff, ShieldX, SquarePen, Wrench } from 'lucide-react'
 import { AgentHistory, useConversationList, useMoveChat } from '@/components/agent/AgentHistory'
 import { ProjectChip } from '@/components/agent/ProjectChip'
 import { useProjectList } from '@/hooks/useProjectList'
@@ -123,6 +123,14 @@ export function AgentChat() {
   // Follow the stream only while the owner is at the bottom: scrolling up to
   // read stops the auto-scroll, scrolling back down resumes it.
   const followRef = useRef(true)
+  // Shows the jump-to-latest button once the owner has scrolled away from the bottom.
+  const [awayFromBottom, setAwayFromBottom] = useState(false)
+  const jumpToBottom = () => {
+    const box = scrollRef.current
+    if (!box) return
+    followRef.current = true
+    box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' })
+  }
   const { messages, busy, send } = chat
 
   // Split screen: diagrams and lead review sets from this conversation live in the right panel.
@@ -521,11 +529,15 @@ export function AgentChat() {
             split && desktop ? 'split-chat-in h-full' : 'mx-auto max-w-[1200px] sm:h-[calc(100dvh-var(--topbar-h)-6.75rem)]'
           )}
         >
+          <div className="relative flex min-h-0 flex-1 flex-col">
           <div
             ref={scrollRef}
             onScroll={(e) => {
               const el = e.currentTarget
-              followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+              const gap = el.scrollHeight - el.scrollTop - el.clientHeight
+              followRef.current = gap < 120
+              const away = gap > 240
+              setAwayFromBottom((a) => (a === away ? a : away))
             }}
             className="thin-scroll scroll-fade-bottom min-h-0 flex-1 overflow-y-auto overscroll-contain px-3.5 pt-3 sm:px-8 sm:pt-7"
             aria-live="polite"
@@ -552,6 +564,17 @@ export function AgentChat() {
               </ol>
             )}
             <div ref={endRef} />
+          </div>
+          {awayFromBottom && !chat.loading && messages.length > 0 && (
+            <button
+              type="button"
+              onClick={jumpToBottom}
+              aria-label="Jump to latest message"
+              className="absolute bottom-3 left-1/2 z-10 inline-flex size-9 -translate-x-1/2 items-center justify-center rounded-full border border-line bg-[var(--glass-fill-strong)] text-fg shadow-lg backdrop-blur hover:bg-surface"
+            >
+              <ArrowDown className="size-4" />
+            </button>
+          )}
           </div>
 
           <div className="shrink-0 border-t border-line bg-[var(--glass-fill-strong)] px-2.5 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:px-8 sm:pt-3 sm:pb-4">

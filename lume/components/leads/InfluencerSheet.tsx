@@ -9,6 +9,7 @@ import { ShimmerBar } from '@/components/overview/parts'
 import { fetchJson } from '@/hooks/fetcher'
 import { sendJson } from '@/lib/validate/client'
 import { cn } from '@/lib/utils'
+import { ExpandButton, SheetOverlay, scrollBoxClass, useSheetExpand } from '@/components/leads/SheetFrame'
 
 /**
  * An influencer candidate batch as a sheet in Leads. The candidates stay in
@@ -65,6 +66,7 @@ const STATUS_LABEL: Record<string, string> = { pending_lookup: 'pending lookup',
 const REJECTABLE = new Set(['found', 'not_found', 'pending_lookup'])
 
 export function InfluencerSheet({ batchId, name }: { batchId: string; name: string }) {
+  const { expanded, toggle: toggleExpanded } = useSheetExpand()
   const detail = useSWR<BatchDetail>(`/api/influencers/candidates/${batchId}`, fetchJson, {
     keepPreviousData: true,
     refreshInterval: (d) => (d?.batch?.status === 'looking_up' ? 5_000 : 0),
@@ -145,9 +147,13 @@ export function InfluencerSheet({ batchId, name }: { batchId: string; name: stri
           Approve all high ({high.length})
         </Button>
       </header>
-      <div className="overflow-x-auto">
+      <SheetOverlay expanded={expanded}>
+      <div className="flex justify-end px-4 py-2">
+        <ExpandButton expanded={expanded} onClick={toggleExpanded} />
+      </div>
+      <div className={scrollBoxClass(expanded)}>
         <table aria-label={`${name} candidates`} className="w-full min-w-max text-left text-[12px]">
-          <thead className="text-fg-46">
+          <thead className="sticky top-0 z-10 bg-background text-fg-46">
             <tr>
               <th className="w-8 py-2 pl-4" />
               {['Name', 'Title', 'Company', 'Category', 'Notes', 'LinkedIn', 'Confidence', 'Evidence', 'Status', 'Possible duplicate'].map((h) => (
@@ -211,6 +217,7 @@ export function InfluencerSheet({ batchId, name }: { batchId: string; name: stri
           </tbody>
         </table>
       </div>
+      </SheetOverlay>
     </GlassCard>
   )
 }

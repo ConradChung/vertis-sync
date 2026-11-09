@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { LIST_COLUMNS, type EditableField, type ListItem } from '@/lib/leads/lists/model'
 import { InfluencerSheet } from '@/components/leads/InfluencerSheet'
+import { ExpandButton, SheetOverlay, scrollBoxClass, useSheetExpand } from '@/components/leads/SheetFrame'
 import { cn } from '@/lib/utils'
 
 /**
@@ -279,6 +280,7 @@ function ListPanel({
   const cellOf = (r: Page['rows'][number], c: string) => r.cells?.[c] ?? (list.columns?.length ? '' : ((r.item[LIST_COLUMNS.find((x) => x.label === c)?.key ?? 'name'] as string | null | undefined) ?? ''))
   const [picked, setPicked] = useState<Set<number>>(new Set())
   const [dialog, setDialog] = useState<null | 'send' | 'delete' | 'rows' | 'paste' | 'add' | 'rename'>(null)
+  const { expanded, toggle: toggleExpanded } = useSheetExpand()
   useEffect(() => {
     const t = setTimeout(() => {
       const next = q.trim()
@@ -363,7 +365,9 @@ function ListPanel({
         {list.email_count < 1 && <p className="w-full text-right text-[11.5px] text-amber">No row has an email yet</p>}
       </header>
 
+      <SheetOverlay expanded={expanded}>
       <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
+        {expanded && <span className="truncate text-[13px] font-medium">{list.name}</span>}
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, company, email, title, city" aria-label="Search rows" className="h-8 max-w-xs" />
         <div className="flex-1" />
         {picked.size > 0 && (
@@ -377,11 +381,12 @@ function ListPanel({
         <Button variant="outline" size="sm" onClick={() => setDialog('paste')}>
           <ClipboardPaste className="size-3.5" /> Paste rows
         </Button>
+        <ExpandButton expanded={expanded} onClick={toggleExpanded} />
       </div>
 
       <Pager page={page} pages={pages} total={total} onPage={setPage} />
       <div
-        className="overflow-x-auto outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={cn(scrollBoxClass(expanded), 'outline-none focus-visible:ring-2 focus-visible:ring-ring')}
         role="region"
         aria-label={`${list.name} table`}
         tabIndex={0}
@@ -393,7 +398,7 @@ function ListPanel({
         }}
       >
         <Table aria-label={`${list.name} rows`} className="min-w-max text-[12.5px]">
-          <TableHeader>
+          <TableHeader className="sticky top-0 z-10 bg-background">
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-8 pl-4" />
               <TableHead className="w-12 text-fg-46">#</TableHead>
@@ -445,6 +450,7 @@ function ListPanel({
       </div>
 
       <Pager page={page} pages={pages} total={total} onPage={setPage} bottom />
+      </SheetOverlay>
 
       <Confirm
         open={dialog === 'send'}

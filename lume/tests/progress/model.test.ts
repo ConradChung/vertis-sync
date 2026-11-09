@@ -23,7 +23,7 @@ describe('progress items', () => {
 
   it('influencer reaction run: stage and cost; awaiting approval counts as live', () => {
     expect(fromInfluencerRun({ id: 'ir', status: 'awaiting_approval', stage: 'reactions', influencer_ids: ['a', 'b'], cost: { total_usd: 1.2 }, counts: {}, error: null, created_at: iso(30), updated_at: iso(2), finished_at: null })).toMatchObject({
-      kind: 'influencer_run', label: 'Influencer run', title: '2 influencers', status: 'awaiting approval', stage: 'reactions', cost_usd: 1.2, finished: false, href: '/influencers',
+      kind: 'influencer_run', label: 'Influencer run', title: '2 influencers', status: 'awaiting approval', stage: 'reactions', cost_usd: 1.2, finished: false, href: '/import/leads',
     })
   })
 

@@ -158,7 +158,7 @@ export function fromInfluencerRun(r: InfluencerRunLike): ProgressItem {
     updated_at: r.finished_at ?? r.updated_at,
     finished: !LIVE_INF_RUN.has(r.status),
     error: r.error,
-    href: '/influencers',
+    href: '/import/leads',
   })
 }
 
