@@ -31,7 +31,7 @@ vi.mock('@xyflow/react', () => ({
   ReactFlowProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   useReactFlow: () => ({ getNode: () => undefined, getZoom: () => 1, setCenter: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn(), fitView: vi.fn(), setViewport: vi.fn() }),
   useNodesInitialized: () => true,
-  useStore: (sel: (s: { width: number; height: number }) => unknown) => sel({ width: 800, height: 600 }),
+  useStore: (sel: (s: { width: number; height: number; transform: [number, number, number] }) => unknown) => sel({ width: 800, height: 600, transform: [0, 0, 1] }),
   Handle: () => null,
   Position: { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' },
 }))

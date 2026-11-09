@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from 'next-themes'
-import { Background, BackgroundVariant, ReactFlow, ReactFlowProvider, useNodesInitialized, useReactFlow, useStore, type FitViewOptions, type NodeMouseHandler } from '@xyflow/react'
+import { ReactFlow, ReactFlowProvider, useNodesInitialized, useReactFlow, useStore, type FitViewOptions, type NodeMouseHandler } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Maximize, Minimize, Minus, Plus, RotateCcw, Scan } from 'lucide-react'
 import { NodeDetails } from '@/components/agent/NodeDetails'
@@ -121,6 +121,34 @@ function RefitWhenShown({ fit }: { fit: FitViewOptions }) {
  * the flow and Esc closes. Remount with a new `key` to replay the entrance
  * when switching pipelines.
  */
+const GRID = 16
+
+/**
+ * A faint small-square grid that pans and zooms with the diagram (owner,
+ * 2026-11-09). Drawn as a CSS background whose size and offset are snapped to
+ * whole pixels: React Flow's SVG pattern sits at fractional offsets while
+ * dragging, so its 1 px lines flickered between one and two pixels wide.
+ * Hidden when zoomed out so far the squares would turn into noise.
+ */
+function PixelGrid({ color }: { color: string }) {
+  const [x, y, zoom] = useStore((st) => st.transform)
+  const size = Math.round(GRID * zoom)
+  if (size < 7) return null
+  const ox = ((Math.round(x) % size) + size) % size
+  const oy = ((Math.round(y) % size) + size) % size
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-0 -z-10"
+      style={{
+        backgroundImage: `linear-gradient(to right, ${color} 1px, transparent 1px), linear-gradient(to bottom, ${color} 1px, transparent 1px)`,
+        backgroundSize: `${size}px ${size}px`,
+        backgroundPosition: `${ox}px ${oy}px`,
+      }}
+    />
+  )
+}
+
 export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { diagram: Diagram; className?: string; direction?: Direction }) {
   const { resolvedTheme } = useTheme()
   const box = useRef<HTMLDivElement>(null)
@@ -210,13 +238,7 @@ export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { dia
           colorMode={resolvedTheme === 'light' ? 'light' : 'dark'}
           style={{ background: 'transparent' }}
         >
-          {/* A faint small-square grid that pans and zooms with the diagram (owner, 2026-11-09). */}
-          <Background
-            variant={BackgroundVariant.Lines}
-            gap={16}
-            lineWidth={1}
-            color={resolvedTheme === 'light' ? 'rgba(15,26,18,0.07)' : '#161616'}
-          />
+          <PixelGrid color={resolvedTheme === 'light' ? 'rgba(15,26,18,0.07)' : '#161616'} />
           <Controls fullscreen={fullscreen} onFullscreen={toggleFullscreen} />
           <FocusSelected id={selected} boxWidth={boxWidth} />
           <RefitWhenShown fit={initialFit} />

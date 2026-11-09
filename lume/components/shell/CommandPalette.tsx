@@ -100,6 +100,10 @@ export function CommandPalette() {
   const registry = useSWR<LumeCampaignRow[]>(open ? '/api/campaigns' : null, fetchJson, opts)
   const orders = useSWR<OrderRow[]>(open ? '/api/orders?limit=50' : null, fetchJson, opts)
   const rules = useSWR<RuleHit[]>(open ? '/api/rules' : null, fetchJson, opts)
+  // Agent opens on the most recent chat (owner, 2026-11-09); asking something starts a new one.
+  const chats = useSWR<{ conversations: { id: string }[] }>(open ? '/api/agent/conversations' : null, fetchJson, opts)
+  const latestChat = chats.data?.conversations?.[0]?.id
+  const agentHref = latestChat ? `/agent?c=${encodeURIComponent(latestChat)}` : '/agent'
   const deals = useSWR<{ deals: DealHit[] }>(open && term.length >= 2 ? `/api/crm/search?q=${encodeURIComponent(term)}` : null, fetchJson, {
     ...opts,
     keepPreviousData: true,
@@ -122,9 +126,9 @@ export function CommandPalette() {
         <CommandList>
           {/* Always first, whatever is typed (owner, 2026-11-09): Enter asks the agent in a new chat. */}
           <CommandGroup heading="Agent" forceMount>
-            <CommandItem forceMount value="__ask_agent__" onSelect={() => go(q.trim() ? `/agent?ask=${encodeURIComponent(q.trim())}` : '/agent')}>
+            <CommandItem forceMount value="__ask_agent__" onSelect={() => go(q.trim() ? `/agent?ask=${encodeURIComponent(q.trim())}` : agentHref)}>
               <Bot strokeWidth={1.75} />
-              <span className="truncate">{q.trim() ? <>Ask the agent: <span className="text-foreground">“{q.trim()}”</span></> : 'Ask the agent…'}</span>
+              <span className="truncate">{q.trim() ? <>Ask the agent: <span className="text-foreground">“{q.trim()}”</span></> : 'Agent — your latest chat'}</span>
               <CommandShortcut>↵</CommandShortcut>
             </CommandItem>
           </CommandGroup>
@@ -150,7 +154,7 @@ export function CommandPalette() {
             {[...FLOW, ...TOOLS].map((t) => {
               const Icon = t.icon
               return (
-                <CommandItem key={t.href} value={`go ${t.label} ${t.step ? `step ${t.step}` : ''} ${TAB_WORDS[t.href] ?? ''}`} onSelect={() => go(t.href)}>
+                <CommandItem key={t.href} value={`go ${t.label} ${t.step ? `step ${t.step}` : ''} ${TAB_WORDS[t.href] ?? ''}`} onSelect={() => go(t.href === '/agent' ? agentHref : t.href)}>
                   <Icon strokeWidth={1.75} />
                   {t.step ? <span className="w-3 font-mono text-xs text-muted-foreground">{t.step}</span> : null}
                   {t.label}

@@ -27,6 +27,7 @@ const respond = (url: string) => {
   if (url.startsWith('/api/orders')) return [{ kind: 'ingest', id: 'o1', summary: 'leads.csv', row_count: 120 }]
   if (url.startsWith('/api/rules')) return [{ id: 'r1', name: 'Weekday drip', cron: '0 8 * * 1-5' }]
   if (url.startsWith('/api/crm/search')) return { deals: [] }
+  if (url.startsWith('/api/agent/conversations')) return { conversations: [{ id: 'chat-new' }, { id: 'chat-old' }] }
   return {}
 }
 
@@ -65,5 +66,22 @@ describe('CommandPalette', () => {
     expect(options[0].textContent).toContain('zzz no match')
     fireEvent.click(options[0])
     expect(push).toHaveBeenCalledWith('/agent?ask=zzz%20no%20match')
+  })
+
+  it('Agent opens the most recent chat', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(respond(url)), { status: 200 })))
+    render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <CommandPalette />
+      </SWRConfig>
+    )
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'k', metaKey: true })
+    })
+    await screen.findByText('Kaspen Q4')
+    const agent = (await screen.findAllByRole('option')).find((o) => o.getAttribute('data-value')?.startsWith('go Agent'))!
+    await new Promise((r) => setTimeout(r, 0))
+    fireEvent.click(agent)
+    expect(push).toHaveBeenLastCalledWith('/agent?c=chat-new')
   })
 })
