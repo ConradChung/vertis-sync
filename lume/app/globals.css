@@ -547,7 +547,10 @@
 html[data-chat] body {
   background: var(--background);
 }
-html[data-chat] [data-app-bg] {
+html[data-chat] [data-app-bg],
+html[data-chat] [data-top-band] {
+  /* The agent is solid black edge to edge; the frosted band would sit over its toolbar
+     (the chat's fixed layer is z-10, the band z-20) and blur it. */
   display: none;
 }
 html[data-chat] .glass {

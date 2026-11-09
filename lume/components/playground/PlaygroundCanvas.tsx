@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from 'next-themes'
-import { ReactFlow, ReactFlowProvider, useNodesInitialized, useReactFlow, useStore, type FitViewOptions, type NodeMouseHandler } from '@xyflow/react'
+import { Background, BackgroundVariant, ReactFlow, ReactFlowProvider, useNodesInitialized, useReactFlow, useStore, type FitViewOptions, type NodeMouseHandler } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Maximize, Minimize, Minus, Plus, RotateCcw, Scan } from 'lucide-react'
 import { NodeDetails } from '@/components/agent/NodeDetails'
@@ -210,6 +210,13 @@ export function PlaygroundCanvas({ diagram, className, direction = 'LR' }: { dia
           colorMode={resolvedTheme === 'light' ? 'light' : 'dark'}
           style={{ background: 'transparent' }}
         >
+          {/* A faint small-square grid that pans and zooms with the diagram (owner, 2026-11-09). */}
+          <Background
+            variant={BackgroundVariant.Lines}
+            gap={16}
+            lineWidth={1}
+            color={resolvedTheme === 'light' ? 'rgba(15,26,18,0.06)' : 'rgba(255,255,255,0.045)'}
+          />
           <Controls fullscreen={fullscreen} onFullscreen={toggleFullscreen} />
           <FocusSelected id={selected} boxWidth={boxWidth} />
           <RefitWhenShown fit={initialFit} />

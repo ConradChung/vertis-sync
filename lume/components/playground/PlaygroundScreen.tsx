@@ -88,7 +88,7 @@ export function PlaygroundScreen() {
   const savedSelected = selected?.kind === 'saved' ? selected.id : null
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-[11px] tracking-[0.18em] text-fg-46 uppercase">Showcase</p>
@@ -132,8 +132,9 @@ export function PlaygroundScreen() {
         </div>
       </div>
 
-      {/* Phones: the canvas fills the space above the bottom bar and the flow runs top to bottom. */}
-      <div className="h-[calc(100dvh-var(--topbar-h)-11rem)] min-h-[420px] max-sm:h-[calc(100dvh-var(--topbar-h)-var(--bottombar-h)-10.5rem)] max-sm:min-h-[360px]">
+      {/* The canvas takes the rest of the window: wider than the page (a 1 rem gutter) and down to
+          the bottom edge. Phones: above the bottom bar, and the flow runs top to bottom. */}
+      <div className="h-[calc(100dvh-var(--topbar-h)-7.5rem)] min-h-[420px] sm:-mx-2 lg:-mx-6 max-sm:h-[calc(100dvh-var(--topbar-h)-var(--bottombar-h)-10.5rem)] max-sm:min-h-[360px]">
         {diagram ? (
           <PlaygroundCanvas key={`${selectedKey}:${phone ? 'TB' : 'LR'}`} diagram={diagram} direction={phone ? 'TB' : 'LR'} className="h-full" />
         ) : loading || catalogLoading ? (

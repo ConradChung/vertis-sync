@@ -60,6 +60,7 @@ export function TopBar({ operator = null }: { operator?: string | null } = {}) {
         instead of running under the page name (owner, 2026-11-09). */}
     <div
       aria-hidden
+      data-top-band
       className="pointer-events-none fixed inset-x-0 top-0 z-20 h-[calc(var(--topbar-h)+20px)] bg-gradient-to-b from-(--background) via-(--background)/80 to-transparent backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_55%,transparent)]"
     />
     <Launcher pathname={pathname} warm={warm} />
