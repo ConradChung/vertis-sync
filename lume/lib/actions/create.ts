@@ -13,6 +13,7 @@ import { approvePayloadError, INFLUENCER_ACTION_KEY, influencerPayloadError, LOO
 import { STAGE_ATTACHMENT_KEY, stageAttachmentPayloadError } from '@/lib/agent/attachmentActionPayload'
 import { LEAD_LIST_KEY, leadListPayloadError } from '@/lib/leads/lists/actionPayload'
 import { tryGrantSend } from '@/lib/actions/grant'
+import { NEW_CAMPAIGN_KEY, NEW_CAMPAIGN_KIND, newCampaignPayloadError } from '@/lib/campaigns/newCampaignPayload'
 import { pushForItem } from '@/lib/webhooks/deliver'
 import { pushSummary } from '@/lib/webhooks/push'
 import { sendActionPrompt, sendMessage } from '@/lib/adapters/telegram'
@@ -53,6 +54,10 @@ import { slackOnAction } from '@/lib/slack/hooks'
  *
  * `update_sequence` (edit a live campaign's emails): one awaiting edit per
  * campaign, backed by `pending_actions_one_awaiting_sequence_idx`.
+ *
+ * `new_campaign` (a campaign from scratch, lib/campaigns/newCampaignPayload.ts):
+ * one awaiting per lowercased name (`name_key`), backed by
+ * `pending_actions_one_awaiting_new_campaign_idx`; with `job_id` also one per job.
  *
  * Telegram unconfigured: the row is still created; the prompt is skipped
  * (the adapter logs it) and `telegram_message_id` stays null.
@@ -174,6 +179,12 @@ export async function createAction(
     const err = updateSequencePayloadError(payload)
     if (err) throw new InvalidActionPayloadError(err)
     campaignKey = { field: 'campaign_id', value: String(payload.campaign_id) }
+  } else if (kind === NEW_CAMPAIGN_KIND) {
+    // One awaiting new campaign per name (pending_actions_one_awaiting_new_campaign_idx);
+    // with job_id, also one per job (pending_actions_one_awaiting_idx).
+    const err = newCampaignPayloadError(payload)
+    if (err) throw new InvalidActionPayloadError(err)
+    campaignKey = { field: NEW_CAMPAIGN_KEY, value: String(payload[NEW_CAMPAIGN_KEY]) }
   }
   const rawJobId = payload.job_id
   if (rawJobId === undefined && JOB_KINDS.has(kind)) {

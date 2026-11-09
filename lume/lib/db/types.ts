@@ -194,6 +194,7 @@ export type PendingActionKind =
   | 'send_lead_list'
   | 'delete_lead_list'
   | 'remove_lead_rows'
+  | 'new_campaign'
 
 export type PendingActionStatus =
   | 'awaiting'

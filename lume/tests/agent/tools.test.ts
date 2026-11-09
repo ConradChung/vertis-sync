@@ -47,6 +47,7 @@ describe('buildTools', () => {
       resume_campaign: { campaign_id: 'c1' },
       activate_campaign: { job_id: JOB },
       duplicate_campaign: { source_campaign_id: 'c1', name: 'copy' },
+      create_campaign: { name: 'Kaspen — PM owners — Nov 2026', template_id: JOB.toUpperCase(), email_list: ['me@send.com'], daily_limit: 50, job_id: JOB.toUpperCase() },
       delete_rule: { rule_id: JOB },
       run_apify_actor: { actor_id: 'compass/crawler-google-places', input: { q: 'roofers' }, inputs_confirmed_by_owner: true },
       update_campaign_sequence: { campaign_id: 'c1', steps: [{ delay: 0, variants: [{ subject: 'Hi', body: 'Hello' }] }] },

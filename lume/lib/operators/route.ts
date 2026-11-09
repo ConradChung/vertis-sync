@@ -88,6 +88,7 @@ const KIND_SCOPE: Record<PendingActionKind, VerticalScope | null> = {
   pause_campaign: 'campaign',
   resume_campaign: 'campaign',
   create_campaign: 'campaign',
+  new_campaign: 'campaign',
   update_sequence: 'campaign',
   remove_leads: 'campaign',
   label_reply: 'replies',

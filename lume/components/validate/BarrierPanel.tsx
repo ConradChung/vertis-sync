@@ -12,6 +12,7 @@ import { jobKey, previewKey, useInstantlyCampaigns, useJobProgress } from '@/hoo
 import type { GateRow } from '@/lib/db/types'
 import { sendJson } from '@/lib/validate/client'
 import { fetchJson } from '@/hooks/fetcher'
+import { NewCampaignSheet } from '@/components/campaigns/NewCampaignSheet'
 
 /**
  * Lume-local push settings (plain PATCHes, not entrypoint claims):
@@ -36,6 +37,7 @@ function CampaignPick({ gate, focusTick }: { gate: GateRow; focusTick: number })
   const { data, error, mutate: reload } = useInstantlyCampaigns(true)
   const [selected, setSelected] = useState('')
   const [saving, setSaving] = useState(false)
+  const [creating, setCreating] = useState(false)
   const selectRef = useRef<HTMLButtonElement>(null)
   const configured = data?.configured === true
   const campaigns = data && data.configured ? data.campaigns : []
@@ -94,6 +96,25 @@ function CampaignPick({ gate, focusTick }: { gate: GateRow; focusTick: number })
               </Button>
               <span className="text-[11px] text-fg-46">Nothing is pushed yet — barriers and names come next.</span>
             </div>
+            <button
+              type="button"
+              className="self-start text-[12px] text-violet-soft hover:text-fg disabled:opacity-50"
+              disabled={!configured}
+              onClick={() => setCreating(true)}
+            >
+              Or create a campaign for this list →
+            </button>
+            <NewCampaignSheet
+              open={creating}
+              onOpenChange={(o) => {
+                setCreating(o)
+                if (!o) {
+                  void mutate('/api/gates')
+                  void mutate(jobKey(gate.target_id))
+                }
+              }}
+              jobId={gate.target_id}
+            />
           </>
         )}
       </div>

@@ -42,6 +42,7 @@ import { executeInfluencerLookup } from '@/lib/influencers/lookupAction'
 import { executeInfluencerApprove } from '@/lib/influencers/approveAction'
 import { executeDeleteLeadList, executeRemoveLeadRows, executeSendLeadList } from '@/lib/leads/lists/actions'
 import type { RunOptions } from '@/lib/apify/pricing'
+import { executeNewCampaign } from '@/lib/campaigns/newCampaignExec'
 import type { Json, PendingActionRow } from '@/lib/db/types'
 import { nextRun } from '@/lib/rules/nextRun'
 import { parseRuleFilter } from '@/lib/rules/filter'
@@ -571,6 +572,15 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
   async create_campaign(p) {
     const created = await createCampaignFrom(need(p, 'source_campaign_id'), need(p, 'name'))
     return { source_campaign_id: need(p, 'source_campaign_id'), campaign_id: created.id, name: created.name }
+  },
+
+  /**
+   * A campaign from scratch (lib/campaigns/newCampaignExec.ts): created as a
+   * draft, never activated; then tagged, and picked for its job when the job
+   * still waits for a campaign.
+   */
+  async new_campaign(p) {
+    return executeNewCampaign(p)
   },
 }
 

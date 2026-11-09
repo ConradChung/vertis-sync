@@ -84,6 +84,7 @@ describe('scopes', () => {
       update_sequence: 'campaign', send_reply: 'replies', crm_close_deal: 'replies', run_actor: 'orders', decide_gate: null,
       issue_operator_key: null, remove_leads: 'campaign', label_reply: 'replies', influencer_run: 'orders', influencer_reactions: 'orders',
       stage_attachment: 'validation', influencer_lookup: 'orders', influencer_approve: 'orders', send_lead_list: 'validation', delete_lead_list: null, remove_lead_rows: null,
+      new_campaign: 'campaign',
     }
     for (const [kind, scope] of Object.entries(expected)) expect(scopeForPendingKind(kind)).toBe(scope)
     expect(scopeForPendingKind('nope')).toBeNull()

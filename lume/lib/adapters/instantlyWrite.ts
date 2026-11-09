@@ -98,6 +98,32 @@ export async function createCampaignFrom(sourceId: string, name: string, sequenc
 }
 
 /**
+ * New campaign from scratch (the `new_campaign` action): POST /campaigns with
+ * exactly these settings. Instantly creates it as a draft; this never calls
+ * /activate, so nothing sends until the campaign is launched separately.
+ */
+export async function createCampaign(input: {
+  name: string
+  email_list: string[]
+  campaign_schedule: unknown
+  daily_limit: number
+  stop_on_reply: boolean
+  sequences: unknown
+}): Promise<{ id: string; name: string }> {
+  const body = {
+    name: input.name,
+    email_list: input.email_list,
+    campaign_schedule: input.campaign_schedule,
+    daily_limit: input.daily_limit,
+    stop_on_reply: input.stop_on_reply,
+    sequences: input.sequences,
+  }
+  const created = (await request('POST', '/campaigns', body)) as { id?: string }
+  if (!created.id) throw new InstantlyError(0, 'Instantly returned no campaign id')
+  return { id: created.id, name: input.name }
+}
+
+/**
  * Delete ONE lead by id (`DELETE /api/v2/leads/{id}`; responses 200 / 404 /
  * 429 per the OpenAPI spec). 429s wait and retry (instantlyCall); a 404 means
  * it is already gone. Any other failure throws InstantlyError. Deliberately

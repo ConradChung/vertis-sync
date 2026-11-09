@@ -37,6 +37,8 @@ export const TOOL_TIERS = {
   run_apify_actor: 'high', update_campaign_sequence: 'high', issue_operator_key: 'high', remove_leads: 'high',
   start_influencer_run: 'high', approve_reactions: 'high', stage_attachment_for_validation: 'high', lookup_influencer_candidates: 'high', approve_influencer_candidates: 'high',
   send_lead_list_to_validation: 'high', delete_lead_list: 'high',
+  // New campaign from scratch: suggest first (read), then file it for the owner's tap.
+  suggest_campaign_setup: 'read', create_campaign: 'high',
 } as const satisfies Record<string, 'read' | 'low' | 'high'>
 
 export type ToolName = keyof typeof TOOL_TIERS
@@ -50,6 +52,7 @@ export const HIGH_RISK_KIND: Record<string, PendingKind> = {
   stage_attachment_for_validation: 'stage_attachment', lookup_influencer_candidates: 'influencer_lookup',
   approve_influencer_candidates: 'influencer_approve',
   send_lead_list_to_validation: 'send_lead_list', delete_lead_list: 'delete_lead_list',
+  create_campaign: 'new_campaign',
   // A low-tier tool that files an approval only for a bulk removal (q, missing, or > 25 rows).
   remove_from_lead_list: 'remove_lead_rows',
   // A low-tier tool that files an approval only for a blocking label (unsubscribe, hostile, BAD + block).
@@ -81,10 +84,13 @@ export const SKIPPABLE_KINDS: ReadonlySet<PendingKind> = new Set<PendingKind>([
  * launching or resuming a campaign starts sends). stage_attachment puts a
  * chat spreadsheet in front of the validation pipeline (paid once approved);
  * send_lead_list does the same for a lead list; delete_lead_list cannot be undone.
+ * new_campaign creates a campaign on the owner's inboxes (owner decision: always a tap).
  */
 export const ALWAYS_ASK_KINDS: ReadonlySet<PendingKind> = new Set<PendingKind>([
   'run_actor', 'send_reply', 'decide_gate', 'launch_campaign', 'resume_campaign', 'label_reply', 'influencer_run', 'influencer_reactions',
   'stage_attachment', 'influencer_lookup', 'influencer_approve', 'send_lead_list', 'delete_lead_list', 'remove_lead_rows',
+  // A new campaign (with its inboxes and copy) always waits on the owner's tap.
+  'new_campaign',
 ])
 
 export const skippable = (kind: PendingKind): boolean => SKIPPABLE_KINDS.has(kind)

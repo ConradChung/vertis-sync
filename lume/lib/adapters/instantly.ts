@@ -3,6 +3,7 @@ import {
   itemsOf,
   mapAccounts,
   mapCampaignDetails,
+  mapCampaignSetups,
   mapCampaignSequence,
   mapAnalyticsOverview,
   mapCampaigns,
@@ -12,6 +13,7 @@ import {
   type InstantlyAccount,
   type InstantlyCampaign,
   type InstantlyCampaignDetail,
+  type InstantlyCampaignSetup,
   type SequenceStep,
   mapSteps,
   mapEmail,
@@ -220,6 +222,11 @@ export async function listAccounts(): Promise<InstantlyAccount[]> {
 /** Every campaign with `daily_limit` and account count, for the `lume_campaigns` sync. */
 export async function listCampaignDetails(): Promise<InstantlyCampaignDetail[]> {
   return mapCampaignDetails(await getAllPages('/campaigns'))
+}
+
+/** Every campaign's inboxes, schedule and cap (what a new campaign copies). Read-only, cached like the list. */
+export async function listCampaignSetups(): Promise<InstantlyCampaignSetup[]> {
+  return mapCampaignSetups(await getAllPages('/campaigns'))
 }
 
 /** First steps of a campaign's sequence (read-only preview). */

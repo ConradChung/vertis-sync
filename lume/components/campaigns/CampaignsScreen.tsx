@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { Copy, Pause, Play } from 'lucide-react'
+import { Copy, Pause, Play, Plus } from 'lucide-react'
 import { GlassCard } from '@/components/ui/glass-card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,6 +15,7 @@ import { InboxPane } from '@/components/campaigns/InboxPane'
 import { SequenceEditor } from '@/components/campaigns/SequenceEditor'
 import { CrmWorkspace } from '@/components/crm/CrmWorkspace'
 import { ValidatedLists } from '@/components/campaigns/ValidatedLists'
+import { NewCampaignSheet } from '@/components/campaigns/NewCampaignSheet'
 import {
   requestCampaignAction,
   useCampaignAnalytics,
@@ -33,9 +34,16 @@ export function CampaignsScreen({ canChangeReplyMode = false }: { canChangeReply
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const rows = table.data?.campaigns
   const selected = rows?.find((r) => r.key === selectedKey) ?? null
+  const [creating, setCreating] = useState(false)
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-end">
+        <Button size="sm" onClick={() => setCreating(true)}>
+          <Plus /> New campaign
+        </Button>
+      </div>
+      <NewCampaignSheet open={creating} onOpenChange={setCreating} />
       {table.error && !table.data ? (
         <GlassCard className="px-[18px] text-[13px] text-fg-46" role="alert">
           <div className="flex items-center justify-between">

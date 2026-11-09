@@ -1409,6 +1409,66 @@ const SPECS: Built[] = [
   ),
   tiered(
     {
+      name: 'suggest_campaign_setup',
+      description:
+        'Suggest how to set up a NEW Instantly campaign (from scratch, not a copy) for a lead set: profiles a sample of the leads (top industries, titles, keywords, locations, roles) and ranks the tags (verticals) by how well their keywords fit, with a short why ' +
+        '(e.g. "62% of industries mention real estate" → Kaspen / Zenport). Returns the suggested tag, template, campaign name, inboxes + schedule + daily limit (copied from that tag\'s latest campaign) and whether a No-Location sibling is advisable. ' +
+        'Pass job_id (a validation job) or list_id (a lead list); neither gives the defaults. Show the suggestion to Conrad and let him change it before calling create_campaign.',
+      inputSchema: z.object({ job_id: uuid.optional(), list_id: uuid.optional() }),
+      run: async ({ job_id, list_id }, { call }) => {
+        const q = job_id ? `?job_id=${job_id.toLowerCase()}` : list_id ? `?list_id=${list_id.toLowerCase()}` : ''
+        const r = (await call(`/api/campaigns/suggest${q}`)) as Record<string, unknown>
+        const opts = (r.options ?? {}) as { templates?: { id: string; name: string; why?: string; no_location?: boolean }[]; accounts?: { email: string }[] }
+        const profile = r.profile as Record<string, unknown> | null
+        return {
+          source: r.source ?? null,
+          profile: profile
+            ? { rows: profile.rows, industries: profile.industries, titles: profile.titles, keywords: profile.keywords, locations: profile.locations, roles: profile.roles, without_city: profile.without_city }
+            : null,
+          tags: Array.isArray(r.verticals) ? (r.verticals as { id: string; name: string; score: number; why: string }[]).slice(0, 4).map((v) => ({ id: v.id, name: v.name, score: Math.round(v.score * 100) / 100, why: v.why })) : [],
+          suggestion: r.suggestion ?? null,
+          templates: (opts.templates ?? []).map((t) => ({ id: t.id, name: t.name, why: t.why || undefined, no_location: t.no_location || undefined })),
+          inboxes_available: (opts.accounts ?? []).length,
+          instantly: r.instantly,
+        }
+      },
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'create_campaign',
+      description:
+        'File a NEW Instantly campaign for Conrad\'s tap (from scratch: tag, template copy, inboxes, schedule, daily limit). Call suggest_campaign_setup first, show Conrad the suggestion, and only file after he agreed (with his edits). ' +
+        'Nothing is created until he approves; then it is created as a DRAFT (never launched), added to the tag, and — with job_id, while that job still waits for a campaign — picked for the job. ' +
+        'no_location_sibling also creates "<name> — No Location" for leads without a city. To copy an existing campaign instead, use duplicate_campaign.',
+      inputSchema: z.object({
+        name: z.string().min(1).max(200),
+        vertical_id: uuid.optional().describe('the tag (vertical) id'),
+        template_id: uuid.describe('a campaign template id from suggest_campaign_setup'),
+        email_list: z.array(z.string().email()).min(1).max(200).describe('sending inboxes (Instantly accounts)'),
+        campaign_schedule: z.record(z.string(), z.unknown()).optional().describe("the suggestion's settings.campaign_schedule; omitted = weekdays 9–5 Central"),
+        daily_limit: z.number().int().min(1).max(10000),
+        stop_on_reply: z.boolean().optional(),
+        job_id: uuid.optional().describe('the validation job this campaign is for'),
+        list_id: uuid.optional().describe('the lead list this campaign is for'),
+        no_location_sibling: z.boolean().optional(),
+      }),
+      payload: (i) => {
+        const out: Record<string, Json> = { name: i.name, template_id: i.template_id.toLowerCase(), email_list: i.email_list, daily_limit: i.daily_limit }
+        if (i.vertical_id) out.vertical_id = i.vertical_id.toLowerCase()
+        if (i.campaign_schedule) out.campaign_schedule = i.campaign_schedule as Json
+        if (i.stop_on_reply !== undefined) out.stop_on_reply = i.stop_on_reply
+        if (i.job_id) out.job_id = i.job_id.toLowerCase()
+        if (i.list_id) out.list_id = i.list_id.toLowerCase()
+        if (i.no_location_sibling) out.no_location_sibling = true
+        return out
+      },
+    },
+    'high'
+  ),
+  tiered(
+    {
       name: 'stage_attachment_for_validation',
       description:
         "Send one sheet of a spreadsheet the owner attached in this chat to validation, through the Import CSV path: the approval shows the sheet, its row count and the email column; once approved the sheet becomes a CSV import waiting at the usual Approve / Deny ingest gate (nothing is validated or spent before that gate). " +

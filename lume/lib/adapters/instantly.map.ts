@@ -436,3 +436,40 @@ export function mapThreads(body: unknown): InboxThread[] {
   }
   return out.sort((a, b) => (b.last_at ?? '').localeCompare(a.last_at ?? ''))
 }
+
+// ---------------------------------------------------------------------------
+// Campaign setups (New campaign suggestions: lib/campaigns/suggest.ts)
+
+export interface InstantlyCampaignSetup {
+  id: string
+  name: string
+  status: number
+  created_at: string | null
+  email_list: string[]
+  campaign_schedule: unknown
+  daily_limit: number | null
+  stop_on_reply: boolean | null
+}
+
+/** The settings a new campaign copies (inboxes, schedule, cap), from the paged campaign list. */
+export function mapCampaignSetups(items: unknown[]): InstantlyCampaignSetup[] {
+  const out: InstantlyCampaignSetup[] = []
+  for (const it of items) {
+    if (!isObj(it)) continue
+    const id = str(it, 'id')
+    const status = num(it, 'status')
+    if (!id || status === null) continue
+    const list = Array.isArray(it.email_list) ? it.email_list.filter((e): e is string => typeof e === 'string' && e.includes('@')) : []
+    out.push({
+      id,
+      name: str(it, 'name') ?? id,
+      status,
+      created_at: str(it, 'timestamp_created', 'created_at'),
+      email_list: list,
+      campaign_schedule: isObj(it.campaign_schedule) ? it.campaign_schedule : null,
+      daily_limit: num(it, 'daily_limit'),
+      stop_on_reply: typeof it.stop_on_reply === 'boolean' ? it.stop_on_reply : null,
+    })
+  }
+  return out
+}

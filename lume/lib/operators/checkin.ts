@@ -99,6 +99,7 @@ const ACTION_LABEL: Record<string, string> = {
   pause_campaign: 'Pause campaign',
   resume_campaign: 'Resume campaign',
   create_campaign: 'Duplicate campaign',
+  new_campaign: 'New campaign',
   update_sequence: 'Edit campaign emails',
   crm_close_deal: 'Close CRM deal',
   run_actor: 'Run Apify actor (spends money)',
