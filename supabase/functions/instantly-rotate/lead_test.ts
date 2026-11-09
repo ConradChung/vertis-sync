@@ -40,6 +40,14 @@ Deno.test('rotateLeadBody: no name on the row, no rows, or uncertain geo -> the 
   assertEquals(rotateLeadBody(q, 'another-campaign', rows).custom_variables.compliance_law, FALLBACK)
 })
 
+Deno.test('rotateLeadBody: a blank location / operating cities (banked no-location lead) is left out, not sent as null', () => {
+  for (const blank of [null, '', '  ']) {
+    const b = rotateLeadBody({ ...q, location: blank, operating_cities: blank }, 'nolocation-campaign', rows)
+    assertEquals(b.custom_variables, { compliance_law: FALLBACK })
+    assertEquals(b.campaign, 'nolocation-campaign')
+  }
+})
+
 Deno.test('rotateLeadBody: an explicit lead_bank.compliance_law is sent as is; the old jurisdiction_line key is gone', () => {
   const b = rotateLeadBody({ ...q, country: 'CA', region: 'Ontario', compliance_law: '  Set by hand  ' }, KASPEN, rows)
   assertEquals(b.custom_variables.compliance_law, 'Set by hand')

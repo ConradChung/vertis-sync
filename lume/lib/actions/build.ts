@@ -234,14 +234,19 @@ async function buildJobAction(kind: 'push_to_instantly' | 'launch_campaign', job
   const campaign = job.instantly_campaign_name ?? job.instantly_campaign_id
 
   if (kind === 'launch_campaign') {
-    if (job.instantly_status !== 'done' || !(job.instantly_pushed && job.instantly_pushed > 0)) return fail(409, 'job_not_ready')
+    const pushed = job.instantly_pushed ?? 0
+    // A banked push (route = bank) created nothing in Instantly yet; the rotation fills the campaign.
+    const banked = job.instantly_banked ?? 0
+    if (job.instantly_status !== 'done' || !(pushed > 0 || banked > 0)) return fail(409, 'job_not_ready')
     return {
       ok: true,
       kind,
       payload: {
         job_id: jobId,
         campaign_id: job.instantly_campaign_id,
-        summary: `Launch ${campaign} (${fmt.format(job.instantly_pushed)} leads pushed from ${job.filename ?? jobId})`,
+        summary: pushed > 0
+          ? `Launch ${campaign} (${fmt.format(pushed)} leads pushed from ${job.filename ?? jobId})`
+          : `Launch ${campaign} (${fmt.format(banked)} leads from ${job.filename ?? jobId} in the lead bank, rotating in as slots free)`,
       },
     }
   }
@@ -251,6 +256,7 @@ async function buildJobAction(kind: 'push_to_instantly' | 'launch_campaign', job
   if (!pv.ok) return fail(502, 'preview_failed')
   const { eligible, filtered } = pv.preview
   if (!eligible) return fail(409, 'nothing_to_push')
+  const bank = pv.preview.route === 'bank'
   // DB defaults: location off, company on, standard names.
   const location = job.location_barrier ?? false
   const company = job.company_barrier ?? true
@@ -265,8 +271,11 @@ async function buildJobAction(kind: 'push_to_instantly' | 'launch_campaign', job
       company_barrier: company,
       company_strict: strict,
       eligible,
+      route: bank ? 'bank' : 'direct',
       summary:
-        `Push ${fmt.format(eligible)} leads from ${job.filename ?? jobId} → ${campaign}` +
+        (bank
+          ? `Push ${fmt.format(eligible)} leads from ${job.filename ?? jobId} → lead bank (rotates automatically into ${campaign} as slots free; over the ${fmt.format(pv.preview.bank_threshold ?? 1000)} threshold)`
+          : `Push ${fmt.format(eligible)} leads from ${job.filename ?? jobId} → ${campaign}`) +
         ` (${fmt.format(filtered)} filtered; location ${onOff(location)}, company ${onOff(company)}, ` +
         `${strict ? 'stricter' : 'standard'} names)`,
     },

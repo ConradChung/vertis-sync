@@ -11,7 +11,14 @@ import { complianceLaw, type JurisdictionRow, resolveJurisdiction } from "../_sh
 // deno-lint-ignore no-explicit-any
 export function rotateLeadBody(q: any, campaign: string, jurisdictions: JurisdictionRow[]) {
   const law = String(q.compliance_law ?? "").trim() || complianceLaw(resolveJurisdiction(q.country, q.region, jurisdictions));
+  // A blank location / operating cities is left out (as instantly-push does), never sent as null or "":
+  // banked city-less leads go to a no-location campaign and must not carry an empty {{location}}.
+  // deno-lint-ignore no-explicit-any
+  const custom: Record<string, any> = {};
+  if (String(q.location ?? "").trim()) custom.location = q.location;
+  if (String(q.operating_cities ?? "").trim()) custom["Operating Cities Copied"] = q.operating_cities;
+  custom.compliance_law = law;
   return { campaign, email: q.email, first_name: q.first_name, last_name: q.last_name,
     company_name: q.company_name, website: q.website, personalization: q.personalization,
-    custom_variables: { location: q.location, "Operating Cities Copied": q.operating_cities, compliance_law: law }, skip_if_in_workspace: true };
+    custom_variables: custom, skip_if_in_workspace: true };
 }

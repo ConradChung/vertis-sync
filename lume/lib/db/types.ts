@@ -352,6 +352,10 @@ export interface PushPreview {
   noLocationRouted?: number
   hasNoLocationCampaign?: boolean
   instantlyKeyPresent: boolean
+  /** 'bank' when eligible > bank_threshold: queued in lead_bank, instantly-rotate drips them in. Absent from older deploys (= direct). */
+  route?: 'direct' | 'bank'
+  banked_estimate?: number
+  bank_threshold?: number
   error?: string
 }
 

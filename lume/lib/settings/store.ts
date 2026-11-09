@@ -26,6 +26,31 @@ export async function setApifyCapUsd(usd: number): Promise<number> {
   return Number(res.data.value)
 }
 
+export const BANK_THRESHOLD_KEY = 'bank_threshold'
+export const BANK_THRESHOLD_DEFAULT = 1000
+export const BANK_THRESHOLD_MAX = 100_000
+
+/**
+ * Lead bank threshold, from Settings → Budget (`lume_settings`). A push whose
+ * eligible leads exceed it is queued in the lead bank and rotated in
+ * automatically; instantly-push reads the same row (fallback 1000).
+ */
+export async function getBankThreshold(): Promise<number> {
+  const res = await createServiceClient().from('lume_settings').select('value').eq('key', BANK_THRESHOLD_KEY).maybeSingle()
+  const n = Number(res.data?.value)
+  return !res.error && Number.isInteger(n) && n >= 1 && n <= BANK_THRESHOLD_MAX ? n : BANK_THRESHOLD_DEFAULT
+}
+
+export async function setBankThreshold(n: number): Promise<number> {
+  const res = await createServiceClient()
+    .from('lume_settings')
+    .upsert({ key: BANK_THRESHOLD_KEY, value: n, updated_at: new Date().toISOString() })
+    .select('value')
+    .single()
+  if (res.error) throw res.error
+  return Number(res.data.value)
+}
+
 export const LINEAR_PROJECT_KEY = 'linear_project_id'
 
 /** The Linear project the Calendar files issues in (cached id; null = not resolved yet). */

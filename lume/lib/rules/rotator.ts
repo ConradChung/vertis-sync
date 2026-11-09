@@ -1,6 +1,7 @@
 /**
- * The Instantly campaign the existing `instantly-rotate` edge function drains
- * from lead_bank. Same env name and default as that function
+ * The Instantly campaign the existing `instantly-rotate` edge function always
+ * drains from lead_bank (since v4 it also drains every other campaign with
+ * queued / active bank rows, under the same shared workspace cap). Same env name and default as that function
  * (supabase/functions/instantly-rotate, retargeted by
  * 20261009074150_lead_bank_retarget_campaign.sql). Not a secret.
  */

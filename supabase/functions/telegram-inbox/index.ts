@@ -724,6 +724,10 @@ interface PushPreview {
   blankLocation: number
   samples: { original: string; normalized: string }[]
   strict: boolean
+  // Lead bank routing (instantly-push): 'bank' when eligible > bank_threshold.
+  route?: 'direct' | 'bank'
+  banked_estimate?: number
+  bank_threshold?: number
   error?: string
 }
 
@@ -773,6 +777,9 @@ async function showCompanyReview(job: InstantlyJob, edit?: { chatId: number; mes
     ``,
     `${preview.eligible} ready to push · ${preview.filtered} filtered out`,
     ...(notes.length > 0 ? [notes.join(' · ')] : []),
+    ...(preview.route === 'bank'
+      ? [``, `📥 ${preview.banked_estimate ?? preview.eligible} leads → lead bank (over the ${preview.bank_threshold ?? 1000} threshold), rotates into ${job.instantly_campaign_name} as slots free`]
+      : []),
   ].join('\n')
 
   const toggleButton = preview.strict

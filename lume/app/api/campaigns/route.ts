@@ -12,8 +12,9 @@ import { rotatorCampaignId } from '@/lib/rules/rotator'
 /**
  * `lume_campaigns` rows (default — the registry shape other screens use),
  * each with `queued` (lead_bank rows waiting for that campaign) and `rotator`
- * (true for the one campaign the existing `instantly-rotate` cron drains;
- * every other campaign's queue just waits).
+ * (true for ROTATE_CAMPAIGN_ID, the campaign `instantly-rotate` always serves;
+ * since v4 it also drains every other campaign with queued lead_bank rows,
+ * sharing the workspace cap, oldest queue first).
  *
  * `?with=analytics` (Campaigns screen): one row per campaign across all
  * families — `lume_campaigns` merged with Instantly's own list (Instantly
