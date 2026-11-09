@@ -40,11 +40,13 @@ export interface GateActionsProps {
   blocked?: Readonly<Record<string, string>>
   /** The element naming this gate (the buttons' group label). */
   labelledBy?: string
+  /** action → label shown instead of the default (e.g. push_to_instantly → "Send 4,562 to lead bank"). */
+  relabel?: Readonly<Record<string, string>>
   className?: string
 }
 
 /** A gate's choices: the same buttons the Telegram message offers (plus the custom count form for Leadsfriday). */
-export function GateActions({ gate, busy, countOpen, onAction, onCountOpenChange, blocked, labelledBy, className }: GateActionsProps) {
+export function GateActions({ gate, busy, countOpen, onAction, onCountOpenChange, blocked, labelledBy, relabel, className }: GateActionsProps) {
   const specs = buttonsFor(gate)
   const formId = useId()
   const [count, setCount] = useState('')
@@ -64,7 +66,7 @@ export function GateActions({ gate, busy, countOpen, onAction, onCountOpenChange
             onClick={() => (s.needsCount ? onCountOpenChange?.(!countOpen) : onAction(s))}
             aria-expanded={s.needsCount ? Boolean(countOpen) : undefined}
           >
-            {s.label}
+            {relabel?.[s.action] ?? s.label}
           </Button>
         ))}
         {gate.kind === 'lume_action' && (

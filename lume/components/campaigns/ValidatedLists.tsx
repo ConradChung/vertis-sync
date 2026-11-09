@@ -16,6 +16,7 @@ export const validatedListsKey = (campaignId: string) => `/api/validation-jobs?c
 function statusText(j: ValidatedListRow): string {
   if (j.unassigned) return 'Not assigned yet'
   const s = j.instantly_status
+  if ((s === 'done' || s === 'pushed') && j.banked) return `${fmt.format(j.banked)} in lead bank`
   if (s === 'done' || s === 'pushed') return 'Pushed'
   if (s === 'pushing') return 'Pushing'
   if (s === 'configuring' || s === 'reviewing_company') return 'Campaign picked'

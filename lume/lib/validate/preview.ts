@@ -211,6 +211,8 @@ export interface ValidatedListRow {
   instantly_status: string | null
   instantly_campaign_id: string | null
   instantly_campaign_name: string | null
+  /** Leads sent to the lead bank by the push (over the bank threshold), 0 for a direct push. */
+  banked?: number
   /** True while the job waits for a campaign pick. */
   unassigned: boolean
 }

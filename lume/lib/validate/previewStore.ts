@@ -155,7 +155,7 @@ export async function displayNamesFor(ids: readonly string[]): Promise<Map<strin
   return out
 }
 
-const LIST_COLS = 'id,filename,display_name,status,total_rows,created_at,valid_count,invalid_count,instantly_status,instantly_campaign_id,instantly_campaign_name'
+const LIST_COLS = 'id,filename,display_name,status,total_rows,created_at,valid_count,invalid_count,instantly_status,instantly_campaign_id,instantly_campaign_name,instantly_banked'
 const CHOICE = new Set<string>(CAMPAIGN_CHOICE_STATUSES)
 
 function toListRow(j: Record<string, unknown>): ValidatedListRow {
@@ -179,6 +179,7 @@ function toListRow(j: Record<string, unknown>): ValidatedListRow {
     instantly_campaign_id: (j.instantly_campaign_id as string | null) ?? null,
     instantly_campaign_name: (j.instantly_campaign_name as string | null) ?? null,
     unassigned: CHOICE.has(status ?? ''),
+    banked: typeof j.instantly_banked === 'number' ? j.instantly_banked : 0,
   }
 }
 

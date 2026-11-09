@@ -1,6 +1,9 @@
 'use client'
 
 import { useId, type ReactNode } from 'react'
+import useSWR from 'swr'
+import { fetchJson } from '@/hooks/fetcher'
+import type { BankStatus } from '@/lib/progress/bank'
 import { BarrierPanel } from '@/components/validate/BarrierPanel'
 import { CompanyReview } from '@/components/validate/CompanyReview'
 import { GateActions } from '@/components/validate/GateCard'
@@ -71,6 +74,10 @@ function explain(node: FlowNode, job: JobProgress | null, route?: PushRoute | nu
       if (s === 'skipped') return 'The push was cancelled for this list.'
       return s === 'done' ? 'Where these leads go in Instantly.' : 'Offered once validation (and enrichment) finish.'
     case 'review':
+      if (s === 'needs_you' && isBankRoute(route)) {
+        const n = typeof route?.banked_estimate === 'number' ? `${fmt.format(route.banked_estimate)} leads` : 'These leads'
+        return `${n} is over the ${fmt.format(route?.threshold ?? 1000)}-lead limit, so they go to the lead bank, not straight into Instantly. The rotation moves them into ${job?.instantly_campaign_name ?? 'the campaign'} as Instantly frees slots. Set the barriers and names, then confirm.`
+      }
       if (s === 'needs_you') return 'Set the barriers and check the company names. Push these asks for one more confirmation — nothing moves before it.'
       if (s === 'skipped') return 'The push was cancelled for this list.'
       return s === 'todo' ? 'Barriers and company names, after the campaign is picked.' : 'Barriers and names were set for the push.'
@@ -94,7 +101,7 @@ function explain(node: FlowNode, job: JobProgress | null, route?: PushRoute | nu
 }
 
 /** The gate's choices inside the panel: a focusable group (J/K, A/R) carrying the gate key. */
-function StepGate({ gate, focusedKey, busyKeys, countOpenKey, onAction, onCountOpenChange, onFocusGate, blockedFor, children }: StepGateProps & { gate: GateRow; children?: ReactNode }) {
+function StepGate({ gate, focusedKey, busyKeys, countOpenKey, onAction, onCountOpenChange, onFocusGate, blockedFor, relabel, children }: StepGateProps & { gate: GateRow; relabel?: Readonly<Record<string, string>>; children?: ReactNode }) {
   const key = gateKey(gate)
   const titleId = useId()
   return (
@@ -118,6 +125,7 @@ function StepGate({ gate, focusedKey, busyKeys, countOpenKey, onAction, onCountO
         onCountOpenChange={(open) => onCountOpenChange(key, open)}
         blocked={blockedFor(gate)}
         labelledBy={titleId}
+        relabel={relabel}
       />
     </div>
   )
@@ -245,7 +253,15 @@ export function StepDetail(props: StepDetailProps) {
       </header>
 
       {gate && (
-        <StepGate gate={gate} {...props}>
+        <StepGate
+          gate={gate}
+          {...props}
+          relabel={
+            gate.kind === 'push_review' && isBankRoute(props.route)
+              ? { push_to_instantly: `Send ${typeof props.route?.banked_estimate === 'number' ? `${fmt.format(props.route.banked_estimate)} ` : ''}to lead bank` }
+              : undefined
+          }
+        >
           {gate.kind === 'lume_action' && gate.subtitle && <p className="text-[13px] text-fg">{gate.subtitle}</p>}
           {gate.kind === 'ingest_approval' && gate.subtitle && <p className="text-[12px] text-fg-46">{gate.subtitle}</p>}
         </StepGate>
@@ -261,7 +277,47 @@ export function StepDetail(props: StepDetailProps) {
         </div>
       )}
 
+      {node.id === 'push' && job && bankedCount(job) > 0 && <BankStanding jobId={job.id} campaign={job.instantly_campaign_name} />}
       <Details node={node} run={run} job={job} />
     </section>
+  )
+}
+
+const when = (iso: string) => new Date(iso).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+
+/**
+ * A banked push in plain words: how many of its leads are in the lead bank vs
+ * already in Instantly, how full Instantly is, what's queued ahead, and when
+ * the next rotation runs.
+ */
+function BankStanding({ jobId, campaign }: { jobId: string; campaign: string | null }) {
+  const { data } = useSWR<BankStatus>(`/api/jobs/${jobId}/bank`, fetchJson, { refreshInterval: 60_000 })
+  if (!data) return null
+  const full = data.in_instantly_total != null && data.in_instantly_total >= data.cap
+  const rows: [string, string][] = [
+    ['In the lead bank', `${fmt.format(data.queued)} waiting`],
+    ['In Instantly', `${fmt.format(data.in_instantly)} from this list${data.done ? ` · ${fmt.format(data.done)} finished` : ''}`],
+    ['Instantly now', data.in_instantly_total == null ? '—' : `${fmt.format(data.in_instantly_total)} / ${fmt.format(data.cap)} contacts${full ? ' — full' : ''}`],
+    ['Queued ahead', data.ahead ? `${fmt.format(data.ahead)} leads from other lists go first` : 'nothing — next in line'],
+    ['Next rotation', when(data.next_run_at)],
+  ]
+  return (
+    <div className="flex flex-col gap-3 rounded-xl bg-(--glass-fill) px-4 py-3.5">
+      <p className="text-[13px] text-fg">
+        {data.queued > 0 && data.in_instantly === 0
+          ? full
+            ? `Nothing from this list is in Instantly yet: Instantly is full, so ${campaign ?? 'the campaign'} gets leads as slots free${data.ahead ? `, after ${fmt.format(data.ahead)} older leads` : ''}.`
+            : `Nothing from this list is in Instantly yet — the next rotation moves leads in.`
+          : `${fmt.format(data.in_instantly)} in Instantly → ${fmt.format(data.queued)} still in the lead bank.`}
+      </p>
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-1.5 text-[12px]">
+        {rows.map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt className="text-fg-46">{k}</dt>
+            <dd className="text-fg tabular-nums">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   )
 }
