@@ -527,7 +527,7 @@ const SPECS: Built[] = [
       name: 'get_lead_bank',
       description:
         'The lead bank by tag → campaign: per campaign, leads queued (waiting in the bank for that campaign), active (in Instantly now), finished, its Instantly status and place in line; ' +
-        'how full Instantly is (in_instantly / cap), last and next rotation run, and blockers (plain-language reasons queued leads are not reaching Instantly). ' +
+        'how full Instantly is (in_instantly / cap; in_instantly_source live = read from Instantly now, last_run = the last rotation run\'s count, which can be stale), last and next rotation run, and blockers (plain-language reasons queued leads are not reaching Instantly). ' +
         'Queued leads are already assigned: rotation moves them into their campaign as slots free (twice daily, oldest queued first across campaigns). ' +
         'Read this first whenever Conrad asks about the lead bank, rotation, or getting banked leads into a campaign / Instantly.',
       inputSchema: z.object({}),
@@ -1910,6 +1910,19 @@ const SPECS: Built[] = [
         if (patch.linkedin_url) patch.linkedin_url = profileUrl(patch.linkedin_url)
         return (await call(`/api/influencers/${slug}`, { method: 'PATCH', body: Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) })) as ToolResult
       },
+    },
+    'low'
+  ),
+  tiered(
+    {
+      name: 'resume_influencer_run',
+      description:
+        'Resume a FAILED PM influencer run from the stage it failed in, without paying for its scrapes again: only stages that start no Apify scrape ' +
+        '(top_posts, triage, verify, doors, output), within 5.5 hours of its start (or of the reactions approval). Spending stays under what Conrad already approved for the run; ' +
+        'top_posts still stops at awaiting_approval with the reactions bill. Refusals: not_failed, stage_not_resumable (posts / reactions failed: start a new run), too_old, run_in_progress (another run is active). ' +
+        'Use it when get_influencer_run shows a failed run whose error was fixed (e.g. an Anthropic 400 or a transient outage), before proposing a new paid run.',
+      inputSchema: z.object({ run_id: uuid }),
+      run: async ({ run_id }, { call }) => (await call(`/api/influencers/runs/${run_id.toLowerCase()}/resume`, { method: 'POST', body: {} })) as ToolResult,
     },
     'low'
   ),

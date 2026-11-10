@@ -139,6 +139,10 @@ describe('low tools', () => {
     expect(JSON.parse(String(fetch.mock.calls[1][1].body))).toEqual({ active: false })
     await run('cancel_influencer_run', { run_id: RUN })
     expect(fetch.mock.calls[2][0]).toBe(`https://lume.test/api/influencers/runs/${RUN}/cancel`)
+    await run('resume_influencer_run', { run_id: RUN })
+    expect(fetch.mock.calls[3][0]).toBe(`https://lume.test/api/influencers/runs/${RUN}/resume`)
+    expect(fetch.mock.calls[3][1].method).toBe('POST')
+    expect(TOOL_TIERS.resume_influencer_run).toBe('low')
   })
   it('add_influencer refuses a non-profile LinkedIn URL', () => {
     const { tool } = setup()

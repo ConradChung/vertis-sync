@@ -10,6 +10,7 @@
 //        only after the owner approved that bill in Lume: continues with
 //        reactions, triage, verify, doors, output.
 // POST { action: 'cancel', run_id }   cancels and aborts the run's live Apify runs.
+// POST { action: 'resume', run_id }   a failed run, from a stage that starts no Apify scrape (top_posts onward).
 // POST { action: 'sweep' }           the 5-minute pg_cron sweep (lume_influencer_sweep_tick).
 // POST { run_id, prev }               internal: the hand-off chain.
 //
@@ -60,6 +61,7 @@ import {
   TOP_POSTS,
 } from '../_shared/influencer/cost.ts'
 import { parseJsonResponse, type JsonRequest } from '../_shared/influencer/haiku.ts'
+import { deepWellFormed } from '../_shared/text.ts'
 import { applyRelevance, buildPostsInput, flattenPosts, parseRelevance, RELEVANCE_BATCH, relevanceRequest, topN } from '../_shared/influencer/posts.ts'
 import { aggregateReactors, buildReactionsInput, flattenReactions } from '../_shared/influencer/reactions.ts'
 import { parseTriage, TRIAGE_BATCH, triageRequest, triageTodo, type TriageLabel } from '../_shared/influencer/triage.ts'
@@ -128,7 +130,7 @@ async function rest(method: string, path: string, body?: unknown, prefer?: strin
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     method,
     headers: prefer ? { ...REST_HEADERS, 'Prefer': prefer } : REST_HEADERS,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body !== undefined ? JSON.stringify(deepWellFormed(body)) : undefined,
   })
   if (!res.ok) throw new RestError(res.status, `Supabase ${method} ${path.split('?')[0]} failed (${res.status}): ${(await res.text()).slice(0, 300)}`)
   const ct = res.headers.get('content-type') ?? ''
@@ -234,7 +236,7 @@ async function haiku(ctx: Ctx, req: JsonRequest): Promise<{ json: unknown; usd: 
   const res = await fetchRetry(ctx, ANTHROPIC_URL, {
     method: 'POST',
     headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
+    body: JSON.stringify(deepWellFormed(req)),
   }, HAIKU_TIMEOUT_MS)
   if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 200)}`)
   const out = parseJsonResponse(await res.json())
@@ -667,7 +669,7 @@ async function askPerplexity(ctx: Ctx, question: string): Promise<PplxAnswer> {
     const res = await fetch(PPLX_URL, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${PERPLEXITY_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(perplexityRequest(question)),
+      body: JSON.stringify(deepWellFormed(perplexityRequest(question))),
       signal: AbortSignal.timeout(PPLX_TIMEOUT_MS),
     })
     if (res.ok) return parsePerplexity(await res.json())
@@ -1012,6 +1014,41 @@ async function approveReactions(body: Record<string, unknown>, waitUntil: (p: Pr
   return reply({ ok: true, run_id: body.run_id, status: 'running', stage: 'reactions' }, 202)
 }
 
+/**
+ * Resume a FAILED run from the stage it failed in. Only stages that start no
+ * Apify scrape (top_posts, triage, verify, doors, output): the posts were
+ * already paid for and stay; Haiku / Perplexity work stays under the caps the
+ * owner already approved, and top_posts still stops for the reactions bill.
+ * A run past the sweep's max age (6 h from start / approval) can't resume.
+ */
+const RESUMABLE = new Set(['top_posts', 'triage', 'verify', 'doors', 'output'])
+const RESUME_MAX_AGE_MS = 5.5 * 3_600_000
+
+async function resume(body: Record<string, unknown>, waitUntil: (p: Promise<unknown>) => void, deps: Deps): Promise<Response> {
+  if (!isUuid(body.run_id)) return reply({ error: 'bad_run_id' }, 400)
+  const found = (await rest('GET', `influencer_runs?id=eq.${body.run_id}&select=id,status,stage,created_at,approved_at,counts`)) as
+    { id: string; status: string; stage: string; created_at: string; approved_at: string | null; counts: Record<string, unknown> | null }[]
+  const run = found?.[0]
+  if (!run) return reply({ error: 'run_not_found' }, 404)
+  if (run.status !== 'failed') return reply({ error: 'not_failed', status: run.status, stage: run.stage }, 409)
+  if (!RESUMABLE.has(run.stage)) return reply({ error: 'stage_not_resumable', stage: run.stage }, 409)
+  if ((deps.now ?? Date.now)() - Date.parse(run.approved_at ?? run.created_at) > RESUME_MAX_AGE_MS) return reply({ error: 'too_old', stage: run.stage }, 409)
+  let rows: unknown[]
+  try {
+    rows = (await rest('PATCH', `influencer_runs?id=eq.${run.id}&status=eq.failed`, {
+      status: 'running', error: null, finished_at: null, lease_token: null, lease_until: null,
+      heartbeat_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      counts: { ...(run.counts ?? {}), transient_streak: 0, resumed: num(run.counts?.resumed) + 1 },
+    }, 'return=representation')) as unknown[]
+  } catch (err) {
+    if (err instanceof RestError && err.status === 409) return reply({ error: 'run_in_progress' }, 409)
+    throw err
+  }
+  if (!Array.isArray(rows) || !rows.length) return reply({ error: 'not_failed' }, 409)
+  waitUntil(advance(run.id, null, deps))
+  return reply({ ok: true, run_id: run.id, status: 'running', stage: run.stage }, 202)
+}
+
 async function cancel(body: Record<string, unknown>): Promise<Response> {
   if (!isUuid(body.run_id)) return reply({ error: 'bad_run_id' }, 400)
   const out = (await rpc('lume_influencer_cancel_run', { p_run: body.run_id })) as { ok?: boolean; error?: string; abort?: string[] }
@@ -1047,6 +1084,7 @@ export async function handle(
       case 'start': return await start(body, waitUntil, deps)
       case 'approve_reactions': return await approveReactions(body, waitUntil, deps)
       case 'cancel': return await cancel(body)
+      case 'resume': return await resume(body, waitUntil, deps)
       case undefined: {
         if (!isUuid(body.run_id) || !isUuid(body.prev)) return reply({ error: 'bad_continue' }, 400)
         waitUntil(advance(body.run_id, body.prev, deps))

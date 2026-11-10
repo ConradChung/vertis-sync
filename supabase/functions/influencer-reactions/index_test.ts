@@ -634,3 +634,63 @@ Deno.test('the re-read aborts when the row carries a different run id', async ()
     assert(f.calls.some((x) => x.url.endsWith('/actor-runs/runNNNNNNNN5/abort')))
   } finally { f.restore() }
 })
+
+// ---------------------------------------------------------------------------
+// resume + split emojis (2026-11-09: a post cut mid-emoji made Anthropic 400 "unexpected end of hex escape")
+
+Deno.test('top_posts: a post whose text ends in half an emoji still sends valid, well-formed JSON to Haiku', async () => {
+  const text = 'x'.repeat(1499) + '\u{1F600}tail' // the 1,500 cut lands inside the emoji
+  const f = stubFetch([
+    ...common,
+    [db('rpc/lume_influencer_claim_run'), () => json([claimed('top_posts')])],
+    [(u) => u.startsWith('https://db.test/rest/v1/influencer_posts?') && u.includes('pm_relevant=is.null'),
+      () => json([{ run_id: RUN, influencer_id: INF, post_id: 'p1', post_url: 'u', text: text + '\uD83D', likes: 1 }])],
+    [(u) => u.startsWith('https://api.anthropic.com/'), () => { throw new Error('stop here') }],
+    [is('influencer_runs', 'PATCH'), () => json([{ id: RUN }])],
+    [db('rpc/lume_influencer_fail_run'), () => json({ ok: true, abort: [] })],
+  ])
+  try {
+    const c = clock()
+    await advance(RUN, null, { handOff: () => Promise.resolve(true), now: c.now, sleep: c.sleep })
+    const sent = f.calls.find((c) => c.url.startsWith('https://api.anthropic.com/'))!.body!
+    assert(!/\\ud[89ab][0-9a-f]{2}(?!\\ud[c-f])/i.test(sent) && !/[\uD800-\uDFFF]/.test(sent.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '')), 'no lone surrogate in the request')
+    JSON.parse(sent)
+  } finally { f.restore() }
+})
+
+Deno.test('resume: a failed top_posts run goes back to running and advances; nothing is scraped again', async () => {
+  const now = Date.now()
+  const f = stubFetch([
+    ...common,
+    [is('influencer_runs', 'GET'), () => json([{ id: RUN, status: 'failed', stage: 'top_posts', created_at: new Date(now - 3_600_000).toISOString(), approved_at: null, counts: { posts: 1982 } }])],
+    [is('influencer_runs', 'PATCH'), () => json([{ id: RUN }])],
+    [db('rpc/lume_influencer_claim_run'), () => json([])],
+  ])
+  try {
+    const waits: Promise<unknown>[] = []
+    const res = await handle(post({ action: 'resume', run_id: RUN }), (p) => waits.push(p))
+    await Promise.all(waits)
+    assertEquals(res.status, 202)
+    assertEquals(await res.json(), { ok: true, run_id: RUN, status: 'running', stage: 'top_posts' })
+    const patch = bodies(f.calls, is('influencer_runs', 'PATCH'))[0]
+    assertEquals([patch.status, patch.error, patch.counts.posts, patch.counts.resumed], ['running', null, 1982, 1])
+    assert(f.calls.some((c) => c.url.includes('influencer_runs?id=eq.') && c.url.includes('status=eq.failed') && c.method === 'PATCH'))
+    assertEquals(f.calls.filter((c) => c.url.includes('apify.com')).length, 0)
+  } finally { f.restore() }
+})
+
+Deno.test('resume: refuses runs that are not failed, scrape stages, and runs past the max age', async () => {
+  const now = Date.now()
+  let row: Record<string, unknown> = {}
+  const f = stubFetch([...common, [is('influencer_runs', 'GET'), () => json([row])]])
+  try {
+    row = { id: RUN, status: 'running', stage: 'top_posts', created_at: new Date(now).toISOString(), approved_at: null }
+    assertEquals((await (await handle(post({ action: 'resume', run_id: RUN }), noWait)).json()).error, 'not_failed')
+    row = { id: RUN, status: 'failed', stage: 'reactions', created_at: new Date(now).toISOString(), approved_at: null }
+    assertEquals((await (await handle(post({ action: 'resume', run_id: RUN }), noWait)).json()).error, 'stage_not_resumable')
+    row = { id: RUN, status: 'failed', stage: 'verify', created_at: new Date(now - 7 * 3_600_000).toISOString(), approved_at: null }
+    assertEquals((await (await handle(post({ action: 'resume', run_id: RUN }), noWait)).json()).error, 'too_old')
+    assertEquals((await handle(post({ action: 'resume', run_id: 'x' }), noWait)).status, 400)
+    assertEquals(f.calls.filter((c) => c.method === 'PATCH').length, 0)
+  } finally { f.restore() }
+})

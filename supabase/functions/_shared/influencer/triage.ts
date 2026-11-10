@@ -1,6 +1,7 @@
 // Stage 5: Haiku headline triage against the decision-maker titles
 // (config.yaml decision_maker_titles). Pure. Ported from pm/triage.py.
 import { buildJsonRequest, type JsonRequest } from './haiku.ts'
+import { clip } from '../text.ts'
 
 export const DECISION_MAKER_TITLES = [
   'owner', 'founder', 'co-founder', 'ceo', 'president', 'principal', 'broker-owner', 'broker/owner',
@@ -47,7 +48,7 @@ export function triageTodo<T extends { id: number; headline: string | null }>(ro
 }
 
 export function triageRequest(batch: { id: number; headline: string | null }[]): JsonRequest {
-  const lines = batch.map((r) => `${r.id}\t${(r.headline ?? '').replace(/[\t\r\n]+/g, ' ').slice(0, 300)}`)
+  const lines = batch.map((r) => `${r.id}\t${clip((r.headline ?? '').replace(/[\t\r\n]+/g, ' '), 300)}`)
   return buildJsonRequest(TRIAGE_SYSTEM, 'One headline per line as `id<TAB>headline`. Return a label for every id.\n\n' + lines.join('\n'), TRIAGE_SCHEMA, 4096)
 }
 

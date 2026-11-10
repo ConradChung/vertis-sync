@@ -1,6 +1,7 @@
 // Stage 1-2: an influencer's posts (harvestapi~linkedin-profile-posts), Haiku
 // PM-relevance, top 10 by likes. Pure. Ported from pm/posts.py.
 import { buildJsonRequest, type JsonRequest } from './haiku.ts'
+import { clip } from '../text.ts'
 
 export interface PostRow {
   post_id: string
@@ -49,7 +50,7 @@ export function flattenPosts(items: unknown[]): PostRow[] {
       likes: int(eng.likes),
       comments: int(eng.comments),
       shares: int(eng.shares),
-      text: str(i.content).trim().slice(0, 4000),
+      text: clip(str(i.content).trim(), 4000),
     })
   }
   return rows
@@ -82,7 +83,7 @@ export const RELEVANCE_BATCH = 20
 const attr = (s: string) => s.replace(/[^A-Za-z0-9_:-]/g, '')
 
 export function relevanceRequest(batch: { post_id: string; text: string | null }[]): JsonRequest {
-  const lines = batch.map((r) => `<post id="${attr(r.post_id)}">\n${(r.text ?? '').slice(0, 1500)}\n</post>`)
+  const lines = batch.map((r) => `<post id="${attr(r.post_id)}">\n${clip(r.text ?? '', 1500)}\n</post>`)
   return buildJsonRequest(RELEVANCE_SYSTEM, 'Classify each post. Return one result per post id.\n\n' + lines.join('\n\n'), RELEVANCE_SCHEMA, 4096)
 }
 

@@ -24,7 +24,7 @@ export const TOOL_TIERS = {
   create_order: 'low', draft_reply: 'low', create_rotation_rule: 'low', notify: 'low', import_actor_run: 'low', save_skill: 'low',
   remember: 'low', forget: 'low', create_vertical: 'low', update_vertical: 'low', create_inbox_project: 'low', create_cycle_out_rule: 'low',
   load_actor_results: 'low', filter_leads: 'low', restore_leads: 'low', export_for_apollo: 'low', label_reply: 'low',
-  export_influencer_csv: 'low', add_influencer: 'low', update_influencer: 'low', cancel_influencer_run: 'low',
+  export_influencer_csv: 'low', add_influencer: 'low', update_influencer: 'low', cancel_influencer_run: 'low', resume_influencer_run: 'low',
   load_attachment_as_leads: 'low', import_influencer_candidates: 'low',
   list_lead_lists: 'read', view_lead_list: 'read', summarize_lead_set: 'read', get_validation_stats: 'read',
   create_lead_list: 'low', append_to_lead_list: 'low', remove_from_lead_list: 'low', rename_lead_list: 'low',
