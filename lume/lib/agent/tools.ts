@@ -524,6 +524,19 @@ const SPECS: Built[] = [
   ),
   tiered(
     {
+      name: 'get_lead_bank',
+      description:
+        'The lead bank by tag → campaign: per campaign, leads queued (waiting in the bank for that campaign), active (in Instantly now), finished, its Instantly status and place in line; ' +
+        'how full Instantly is (in_instantly / cap), last and next rotation run, and blockers (plain-language reasons queued leads are not reaching Instantly). ' +
+        'Queued leads are already assigned: rotation moves them into their campaign as slots free (twice daily, oldest queued first across campaigns). ' +
+        'Read this first whenever Conrad asks about the lead bank, rotation, or getting banked leads into a campaign / Instantly.',
+      inputSchema: z.object({}),
+      run: async (_i, { call }) => ({ lead_bank: await call('/api/rotation/queues') }),
+    },
+    'read'
+  ),
+  tiered(
+    {
       name: 'list_scheduled_jobs',
       description: 'Every scheduled job (pg_cron and rotation rules) with its next run time.',
       inputSchema: z.object({}),
@@ -1304,7 +1317,9 @@ const SPECS: Built[] = [
     {
       name: 'assign_leads',
       description:
-        'Queue lead-bank leads matching a filter into a campaign (the same as dragging "all N matching" onto its card). The owner sees the matching count before approving; limit takes at most that many.',
+        'Queue lead-bank leads matching a filter into a campaign (the same as dragging "all N matching" onto its card). The owner sees the matching count before approving; limit takes at most that many. ' +
+        "source 'validation_rows' (the default) is NOT a job's banked leads: it is older validated leads from completed jobs that were never pushed or banked, from any list. " +
+        "source 'lead_bank' re-queues leads already queued for another campaign. Leads already queued for this campaign need no assigning (get_lead_bank shows them); never use this to get them into Instantly.",
       inputSchema: z.object({
         campaign_id: campaignId,
         filter: leadFilter,

@@ -4,10 +4,10 @@ import { isInstantlyConfigured, listCampaigns } from '@/lib/adapters/instantly'
 import { createServiceClient } from '@/lib/supabase/service'
 import { dbErrorResponse } from '@/lib/http/errors'
 import { nextRotation } from '@/lib/progress/bank'
-import { groupQueues, type QueueRow } from '@/lib/rotation/queues'
+import { bankBlockers, groupQueues, type QueueRow } from '@/lib/rotation/queues'
 
 /**
- * GET → { tags: TagQueues[], in_instantly, cap, last_run_at, next_run_at }:
+ * GET → { tags: TagQueues[], in_instantly, cap, last_run_at, next_run_at, blockers }:
  * the lead bank by tag → campaign, how full Instantly is (the last rotation
  * run) and when the next one runs. Campaign names / statuses come from
  * Instantly (best effort: ids when it can't be read).
@@ -34,12 +34,15 @@ export async function GET(req: Request) {
         console.error('[api/rotation/queues] campaign names failed:', err instanceof Error ? err.message : err)
       }
     }
+    const tags = groupQueues((q.data ?? []) as QueueRow[], names, (v.data ?? []) as { id: string; name: string; campaign_ids: string[] | null }[])
+    const inInstantly = run.data?.in_instantly_after ?? null
     return NextResponse.json({
-      tags: groupQueues((q.data ?? []) as QueueRow[], names, (v.data ?? []) as { id: string; name: string; campaign_ids: string[] | null }[]),
-      in_instantly: run.data?.in_instantly_after ?? null,
+      tags,
+      in_instantly: inInstantly,
       cap: CAP,
       last_run_at: run.data?.ran_at ?? null,
       next_run_at: nextRotation(new Date()),
+      blockers: bankBlockers(tags, inInstantly, CAP),
     })
   } catch (err) {
     return dbErrorResponse(err, 'api/rotation/queues')

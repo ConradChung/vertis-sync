@@ -70,3 +70,34 @@ export function groupQueues(
   const first = (g: TagQueues) => Math.min(...g.campaigns.map((c) => c.place ?? 1e9))
   return out.sort((a, b) => (a.tag_id === null ? 1 : 0) - (b.tag_id === null ? 1 : 0) || first(a) - first(b) || a.tag.localeCompare(b.tag))
 }
+
+/**
+ * Why queued leads aren't reaching Instantly, in plain words, for the agent and
+ * the Rotate page. Rotation fills free slots oldest-queued-first whatever the
+ * campaign's status, so a paused campaign ahead in line takes freed slots too.
+ */
+export function bankBlockers(tags: readonly TagQueues[], inInstantly: number | null, cap: number): string[] {
+  const out: string[] = []
+  const all = tags.flatMap((t) => t.campaigns)
+  const queued = all.filter((c) => c.queued > 0).sort((a, b) => (a.place ?? 1e9) - (b.place ?? 1e9))
+  if (!queued.length) return out
+  if (inInstantly !== null && inInstantly >= cap) {
+    out.push(`Instantly is full (${inInstantly.toLocaleString('en-US')}/${cap.toLocaleString('en-US')} contacts), so rotation can't move any queued leads until slots are freed (remove_leads frees them 5-10 minutes later).`)
+  }
+  for (const c of all) {
+    if (c.active > 0 && c.status && c.status !== 'active') {
+      out.push(`"${c.name}" is ${c.status} but holds ${c.active.toLocaleString('en-US')} slots in Instantly; those leads aren't being emailed.`)
+    }
+  }
+  const ahead = queued.filter((c) => c.status === 'paused')
+  for (const p of ahead) {
+    const behind = queued.filter((c) => (c.place ?? 0) > (p.place ?? 0)).map((c) => `"${c.name}"`)
+    if (behind.length) {
+      out.push(`"${p.name}" is paused but is #${p.place} in line with ${p.queued.toLocaleString('en-US')} queued: freed slots go to it before ${behind.join(', ')}.`)
+    }
+  }
+  for (const c of queued) {
+    if (c.status === 'draft') out.push(`"${c.name}" is a draft: its leads can rotate in, but nothing sends until it is launched.`)
+  }
+  return out
+}

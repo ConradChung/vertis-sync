@@ -19,7 +19,7 @@ export const TOOL_TIERS = {
   open_website: 'read', review_leads: 'read', search_past_chats: 'read',
   search_apify_store: 'read', get_actor_input_schema: 'read', get_actor_run: 'read', list_actor_runs: 'read', rank_campaigns: 'read',
   get_campaign_sequence: 'read', list_skills: 'read', get_skill: 'read', list_verticals: 'read',
-  list_campaign_leads: 'read', contact_usage: 'read', read_project_file: 'read', list_replies: 'read', get_thread: 'read', get_sop: 'read',
+  list_campaign_leads: 'read', contact_usage: 'read', get_lead_bank: 'read', read_project_file: 'read', list_replies: 'read', get_thread: 'read', get_sop: 'read',
   list_influencers: 'read', estimate_influencer_run: 'read', get_influencer_run: 'read', read_attachment: 'read', list_influencer_candidates: 'read',
   create_order: 'low', draft_reply: 'low', create_rotation_rule: 'low', notify: 'low', import_actor_run: 'low', save_skill: 'low',
   remember: 'low', forget: 'low', create_vertical: 'low', update_vertical: 'low', create_inbox_project: 'low', create_cycle_out_rule: 'low',

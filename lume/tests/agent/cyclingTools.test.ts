@@ -117,3 +117,12 @@ describe('create_cycle_out_rule', () => {
     })
   })
 })
+
+describe('get_lead_bank', () => {
+  it('is a read tool that reads /api/rotation/queues', async () => {
+    expect(TOOL_TIERS.get_lead_bank).toBe('read')
+    const { fetch, run } = setup({ tags: [], in_instantly: 1000, cap: 1000, blockers: ['Instantly is full'] })
+    expect(await run('get_lead_bank', {})).toEqual({ lead_bank: { tags: [], in_instantly: 1000, cap: 1000, blockers: ['Instantly is full'] } })
+    expect(fetch.mock.calls[0][0]).toBe('https://lume.test/api/rotation/queues')
+  })
+})
