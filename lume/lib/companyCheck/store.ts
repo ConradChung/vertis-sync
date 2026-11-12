@@ -72,13 +72,13 @@ export async function getCheckJob(id: string): Promise<CheckJob | null> {
   if (res.error) throw new DbError('getCheckJob', res.error)
   const row = res.data as (Omit<CheckJob, 'vertical_name'> & { vertical_id: string | null }) | null
   if (!row) return null
+  const { vertical_id, ...job } = row
   let vertical_name: string | null = null
-  if (row.vertical_id) {
-    const v = await sb.from('lume_verticals').select('name').eq('id', row.vertical_id).maybeSingle()
+  if (vertical_id) {
+    const v = await sb.from('lume_verticals').select('name').eq('id', vertical_id).maybeSingle()
     if (v.error) throw new DbError('getCheckJob.vertical', v.error)
     vertical_name = (v.data as { name: string } | null)?.name ?? null
   }
-  const { vertical_id: _v, ...job } = row
   return { ...job, vertical_name }
 }
 

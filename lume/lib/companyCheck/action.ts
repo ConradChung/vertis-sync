@@ -119,7 +119,7 @@ export async function companyCheckOverview(jobId: string, opts: OverviewOpts = {
   const unchecked = Math.max(0, plan.companies - plan.cached)
   const estimate = estimateCheck(unchecked, plan.valid_leads)
   const run = await getCheckRun(job.id, plan.icp_key, scope)
-  const { icp: _i, scope: _s, ...page } = opts
+  const page = Object.fromEntries(Object.entries({ fit: opts.fit, type: opts.type, limit: opts.limit, offset: opts.offset }).filter(([, v]) => v !== undefined))
   const [summary, results] = run ? await Promise.all([checkSummary(run.id), listCheckResults(run.id, page)]) : [null, []]
   return {
     job: { id: job.id, name: job.display_name ?? job.filename ?? job.id, status: job.status },
