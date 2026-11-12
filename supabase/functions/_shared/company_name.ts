@@ -184,7 +184,9 @@ export function acceptLlmName(out: unknown, raw: string, email: string): string 
   const words = name.split(/[\s\-/&+]+/).map(squash).filter(Boolean)
   if (words.length === 0) return null
   for (const w of words) if (!rawSq.includes(w) && !(label && label.includes(w))) return null
-  return name
+  // Rule 1 is mechanical, so it is enforced on Haiku's answer too
+  // ("Housing Services Corporation" came back with its suffix).
+  return stripSuffixes(name, LEGAL_SUFFIXES)
 }
 
 // ---- Batch cleaning ----
@@ -257,7 +259,7 @@ export async function cleanCompanyNames(inputs: NameInput[], deps: CleanDeps): P
   if (deps.readCache) {
     try {
       const cached = await deps.readCache([...todo.entries()].map(([, v]) => ({ raw: v.raw, domain: emailDomain(v.email) })))
-      for (const [k, v] of cached) if (todo.has(k)) { out.set(k, v); todo.delete(k); deps.llmKeys?.add(k) }
+      for (const [k, v] of cached) if (todo.has(k)) { out.set(k, stripSuffixes(v, LEGAL_SUFFIXES)); todo.delete(k); deps.llmKeys?.add(k) }
     } catch (err) {
       console.error('[company_name] cache read failed:', err instanceof Error ? err.message : err)
     }

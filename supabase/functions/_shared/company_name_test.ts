@@ -42,6 +42,7 @@ Deno.test('acceptLlmName: no domain, no TLD, no invented words', () => {
   assertEquals(acceptLlmName('chardproperties.com', 'Chard', 'a@chardproperties.com'), null)
   assertEquals(acceptLlmName('Chard Homes', 'Chard', 'a@chardproperties.com'), null)
   assertEquals(acceptLlmName('"Zuker Property."', 'ZUKER PROPERTY LTD', 'a@zuker.com'), 'Zuker Property')
+  assertEquals(acceptLlmName('Housing Services Corporation', 'Housing Services Corporation', 'a@hscorp.ca'), 'Housing Services')
   assertEquals(acceptLlmName('', 'X Ltd', 'a@x.com'), null)
   assertEquals(acceptLlmName(42, 'X Ltd', 'a@x.com'), null)
 })
