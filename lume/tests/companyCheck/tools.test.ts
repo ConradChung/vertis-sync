@@ -23,8 +23,8 @@ describe('company check tools', () => {
   })
   it('get_company_check reads the route with the job, ICP and filters', async () => {
     const { run, fetch } = setup()
-    await run('get_company_check', { job_id: JOB.toUpperCase(), icp: 'a property manager', fit: 'not_fit', limit: 20 })
-    expect((fetch.mock.calls[0] as unknown as [string])[0]).toBe(`https://lume.test/api/company-check?job_id=${JOB}&icp=a+property+manager&fit=not_fit&limit=20`)
+    await run('get_company_check', { job_id: JOB.toUpperCase(), icp: 'a property manager', scope: 'sending', fit: 'not_fit', type: 'multifamily', limit: 20 })
+    expect((fetch.mock.calls[0] as unknown as [string])[0]).toBe(`https://lume.test/api/company-check?job_id=${JOB}&icp=a+property+manager&scope=sending&fit=not_fit&type=multifamily&limit=20`)
   })
   it('check_companies needs the estimate shown, and only proposes (no fetch)', async () => {
     const { run, tool, fetch, prepare, createAction } = setup()
@@ -32,7 +32,10 @@ describe('company check tools', () => {
     const out = await run('check_companies', { job_id: JOB.toUpperCase(), max_usd: 10, estimate_shown_to_owner: true })
     expect(out).toMatchObject({ status: 'awaiting_approval', action_id: 'a1' })
     expect(prepare).toHaveBeenCalledWith({ kind: 'company_check', payload: { job_id: JOB, max_usd: 10 } })
+    await run('check_companies', { job_id: JOB, scope: 'sending', estimate_shown_to_owner: true })
+    expect(prepare).toHaveBeenLastCalledWith({ kind: 'company_check', payload: { job_id: JOB, scope: 'sending' } })
     expect(createAction.mock.calls[0][0]).toBe('company_check')
+    expect(() => tool('check_companies').inputSchema.parse({ job_id: JOB, scope: 'pulled', estimate_shown_to_owner: true })).toThrow()
     expect(fetch).not.toHaveBeenCalled()
   })
   it('the prompt sends the agent to the read tool and forbids borrowed prices', () => {

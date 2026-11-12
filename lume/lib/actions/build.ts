@@ -67,8 +67,8 @@ import { buildCompanyCheck } from '@/lib/companyCheck/action'
  *                     inboxes, tag, template and name checked live; the copy frozen
  *  bank_queue         { op: restart | move, source_job_id, campaign_id, to_campaign_id? } →
  *                     lib/rotation/pushesStore.ts: one push's lead bank queue, count frozen now
- *  company_check      { job_id, icp?, max_usd? } → lib/companyCheck/action.ts: the job's companies
- *                     not yet checked for this ICP x $0.00695 and a hard cap the edge function stops at
+ *  company_check      { job_id, icp?, scope?, max_usd? } → lib/companyCheck/action.ts: the job's companies
+ *                     in scope (all | sending) not yet checked for this ICP x $0.00706 and a hard cap the edge function stops at
  *  send_reply / pause_campaign / resume_campaign / create_campaign:
  *                     lib/actions/payloads.ts, with the display extras
  *                     written here (`withServerExtras`): the campaign name

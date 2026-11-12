@@ -1,7 +1,7 @@
 import 'server-only'
 import { createServiceClient } from '@/lib/supabase/service'
 import { DbError } from '@/lib/db/service'
-import type { CheckPlan } from '@/lib/companyCheck/model'
+import type { CheckPlan, CheckScope, Fit, PropertyType } from '@/lib/companyCheck/model'
 
 /**
  * Company check reads (service role, behind the owner guard). Lume only reads
@@ -15,6 +15,9 @@ export interface CheckJob {
   display_name: string | null
   status: string | null
   icp_description: string | null
+  instantly_campaign_name: string | null
+  /** The job's tag (lume_verticals.name), when tagged. */
+  vertical_name: string | null
 }
 
 export interface CheckRun {
@@ -22,6 +25,7 @@ export interface CheckRun {
   job_id: string
   icp_description: string
   icp_key: string
+  scope: CheckScope
   status: 'staged' | 'running' | 'done' | 'capped' | 'cancelled' | 'failed'
   companies_total: number
   estimate_usd: number | string | null
@@ -37,6 +41,8 @@ export interface CheckSummary {
   items: Record<string, number>
   companies_by_fit: Record<string, number>
   leads_by_fit: Record<string, number>
+  companies_by_type: Record<string, number>
+  leads_by_type: Record<string, number>
 }
 
 export interface CheckResultRow {
@@ -51,26 +57,39 @@ export interface CheckResultRow {
   confidence: 'high' | 'medium' | 'low' | null
   evidence: string | null
   evidence_url: string | null
+  property_type: PropertyType | null
+  doors: number | null
+  doors_evidence: string | null
 }
 
-const RUN_COLS = 'id,job_id,icp_description,icp_key,status,companies_total,estimate_usd,max_usd,spent_usd,error,created_at,updated_at,finished_at'
-const RESULT_COLS = 'company_key,company_name,website,leads,status,error,what_it_does,icp_fit,confidence,evidence,evidence_url'
+const RUN_COLS = 'id,job_id,icp_description,icp_key,scope,status,companies_total,estimate_usd,max_usd,spent_usd,error,created_at,updated_at,finished_at'
+const RESULT_COLS = 'company_key,company_name,website,leads,status,error,what_it_does,icp_fit,confidence,evidence,evidence_url,property_type,doors,doors_evidence'
 const db = () => createServiceClient()
 
 export async function getCheckJob(id: string): Promise<CheckJob | null> {
-  const res = await db().from('validation_jobs').select('id,filename,display_name,status,icp_description').eq('id', id).maybeSingle()
+  const sb = db()
+  const res = await sb.from('validation_jobs').select('id,filename,display_name,status,icp_description,instantly_campaign_name,vertical_id').eq('id', id).maybeSingle()
   if (res.error) throw new DbError('getCheckJob', res.error)
-  return (res.data as CheckJob | null) ?? null
+  const row = res.data as (Omit<CheckJob, 'vertical_name'> & { vertical_id: string | null }) | null
+  if (!row) return null
+  let vertical_name: string | null = null
+  if (row.vertical_id) {
+    const v = await sb.from('lume_verticals').select('name').eq('id', row.vertical_id).maybeSingle()
+    if (v.error) throw new DbError('getCheckJob.vertical', v.error)
+    vertical_name = (v.data as { name: string } | null)?.name ?? null
+  }
+  const { vertical_id: _v, ...job } = row
+  return { ...job, vertical_name }
 }
 
-export async function checkPlan(jobId: string, icp: string): Promise<CheckPlan> {
-  const res = await db().rpc('company_check_plan', { p_job_id: jobId, p_icp: icp })
+export async function checkPlan(jobId: string, icp: string, scope: CheckScope = 'all'): Promise<CheckPlan> {
+  const res = await db().rpc('company_check_plan', { p_job_id: jobId, p_icp: icp, p_scope: scope })
   if (res.error) throw new DbError('checkPlan', res.error)
   return res.data as CheckPlan
 }
 
-export async function getCheckRun(jobId: string, icpKey: string): Promise<CheckRun | null> {
-  const res = await db().from('company_check_runs').select(RUN_COLS).eq('job_id', jobId).eq('icp_key', icpKey).maybeSingle()
+export async function getCheckRun(jobId: string, icpKey: string, scope: CheckScope = 'all'): Promise<CheckRun | null> {
+  const res = await db().from('company_check_runs').select(RUN_COLS).eq('job_id', jobId).eq('icp_key', icpKey).eq('scope', scope).maybeSingle()
   if (res.error) throw new DbError('getCheckRun', res.error)
   return (res.data as CheckRun | null) ?? null
 }
@@ -81,12 +100,14 @@ export async function checkSummary(runId: string): Promise<CheckSummary> {
   return res.data as CheckSummary
 }
 
-/** A page of a run's companies with their verdicts, most leads first; optionally one verdict. */
-export async function listCheckResults(runId: string, opts: { fit?: 'fit' | 'not_fit' | 'unclear'; limit?: number; offset?: number } = {}): Promise<CheckResultRow[]> {
+/** A page of a run's companies with their verdicts, most leads first; optionally one verdict and / or one property type. */
+export async function listCheckResults(runId: string, opts: { fit?: Fit; type?: PropertyType; limit?: number; offset?: number } = {}): Promise<CheckResultRow[]> {
   const limit = Math.min(200, Math.max(1, opts.limit ?? 50))
   const offset = Math.max(0, opts.offset ?? 0)
   let q = db().from('company_check_results').select(RESULT_COLS).eq('run_id', runId)
   if (opts.fit) q = q.eq('icp_fit', opts.fit)
+  if (opts.type === 'unknown') q = q.not('icp_fit', 'is', null).or('property_type.is.null,property_type.eq.unknown')
+  else if (opts.type) q = q.eq('property_type', opts.type)
   const res = await q.order('leads', { ascending: false }).order('company_key').range(offset, offset + limit - 1)
   if (res.error) throw new DbError('listCheckResults', res.error)
   return (res.data ?? []) as CheckResultRow[]
