@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   applySentCompanyNames,
   cellText,
-  companyColumn,
+  emailCompanyColumn,
   DisplayNameBody,
   jobName,
   pageBounds,
@@ -134,10 +134,10 @@ describe('sent company names', () => {
   const row = (email: string | null, company: string | null) =>
     ({ id: email ?? 'x', row_index: 0, email, status: 'valid', status_label: 'Valid', reason: null, cells: ['a', company], enrichment: [] }) as PreviewRow
 
-  it('finds the company column by the row editor keys', () => {
-    expect(companyColumn(['Email', 'Company Name'])).toBe(1)
-    expect(companyColumn(['email', 'organisation'])).toBe(1)
-    expect(companyColumn(['Email'])).toBeNull()
+  it('targets "Company Name for Emails", never the raw Company Name column', () => {
+    expect(emailCompanyColumn(['Company Name', 'Company Name for Emails', 'Email'])).toBe(1)
+    expect(emailCompanyColumn(['company_name_for_emails'])).toBe(0)
+    expect(emailCompanyColumn(['Email', 'Company Name'])).toBeNull()
   })
 
   it('shows the sent name and keeps the CSV original; unbanked and unchanged rows are untouched', () => {

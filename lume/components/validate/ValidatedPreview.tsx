@@ -331,7 +331,7 @@ export function LeadsPreview({ jobId, variant = 'panel', editRequest = 0, expand
                   <tr key={r.id} className="text-fg-70 hover:bg-white/3">
                     <td className="px-3 py-2 pl-4 font-mono text-fg-24 tabular-nums">{r.row_index}</td>
                     {r.cells.map((v, i) => {
-                      const cleaned = i === data.company_col && r.company_original !== undefined
+                      const cleaned = i === data.email_company_col && r.company_original !== undefined
                       return (
                         <td
                           key={i}

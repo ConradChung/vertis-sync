@@ -19,7 +19,7 @@ import {
   type RawPreviewRow,
   type ValidatedListRow,
   applySentCompanyNames,
-  companyColumn,
+  emailCompanyColumn,
 } from '@/lib/validate/preview'
 
 /**
@@ -138,12 +138,12 @@ export async function getPreviewPage(jobId: string, q: PreviewQuery): Promise<Pr
   const columns = previewColumns(job.column_order, job.enrich, rows)
   const editable = job.finder_status === ROW_EDIT_FINDER_STATUS
   const pub = publicJob(job)
-  const companyCol = companyColumn(columns.original)
+  const companyCol = emailCompanyColumn(columns.original)
   const sent = companyCol === null ? new Map<string, string | null>() : await sentCompanyNames(jobId, rows)
   return {
     job: pub,
     columns,
-    company_col: companyCol,
+    email_company_col: companyCol,
     rows: applySentCompanyNames(rows.map((r) => toPreviewRow(r, columns, editable)), companyCol, sent),
     total,
     page: q.page,
