@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { Bot, Briefcase, ChevronRight, ExternalLink, Search, ShieldCheck, ShoppingCart, Users, type LucideIcon } from 'lucide-react'
+import { Bot, Briefcase, Building2, ChevronRight, ExternalLink, Search, ShieldCheck, ShoppingCart, Users, type LucideIcon } from 'lucide-react'
 import { TagChip } from '@/components/tags/TagChip'
 import { PROGRESS_KEY } from '@/hooks/useProgress'
 import { PreviewLeadsButton } from '@/components/validate/ValidatedPreview'
@@ -18,6 +18,7 @@ const ICON: Record<ProgressKind, LucideIcon> = {
   influencer_lookup: Search,
   leadsfriday_order: ShoppingCart,
   job_batch: Briefcase,
+  company_check: Building2,
 }
 
 const fmt = new Intl.NumberFormat('en-US')

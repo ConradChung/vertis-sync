@@ -39,6 +39,8 @@ export const TOOL_TIERS = {
   send_lead_list_to_validation: 'high', delete_lead_list: 'high',
   // New campaign from scratch: suggest first (read), then file it for the owner's tap.
   suggest_campaign_setup: 'read', create_campaign: 'high',
+  // Company check: price it (read), then file the paid per-company check for the owner's tap.
+  get_company_check: 'read', check_companies: 'high',
 } as const satisfies Record<string, 'read' | 'low' | 'high'>
 
 export type ToolName = keyof typeof TOOL_TIERS
@@ -53,6 +55,7 @@ export const HIGH_RISK_KIND: Record<string, PendingKind> = {
   approve_influencer_candidates: 'influencer_approve',
   send_lead_list_to_validation: 'send_lead_list', delete_lead_list: 'delete_lead_list',
   create_campaign: 'new_campaign',
+  check_companies: 'company_check',
   // A low-tier tool that files an approval only for a bulk removal (q, missing, or > 25 rows).
   remove_from_lead_list: 'remove_lead_rows',
   // A low-tier tool that files an approval only for a blocking label (unsubscribe, hostile, BAD + block).
@@ -85,12 +88,15 @@ export const SKIPPABLE_KINDS: ReadonlySet<PendingKind> = new Set<PendingKind>([
  * chat spreadsheet in front of the validation pipeline (paid once approved);
  * send_lead_list does the same for a lead list; delete_lead_list cannot be undone.
  * new_campaign creates a campaign on the owner's inboxes (owner decision: always a tap).
+ * company_check pays Perplexity + Haiku per company in a validation job.
  */
 export const ALWAYS_ASK_KINDS: ReadonlySet<PendingKind> = new Set<PendingKind>([
   'run_actor', 'send_reply', 'decide_gate', 'launch_campaign', 'resume_campaign', 'label_reply', 'influencer_run', 'influencer_reactions',
   'stage_attachment', 'influencer_lookup', 'influencer_approve', 'send_lead_list', 'delete_lead_list', 'remove_lead_rows',
   // A new campaign (with its inboxes and copy) always waits on the owner's tap.
   'new_campaign',
+  // The per-company web check spends Perplexity + Haiku money.
+  'company_check',
 ])
 
 export const skippable = (kind: PendingKind): boolean => SKIPPABLE_KINDS.has(kind)

@@ -1815,6 +1815,54 @@ const SPECS: Built[] = [
   ),
   tiered(
     {
+      name: 'get_company_check',
+      description:
+        "Price and track the company check of a validation job (job_id from get_validation_queue / get_validation_stats): one web-research call per distinct company " +
+        '(deduped by domain) saying what the company really does and whether it fits the ICP. Returns the ICP used (icp, else the job\'s, else the property-management default), ' +
+        'valid leads, distinct companies, how many are already checked for this ICP (free) and unchecked, the per-company unit price with where each part comes from (pricing), ' +
+        'the total estimate, the per-lead price and the default cap; the icp_status the city enrichment already wrote (free); and, once a check ran, its spend vs the estimate, ' +
+        'per-status counts, companies and leads by verdict (fit / not_fit / unclear) and a page of per-company results (what_it_does, icp_fit, confidence, evidence, evidence_url). Spends nothing.',
+      inputSchema: z
+        .object({
+          job_id: uuid,
+          icp: z.string().trim().min(3).max(1000).optional().describe('the ICP to judge fit against, in words; omit to use the job\'s'),
+          fit: z.enum(['fit', 'not_fit', 'unclear']).optional().describe('only results with this verdict'),
+          limit: z.number().int().min(1).max(200).optional(),
+          offset: z.number().int().min(0).optional(),
+        })
+        .strict(),
+      run: async ({ job_id, icp, fit, limit, offset }, { call }) => {
+        const q = new URLSearchParams({ job_id: job_id.toLowerCase() })
+        if (icp) q.set('icp', icp)
+        if (fit) q.set('fit', fit)
+        if (limit !== undefined) q.set('limit', String(limit))
+        if (offset !== undefined) q.set('offset', String(offset))
+        return (await call(`/api/company-check?${q}`)) as ToolResult
+      },
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'check_companies',
+      description:
+        "Propose the paid company check of a validation job: Perplexity Sonar + a Haiku parse per company not yet checked for this ICP ($0.00695 each, from get_company_check), " +
+        'with a hard cap (max_usd, default the estimate + 10 %, at most 50 per approval) it stops at. Only after you quoted get_company_check for this job and ICP in this chat. ' +
+        'Results are cached per domain, so a re-run or another job never pays twice for the same company; a capped run continues with another approval.',
+      inputSchema: z
+        .object({
+          job_id: uuid,
+          icp: z.string().trim().min(3).max(1000).optional(),
+          max_usd: z.number().positive().max(50).optional(),
+          estimate_shown_to_owner: z.literal(true).describe('true only if you showed get_company_check for this job and ICP in this chat'),
+        })
+        .strict(),
+      payload: ({ job_id, icp, max_usd }) => ({ job_id: job_id.toLowerCase(), ...(icp ? { icp } : {}), ...(max_usd !== undefined ? { max_usd } : {}) }),
+    },
+    'high'
+  ),
+  tiered(
+    {
       name: 'approve_reactions',
       description:
         'Propose the reactions scrape of a PM influencer run that is awaiting_approval (get_influencer_run): the approval shows the EXACT bill from top posts ' +

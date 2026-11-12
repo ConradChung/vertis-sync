@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fromApifyRun, fromApolloOrder, fromInfluencerRun, fromJobBatch, fromLookupBatch, fromValidationJob, partitionProgress, pollInterval, withTagNames } from '@/lib/progress/model'
+import { fromApifyRun, fromApolloOrder, fromCompanyCheckRun, fromInfluencerRun, fromJobBatch, fromLookupBatch, fromValidationJob, partitionProgress, pollInterval, withTagNames } from '@/lib/progress/model'
 
 const NOW = Date.parse('2026-11-06T12:00:00Z')
 const iso = (minAgo: number) => new Date(NOW - minAgo * 60_000).toISOString()
@@ -67,5 +67,17 @@ describe('withTagNames', () => {
     expect(b).toMatchObject({ vertical_id: 'v-jobs', vertical_name: 'Job search / GTM roles', tag_table: 'job_batches' })
     expect(o).toMatchObject({ vertical_id: null, tag_table: 'apollo_orders' })
     expect(r).toMatchObject({ vertical_id: 'v-pm', vertical_name: 'PM reactions', tag_table: null })
+  })
+})
+
+describe('fromCompanyCheckRun', () => {
+  it('settled companies of the total, spend vs cap, finished unless running', () => {
+    const now = new Date().toISOString()
+    const r = { id: 'r', job_id: 'j', job_name: 'leadsfriday-4445.csv', status: 'running', companies_total: 3140, spent_usd: '1.2', max_usd: '24.01', error: null, created_at: now, updated_at: now }
+    expect(fromCompanyCheckRun(r, { pending: 3000, done: 120, cached: 20 })).toMatchObject({
+      key: 'company_check:r', kind: 'company_check', title: 'leadsfriday-4445.csv', done: 140, total: 3140, cost_usd: 1.2, cap_usd: 24.01, finished: false, job_id: 'j',
+    })
+    expect(fromCompanyCheckRun({ ...r, status: 'done' }, {}).finished).toBe(true)
+    expect(fromCompanyCheckRun({ ...r, status: 'done' }, {}).total).toBe(3140)
   })
 })

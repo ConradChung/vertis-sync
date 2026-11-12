@@ -15,6 +15,7 @@ import { LEAD_LIST_KEY, leadListPayloadError } from '@/lib/leads/lists/actionPay
 import { tryGrantSend } from '@/lib/actions/grant'
 import { NEW_CAMPAIGN_KEY, NEW_CAMPAIGN_KIND, newCampaignPayloadError } from '@/lib/campaigns/newCampaignPayload'
 import { BANK_QUEUE_KEY, bankQueuePayloadError } from '@/lib/rotation/pushes'
+import { companyCheckPayloadError } from '@/lib/companyCheck/model'
 import { pushForItem } from '@/lib/webhooks/deliver'
 import { pushSummary } from '@/lib/webhooks/push'
 import { sendActionPrompt, sendMessage } from '@/lib/adapters/telegram'
@@ -59,6 +60,9 @@ import { slackOnAction } from '@/lib/slack/hooks'
  * `new_campaign` (a campaign from scratch, lib/campaigns/newCampaignPayload.ts):
  * one awaiting per lowercased name (`name_key`), backed by
  * `pending_actions_one_awaiting_new_campaign_idx`; with `job_id` also one per job.
+ *
+ * `company_check` (the per-company web check of a validation job,
+ * lib/companyCheck/model.ts): one awaiting per job via its `job_id`.
  *
  * Telegram unconfigured: the row is still created; the prompt is skipped
  * (the adapter logs it) and `telegram_message_id` stays null.
@@ -185,6 +189,10 @@ export async function createAction(
     const err = updateSequencePayloadError(payload)
     if (err) throw new InvalidActionPayloadError(err)
     campaignKey = { field: 'campaign_id', value: String(payload.campaign_id) }
+  } else if (kind === 'company_check') {
+    // One awaiting check per job: payload.job_id (pending_actions_one_awaiting_idx).
+    const err = companyCheckPayloadError(payload)
+    if (err) throw new InvalidActionPayloadError(err)
   } else if (kind === NEW_CAMPAIGN_KIND) {
     // One awaiting new campaign per name (pending_actions_one_awaiting_new_campaign_idx);
     // with job_id, also one per job (pending_actions_one_awaiting_idx).

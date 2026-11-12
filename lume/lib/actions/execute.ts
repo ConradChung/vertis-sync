@@ -44,6 +44,7 @@ import { executeDeleteLeadList, executeRemoveLeadRows, executeSendLeadList } fro
 import type { RunOptions } from '@/lib/apify/pricing'
 import { executeNewCampaign } from '@/lib/campaigns/newCampaignExec'
 import { executeBankQueue } from '@/lib/rotation/pushesStore'
+import { executeCompanyCheck } from '@/lib/companyCheck/action'
 import type { Json, PendingActionRow } from '@/lib/db/types'
 import { nextRun } from '@/lib/rules/nextRun'
 import { parseRuleFilter } from '@/lib/rules/filter'
@@ -493,6 +494,13 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
   /** The influencer LinkedIn lookup of a candidate batch, after re-checking it is still startable with people pending. */
   async influencer_lookup(p, action) {
     const out = await executeInfluencerLookup(p, action.id)
+    if (!out.ok) throw new ActionFailure(out.error, out.result)
+    return out.result
+  },
+
+  /** The per-company web check of a validation job, after re-checking there is something to check and no run in progress. */
+  async company_check(p, action) {
+    const out = await executeCompanyCheck(p, action.id)
     if (!out.ok) throw new ActionFailure(out.error, out.result)
     return out.result
   },

@@ -5,14 +5,15 @@ import 'server-only'
  * only by the executor of an approved `influencer_run` / `influencer_reactions`
  * pending action and by the low-risk cancel (which only stops spending); and
  * `influencer-lookup`, called only by the executor of an approved
- * `influencer_lookup`.
+ * `influencer_lookup`; and `company-check`, called only by the executor of an
+ * approved `company_check` (lib/companyCheck/action.ts).
  */
 
 export const INFLUENCER_FN_TIMEOUT_MS = 60_000
 
 export type InfluencerFnResult = { ok: true; status: number; body: Record<string, unknown> } | { ok: false; status: number; error: string }
 
-export async function callInfluencerFn(body: Record<string, unknown>, fn: 'influencer-reactions' | 'influencer-lookup' = 'influencer-reactions'): Promise<InfluencerFnResult> {
+export async function callInfluencerFn(body: Record<string, unknown>, fn: 'influencer-reactions' | 'influencer-lookup' | 'company-check' = 'influencer-reactions'): Promise<InfluencerFnResult> {
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/+$/, '')
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!base || !key) return { ok: false, status: 0, error: 'not_configured' }

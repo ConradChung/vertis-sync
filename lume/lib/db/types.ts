@@ -196,6 +196,7 @@ export type PendingActionKind =
   | 'remove_lead_rows'
   | 'new_campaign'
   | 'bank_queue'
+  | 'company_check'
 
 export type PendingActionStatus =
   | 'awaiting'
