@@ -9,7 +9,7 @@ vi.mock('@/lib/adapters/instantly', () => ({
 vi.mock('@/lib/adapters/instantlyLeads', () => ({
   getContactUsage: async () => {
     if (usageFails) throw new Error('down')
-    return { current: 5, limit: 1000 }
+    return { current: 5, limit: 25000 }
   },
 }))
 vi.mock('@/lib/supabase/service', () => ({
@@ -18,7 +18,7 @@ vi.mock('@/lib/supabase/service', () => ({
     from: (t: string) => {
       const q = {
         select: () => q, is: () => q, order: () => q, limit: () => q,
-        maybeSingle: async () => ({ data: { ran_at: '2026-11-10T01:00:00Z', in_instantly_after: 1000 }, error: null }),
+        maybeSingle: async () => ({ data: { ran_at: '2026-11-10T01:00:00Z', in_instantly_after: 25000 }, error: null }),
         then: (r: (v: unknown) => unknown) => r({ data: t === 'lume_verticals' ? [{ id: 'v', name: 'Kaspen', campaign_ids: ['kaspen'] }] : [], error: null }),
       }
       return q
@@ -38,7 +38,7 @@ describe('GET /api/rotation/queues', () => {
   it('falls back to the last run when Instantly usage cannot be read', async () => {
     usageFails = true
     const body = await (await GET(new Request('https://x/api/rotation/queues'))).json()
-    expect([body.in_instantly, body.in_instantly_source]).toEqual([1000, 'last_run'])
+    expect([body.in_instantly, body.in_instantly_source]).toEqual([25000, 'last_run'])
     expect(body.blockers[0]).toMatch(/Instantly is full/)
   })
 })
