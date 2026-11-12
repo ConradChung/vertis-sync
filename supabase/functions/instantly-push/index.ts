@@ -13,7 +13,8 @@
 //                     junk names (scraped placeholders) are dropped.
 //                     OFF — no review, no junk filtering.
 //
-// Company names are ALWAYS returned in Capitalized Case, both barriers aside.
+// Company names follow the owner's cold-email SOP (_shared/company_name.ts),
+// both barriers aside: Haiku first, deterministic rules as the fallback.
 //
 // mode:'preview' answers synchronously with the first 10 normalized names and
 // the eligibility counts — telegram-inbox renders that for the review screen.
@@ -31,12 +32,21 @@ import {
   normalizeRegion,
   resolveJurisdiction,
 } from '../_shared/research/jurisdiction.ts'
+import {
+  applyStrict,
+  cacheKey,
+  cleanCompanyNameRules,
+  cleanCompanyNames,
+  emailDomain,
+  restCache,
+} from '../_shared/company_name.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const INSTANTLY_API_KEY = Deno.env.get('INSTANTLY_API_KEY') ?? ''
 const TELEGRAM_BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN') ?? ''
 const TELEGRAM_CHAT_ID = Deno.env.get('TELEGRAM_CHAT_ID') ?? ''
+const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
 
 const INSTANTLY_BASE_URL = 'https://api.instantly.ai/api/v2'
 const SAMPLE_SIZE = 10
@@ -128,94 +138,27 @@ function detectColumns(headers: string[]): Columns {
 }
 
 // ---- Company name normalization ----
+//
+// The owner's SOP (_shared/company_name.ts): Haiku cleans each chunk's names
+// before decideRow runs, and the deterministic rules stand in for any name it
+// did not answer (no key, an error, a rejected answer). company_strict then
+// peels descriptive suffixes on top, as before.
 
-// Stripped in every mode. Order matters only in that longer variants must be
-// tried before their prefixes ('l.l.c.' before 'lc' style collisions).
-const LEGAL_SUFFIXES = [
-  'incorporated', 'corporation', 'limited', 'company',
-  'l.l.c.', 'l.l.c', 'llc', 'l.p.', 'llp', 'lp', 'p.l.l.c.', 'pllc', 'p.c.', 'plc', 'pc',
-  'inc.', 'inc', 'corp.', 'corp', 'ltd.', 'ltd', 'co.', 'co',
-  'gmbh', 'ag', 'n.v.', 'nv', 'b.v.', 'bv', 's.a.', 'sa', 'pty', 'pte',
-]
-
-// Stripped only when the owner asks for stricter personalization from the
-// review screen. This is what turns "Wildwood Management Group" into
-// "Wildwood" so a first line reads like a person wrote it.
-const DESCRIPTIVE_SUFFIXES = [
-  'property management group', 'property management', 'properties management',
-  'management group', 'management company', 'management', 'property', 'properties',
-  'real estate group', 'real estate', 'realty group', 'realty',
-  'holdings', 'holding', 'group', 'partners', 'partner', 'associates', 'associate',
-  'enterprises', 'enterprise', 'services', 'service', 'solutions', 'solution',
-  'ventures', 'venture', 'capital', 'advisors', 'advisory', 'consulting',
-  'agency', 'team', 'rentals', 'rental', 'homes', 'residential', 'commercial',
-  'investments', 'investment', 'development', 'developers', 'builders',
-]
-
-// A trailing conjunction or stray punctuation left behind by suffix stripping
-// is exactly the "Hylton & Company" -> "Hylton &" bug from the manual run.
-function trimEdges(s: string): string {
-  return s
-    .replace(/[\s,;:.\-_/\\|]+$/g, '')
-    .replace(/\s+(?:&|and|\+|of|the|for)$/i, '')
-    .replace(/[\s,;:.\-_/\\|]+$/g, '')
-    .replace(/^[\s,;:.\-_/\\|]+/g, '')
-    .trim()
+function normalizeCompany(raw: string, strict: boolean, cleaned?: string): string {
+  const base = cleaned ?? cleanCompanyNameRules(raw)
+  return strict && base ? applyStrict(base) : base
 }
 
-function stripSuffixes(name: string, suffixes: string[]): string {
-  let current = trimEdges(name)
-  // Peel repeatedly: "Acme Properties LLC, Inc." needs more than one pass.
-  for (let pass = 0; pass < 4; pass++) {
-    const lower = current.toLowerCase()
-    let matched = false
-    for (const suffix of suffixes) {
-      // Suffix must sit at the end on a word boundary, not mid-word
-      // ("Incorporated" must not be shaved off "Incorporations").
-      const idx = lower.lastIndexOf(suffix)
-      if (idx <= 0 || idx + suffix.length !== lower.length) continue
-      const preceding = current[idx - 1]
-      if (!/[\s,\-&.]/.test(preceding)) continue
-      const candidate = trimEdges(current.slice(0, idx))
-      // Never strip a name down to nothing — "Management Group" as a whole
-      // company name has to survive as itself.
-      if (candidate.length < 2) continue
-      current = candidate
-      matched = true
-      break
-    }
-    if (!matched) break
-  }
-  return current
-}
-
-// "Capitalized Case" for every name, in every mode — the owner's rule.
-// Acronym-only names ("JLL") come back as "Jll"; the review screen is where
-// that gets caught, since the rule is deliberately literal and predictable.
-function capitalizedCase(name: string): string {
-  return name
-    .split(/(\s+|[-/])/)
-    .map(part => {
-      if (part.length === 0 || /^\s+$/.test(part) || part === '-' || part === '/') return part
-      const cased = part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
-      // O'Brien / D'Angelo — capitalize after an apostrophe only when the
-      // fragment before it is a 1-2 letter prefix, so "Sam's" stays "Sam's".
-      return cased.replace(/^([A-Za-z]{1,2})'([a-z])/, (_m, p1, p2) => `${p1}'${p2.toUpperCase()}`)
-    })
-    .join('')
-}
-
-function normalizeCompany(raw: string, strict: boolean): string {
-  const base = raw.replace(/\s+/g, ' ').trim()
-  if (!base) return ''
-  let out = stripSuffixes(base, LEGAL_SUFFIXES)
-  if (strict) {
-    const stricter = stripSuffixes(out, DESCRIPTIVE_SUFFIXES)
-    if (stricter.length >= 2) out = stricter
-  }
-  out = trimEdges(out)
-  if (out.length < 2) out = trimEdges(base)
-  return capitalizedCase(out)
+/** Cleaned company names for these rows, keyed by cacheKey(raw, email domain). Never throws. */
+export async function cleanNamesFor(rows: ValidationRow[], cols: Columns, deadline?: number, llmKeys?: Set<string>): Promise<Map<string, string>> {
+  if (!cols.company) return new Map()
+  const inputs = rows.map(r => ({ raw: String(r.row_data?.[cols.company!] ?? ''), email: r.email ?? '' }))
+  return await cleanCompanyNames(inputs, {
+    anthropicKey: ANTHROPIC_API_KEY,
+    ...(ANTHROPIC_API_KEY ? restCache(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) : {}),
+    deadline,
+    llmKeys,
+  })
 }
 
 // Scraped placeholders that would render as a broken first line if they
@@ -317,6 +260,7 @@ export function decideRow(
   cols: Columns,
   job: ValidationJob,
   ctx: JurisdictionContext = { rows: [] },
+  names?: Map<string, string>,
 ): Decision {
   const data = row.row_data ?? {}
   const get = (col: string | null): string => (col ? String(data[col] ?? '').trim() : '')
@@ -362,7 +306,7 @@ export function decideRow(
       email,
       first_name: get(cols.first),
       last_name: get(cols.last),
-      company_name: normalizeCompany(rawCompany, job.company_strict),
+      company_name: normalizeCompany(rawCompany, job.company_strict, names?.get(cacheKey(rawCompany, emailDomain(email)))),
       website: get(cols.website),
       location,
       operatingCities,
@@ -501,6 +445,7 @@ async function buildPreview(jobId: string): Promise<PreviewResult> {
     route: 'direct', banked_estimate: 0, bank_threshold: threshold,
   }
 
+  const sampleRows: ValidationRow[] = []
   for (const row of rows ?? []) {
     const decision = decideRow(row, cols, job)
     if (!decision.keep) {
@@ -514,12 +459,18 @@ async function buildPreview(jobId: string): Promise<PreviewResult> {
       result.blankLocation++
       if (job.instantly_campaign_id_nolocation) result.noLocationRouted++
     }
-    if (result.samples.length < SAMPLE_SIZE) {
-      result.samples.push({
-        original: decision.originalCompany || '(blank)',
-        normalized: decision.lead.company_name || '(blank)',
-      })
-    }
+    if (sampleRows.length < SAMPLE_SIZE) sampleRows.push(row)
+  }
+  // Only the shown names go through Haiku here; the push cleans every chunk
+  // the same way (same cache), so what is approved is what is sent.
+  const names = await cleanNamesFor(sampleRows, cols, Date.now() + 25_000)
+  for (const row of sampleRows) {
+    const decision = decideRow(row, cols, job, undefined, names)
+    if (!decision.keep) continue
+    result.samples.push({
+      original: decision.originalCompany || '(blank)',
+      normalized: decision.lead.company_name || '(blank)',
+    })
   }
   // A push already under way keeps the route it started with.
   result.route = job.instantly_route ?? pushRoute(result.eligible, threshold)
@@ -667,9 +618,10 @@ export async function processJob(jobId: string): Promise<void> {
       `validation_rows?job_id=eq.${jobId}&status=eq.valid&instantly_status=eq.skipped&order=row_index.asc&limit=100&select=id,row_index,email,row_data`,
     )) as ValidationRow[]
     if (!rows || rows.length === 0) break
+    const names = await cleanNamesFor(rows, cols, startTime + CHUNK_LIMIT_MS)
 
     for (const row of rows) {
-      const decision = decideRow(row, cols, job, jurisdictionCtx)
+      const decision = decideRow(row, cols, job, jurisdictionCtx, names)
 
       if (!decision.keep) {
         await supabaseRequest('PATCH', `validation_rows?id=eq.${row.id}`, {
@@ -932,8 +884,9 @@ export async function processBankJob(job: ValidationJob, cols: Columns, startTim
     const drop = (reason: string, id: string) => drops.set(reason, [...(drops.get(reason) ?? []), id])
     const kept: { id: string; key: string; row: BankRow }[] = []
     const seen = new Set<string>()
+    const names = await cleanNamesFor(rows, cols, startTime + CHUNK_LIMIT_MS)
     for (const row of rows) {
-      const decision = decideRow(row, cols, job)
+      const decision = decideRow(row, cols, job, undefined, names)
       if (!decision.keep) { drop(decision.reason, row.id); continue }
       const target = (!decision.lead.location && noLocationCampaignId) ? noLocationCampaignId : campaignId
       const b = bankRow(decision.lead, target, jobId)
@@ -1003,13 +956,91 @@ export async function processBankJob(job: ValidationJob, cols: Columns, startTim
   )
 }
 
+// ---- Re-clean a banked job's company names ----
+//
+// mode:'reclean_bank' re-runs the company-name SOP over a job's valid rows and
+// rewrites company_name on that job's lead_bank rows that are still queued
+// (never on a lead already created in Instantly). Haiku answers are cached,
+// so a run cut short by the chunk limit re-invokes itself and picks up where
+// it stopped; after RECLEAN_MAX_PASSES the rules stand in for the rest.
+// dry_run fills the cache and logs the count without renaming anything.
+
+const RECLEAN_MAX_PASSES = 6
+
+async function fetchAllValidRows(jobId: string): Promise<ValidationRow[]> {
+  const all: ValidationRow[] = []
+  for (let offset = 0; ; offset += PREVIEW_PAGE_SIZE) {
+    const page = (await supabaseRequest(
+      'GET',
+      `validation_rows?job_id=eq.${jobId}&status=eq.valid&order=row_index.asc&select=id,row_index,email,row_data` +
+      `&limit=${PREVIEW_PAGE_SIZE}&offset=${offset}`,
+    )) as ValidationRow[]
+    if (!page || page.length === 0) break
+    all.push(...page)
+    if (page.length < PREVIEW_PAGE_SIZE) break
+  }
+  return all
+}
+
+export async function recleanBank(jobId: string, pass: number, dryRun = false): Promise<void> {
+  const startTime = Date.now()
+  const job = await loadJob(jobId)
+  const cols = await resolveColumns(job)
+  const rows = await fetchAllValidRows(jobId)
+
+  const llmKeys = new Set<string>()
+  const names = await cleanNamesFor(rows, cols, startTime + 110_000, llmKeys)
+  const wanted = new Set(rows.map(r => cacheKey(String(r.row_data?.[cols.company ?? ''] ?? ''), emailDomain(r.email ?? ''))).filter(k => !k.startsWith('\u0000')))
+  const missing = [...wanted].filter(k => !llmKeys.has(k)).length
+  if (missing > 0 && pass < RECLEAN_MAX_PASSES && ANTHROPIC_API_KEY) {
+    console.log(`[instantly-push] reclean ${jobId}: pass ${pass}, ${missing} names still to clean, re-invoking`)
+    await fetch(`${SUPABASE_URL}/functions/v1/instantly-push`, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job_id: jobId, mode: 'reclean_bank', pass: pass + 1, dry_run: dryRun }),
+    }).catch(err => console.error('[instantly-push] reclean re-invoke error:', err))
+    await new Promise(r => setTimeout(r, 3000))
+    return
+  }
+
+  const byEmail = new Map<string, string>()
+  for (const row of rows) {
+    const d = decideRow(row, cols, job, undefined, names)
+    if (d.keep) byEmail.set(d.lead.email.trim().toLowerCase(), d.lead.company_name)
+  }
+  const bank: { id: number; email: string; company_name: string | null }[] = []
+  for (let offset = 0; ; offset += PREVIEW_PAGE_SIZE) {
+    const page = (await supabaseRequest(
+      'GET',
+      `lead_bank?source_job_id=eq.${jobId}&state=eq.queued&pushed_at=is.null&order=id.asc&select=id,email,company_name&limit=${PREVIEW_PAGE_SIZE}&offset=${offset}`,
+    )) as typeof bank
+    if (!page || page.length === 0) break
+    bank.push(...page)
+    if (page.length < PREVIEW_PAGE_SIZE) break
+  }
+  const updates = bank
+    .filter(b => byEmail.has(b.email) && (byEmail.get(b.email) || null) !== b.company_name)
+    .map(b => ({ id: b.id, company_name: byEmail.get(b.email) ?? '' }))
+  if (dryRun) {
+    console.log(`[instantly-push] reclean ${jobId} (dry run): ${bank.length} queued, ${updates.length} would be renamed, ${missing} by rules only`)
+    return
+  }
+  let changed = 0
+  for (const part of chunks(updates, 1000)) {
+    changed += Number(await supabaseRequest('POST', 'rpc/lead_bank_set_company_names', { p_rows: part }) ?? 0)
+  }
+  console.log(`[instantly-push] reclean ${jobId}: ${bank.length} queued, ${changed} renamed, ${missing} by rules only`)
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
 
   let jobId: string
   let mode: string | undefined
+  let pass = 1
+  let dryRun = false
   try {
-    const body = await req.json() as { job_id?: string; mode?: string }
+    const body = await req.json() as { job_id?: string; mode?: string; pass?: number; dry_run?: boolean }
     if (!body.job_id) {
       return new Response(JSON.stringify({ error: 'job_id is required' }), {
         status: 400,
@@ -1018,6 +1049,8 @@ Deno.serve(async (req: Request) => {
     }
     jobId = body.job_id
     mode = body.mode
+    pass = Number.isInteger(body.pass) ? body.pass! : 1
+    dryRun = body.dry_run === true
   } catch {
     return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
       status: 400,
@@ -1040,6 +1073,15 @@ Deno.serve(async (req: Request) => {
         headers: { 'Content-Type': 'application/json' },
       })
     }
+  }
+
+  if (mode === 'reclean_bank') {
+    EdgeRuntime.waitUntil(recleanBank(jobId, pass, dryRun).catch(err =>
+      console.error(`[instantly-push] reclean ${jobId} failed:`, err instanceof Error ? err.message : err)))
+    return new Response(JSON.stringify({ ok: true, job_id: jobId, mode, pass, dry_run: dryRun }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
   }
 
   const asyncWork = processJob(jobId).catch(async (err: unknown) => {
