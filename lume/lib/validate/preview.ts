@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { jobName } from '@/lib/validate/jobs'
-import { toRowView, type ValidationRowView } from '@/lib/validate/rows'
+import { nameKeysFor, toRowView, type ValidationRowView } from '@/lib/validate/rows'
 
 /**
  * The validated-leads preview (pure, client-safe): one job's rows with the
@@ -71,6 +71,8 @@ export interface PreviewRow {
   enrichment: (string | null)[]
   /** The row editor's view; only while the job's rows are editable (finder prompt). */
   edit?: ValidationRowView
+  /** The CSV's company name, when the Company cell shows a different, cleaned name (the one sent). */
+  company_original?: string | null
 }
 
 export interface PreviewCounts {
@@ -110,6 +112,8 @@ export interface PreviewPage {
   counts: PreviewCounts
   editable: boolean
   edit_block_reason: string | null
+  /** Index in `columns.original` of the company column, when there is one. */
+  company_col: number | null
 }
 
 const columnsOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x !== '') : [])
@@ -155,6 +159,35 @@ export function toPreviewRow(r: RawPreviewRow, columns: PreviewColumns, editable
   }
   if (editable) row.edit = toRowView({ ...r, validation_result: r.validation_result }, columns.original)
   return row
+}
+
+/** Index in `original` of the company column (same keys the row editor uses), or null. */
+export function companyColumn(original: readonly string[]): number | null {
+  for (const key of nameKeysFor('company_name', original)) {
+    const i = original.indexOf(key)
+    if (i >= 0) return i
+  }
+  return null
+}
+
+/**
+ * Show the company name that is sent (lead_bank.company_name, cleaned by the
+ * cold-email SOP at push time) in the Company cell of rows that have one,
+ * keeping the CSV's original on `company_original`. `sent` is keyed by
+ * lowercased email.
+ */
+export function applySentCompanyNames(rows: PreviewRow[], col: number | null, sent: ReadonlyMap<string, string | null>): PreviewRow[] {
+  if (col === null || sent.size === 0) return rows
+  return rows.map((r) => {
+    const email = r.email?.trim().toLowerCase()
+    if (!email || !sent.has(email)) return r
+    const name = sent.get(email) ?? null
+    const original = r.cells[col] ?? null
+    if (name === original) return r
+    const cells = [...r.cells]
+    cells[col] = name
+    return { ...r, cells, company_original: original }
+  })
 }
 
 /**

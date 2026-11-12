@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  applySentCompanyNames,
   cellText,
+  companyColumn,
   DisplayNameBody,
   jobName,
   pageBounds,
@@ -10,6 +12,7 @@ import {
   searchTerm,
   statusLabel,
   toPreviewRow,
+  type PreviewRow,
   type RawPreviewRow,
 } from '@/lib/validate/preview'
 
@@ -124,5 +127,29 @@ describe('DisplayNameBody / jobName', () => {
   it('names a job by display_name, else its size and day', () => {
     expect(jobName({ display_name: 'UK agents', total_rows: 5255, created_at: '2026-11-06T10:00:00Z' })).toBe('UK agents')
     expect(jobName({ display_name: null, total_rows: 5255, created_at: '2026-11-06T10:00:00Z' })).toBe('5,255 leads · 06 Nov')
+  })
+})
+
+describe('sent company names', () => {
+  const row = (email: string | null, company: string | null) =>
+    ({ id: email ?? 'x', row_index: 0, email, status: 'valid', status_label: 'Valid', reason: null, cells: ['a', company], enrichment: [] }) as PreviewRow
+
+  it('finds the company column by the row editor keys', () => {
+    expect(companyColumn(['Email', 'Company Name'])).toBe(1)
+    expect(companyColumn(['email', 'organisation'])).toBe(1)
+    expect(companyColumn(['Email'])).toBeNull()
+  })
+
+  it('shows the sent name and keeps the CSV original; unbanked and unchanged rows are untouched', () => {
+    const sent = new Map([['ann@jfm.co.uk', 'JFM Block & Estate Management'], ['bo@x.com', 'Same']])
+    const [a, b, c] = applySentCompanyNames(
+      [row('Ann@JFM.co.uk', 'Jfm Block & Estate Management Ltd'), row('bo@x.com', 'Same'), row('cy@y.com', 'Raw')],
+      1,
+      sent,
+    )
+    expect(a.cells[1]).toBe('JFM Block & Estate Management')
+    expect(a.company_original).toBe('Jfm Block & Estate Management Ltd')
+    expect(b.company_original).toBeUndefined()
+    expect(c.cells[1]).toBe('Raw')
   })
 })

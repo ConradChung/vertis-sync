@@ -18,6 +18,8 @@ import {
   type PreviewQuery,
   type RawPreviewRow,
   type ValidatedListRow,
+  applySentCompanyNames,
+  companyColumn,
 } from '@/lib/validate/preview'
 
 /**
@@ -112,6 +114,21 @@ async function readRows(jobId: string, q: PreviewQuery, total: number): Promise<
   return { rows: (res.data ?? []) as unknown as RawPreviewRow[], total }
 }
 
+/**
+ * Lowercased email → the company name this job banked or pushed for it
+ * (lead_bank, written by instantly-push after the company-name SOP). Rows the
+ * job never banked are absent and keep their CSV value.
+ */
+async function sentCompanyNames(jobId: string, rows: readonly RawPreviewRow[]): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>()
+  const emails = [...new Set(rows.filter((r) => r.instantly_status === 'banked' || r.instantly_status === 'pushed').map((r) => r.email?.trim().toLowerCase()).filter((e): e is string => !!e))]
+  if (!emails.length) return out
+  const res = await createServiceClient().from('lead_bank').select('email,company_name').eq('source_job_id', jobId).in('email', emails)
+  if (res.error) throw new DbError('sentCompanyNames', res.error)
+  for (const r of (res.data ?? []) as { email: string; company_name: string | null }[]) out.set(r.email.toLowerCase(), r.company_name)
+  return out
+}
+
 /** One page of the preview; `null` when the job does not exist. */
 export async function getPreviewPage(jobId: string, q: PreviewQuery): Promise<PreviewPage | null> {
   const job = await getPreviewJob(jobId)
@@ -121,10 +138,13 @@ export async function getPreviewPage(jobId: string, q: PreviewQuery): Promise<Pr
   const columns = previewColumns(job.column_order, job.enrich, rows)
   const editable = job.finder_status === ROW_EDIT_FINDER_STATUS
   const pub = publicJob(job)
+  const companyCol = companyColumn(columns.original)
+  const sent = companyCol === null ? new Map<string, string | null>() : await sentCompanyNames(jobId, rows)
   return {
     job: pub,
     columns,
-    rows: rows.map((r) => toPreviewRow(r, columns, editable)),
+    company_col: companyCol,
+    rows: applySentCompanyNames(rows.map((r) => toPreviewRow(r, columns, editable)), companyCol, sent),
     total,
     page: q.page,
     page_size: PREVIEW_PAGE_SIZE,

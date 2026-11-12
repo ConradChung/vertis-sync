@@ -330,11 +330,18 @@ export function LeadsPreview({ jobId, variant = 'panel', editRequest = 0, expand
                 ) : (
                   <tr key={r.id} className="text-fg-70 hover:bg-white/3">
                     <td className="px-3 py-2 pl-4 font-mono text-fg-24 tabular-nums">{r.row_index}</td>
-                    {r.cells.map((v, i) => (
-                      <td key={i} className="max-w-[240px] truncate px-3 py-2" title={v ?? undefined}>
-                        {v ?? <span className="text-fg-24">—</span>}
-                      </td>
-                    ))}
+                    {r.cells.map((v, i) => {
+                      const cleaned = i === data.company_col && r.company_original !== undefined
+                      return (
+                        <td
+                          key={i}
+                          className="max-w-[240px] truncate px-3 py-2"
+                          title={cleaned ? `Sent as: ${v ?? '—'}\nIn the CSV: ${r.company_original ?? '—'}` : (v ?? undefined)}
+                        >
+                          {v ?? <span className="text-fg-24">—</span>}
+                        </td>
+                      )
+                    })}
                     <td className="px-3 py-2 whitespace-nowrap" title={r.reason ?? undefined}>
                       <span className={cn('font-medium', STATUS_TONE[r.status] ?? 'text-fg-46')}>{r.status_label}</span>
                       {r.reason && r.reason !== 'Accepted' && <span className="ml-1.5 text-fg-46">{r.reason}</span>}
