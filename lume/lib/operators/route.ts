@@ -107,6 +107,8 @@ const KIND_SCOPE: Record<PendingActionKind, VerticalScope | null> = {
   send_lead_list: 'validation',
   delete_lead_list: null,
   remove_lead_rows: null,
+  // Restart / move a push's lead bank queue: the rotation feeds a campaign.
+  bank_queue: 'campaign',
   decide_gate: null,
   // Owner / master-bot business: never a vertical's item.
   issue_operator_key: null,

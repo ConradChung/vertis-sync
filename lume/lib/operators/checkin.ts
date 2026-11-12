@@ -115,6 +115,7 @@ const ACTION_LABEL: Record<string, string> = {
   send_lead_list: 'Send a lead list to the ingest gate',
   delete_lead_list: 'Delete a lead list',
   remove_lead_rows: 'Remove rows from a lead list (bulk)',
+  bank_queue: 'Restart or move a push in the lead bank rotation',
 }
 
 function priorityOf(gate: GateRow): Priority {

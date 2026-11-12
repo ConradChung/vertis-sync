@@ -195,6 +195,7 @@ export type PendingActionKind =
   | 'delete_lead_list'
   | 'remove_lead_rows'
   | 'new_campaign'
+  | 'bank_queue'
 
 export type PendingActionStatus =
   | 'awaiting'

@@ -43,6 +43,7 @@ import { executeInfluencerApprove } from '@/lib/influencers/approveAction'
 import { executeDeleteLeadList, executeRemoveLeadRows, executeSendLeadList } from '@/lib/leads/lists/actions'
 import type { RunOptions } from '@/lib/apify/pricing'
 import { executeNewCampaign } from '@/lib/campaigns/newCampaignExec'
+import { executeBankQueue } from '@/lib/rotation/pushesStore'
 import type { Json, PendingActionRow } from '@/lib/db/types'
 import { nextRun } from '@/lib/rules/nextRun'
 import { parseRuleFilter } from '@/lib/rules/filter'
@@ -469,6 +470,11 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
     const out = await executeRemoveLeadRows(p)
     if (!out.ok) throw new ActionFailure(out.error, out.result)
     return out.result
+  },
+
+  /** One push's lead bank queue: stopped leads back in the rotation, or queued ones to another campaign (never-pushed rows only). */
+  async bank_queue(p) {
+    return executeBankQueue(p)
   },
 
   async delete_lead_list(p) {

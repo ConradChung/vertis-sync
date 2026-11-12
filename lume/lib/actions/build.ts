@@ -25,6 +25,7 @@ import { buildInfluencerLookup } from '@/lib/influencers/lookupAction'
 import { buildInfluencerApprove } from '@/lib/influencers/approveAction'
 import { buildDeleteLeadList, buildRemoveLeadRows, buildSendLeadList } from '@/lib/leads/lists/actions'
 import { buildNewCampaign } from '@/lib/campaigns/newCampaign'
+import { buildBankQueue } from '@/lib/rotation/pushesStore'
 
 /**
  * Turn a requested action `{ kind, payload }` into the snapshot the owner
@@ -63,6 +64,8 @@ import { buildNewCampaign } from '@/lib/campaigns/newCampaign'
  *                     fresh Instantly read, stale check, diff, frozen PATCH body
  *  new_campaign       { name, template_id | sequences, email_list, … } → lib/campaigns/newCampaign.ts:
  *                     inboxes, tag, template and name checked live; the copy frozen
+ *  bank_queue         { op: restart | move, source_job_id, campaign_id, to_campaign_id? } →
+ *                     lib/rotation/pushesStore.ts: one push's lead bank queue, count frozen now
  *  send_reply / pause_campaign / resume_campaign / create_campaign:
  *                     lib/actions/payloads.ts, with the display extras
  *                     written here (`withServerExtras`): the campaign name
@@ -113,9 +116,10 @@ const InfluencerLookupBody = z.object({ kind: z.literal('influencer_lookup'), pa
 const InfluencerApproveBody = z.object({ kind: z.literal('influencer_approve'), payload: z.record(z.string(), z.unknown()) })
 const LeadListBody = z.object({ kind: z.enum(['send_lead_list', 'delete_lead_list', 'remove_lead_rows']), payload: z.record(z.string(), z.unknown()) })
 const NewCampaignBody = z.object({ kind: z.literal('new_campaign'), payload: z.record(z.string(), z.unknown()) })
+const BankQueueRequest = z.object({ kind: z.literal('bank_queue'), payload: z.record(z.string(), z.unknown()) })
 
 /** Shape check for `POST /api/actions`; `buildActionRequest` validates each payload fully. */
-export const ActionRequestBody = z.union([JobBody, rotateActionBody, OtherBody, RunActorBody, UpdateSequenceBody, RemoveLeadsBody, LabelReplyBody, InfluencerBody, StageAttachmentBody, InfluencerLookupBody, InfluencerApproveBody, LeadListBody, NewCampaignBody, CampaignBody])
+export const ActionRequestBody = z.union([JobBody, rotateActionBody, OtherBody, RunActorBody, UpdateSequenceBody, RemoveLeadsBody, LabelReplyBody, InfluencerBody, StageAttachmentBody, InfluencerLookupBody, InfluencerApproveBody, LeadListBody, NewCampaignBody, BankQueueRequest, CampaignBody])
 export type ActionRequest = z.infer<typeof ActionRequestBody>
 
 export type ActionBuild =
@@ -219,6 +223,8 @@ export async function buildActionRequest(input: unknown): Promise<ActionBuild> {
       return buildRemoveLeadRows(req.payload)
     case 'new_campaign':
       return buildNewCampaign(req.payload)
+    case 'bank_queue':
+      return buildBankQueue(req.payload, campaignName)
     case 'push_to_instantly':
     case 'launch_campaign':
       return buildJobAction(req.kind, (req.payload as { job_id: string }).job_id.toLowerCase())

@@ -15,6 +15,7 @@ import {
 import { toast } from 'sonner'
 import { CampaignCards } from '@/components/rotate/CampaignCards'
 import { bundleOf, LeadBank } from '@/components/rotate/LeadBank'
+import { BankPushes } from '@/components/rotate/BankPushes'
 import { RotationQueues } from '@/components/rotate/RotationQueues'
 import { RuleSheet } from '@/components/rotate/RuleSheet'
 import { RulesTable } from '@/components/rotate/RulesTable'
@@ -116,6 +117,7 @@ export function RotateScreen() {
     <DndContext id="rotate-dnd" sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setDragging(null)}>
       <div className="flex flex-col gap-5">
         <RotationQueues />
+        <BankPushes />
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
           <LeadBank
             rows={bank.data?.rows}

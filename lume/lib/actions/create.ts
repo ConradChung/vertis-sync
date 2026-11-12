@@ -14,6 +14,7 @@ import { STAGE_ATTACHMENT_KEY, stageAttachmentPayloadError } from '@/lib/agent/a
 import { LEAD_LIST_KEY, leadListPayloadError } from '@/lib/leads/lists/actionPayload'
 import { tryGrantSend } from '@/lib/actions/grant'
 import { NEW_CAMPAIGN_KEY, NEW_CAMPAIGN_KIND, newCampaignPayloadError } from '@/lib/campaigns/newCampaignPayload'
+import { BANK_QUEUE_KEY, bankQueuePayloadError } from '@/lib/rotation/pushes'
 import { pushForItem } from '@/lib/webhooks/deliver'
 import { pushSummary } from '@/lib/webhooks/push'
 import { sendActionPrompt, sendMessage } from '@/lib/adapters/telegram'
@@ -165,6 +166,11 @@ export async function createAction(
     const err = leadListPayloadError(payload)
     if (err) throw new InvalidActionPayloadError(err)
     campaignKey = { field: LEAD_LIST_KEY, value: String(payload[LEAD_LIST_KEY]) }
+  } else if (kind === 'bank_queue') {
+    // One awaiting restart / move per push and campaign (pending_actions_one_awaiting_bank_queue_idx).
+    const err = bankQueuePayloadError(payload)
+    if (err) throw new InvalidActionPayloadError(err)
+    campaignKey = { field: BANK_QUEUE_KEY, value: String(payload[BANK_QUEUE_KEY]) }
   } else if (kind === 'influencer_lookup') {
     // One awaiting lookup per batch (pending_actions_one_awaiting_influencer_lookup_idx).
     const err = lookupPayloadError(payload)

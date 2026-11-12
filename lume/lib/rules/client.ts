@@ -53,6 +53,16 @@ export function requestAssign(campaignId: string, d: DragLeads): Promise<ApiAnsw
   return sendJson<ActionAnswer>('/api/actions', { kind: 'assign_leads', payload })
 }
 
+/** Stop one push's queue for one campaign now (direct: it can only stop sending). */
+export function stopPushQueue(sourceJobId: string | null, campaignId: string): Promise<ApiAnswer<{ stopped: number }>> {
+  return sendJson<{ stopped: number }>('/api/rotation/pushes', { source_job_id: sourceJobId, campaign_id: campaignId })
+}
+
+/** Restart a push's stopped leads, or move its queued ones: a bank_queue action that waits for a tap. */
+export function requestBankQueue(payload: { op: 'restart' | 'move'; source_job_id: string | null; campaign_id: string; to_campaign_id?: string }): Promise<ApiAnswer<ActionAnswer>> {
+  return sendJson<ActionAnswer>('/api/actions', { kind: 'bank_queue', payload })
+}
+
 export function requestActivate(ruleId: string): Promise<ApiAnswer<ActionAnswer>> {
   return sendJson<ActionAnswer>('/api/actions', { kind: 'activate_rule', payload: { rule_id: ruleId } })
 }
@@ -99,6 +109,9 @@ const ERRORS: Record<string, string> = {
   action_awaiting: 'A confirmation for this rule is still open.',
   invalid_body: 'Check the fields and try again.',
   too_large: 'Too many leads in one drop (max 500).',
+  push_not_found: 'That push has no leads in the bank any more.',
+  nothing_stopped: 'Nothing stopped to restart.',
+  nothing_queued: 'Nothing queued to move.',
 }
 
 export function errorText(a: ApiAnswer<unknown>): string {
