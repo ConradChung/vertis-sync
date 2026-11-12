@@ -15,7 +15,7 @@ import { bankBlockers, groupQueues, type QueueRow } from '@/lib/rotation/queues'
  * next rotation runs. Campaign names / statuses come from
  * Instantly (best effort: ids when it can't be read).
  */
-const CAP = 1000
+const CAP = 25000 // Instantly plan contact limit (upgraded 2026-11-12)
 
 export async function GET(req: Request) {
   const auth = await requireOwner(req)

@@ -15,7 +15,7 @@ import { nextRotation } from '@/lib/progress/bank'
  */
 type Ctx = { params: Promise<{ id: string }> }
 
-const CAP = 1000
+const CAP = 25000 // Instantly plan contact limit (upgraded 2026-11-12)
 
 export async function GET(req: Request, ctx: Ctx) {
   const auth = await requireOwner(req)

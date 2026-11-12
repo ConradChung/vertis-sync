@@ -753,7 +753,7 @@ export async function processJob(jobId: string): Promise<void> {
 // Above bank_threshold eligible leads, nothing is created in Instantly here:
 // every eligible lead is queued in lead_bank for its target campaign (main, or
 // the no-location sibling for city-less leads when one is set) and
-// instantly-rotate pushes them twice a day as the shared 1,000-contact
+// instantly-rotate pushes them twice a day as the shared 25,000-contact
 // workspace cap frees slots, oldest queued first. The owner's push tap is the
 // authorisation for both the banking and that rotation. Same decideRow, same
 // barriers; compliance_law is left null so the rotation resolves it at push
