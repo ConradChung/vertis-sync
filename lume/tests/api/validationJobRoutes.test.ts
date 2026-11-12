@@ -59,7 +59,7 @@ describe('GET /api/validation-jobs/[id]/rows', () => {
     store.getPreviewPage.mockResolvedValue({ rows: [], total: 0 })
     const res = await rowsGET(get(`/api/validation-jobs/${JOB}/rows?page=3&status=invalid&q=%22acme%22`), params(JOB))
     expect(res.status).toBe(200)
-    expect(store.getPreviewPage).toHaveBeenCalledWith(JOB, { page: 3, status: 'invalid', q: 'acme' })
+    expect(store.getPreviewPage).toHaveBeenCalledWith(JOB, { page: 3, status: 'invalid', q: 'acme', send: 'all' })
   })
 
   it('400 on bad page / status, 404 on a missing job', async () => {

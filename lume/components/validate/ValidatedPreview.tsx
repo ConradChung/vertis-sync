@@ -12,13 +12,13 @@ import { ExpandButton, SheetOverlay, scrollBoxClass, useSheetExpand } from '@/co
 import { RowEditor } from '@/components/validate/RowTable'
 import { fetchJson } from '@/hooks/fetcher'
 import { sendJson } from '@/lib/validate/client'
-import { DISPLAY_NAME_MAX, PREVIEW_PAGE_SIZE, type PreviewFilter, type PreviewPage } from '@/lib/validate/preview'
+import { DISPLAY_NAME_MAX, PREVIEW_PAGE_SIZE, type PreviewFilter, type PreviewPage, type SendFilter } from '@/lib/validate/preview'
 import { cn } from '@/lib/utils'
 
 const fmt = new Intl.NumberFormat('en-US')
 
-export const previewRowsKey = (id: string, page: number, status: PreviewFilter, q: string) =>
-  `/api/validation-jobs/${id}/rows?page=${page}&status=${status}${q ? `&q=${encodeURIComponent(q)}` : ''}`
+export const previewRowsKey = (id: string, page: number, status: PreviewFilter, q: string, send: SendFilter = 'all') =>
+  `/api/validation-jobs/${id}/rows?page=${page}&status=${status}${send === 'all' ? '' : `&send=${send}`}${q ? `&q=${encodeURIComponent(q)}` : ''}`
 
 /** Every SWR key that shows a job's name (after a rename). */
 const showsJobName = (id: string) => (key: unknown) =>
@@ -38,6 +38,20 @@ const FILTERS: { key: PreviewFilter; label: string; tone: string }[] = [
   { key: 'error', label: 'Error', tone: 'text-amber' },
   { key: 'all', label: 'All', tone: 'text-fg' },
 ]
+
+/** Sending tabs, shown once the job has pushed or banked leads (lead bank state). */
+const SEND_TABS: { key: SendFilter; label: string; title: string }[] = [
+  { key: 'sending', label: 'Sending', title: 'Queued in the lead bank, in Instantly, or replied' },
+  { key: 'pulled', label: 'Pulled', title: 'Taken out of the queue before sending (e.g. not ICP)' },
+  { key: 'all', label: 'All', title: 'Every lead in the list' },
+]
+
+const SEND_TONE: Record<string, string> = {
+  queued: 'text-cyan',
+  in_instantly: 'text-green',
+  replied: 'text-violet-soft',
+  bounced: 'text-red',
+}
 
 const STATUS_TONE: Record<string, string> = {
   valid: 'text-green',
@@ -173,18 +187,22 @@ export function LeadsPreview({ jobId, variant = 'panel', editRequest = 0, expand
   const toggle = variant === 'dialog' ? (onToggleExpanded ?? (() => {})) : own.toggle
   const [filter, setFilter] = useState<PreviewFilter>('valid')
   const picked = useRef(false)
+  const [send, setSend] = useState<SendFilter>('all')
+  const pickedSend = useRef(false)
   const [page, setPage] = useState(0)
   const [qInput, setQInput] = useState('')
   const q = useDebounced(qInput.trim())
   const [editing, setEditing] = useState<string | null>(null)
   const lastRequest = useRef(editRequest)
-  const { data, error, mutate } = useSWR<PreviewPage>(previewRowsKey(jobId, page, filter, q), fetchJson, { keepPreviousData: true })
+  const { data, error, mutate } = useSWR<PreviewPage>(previewRowsKey(jobId, page, filter, q, send), fetchJson, { keepPreviousData: true })
 
   useEffect(() => {
     setPage(0)
     setEditing(null)
     setFilter('valid')
     picked.current = false
+    setSend('all')
+    pickedSend.current = false
   }, [jobId])
   useEffect(() => setPage(0), [q])
 
@@ -192,6 +210,12 @@ export function LeadsPreview({ jobId, variant = 'panel', editRequest = 0, expand
   useEffect(() => {
     if (!picked.current && data && data.job.id === jobId && filter === 'valid' && data.counts.valid === 0 && data.counts.all > 0) setFilter('all')
   }, [data, filter, jobId])
+
+  // A pushed / banked list opens on what is actually being sent.
+  const banked = (data?.send_counts?.banked ?? 0) > 0
+  useEffect(() => {
+    if (!pickedSend.current && data && data.job.id === jobId && send === 'all' && data.send_counts?.banked > 0) setSend('sending')
+  }, [data, send, jobId])
 
   useEffect(() => {
     if (editRequest === lastRequest.current) return
@@ -208,11 +232,19 @@ export function LeadsPreview({ jobId, variant = 'panel', editRequest = 0, expand
     setFilter(f)
     setPage(0)
   }
+  const pickSend = (f: SendFilter) => {
+    pickedSend.current = true
+    setSend(f)
+    setPage(0)
+  }
+  const sendCount = (k: SendFilter) => (k === 'all' ? data?.send_counts.all : data?.send_counts[k])
+  const csvHref = (status: 'valid' | 'all') => `/api/validation-jobs/${jobId}/export?status=${status}${banked && send !== 'all' ? `&send=${send}` : ''}`
+  const sendNoun = banked && send !== 'all' ? `${send} ` : ''
 
   const total = data?.total ?? 0
   const pages = Math.max(1, Math.ceil(total / PREVIEW_PAGE_SIZE))
   const cols = data?.columns
-  const colCount = cols ? cols.original.length + cols.enrichment.length + 2 + (data?.editable ? 1 : 0) : 1
+  const colCount = cols ? cols.original.length + cols.enrichment.length + 2 + (banked ? 1 : 0) + (data?.editable ? 1 : 0) : 1
 
   const body = (
     <>
@@ -235,6 +267,23 @@ export function LeadsPreview({ jobId, variant = 'panel', editRequest = 0, expand
             </button>
           ))}
         </div>
+        {banked && (
+          <div role="group" aria-label="Filter by sending" className="flex max-w-full items-center gap-0.5 overflow-x-auto whitespace-nowrap rounded-lg bg-white/4 p-0.5 [scrollbar-width:none]">
+            {SEND_TABS.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                title={f.title}
+                aria-pressed={send === f.key}
+                onClick={() => pickSend(f.key)}
+                className={cn('rounded-md px-2.5 py-1 text-[12px] transition-colors', send === f.key ? 'bg-white/10 text-fg' : 'text-fg-46 hover:text-fg')}
+              >
+                {f.label}
+                <span className={cn('ml-1.5 font-mono tabular-nums', send === f.key ? 'text-fg-70' : 'text-fg-24')}>{fmt.format(sendCount(f.key) ?? 0)}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <Input
           value={qInput}
           onChange={(e) => setQInput(e.target.value)}
@@ -244,14 +293,14 @@ export function LeadsPreview({ jobId, variant = 'panel', editRequest = 0, expand
         />
         <div className="flex-1" />
         <a
-          href={`/api/validation-jobs/${jobId}/export?status=valid`}
+          href={csvHref('valid')}
           className="inline-flex items-center gap-1 text-[12px] text-fg-70 hover:text-fg"
           download
         >
           <Download className="size-3.5" aria-hidden /> Valid CSV
         </a>
         <a
-          href={`/api/validation-jobs/${jobId}/export?status=all`}
+          href={csvHref('all')}
           className="inline-flex items-center gap-1 text-[12px] text-fg-70 hover:text-fg"
           download
         >
@@ -286,7 +335,7 @@ export function LeadsPreview({ jobId, variant = 'panel', editRequest = 0, expand
             ))}
           </div>
         ) : data.rows.length === 0 ? (
-          <p className="px-4 py-6 text-[13px] text-fg-46">{q ? `No ${filter === 'all' ? '' : `${filter} `}leads match “${q}”.` : `No ${filter === 'all' ? '' : `${filter} `}leads in this list.`}</p>
+          <p className="px-4 py-6 text-[13px] text-fg-46">{q ? `No ${sendNoun}${filter === 'all' ? '' : `${filter} `}leads match “${q}”.` : `No ${sendNoun}${filter === 'all' ? '' : `${filter} `}leads in this list.`}</p>
         ) : (
           <table aria-label="Leads" className="w-full min-w-max border-collapse text-left text-[12px]">
             <thead className="sticky top-0 z-10 bg-background text-[11px] text-fg-46">
@@ -302,6 +351,11 @@ export function LeadsPreview({ jobId, variant = 'panel', editRequest = 0, expand
                 <th scope="col" className="px-3 py-2 font-normal">
                   Status
                 </th>
+                {banked && (
+                  <th scope="col" className="px-3 py-2 font-normal">
+                    Sending
+                  </th>
+                )}
                 {cols.enrichment.map((c) => (
                   <th key={`e:${c.key}`} scope="col" className="px-3 py-2 font-normal whitespace-nowrap">
                     {c.label}
@@ -346,6 +400,11 @@ export function LeadsPreview({ jobId, variant = 'panel', editRequest = 0, expand
                       <span className={cn('font-medium', STATUS_TONE[r.status] ?? 'text-fg-46')}>{r.status_label}</span>
                       {r.reason && r.reason !== 'Accepted' && <span className="ml-1.5 text-fg-46">{r.reason}</span>}
                     </td>
+                    {banked && (
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <span className={SEND_TONE[r.send_state ?? ''] ?? 'text-fg-46'}>{r.send_label ?? '—'}</span>
+                      </td>
+                    )}
                     {r.enrichment.map((v, i) => (
                       <td key={`e${i}`} className="max-w-[240px] truncate px-3 py-2" title={v ?? undefined}>
                         {v ?? <span className="text-fg-24">—</span>}

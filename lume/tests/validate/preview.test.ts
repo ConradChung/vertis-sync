@@ -10,6 +10,7 @@ import {
   previewColumns,
   searchPattern,
   searchTerm,
+  sendLabel,
   statusLabel,
   toPreviewRow,
   type PreviewRow,
@@ -89,9 +90,9 @@ describe('search', () => {
 
 describe('parsePreviewQuery / pageBounds', () => {
   const p = (qs: string) => parsePreviewQuery(new URLSearchParams(qs))
-  it('defaults to page 0, status valid, no search', () => {
-    expect(p('')).toEqual({ ok: true, query: { page: 0, status: 'valid', q: null } })
-    expect(p('page=2&status=all&q=%20acme%20')).toEqual({ ok: true, query: { page: 2, status: 'all', q: 'acme' } })
+  it('defaults to page 0, status valid, every sending state, no search', () => {
+    expect(p('')).toEqual({ ok: true, query: { page: 0, status: 'valid', q: null, send: 'all' } })
+    expect(p('page=2&status=all&q=%20acme%20&send=pulled')).toEqual({ ok: true, query: { page: 2, status: 'all', q: 'acme', send: 'pulled' } })
   })
 
   it('refuses bad pages and statuses', () => {
@@ -99,6 +100,7 @@ describe('parsePreviewQuery / pageBounds', () => {
     expect(p('page=1.5')).toEqual({ ok: false, error: 'bad_page' })
     expect(p('page=10000')).toEqual({ ok: false, error: 'bad_page' })
     expect(p('status=pending')).toEqual({ ok: false, error: 'bad_status' })
+    expect(p('send=queued')).toEqual({ ok: false, error: 'bad_send' })
   })
 
   it('pages by 100 and knows when a page lies past the total', () => {
@@ -132,7 +134,7 @@ describe('DisplayNameBody / jobName', () => {
 
 describe('sent company names', () => {
   const row = (email: string | null, company: string | null) =>
-    ({ id: email ?? 'x', row_index: 0, email, status: 'valid', status_label: 'Valid', reason: null, cells: ['a', company], enrichment: [] }) as PreviewRow
+    ({ id: email ?? 'x', row_index: 0, email, status: 'valid', status_label: 'Valid', reason: null, cells: ['a', company], enrichment: [], send_state: null, send_label: null }) as PreviewRow
 
   it('targets "Company Name for Emails", never the raw Company Name column', () => {
     expect(emailCompanyColumn(['Company Name', 'Company Name for Emails', 'Email'])).toBe(1)
@@ -151,5 +153,14 @@ describe('sent company names', () => {
     expect(a.company_original).toBe('Jfm Block & Estate Management Ltd')
     expect(b.company_original).toBeUndefined()
     expect(c.cells[1]).toBe('Raw')
+  })
+})
+
+describe('sending state', () => {
+  it('labels the lead bank states, and stays empty without one', () => {
+    expect(sendLabel('queued')).toBe('Queued')
+    expect(sendLabel('in_instantly')).toBe('In Instantly')
+    expect(sendLabel('pulled')).toBe('Pulled')
+    expect(sendLabel(null)).toBeNull()
   })
 })

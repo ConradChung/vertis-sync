@@ -17,6 +17,8 @@ import {
   type PreviewPage,
   type PreviewQuery,
   type RawPreviewRow,
+  type SendCounts,
+  type SendFilter,
   type ValidatedListRow,
   applySentCompanyNames,
   emailCompanyColumn,
@@ -30,7 +32,6 @@ import {
 
 const JOB_COLS =
   'id,filename,display_name,status,total_rows,created_at,enrich,column_order,finder_status,instantly_status,instantly_campaign_id,instantly_campaign_name'
-const ROW_COLS = 'id,row_index,email,status,validation_result,enrichment_status,enrichment,instantly_status,row_data'
 
 type JobRecord = PreviewJob & { column_order: unknown; finder_status: string | null }
 
@@ -90,42 +91,43 @@ async function statusCounts(jobId: string): Promise<PreviewCounts> {
 
 const statusOf = (f: PreviewFilter) => (f === 'all' ? null : f)
 
-async function readRows(jobId: string, q: PreviewQuery, total: number): Promise<{ rows: RawPreviewRow[]; total: number }> {
-  const sb = createServiceClient()
-  const { from, past } = pageBounds(q.page, total)
-  if (q.q) {
-    const res = await sb.rpc('lume_validation_rows_search', {
-      p_job: jobId,
-      p_status: statusOf(q.status),
-      p_pattern: searchPattern(q.q),
-      p_offset: from,
-      p_limit: PREVIEW_PAGE_SIZE,
-    })
-    if (res.error) throw new DbError('previewRows.search', res.error)
-    const d = (res.data ?? {}) as { total?: number; rows?: RawPreviewRow[] }
-    return { rows: d.rows ?? [], total: Number(d.total) || 0 }
-  }
-  if (past) return { rows: [], total }
-  let query = sb.from('validation_rows').select(ROW_COLS).eq('job_id', jobId)
-  const s = statusOf(q.status)
-  if (s) query = query.eq('status', s)
-  const res = await query.order('row_index', { ascending: true }).order('id', { ascending: true }).range(from, from + PREVIEW_PAGE_SIZE - 1)
+const NO_SEND_COUNTS: SendCounts = { sending: 0, pulled: 0, banked: 0, all: 0 }
+
+/**
+ * One page of rows through lume_validation_rows_page: each row with its
+ * sending state (the job's lead bank rows by email, or the direct push) and
+ * the company name the bank holds, filtered by status, sending tab and search.
+ */
+async function readRows(
+  jobId: string,
+  q: { status: PreviewFilter; send: SendFilter; q: string | null },
+  offset: number,
+  limit: number
+): Promise<{ rows: RawPreviewRow[]; total: number; send_counts: SendCounts }> {
+  const res = await createServiceClient().rpc('lume_validation_rows_page', {
+    p_job: jobId,
+    p_status: statusOf(q.status),
+    p_send: q.send === 'all' ? null : q.send,
+    p_pattern: q.q ? searchPattern(q.q) : null,
+    p_offset: offset,
+    p_limit: limit,
+  })
   if (res.error) throw new DbError('previewRows', res.error)
-  return { rows: (res.data ?? []) as unknown as RawPreviewRow[], total }
+  const d = (res.data ?? {}) as { total?: number; rows?: RawPreviewRow[]; send_counts?: Partial<SendCounts> }
+  return { rows: d.rows ?? [], total: Number(d.total) || 0, send_counts: { ...NO_SEND_COUNTS, ...d.send_counts } }
 }
 
 /**
- * Lowercased email → the company name this job banked or pushed for it
- * (lead_bank, written by instantly-push after the company-name SOP). Rows the
- * job never banked are absent and keep their CSV value.
+ * Lowercased email → the company name the job banked for it (lead_bank,
+ * cleaned by the company-name SOP at push time). Rows the job never banked
+ * are absent and keep their CSV value.
  */
-async function sentCompanyNames(jobId: string, rows: readonly RawPreviewRow[]): Promise<Map<string, string | null>> {
+function sentCompanyNames(rows: readonly RawPreviewRow[]): Map<string, string | null> {
   const out = new Map<string, string | null>()
-  const emails = [...new Set(rows.filter((r) => r.instantly_status === 'banked' || r.instantly_status === 'pushed').map((r) => r.email?.trim().toLowerCase()).filter((e): e is string => !!e))]
-  if (!emails.length) return out
-  const res = await createServiceClient().from('lead_bank').select('email,company_name').eq('source_job_id', jobId).in('email', emails)
-  if (res.error) throw new DbError('sentCompanyNames', res.error)
-  for (const r of (res.data ?? []) as { email: string; company_name: string | null }[]) out.set(r.email.toLowerCase(), r.company_name)
+  for (const r of rows) {
+    const email = r.email?.trim().toLowerCase()
+    if (email && r.bank_company !== undefined && r.bank_company !== null) out.set(email, r.bank_company)
+  }
   return out
 }
 
@@ -133,23 +135,25 @@ async function sentCompanyNames(jobId: string, rows: readonly RawPreviewRow[]): 
 export async function getPreviewPage(jobId: string, q: PreviewQuery): Promise<PreviewPage | null> {
   const job = await getPreviewJob(jobId)
   if (!job) return null
-  const counts = await statusCounts(jobId)
-  const { rows, total } = await readRows(jobId, q, counts[q.status])
+  const { from } = pageBounds(q.page, Number.MAX_SAFE_INTEGER)
+  const [counts, read] = await Promise.all([statusCounts(jobId), readRows(jobId, q, from, PREVIEW_PAGE_SIZE)])
+  const { rows, total, send_counts } = read
   const columns = previewColumns(job.column_order, job.enrich, rows)
   const editable = job.finder_status === ROW_EDIT_FINDER_STATUS
   const pub = publicJob(job)
   const companyCol = emailCompanyColumn(columns.original)
-  const sent = companyCol === null ? new Map<string, string | null>() : await sentCompanyNames(jobId, rows)
   return {
     job: pub,
     columns,
     email_company_col: companyCol,
-    rows: applySentCompanyNames(rows.map((r) => toPreviewRow(r, columns, editable)), companyCol, sent),
+    rows: applySentCompanyNames(rows.map((r) => toPreviewRow(r, columns, editable)), companyCol, sentCompanyNames(rows)),
     total,
     page: q.page,
     page_size: PREVIEW_PAGE_SIZE,
     status: q.status,
     q: q.q,
+    send: q.send,
+    send_counts,
     counts,
     editable,
     edit_block_reason: editable ? null : ROW_EDIT_BLOCKED_REASON,
@@ -227,27 +231,29 @@ export async function listValidatedJobs(opts: { campaignId: string | null; unass
   return [...seen.values()].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
 }
 
-/** CSV header + lines of a job's rows (`valid` or `all`), streamed 1,000 rows at a time in row_index order. */
-export async function* previewCsvChunks(job: JobRecord, status: 'valid' | 'all', pageSize = 1000): AsyncGenerator<string> {
-  const sb = createServiceClient()
+/**
+ * CSV header + lines of a job's rows (`valid` or `all`, narrowed to a sending
+ * tab), streamed 1,000 rows at a time in row_index order. "Company Name for
+ * Emails" carries the name that is sent; a Sending column follows Status
+ * once the job has pushed or banked anything.
+ */
+export async function* previewCsvChunks(job: JobRecord, status: 'valid' | 'all', send: SendFilter = 'all', pageSize = 1000): AsyncGenerator<string> {
   let columns: ReturnType<typeof previewColumns> | null = null
+  let companyCol: number | null = null
+  let withSend = false
   for (let from = 0; ; from += pageSize) {
-    let query = sb.from('validation_rows').select(ROW_COLS).eq('job_id', job.id)
-    if (status === 'valid') query = query.eq('status', 'valid')
-    const res = await query.order('row_index', { ascending: true }).order('id', { ascending: true }).range(from, from + pageSize - 1)
-    if (res.error) throw new DbError('previewCsv', res.error)
-    const page = (res.data ?? []) as unknown as RawPreviewRow[]
+    const { rows: page, send_counts } = await readRows(job.id, { status, send, q: null }, from, pageSize)
     if (!columns) {
       columns = previewColumns(job.column_order, job.enrich, page)
-      yield [...columns.original, 'Status', 'Reason', ...columns.enrichment.map((c) => c.label)].map(csvCell).join(',') + '\n'
+      companyCol = emailCompanyColumn(columns.original)
+      withSend = send_counts.banked > 0
+      yield [...columns.original, 'Status', 'Reason', ...(withSend ? ['Sending'] : []), ...columns.enrichment.map((c) => c.label)].map(csvCell).join(',') + '\n'
     }
     const cols = columns
     if (page.length) {
-      yield page
-        .map((r) => {
-          const v = toPreviewRow(r, cols)
-          return [...v.cells, v.status_label, v.reason, ...v.enrichment].map(csvCell).join(',')
-        })
+      const views = applySentCompanyNames(page.map((r) => toPreviewRow(r, cols)), companyCol, sentCompanyNames(page))
+      yield views
+        .map((v) => [...v.cells, v.status_label, v.reason, ...(withSend ? [v.send_label] : []), ...v.enrichment].map(csvCell).join(','))
         .join('\n') + '\n'
     }
     if (page.length < pageSize) return

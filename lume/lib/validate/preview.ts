@@ -11,6 +11,9 @@ import { toRowView, type ValidationRowView } from '@/lib/validate/rows'
 
 export const PREVIEW_FILTERS = ['valid', 'invalid', 'error', 'all'] as const
 export type PreviewFilter = (typeof PREVIEW_FILTERS)[number]
+/** Sending tabs (lead bank state, or the direct push): what is going out, what was pulled, everything. */
+export const SEND_FILTERS = ['sending', 'pulled', 'all'] as const
+export type SendFilter = (typeof SEND_FILTERS)[number]
 export const PREVIEW_PAGE_SIZE = 100
 /** Pages beyond this are refused (100 rows each: a million rows). */
 export const PREVIEW_MAX_PAGE = 9_999
@@ -25,6 +28,20 @@ export const STATUS_LABEL: Record<string, string> = {
   pending: 'Pending',
 }
 export const statusLabel = (s: string) => STATUS_LABEL[s] ?? s.replace(/_/g, ' ')
+
+/** `send_state` from lume_validation_rows_page → the Sending column. */
+export const SEND_LABEL: Record<string, string> = {
+  queued: 'Queued',
+  in_instantly: 'In Instantly',
+  replied: 'Replied',
+  pulled: 'Pulled',
+  finished: 'Finished',
+  bounced: 'Bounced',
+  unsubscribed: 'Unsubscribed',
+  filtered: 'Filtered',
+  not_sent: 'Not sent',
+}
+export const sendLabel = (s: string | null | undefined) => (s ? (SEND_LABEL[s] ?? s.replace(/_/g, ' ')) : null)
 
 /**
  * Enrichment output (validation_rows.enrichment) shown after Status, unless
@@ -55,6 +72,9 @@ export interface RawPreviewRow {
   enrichment?: unknown
   instantly_status: string | null
   row_data: Record<string, unknown> | null
+  /** From lume_validation_rows_page: the row's sending state and the company name the bank holds for it. */
+  send_state?: string | null
+  bank_company?: string | null
 }
 
 export interface PreviewRow {
@@ -73,6 +93,17 @@ export interface PreviewRow {
   edit?: ValidationRowView
   /** The CSV's "Company Name for Emails" value, when that cell shows a different, cleaned name (the one sent). */
   company_original?: string | null
+  /** Sending state (SEND_LABEL key) and its label. */
+  send_state: string | null
+  send_label: string | null
+}
+
+export interface SendCounts {
+  sending: number
+  pulled: number
+  /** Rows the job pushed or banked at all; 0 hides the Sending tabs and column. */
+  banked: number
+  all: number
 }
 
 export interface PreviewCounts {
@@ -114,6 +145,9 @@ export interface PreviewPage {
   edit_block_reason: string | null
   /** Index in `columns.original` of the "Company Name for Emails" column, when there is one. */
   email_company_col: number | null
+  send: SendFilter
+  /** Per sending tab, within the status filter (search does not narrow these). */
+  send_counts: SendCounts
 }
 
 const columnsOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x !== '') : [])
@@ -156,6 +190,8 @@ export function toPreviewRow(r: RawPreviewRow, columns: PreviewColumns, editable
     reason: cellText(r.validation_result?.message),
     cells: columns.original.map((c) => cellText(data[c])),
     enrichment: columns.enrichment.map((c) => cellText(enr[c.key])),
+    send_state: r.send_state ?? null,
+    send_label: sendLabel(r.send_state),
   }
   if (editable) row.edit = toRowView({ ...r, validation_result: r.validation_result }, columns.original)
   return row
@@ -206,15 +242,23 @@ export function searchTerm(q: string | null | undefined): string | null {
 /** `%term%` for ILIKE with `%` and `_` escaped (`\` is the default escape; the term has none). */
 export const searchPattern = (term: string) => `%${term.replace(/[%_]/g, (m) => `\\${m}`)}%`
 
-export type PreviewQuery = { page: number; status: PreviewFilter; q: string | null }
+export type PreviewQuery = { page: number; status: PreviewFilter; q: string | null; send: SendFilter }
 
-/** `?page=&status=&q=` → the query, or an error code. Status defaults to valid. */
-export function parsePreviewQuery(sp: URLSearchParams): { ok: true; query: PreviewQuery } | { ok: false; error: 'bad_page' | 'bad_status' } {
+/** `?send=` → the sending tab (default all), or null when unknown. */
+export function parseSend(raw: string | null): SendFilter | null {
+  const send = (raw ?? 'all') as SendFilter
+  return SEND_FILTERS.includes(send) ? send : null
+}
+
+/** `?page=&status=&q=&send=` → the query, or an error code. Status defaults to valid, send to all. */
+export function parsePreviewQuery(sp: URLSearchParams): { ok: true; query: PreviewQuery } | { ok: false; error: 'bad_page' | 'bad_status' | 'bad_send' } {
   const rawPage = sp.get('page') ?? '0'
   if (!/^\d{1,6}$/.test(rawPage) || Number(rawPage) > PREVIEW_MAX_PAGE) return { ok: false, error: 'bad_page' }
   const status = (sp.get('status') ?? 'valid') as PreviewFilter
   if (!PREVIEW_FILTERS.includes(status)) return { ok: false, error: 'bad_status' }
-  return { ok: true, query: { page: Number(rawPage), status, q: searchTerm(sp.get('q')) } }
+  const send = parseSend(sp.get('send'))
+  if (!send) return { ok: false, error: 'bad_send' }
+  return { ok: true, query: { page: Number(rawPage), status, q: searchTerm(sp.get('q')), send } }
 }
 
 /** Row offset of a page, and whether it lies past the total (no query needed). */

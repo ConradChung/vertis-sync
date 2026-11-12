@@ -6,10 +6,10 @@ import { parsePreviewQuery } from '@/lib/validate/preview'
 import { getPreviewPage } from '@/lib/validate/previewStore'
 
 /**
- * `GET /api/validation-jobs/<id>/rows?page=0&status=valid|invalid|error|all&q=`
+ * `GET /api/validation-jobs/<id>/rows?page=0&status=valid|invalid|error|all&send=sending|pulled|all&q=`
  * → one page (100) of the validated-leads preview: the original CSV columns
  * in `column_order` order, Status + MailTester reason, enrichment columns;
- * counts per status; `row_index` order. `q` matches the email or any
+ * counts per status and per sending tab (lead bank state); `row_index` order. `q` matches the email or any
  * original value (escaped ILIKE through a parameterised RPC). Read-only.
  */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
