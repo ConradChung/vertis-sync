@@ -22,7 +22,7 @@ import { allocate, rotationCampaigns } from "./allocate.ts";
 // knows are archived and deleted (a lead pushed directly is never removed by the rotation). trim mode
 // stays primary-only.
 const CAMPAIGN = Deno.env.get("ROTATE_CAMPAIGN_ID") ?? "869d73b3-5bf3-4f1c-ba8c-43ac6d0f529d";
-const CAP = Number(Deno.env.get("ROTATE_CAP") ?? "1000");
+const CAP = Number(Deno.env.get("ROTATE_CAP") ?? "25000"); // Instantly plan contact limit (25,000 since 2026-11-12)
 const MAX_PUSH = Number(Deno.env.get("ROTATE_MAX_PUSH") ?? "450"); // per run; two runs a day fill the cap
 const TIME_BUDGET_MS = Number(Deno.env.get("ROTATE_TIME_BUDGET_MS") ?? "110000"); // stay under the 150 s limit
 const CONCURRENCY = 4;
@@ -44,7 +44,7 @@ async function ik(path: string, init: RequestInit = {}, tries = 0): Promise<any>
 
 async function listAllLeads(): Promise<any[]> {
   const out: any[] = []; let after: string | undefined;
-  for (let page = 0; page < 200; page++) {
+  for (let page = 0; page < 300; page++) { // 30,000 leads: above the 25,000 plan cap
     const body: any = { limit: 100 }; if (after) body.starting_after = after;
     const d = await ik("/leads/list", { method: "POST", body: JSON.stringify(body) });
     out.push(...(d.items ?? []));

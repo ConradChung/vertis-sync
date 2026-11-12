@@ -90,3 +90,20 @@ Deno.test('cleanCompanyNames: a failed Haiku call falls back to the rules', asyn
   })
   assertEquals(out.get(cacheKey('ZUKER PROPERTY LTD', 'z.com')), 'Zuker Property')
 })
+
+Deno.test('blank company falls back to the email domain, not a personal mailbox', async () => {
+  const { companyFromDomain, companyOrDomain } = await import('./company_name.ts')
+  assertEquals(companyFromDomain('leo@investgain.com'), 'investgain')
+  assertEquals(companyFromDomain('a@mail.chardproperties.co.uk'), 'chardproperties')
+  assertEquals(companyFromDomain('a@www.acme.com'), 'acme')
+  assertEquals(companyFromDomain('a@gmail.com'), '')
+  assertEquals(companyFromDomain('a@yahoo.co.uk'), '')
+  assertEquals(companyFromDomain('a@hotmail.com'), '')
+  assertEquals(companyFromDomain('nodomain'), '')
+  assertEquals(companyOrDomain('  Acme Ltd ', 'x@other.com'), 'Acme Ltd')
+  assertEquals(companyOrDomain('', 'leo@investgain.com'), 'investgain')
+  assertEquals(companyOrDomain('   ', 'leo@gmail.com'), '')
+  // The rules alone (no Haiku) still give a usable name; Haiku splits the words.
+  assertEquals(cleanCompanyNameRules('investgain'), 'Investgain')
+  assertEquals(acceptLlmName('InvestGain', 'investgain', 'leo@investgain.com'), 'InvestGain')
+})
