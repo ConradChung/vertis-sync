@@ -29,7 +29,8 @@ export interface RunSummary {
 
 const LIVE = new Set(['pending', 'processing'])
 const FAILED = new Set(['failed', 'error', 'cancelled'])
-const RUN_ACTION_KINDS = new Set(['push_to_instantly', 'launch_campaign'])
+/** Pending-action kinds that belong to a job's run (payload.job_id); company_check is decided in the run's ICP check panel. */
+const RUN_ACTION_KINDS = new Set(['push_to_instantly', 'launch_campaign', 'company_check'])
 
 export const ingestRunId = (ingestId: string) => `ingest:${ingestId}`
 export const isIngestRun = (id: string) => id.startsWith('ingest:')

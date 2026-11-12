@@ -8,6 +8,7 @@ import { ShimmerBar } from '@/components/overview/parts'
 import { TagChip } from '@/components/tags/TagChip'
 import { AlsoNeedsYou } from '@/components/progress/AlsoNeedsYou'
 import { FlowChart } from '@/components/progress/FlowChart'
+import { IcpCheck } from '@/components/progress/IcpCheck'
 import { OtherActivity } from '@/components/progress/OtherActivity'
 import { RunDot, RunSwitcher } from '@/components/progress/RunSwitcher'
 import { StepDetail } from '@/components/progress/StepDetail'
@@ -16,7 +17,8 @@ import { LeadsPreview, RenamableName } from '@/components/validate/ValidatedPrev
 import { useGateRunner } from '@/hooks/useGateRunner'
 import { usePushPreview } from '@/hooks/useJob'
 import type { GateRow, JobProgress } from '@/lib/db/types'
-import { buildFlow, focusStep, type PushRoute, type StepId } from '@/lib/progress/flow'
+import { checkGateFor } from '@/lib/companyCheck/view'
+import { bankedCount, buildFlow, focusStep, type PushRoute, type StepId } from '@/lib/progress/flow'
 import type { ProgressPayload } from '@/lib/progress/model'
 import { gatesForRun, isIngestRun, runOfGate, runStatus, type DeepLinkTarget, type RunSummary } from '@/lib/progress/runs'
 import { buttonsFor, hotkeyTarget } from '@/lib/validate/actions'
@@ -75,7 +77,14 @@ export function ProgressBoard(props: ProgressBoardProps) {
   const node = stepIndex >= 0 ? nodes[stepIndex] : null
 
   const statusOf = useCallback((r: RunSummary) => runStatus(r, all), [all])
-  const alsoGates = useMemo(() => all.filter((g) => runOfGate(g) === null), [all])
+  // A company_check approval whose job is not in the runs list still needs a place: the side list.
+  const alsoGates = useMemo(
+    () => all.filter((g) => { const id = runOfGate(g); return id === null || (g.title === 'company_check' && id !== selectedId && !runs.some((r) => r.id === id)) }),
+    [all, runs, selectedId]
+  )
+  // The ICP check panel shows for a completed validation job; its approval (if waiting) is decided there.
+  const icpJob = run?.kind === 'job' && job && job.id === run.id && job.status === 'completed' ? job : null
+  const icpGate = useMemo(() => (icpJob ? checkGateFor(all, icpJob.id) : null), [all, icpJob])
   const otherRuns = useMemo(() => {
     const out: { run: RunSummary; gate: GateRow }[] = []
     for (const g of all) {
@@ -88,7 +97,7 @@ export function ProgressBoard(props: ProgressBoardProps) {
   }, [all, runs, selectedId])
 
   // The gates on screen, in order: the step's own, then the side list.
-  const onScreen = useMemo(() => [...(node?.gate ? [node.gate] : []), ...alsoGates], [node, alsoGates])
+  const onScreen = useMemo(() => [...(node?.gate ? [node.gate] : []), ...(icpGate ? [icpGate] : []), ...alsoGates], [node, icpGate, alsoGates])
   const keys = useMemo(() => onScreen.map(gateKey), [onScreen])
 
   const runner = useGateRunner(onRefresh)
@@ -267,6 +276,11 @@ export function ProgressBoard(props: ProgressBoardProps) {
                   <ShimmerBar className="h-24 w-full" />
                 </div>
               )}
+            </GlassCard>
+          )}
+          {icpJob && (
+            <GlassCard className={`${SURFACE} px-4 py-5 sm:px-6 sm:py-6`}>
+              <IcpCheck key={icpJob.id} jobId={icpJob.id} banked={bankedCount(icpJob)} gates={gates} onRequested={onRefresh} blockedFor={blockedFor} pickerTick={runner.pickerTick} {...gateProps} />
             </GlassCard>
           )}
           {run?.kind === 'job' && (
