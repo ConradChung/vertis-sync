@@ -16,7 +16,7 @@
 
 import { fetchWithBackoff } from './backoff.ts'
 
-export const COMPANY_NAME_SOP_VERSION = 1
+export const COMPANY_NAME_SOP_VERSION = 2
 
 export const COMPANY_NAME_SOP = `You are cleaning company names for use in cold email copy. Return the name the way an employee would say it casually in conversation, e.g. "I saw what you're doing at ___".
 
@@ -29,6 +29,7 @@ Rules:
 6. Keep descriptive words that are part of how the brand is said ("Chase Commercial", "My Property Host", "Ethical Estate"). Drop generic trailing words like "Services", "Group", or "Holdings" only if the name still reads as a distinct brand without them.
 7. Use the email domain as a sanity check. If the company name is a single ambiguous word and the domain shows a fuller brand, use the fuller brand ("Chard" with chardproperties.com becomes "Chard Properties"). Never output the domain itself or a TLD.
 8. If the name is already clean, return it unchanged. Do not invent, translate, or abbreviate.
+9. If the company is blank, it is filled with the name part of the email domain in lowercase (leo@investgain.com gives "investgain"). Turn it into the brand as written: split the words and case them ("investgain" becomes "InvestGain", "chardproperties" becomes "Chard Properties"). Do not add words that are not in it.
 
 Output only the cleaned company name. No quotes, no explanation, no trailing punctuation.`
 
@@ -156,6 +157,35 @@ export function applyStrict(name: string): string {
   const stricter = stripSuffixes(name, DESCRIPTIVE_SUFFIXES)
   return stricter.length >= 2 ? stricter : name
 }
+
+// ---- Blank company: fall back to the email domain ----
+
+// Personal mailboxes say nothing about the company: no fallback for these.
+export const FREE_MAIL_LABELS = new Set([
+  'gmail', 'googlemail', 'yahoo', 'ymail', 'rocketmail', 'hotmail', 'outlook', 'live', 'msn', 'windowslive',
+  'icloud', 'me', 'mac', 'aol', 'aim', 'protonmail', 'proton', 'pm', 'gmx', 'zoho', 'zohomail', 'yandex',
+  'mail', 'email', 'inbox', 'fastmail', 'hey', 'tutanota', 'tuta', 'btinternet', 'btopenworld', 'sky',
+  'virginmedia', 'talktalk', 'comcast', 'verizon', 'att', 'sbcglobal', 'bellsouth', 'cox', 'charter',
+  'earthlink', 'optonline', 'shaw', 'rogers', 'sympatico', 'telus', 'videotron', 'bigpond', 'optusnet',
+  'iinet', 'tpg', 'xtra', 'qq', '163', '126', 'naver', 'web', 'orange', 'wanadoo', 'free', 'libero',
+])
+
+/**
+ * The company to clean when the lead has none: the email domain's name part
+ * (leo@investgain.com -> "investgain"; www./mail. prefixes skipped), or ''
+ * for a personal mailbox or no domain. Owner, 2026-11-12: the fallback
+ * company name comes from the domain.
+ */
+export function companyFromDomain(email: string): string {
+  const parts = emailDomain(email).split('.').filter(Boolean)
+  while (parts.length > 2 && ['www', 'mail', 'email', 'mx', 'smtp'].includes(parts[0])) parts.shift()
+  const label = parts.length >= 2 ? parts[0] : ''
+  if (!label || FREE_MAIL_LABELS.has(label) || !/\p{L}/u.test(label)) return ''
+  return label
+}
+
+/** The raw company for a lead: its own, else companyFromDomain(email). */
+export const companyOrDomain = (raw: string, email: string): string => raw.trim() || companyFromDomain(email)
 
 // ---- Guarding Haiku ----
 

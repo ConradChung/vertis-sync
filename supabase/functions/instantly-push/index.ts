@@ -37,6 +37,7 @@ import {
   cacheKey,
   cleanCompanyNameRules,
   cleanCompanyNames,
+  companyOrDomain,
   emailDomain,
   restCache,
 } from '../_shared/company_name.ts'
@@ -151,8 +152,7 @@ function normalizeCompany(raw: string, strict: boolean, cleaned?: string): strin
 
 /** Cleaned company names for these rows, keyed by cacheKey(raw, email domain). Never throws. */
 export async function cleanNamesFor(rows: ValidationRow[], cols: Columns, deadline?: number, llmKeys?: Set<string>): Promise<Map<string, string>> {
-  if (!cols.company) return new Map()
-  const inputs = rows.map(r => ({ raw: String(r.row_data?.[cols.company!] ?? ''), email: r.email ?? '' }))
+  const inputs = rows.map(r => ({ raw: companyOrDomain(cols.company ? String(r.row_data?.[cols.company] ?? '') : '', r.email ?? ''), email: r.email ?? '' }))
   return await cleanCompanyNames(inputs, {
     anthropicKey: ANTHROPIC_API_KEY,
     ...(ANTHROPIC_API_KEY ? restCache(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) : {}),
@@ -291,7 +291,7 @@ export function decideRow(
     ? [rawCity, secondary].filter(Boolean).join('; ')
     : ''
 
-  const rawCompany = get(cols.company)
+  const rawCompany = companyOrDomain(get(cols.company), email) // blank -> the email domain's name (owner, 2026-11-12)
   if (job.company_barrier && rawCompany && looksLikeJunkCompany(rawCompany)) {
     return { keep: false, reason: 'junk company name' }
   }
