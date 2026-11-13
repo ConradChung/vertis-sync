@@ -12,7 +12,7 @@ import { listPushRows, stopPush } from '@/lib/rotation/pushesStore'
  * source list and campaign (queued / stopped / in Instantly / finished), and
  * the campaigns a queue can move to. Names from Instantly, best effort.
  *
- * POST { source_job_id, campaign_id } → { stopped }: stop that queue now. It
+ * POST { source_job_id, campaign_id, reason? } → { stopped }: stop that queue now. It
  * can only stop sending, so it is direct; restart and move are a bank_queue
  * action (POST /api/actions) that waits for a tap.
  */
@@ -41,15 +41,16 @@ export async function POST(req: Request) {
   const body = await parseJsonBody(req, StopBody, 1024)
   if (!body.ok) return body.response
   const { source_job_id, campaign_id } = body.data
+  const reason = body.data.reason || null
   try {
-    const out = await stopPush(source_job_id, campaign_id)
+    const out = await stopPush(source_job_id, campaign_id, reason)
     await logEvent({
       type: 'lume.bank_queue_stopped',
       source: 'lume',
       source_id: source_job_id ?? campaign_id,
       campaign_id,
-      title: `Rotation stopped for ${out.stopped.toLocaleString('en-US')} queued leads`,
-      payload: { source_job_id, by: auth.via === 'internal' ? 'agent' : 'user', stopped: out.stopped },
+      title: `Rotation stopped for ${out.stopped.toLocaleString('en-US')} queued leads${reason ? `: ${reason}` : ''}`,
+      payload: { source_job_id, by: auth.via === 'internal' ? 'agent' : 'user', stopped: out.stopped, reason },
     }).catch(() => null)
     return NextResponse.json(out)
   } catch (err) {

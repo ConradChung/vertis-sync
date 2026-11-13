@@ -23,9 +23,19 @@ export interface PushRow {
   finished: number
   first_banked_at: string | null
   last_pushed_at: string | null
+  /** Why the stopped leads were stopped, biggest first (`lead_bank.stop_reason`). */
+  stop_reasons?: StopReason[] | null
+}
+
+/** One stop reason on a push x campaign: how many leads, and when they were last stopped for it. */
+export interface StopReason {
+  reason: string
+  count: number
+  at: string | null
 }
 
 export interface PushCampaign extends PushRow {
+  stop_reasons: StopReason[]
   campaign_name: string
   campaign_status: string | null
 }
@@ -65,6 +75,9 @@ export function groupPushes(rows: readonly PushRow[], names: ReadonlyMap<string,
       stopped: n(r.stopped),
       active: n(r.active),
       finished: n(r.finished),
+      stop_reasons: (Array.isArray(r.stop_reasons) ? r.stop_reasons : [])
+        .filter((x) => x && typeof x.reason === 'string')
+        .map((x) => ({ reason: x.reason, count: n(x.count), at: typeof x.at === 'string' ? x.at : null })),
       campaign_name: names.get(r.campaign_id)?.name ?? r.campaign_id,
       campaign_status: names.get(r.campaign_id)?.status ?? null,
     }
@@ -86,8 +99,12 @@ export function groupPushes(rows: readonly PushRow[], names: ReadonlyMap<string,
 const JobId = z.string().regex(LOWER_UUID).nullable()
 const CampaignId = z.string().regex(CAMPAIGN_ID_RE)
 
-/** `POST /api/rotation/pushes`: stop one push's queue for one campaign (direct). */
-export const StopBody = z.strictObject({ source_job_id: JobId, campaign_id: CampaignId })
+/** Quick picks for why a queue is stopped (the owner can also type their own). */
+export const STOP_REASONS = ['Not a property manager', 'Wrong region', 'Bad or old data', 'Pausing for now'] as const
+export const STOP_REASON_MAX = 200
+
+/** `POST /api/rotation/pushes`: stop one push's queue for one campaign (direct), with a short reason. */
+export const StopBody = z.strictObject({ source_job_id: JobId, campaign_id: CampaignId, reason: z.string().trim().max(STOP_REASON_MAX).optional() })
 
 /** `bank_queue` request: restart the stopped leads, or move the queued ones to another campaign. */
 export const BankQueueBody = z

@@ -54,8 +54,8 @@ export function requestAssign(campaignId: string, d: DragLeads): Promise<ApiAnsw
 }
 
 /** Stop one push's queue for one campaign now (direct: it can only stop sending). */
-export function stopPushQueue(sourceJobId: string | null, campaignId: string): Promise<ApiAnswer<{ stopped: number }>> {
-  return sendJson<{ stopped: number }>('/api/rotation/pushes', { source_job_id: sourceJobId, campaign_id: campaignId })
+export function stopPushQueue(sourceJobId: string | null, campaignId: string, reason?: string): Promise<ApiAnswer<{ stopped: number }>> {
+  return sendJson<{ stopped: number }>('/api/rotation/pushes', { source_job_id: sourceJobId, campaign_id: campaignId, ...(reason ? { reason } : {}) })
 }
 
 /** Restart a push's stopped leads, or move its queued ones: a bank_queue action that waits for a tap. */

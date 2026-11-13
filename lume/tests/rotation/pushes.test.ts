@@ -26,6 +26,20 @@ describe('groupPushes', () => {
     expect(g[1].key).toBe('none')
   })
 
+  it('carries why leads were stopped, dropping malformed entries', () => {
+    const reasons = [
+      { reason: 'Not a property manager (company research)', count: '671', at: '2026-11-12T04:34:51Z' },
+      { reason: 'Wrong region', count: 2, at: null },
+      { count: 9 },
+    ] as unknown as PushRow['stop_reasons']
+    const c = groupPushes([row({ campaign_id: NOLOC, stopped: 673, stop_reasons: reasons })], new Map())[0].campaigns[0]
+    expect(c.stop_reasons).toEqual([
+      { reason: 'Not a property manager (company research)', count: 671, at: '2026-11-12T04:34:51Z' },
+      { reason: 'Wrong region', count: 2, at: null },
+    ])
+    expect(groupPushes([row({ stopped: 0 })], new Map())[0].campaigns[0].stop_reasons).toEqual([])
+  })
+
   it('falls back to the campaign id when Instantly names are unavailable', () => {
     expect(groupPushes([row({ queued: '5' as unknown as number })], new Map())[0].campaigns[0]).toMatchObject({ campaign_name: KASPEN, queued: 5 })
   })
@@ -39,6 +53,8 @@ describe('bank_queue payloads', () => {
     expect(BankQueueBody.safeParse({ op: 'stop', source_job_id: JOB, campaign_id: KASPEN }).success).toBe(false)
     expect(StopBody.safeParse({ source_job_id: null, campaign_id: KASPEN }).success).toBe(true)
     expect(StopBody.safeParse({ source_job_id: 'nope', campaign_id: KASPEN }).success).toBe(false)
+    expect(StopBody.safeParse({ source_job_id: JOB, campaign_id: KASPEN, reason: 'Not a property manager' }).data?.reason).toBe('Not a property manager')
+    expect(StopBody.safeParse({ source_job_id: JOB, campaign_id: KASPEN, reason: 'x'.repeat(201) }).success).toBe(false)
   })
 
   it('createAction refuses a payload whose push_key or count does not match', () => {
