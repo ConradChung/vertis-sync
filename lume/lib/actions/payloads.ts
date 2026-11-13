@@ -68,6 +68,8 @@ export const CAMPAIGN_PAYLOADS = {
     original_body: z.string().trim().max(20_000).optional(),
     edited_by: LABEL,
     edited_at: LABEL,
+    /** Not sent before this instant (ISO): the video auto-reply's 3-minute pause after the lead's email. */
+    send_after: z.iso.datetime({ offset: true }).optional(),
   }),
   pause_campaign: z.object({ campaign_id: ID, campaign_name: LABEL }),
   resume_campaign: z.object({ campaign_id: ID, campaign_name: LABEL }),

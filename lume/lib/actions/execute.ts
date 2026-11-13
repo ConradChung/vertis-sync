@@ -77,7 +77,7 @@ import {
  */
 
 export type ExecuteOutcome =
-  | { ran: false; reason: 'not_found' | 'not_claimable'; status?: PendingActionRow['status'] }
+  | { ran: false; reason: 'not_found' | 'not_claimable' | 'not_yet'; status?: PendingActionRow['status'] }
   | {
       ran: true
       status: 'executed' | 'failed'
@@ -632,6 +632,9 @@ async function report(a: PendingActionRow, status: 'executed' | 'failed', result
 }
 
 export async function executeAction(id: string, opts: ExecuteOptions = {}): Promise<ExecuteOutcome> {
+  // A reply held until `send_after` (the video auto-reply's pause) stays approved: a later dispatch sends it.
+  const peek = await getAction(id)
+  if (peek && notYet(peek)) return { ran: false, reason: 'not_yet', status: peek.status }
   const action = await claimExecution(id)
   if (!action) {
     const row = await getAction(id)
@@ -660,6 +663,12 @@ export async function executeAction(id: string, opts: ExecuteOptions = {}): Prom
   // 3g: show the outcome on the reply's client-channel posts.
   slackOnAction(action)
   return { ran: true, status, result, error, ...(reveal ? { reveal } : {}) }
+}
+
+/** An approved send_reply whose `send_after` is still ahead. */
+export function notYet(row: Pick<PendingActionRow, 'kind' | 'status' | 'payload'>, now = Date.now()): boolean {
+  const at = row.kind === 'send_reply' && row.status === 'approved' ? row.payload?.send_after : undefined
+  return typeof at === 'string' && Date.parse(at) > now
 }
 
 export const SWEEP_AFTER_MS = 2 * 60_000

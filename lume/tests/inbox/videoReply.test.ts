@@ -84,3 +84,15 @@ describe('videoBlocker', () => {
     expect(videoBlocker({ payload: payload(), ...ok, leadReplies: [{ reply_to_uuid: 'r0' }, { reply_to_uuid: 'r1' }] })).toBe('video_not_first_reply')
   })
 })
+
+describe('the 3-minute hold', () => {
+  it('notYet holds an approved send_reply until send_after', async () => {
+    const { notYet } = await import('@/lib/actions/execute')
+    const at = '2026-11-12T10:03:00.000Z'
+    const row = (status: string, kind = 'send_reply') => ({ kind, status, payload: { send_after: at } }) as never
+    expect(notYet(row('approved'), Date.parse('2026-11-12T10:02:59Z'))).toBe(true)
+    expect(notYet(row('approved'), Date.parse('2026-11-12T10:03:01Z'))).toBe(false)
+    expect(notYet(row('awaiting'), Date.parse('2026-11-12T10:00:00Z'))).toBe(false)
+    expect(notYet({ kind: 'send_reply', status: 'approved', payload: {} } as never)).toBe(false)
+  })
+})

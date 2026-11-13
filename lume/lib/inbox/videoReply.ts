@@ -22,6 +22,9 @@ export const VIDEO_REPLY_CAMPAIGNS: ReadonlySet<string> = new Set([
 
 export const VIDEO_REPLY_DRAFTED_BY = 'Lume (video yes)'
 
+/** The pause between the lead's email arriving and the reply going out. */
+export const VIDEO_REPLY_DELAY_MS = 3 * 60_000
+
 const firstNameOf = (leadName: string | null | undefined) => {
   const first = (leadName ?? '').trim().split(/\s+/)[0] ?? ''
   return /^[\p{L}][\p{L}'’.-]{0,40}$/u.test(first) ? first : null
