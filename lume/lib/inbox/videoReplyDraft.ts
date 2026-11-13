@@ -3,7 +3,7 @@ import { buildActionRequest } from '@/lib/actions/build'
 import { createAction, DuplicateActionError } from '@/lib/actions/create'
 import { getEmail, getThreadEmails } from '@/lib/adapters/instantlyEmails'
 import { trimQuotes } from '@/lib/inbox/model'
-import { askedVideo, isPlainYes, VIDEO_REPLY_CAMPAIGNS, VIDEO_REPLY_DRAFTED_BY, videoReplyBody } from '@/lib/inbox/videoReply'
+import { askedVideo, isPlainYes, VIDEO_REPLY_CAMPAIGNS, VIDEO_REPLY_DELAY_MS, VIDEO_REPLY_DRAFTED_BY, videoReplyBody } from '@/lib/inbox/videoReply'
 
 /**
  * A new positive reply on a live Kaspen campaign that is a plain yes to the
@@ -32,6 +32,9 @@ export async function draftVideoReply(input: { reply_to_uuid: string; campaign_i
     // Name and company are the server's own lookup (build.ts), the same ones the grant re-derives the body from.
     const p = built.payload
     p.body = videoReplyBody(typeof p.lead_name === 'string' ? p.lead_name : null, typeof p.company === 'string' ? p.company : null)
+    // Sent no sooner than 3 minutes after the lead's email arrived (owner, 2026-11-12).
+    const received = Date.parse(email.created_at ?? email.at ?? '')
+    p.send_after = new Date(Math.max(Number.isFinite(received) ? received + VIDEO_REPLY_DELAY_MS : 0, Date.now() + 5_000)).toISOString()
     p.summary = `Video link to ${typeof p.lead_name === 'string' ? p.lead_name : String(p.lead_email ?? 'lead')} (plain yes)`
     await createAction(built.kind, p, 'agent')
     return 'filed'

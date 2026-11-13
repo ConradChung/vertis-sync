@@ -9,6 +9,7 @@ import { trimQuotes, type InboxEmail } from '@/lib/inbox/model'
 import { grantBlocker, type GrantBlocker } from '@/lib/inbox/replyMode'
 import { getReplyMode } from '@/lib/inbox/replyModeStore'
 import { canApproveSend } from '@/lib/operators/policy'
+import { configuredBaseUrl } from '@/lib/http/origin'
 import { askedVideo, isVideoReplyPayload, videoBlocker } from '@/lib/inbox/videoReply'
 
 /**
@@ -93,20 +94,28 @@ export async function tryGrantSend(row: PendingActionRow): Promise<GrantOutcome>
   } catch (err) {
     console.error('[grant] logEvent failed:', err instanceof Error ? err.message : err)
   }
-  scheduleExecution(row.id)
+  scheduleExecution(row.id, typeof row.payload?.send_after === 'string' ? row.payload.send_after : null)
   return { granted: true, row: claimed }
 }
+
+/** Longest in-function hold; past it the 15-minute sweeper sends the reply. */
+const MAX_HOLD_MS = 200_000
 
 /**
  * Run the executor after the response (`after()`); outside a request scope it
  * starts at once without being awaited. If the function is cut first, the row
  * stays `approved` and the sweeper re-dispatches it (SWEEP_AFTER_MS).
  */
-export function scheduleExecution(id: string): void {
+export function scheduleExecution(id: string, sendAfter: string | null = null): void {
   const job = async () => {
     try {
-      const { executeAction } = await import('@/lib/actions/execute')
-      await executeAction(id)
+      const wait = sendAfter ? Math.min(Date.parse(sendAfter) - Date.now(), MAX_HOLD_MS) : 0
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait + 1_000))
+      const exec = await import('@/lib/actions/execute')
+      // After a hold, start the send in its own function (this one has spent its time waiting).
+      const base = wait > 0 ? configuredBaseUrl() : null
+      if (base && (await exec.dispatchExecuteNow(id, base)) === 'dispatched') return
+      await exec.executeAction(id)
     } catch (err) {
       console.error('[grant] executing the auto-approved reply failed:', err instanceof Error ? err.message : err)
     }

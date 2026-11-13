@@ -24,6 +24,9 @@ import { notePositiveFromWebhook } from '@/lib/inbox/webhook'
  * interested status) is recorded in lume_replies and raises one feed alert
  * (lib/inbox/webhook.ts); also never changes the answer.
  */
+/** A plain yes to the video question holds its reply ~3 minutes in this function (lib/actions/grant.ts). */
+export const maxDuration = 300
+
 export async function POST(req: Request) {
   const auth = requireSecret(req, { query: 'secret' }, 'INSTANTLY_WEBHOOK_SECRET')
   if (!auth.ok) return auth.response
