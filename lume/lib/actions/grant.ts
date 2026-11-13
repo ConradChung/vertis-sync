@@ -4,11 +4,12 @@ import { claimDecision } from '@/lib/actions/store'
 import { logEvent } from '@/lib/db/service'
 import type { Json, PendingActionRow } from '@/lib/db/types'
 import { getReply, listLeadReplies } from '@/lib/inbox/store'
-import { getEmail } from '@/lib/adapters/instantlyEmails'
+import { getEmail, getThreadEmails } from '@/lib/adapters/instantlyEmails'
 import { trimQuotes, type InboxEmail } from '@/lib/inbox/model'
 import { grantBlocker, type GrantBlocker } from '@/lib/inbox/replyMode'
 import { getReplyMode } from '@/lib/inbox/replyModeStore'
 import { canApproveSend } from '@/lib/operators/policy'
+import { askedVideo, isVideoReplyPayload, videoBlocker } from '@/lib/inbox/videoReply'
 
 /**
  * The scoped send grant (inbox manager 3e): a campaign in Auto reply mode
@@ -39,7 +40,9 @@ export async function evaluateGrant(payload: Record<string, Json> | null, fresh?
   const campaign = str(p.campaign_id)
   if (!campaign) return 'no_campaign'
   const mode = await getReplyMode(campaign)
-  if (mode !== 'auto') return grantBlocker({ mode, payload: p, email: null, reply: null, leadReplies: [] })
+  // The video yes (lib/inbox/videoReply.ts): its own narrow grant, in any mode.
+  const video = mode !== 'auto' && isVideoReplyPayload(p)
+  if (mode !== 'auto' && !video) return grantBlocker({ mode, payload: p, email: null, reply: null, leadReplies: [] })
   const lead = str(p.lead_email)
   if (!lead) return 'recipient_unverified'
   const replyTo = str(p.reply_to_uuid)
@@ -49,7 +52,13 @@ export async function evaluateGrant(payload: Record<string, Json> | null, fresh?
     listLeadReplies(lead),
   ])
   const view = email ? { message: trimQuotes(email.text ?? ''), interest: email.interest ?? null, campaign_id: email.campaign_id ?? null } : null
-  return grantBlocker({ mode, payload: p, email: view, reply, leadReplies })
+  if (!video) return grantBlocker({ mode, payload: p, email: view, reply, leadReplies })
+  // Every Auto-mode safety check (verdict aside: the template is the judgment), then the video rules.
+  const shared = grantBlocker({ mode: 'auto', payload: { ...p, verdict: 'GOOD' }, email: view, reply, leadReplies })
+  if (shared) return shared
+  const thread = await getThreadEmails(email!.thread_id)
+  const asked = !thread.truncated && askedVideo(thread.emails, email!.id)
+  return videoBlocker({ payload: p, message: view!.message, leadReplies, asked })
 }
 
 export type GrantOutcome = { granted: true; row: PendingActionRow } | { granted: false; reason: GrantBlocker | 'policy' | 'already_decided' | 'error' }
@@ -78,7 +87,7 @@ export async function tryGrantSend(row: PendingActionRow): Promise<GrantOutcome>
       type: 'lume.reply_auto_approved',
       source: 'lume',
       source_id: row.id,
-      title: 'send_reply approved by the campaign’s Auto mode',
+      title: isVideoReplyPayload(row.payload ?? {}) ? 'Video-link reply approved (plain yes)' : 'send_reply approved by the campaign’s Auto mode',
       payload: { campaign_id: str(row.payload?.campaign_id), reply_to_uuid: str(row.payload?.reply_to_uuid), decided_via: 'grant' },
     })
   } catch (err) {
