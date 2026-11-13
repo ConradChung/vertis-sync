@@ -19,16 +19,16 @@ async function pushRow(jobId: string | null, campaignId: string): Promise<PushRo
   return (await listPushRows()).find((r) => r.source_job_id === jobId && r.campaign_id === campaignId) ?? null
 }
 
-async function queueOp(jobId: string | null, campaignId: string, op: 'stop' | 'restart' | 'move', to: string | null = null): Promise<{ changed: number; kept: number }> {
-  const res = await createServiceClient().rpc('lume_lead_bank_queue_op', { p_job: jobId, p_campaign: campaignId, p_op: op, p_to: to })
+async function queueOp(jobId: string | null, campaignId: string, op: 'stop' | 'restart' | 'move', to: string | null = null, reason: string | null = null): Promise<{ changed: number; kept: number }> {
+  const res = await createServiceClient().rpc('lume_lead_bank_queue_op', { p_job: jobId, p_campaign: campaignId, p_op: op, p_to: to, ...(op === 'stop' ? { p_reason: reason } : {}) })
   if (res.error) throw new DbError(`lead bank ${op}`, res.error)
   const d = (res.data ?? {}) as { changed?: number; kept?: number }
   return { changed: Number(d.changed) || 0, kept: Number(d.kept) || 0 }
 }
 
-/** Stop one push's queue for one campaign now: its queued leads leave the rotation (restartable). */
-export async function stopPush(jobId: string | null, campaignId: string): Promise<{ stopped: number }> {
-  const { changed } = await queueOp(jobId, campaignId, 'stop')
+/** Stop one push's queue for one campaign now: its queued leads leave the rotation (restartable), with why. */
+export async function stopPush(jobId: string | null, campaignId: string, reason: string | null = null): Promise<{ stopped: number }> {
+  const { changed } = await queueOp(jobId, campaignId, 'stop', null, reason)
   return { stopped: changed }
 }
 
