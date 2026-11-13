@@ -10,7 +10,7 @@ afterEach(cleanup)
 
 const row = (o: Partial<CampaignTableRow>): CampaignTableRow => ({
   key: o.name ?? 'k', instantly_id: null, lume_id: null, name: 'C', family: 'kaspen', sender_type: 'instantly', status: 'active',
-  sent: 1000, replies: 10, reply_rate: 1, opportunities: 1, bounced: 15, last_activity: null, ...o,
+  sent: 1000, replies: 10, reply_rate: 1, opportunities: 1, bounced: 15, last_activity: null, schedule: null, ...o,
 })
 
 describe('CampaignTable bounce rate', () => {

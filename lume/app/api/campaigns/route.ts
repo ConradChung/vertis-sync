@@ -98,6 +98,7 @@ async function buildTable(registry: LumeCampaignRow[]): Promise<CampaignTableRes
       status: live?.statusLabel ?? r.status,
       ...withStats(instantlyId),
       last_activity: null,
+      schedule: live?.schedule ?? null,
     })
   }
   for (const c of list) {
@@ -112,6 +113,7 @@ async function buildTable(registry: LumeCampaignRow[]): Promise<CampaignTableRes
       status: c.statusLabel,
       ...withStats(c.id),
       last_activity: null,
+      schedule: c.schedule ?? null,
     })
   }
 

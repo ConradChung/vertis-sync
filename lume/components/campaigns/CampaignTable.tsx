@@ -9,6 +9,8 @@ import { cn } from '@/lib/utils'
 import { BOUNCE_HINT, BOUNCE_TONE_TEXT, bounceRate, bounceTone, formatBounceRate } from '@/lib/campaigns/bounce'
 import { ReplyModeSelect } from '@/components/campaigns/ReplyModeSelect'
 import type { ReplyMode } from '@/lib/inbox/replyMode'
+import { formatDays, formatGap, scheduleState, zoneLabel, type SendSchedule } from '@/lib/campaigns/schedule'
+import { useEffect, useState, type ReactNode } from 'react'
 
 const n = (v: number | null) => (v === null ? '—' : <AnimatedNumber value={v} />)
 const rate = (r: number | null) => (r === null ? '—' : <AnimatedNumber value={r < 10 ? r : Math.round(r)} decimals={r < 10 ? 1 : 0} suffix="%" />)
@@ -46,6 +48,50 @@ function BounceCell({ bounced, sent }: { bounced: number | null; sent: number | 
   )
 }
 
+const SENDING_STATUSES = new Set(['active', 'running_subsequences'])
+
+/** The campaign's send window in its own zone, whether it is sending now, and the window in the owner's time. */
+export function SendWindowCell({ schedule, status, now }: { schedule: SendSchedule | null; status: string; now: Date }) {
+  if (!schedule) return <td className="px-2 py-[10px] text-[12px] text-fg-24">—</td>
+  const st = scheduleState(schedule, now)
+  const live = SENDING_STATUSES.has(status)
+  const zone = zoneLabel(schedule.timezone)
+  let headline: ReactNode
+  if (!st) headline = <span className="text-fg-46">Unknown zone</span>
+  else if (!st.window) headline = <span className="text-fg-46">No send days</span>
+  else if (!live) headline = <span className="text-fg-46">Not sending ({status.replace(/_/g, ' ')})</span>
+  else if (st.inWindow)
+    headline = (
+      <span className="inline-flex items-center gap-1.5 text-green">
+        <span className="size-1.5 animate-pulse rounded-full bg-green" />
+        Sending · {formatGap(st.window.end.getTime() - now.getTime())} left
+      </span>
+    )
+  else headline = <span className="text-fg-46">Opens in {formatGap(st.window.start.getTime() - now.getTime())}</span>
+  return (
+    <td
+      data-testid="send-window"
+      className="px-2 py-[10px] text-[12px] whitespace-nowrap"
+      title={`${schedule.timezone} · ${formatDays(schedule.days)} ${schedule.from}–${schedule.to}`}
+    >
+      <div>{headline}</div>
+      <div className="text-[11px] text-fg-24">
+        {formatDays(schedule.days)} {schedule.from}–{schedule.to} {zone}
+        {st?.ownerWindow && <> · {st.ownerWindow} PT</>}
+      </div>
+    </td>
+  )
+}
+
+function useMinuteClock(): Date {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 60_000)
+    return () => clearInterval(t)
+  }, [])
+  return now
+}
+
 export function CampaignTable({
   rows,
   instantly,
@@ -60,6 +106,7 @@ export function CampaignTable({
   /** The per-campaign reply approval mode column (Instantly campaigns only). */
   replyMode?: { modeOf: (id: string) => ReplyMode; canChange: boolean; onChange: (id: string, mode: ReplyMode) => Promise<boolean> | void }
 }) {
+  const now = useMinuteClock()
   return (
     <GlassCard className="gap-0 py-0" aria-label="Campaigns">
       <SectionTitle title="All campaigns">
@@ -76,11 +123,14 @@ export function CampaignTable({
         <p className="px-[18px] py-6 text-[13px] text-fg-46">No campaigns yet.</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[800px] text-left text-[13px]">
+          <table className="w-full min-w-[980px] text-left text-[13px]">
             <thead className="text-[11px] tracking-wide text-fg-46 uppercase">
               <tr className="border-b border-white/8">
                 <th className="px-[18px] py-2 font-medium">Campaign</th>
                 <th className="px-2 py-2 font-medium">Status</th>
+                <th className="px-2 py-2 font-medium" title="Instantly's sending window in the campaign's timezone, and the same window in Pacific time">
+                  Sending window
+                </th>
                 <th className="px-2 py-2 text-right font-medium">Sent</th>
                 <th className="px-2 py-2 text-right font-medium">Replies</th>
                 <th className="px-2 py-2 text-right font-medium">Reply rate</th>
@@ -137,6 +187,7 @@ export function CampaignTable({
                       </span>
                     )}
                   </td>
+                  <SendWindowCell schedule={r.schedule} status={r.status} now={now} />
                   <td className="px-2 py-[10px] text-right font-mono tabular-nums">{n(r.sent)}</td>
                   <td className="px-2 py-[10px] text-right font-mono tabular-nums">{n(r.replies)}</td>
                   <td className="px-2 py-[10px] text-right font-mono tabular-nums">{rate(r.reply_rate)}</td>

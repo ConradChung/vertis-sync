@@ -4,6 +4,8 @@
  * become zeros / nulls, and nothing raw is passed through to the browser.
  */
 
+import { parseSchedule, type SendSchedule } from '@/lib/campaigns/schedule'
+
 type Raw = Record<string, unknown>
 
 const isObj = (v: unknown): v is Raw => typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -42,6 +44,8 @@ export interface InstantlyCampaign {
   name: string
   status: number
   statusLabel: string
+  /** Sending window from `campaign_schedule`; absent when Instantly has none. */
+  schedule?: SendSchedule
 }
 
 export function campaignStatusLabel(status: number): string {
@@ -84,7 +88,8 @@ export function mapCampaigns(items: unknown[]): InstantlyCampaign[] {
     const id = str(it, 'id')
     const status = num(it, 'status')
     if (!id || status === null) continue
-    out.push({ id, name: str(it, 'name') ?? id, status, statusLabel: campaignStatusLabel(status) })
+    const schedule = parseSchedule(it.campaign_schedule)
+    out.push({ id, name: str(it, 'name') ?? id, status, statusLabel: campaignStatusLabel(status), ...(schedule && { schedule }) })
   }
   return out.sort((a, b) => a.name.localeCompare(b.name))
 }
