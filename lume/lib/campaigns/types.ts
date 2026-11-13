@@ -1,3 +1,4 @@
+import type { SendSchedule } from '@/lib/campaigns/schedule'
 import type { AnalyticsOverview, DailyPoint, InboxThread, StepPoint } from '@/lib/adapters/instantly.map'
 import type { GateRow, LumeCampaignRow } from '@/lib/db/types'
 
@@ -22,6 +23,8 @@ export interface CampaignTableRow {
   opportunities: number | null
   bounced: number | null
   last_activity: string | null
+  /** Instantly sending window; null when unknown (not Instantly, or Instantly down). */
+  schedule: SendSchedule | null
 }
 
 /** `GET /api/campaigns?with=analytics` */
