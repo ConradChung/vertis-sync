@@ -175,6 +175,10 @@ export async function notePositiveReply(input: ReplyInsert): Promise<boolean> {
   )
   // 3g: post the lead card to the client channels bound to the campaign (never blocks).
   slackOnPositiveReply(input.reply_to_uuid)
+  // A plain yes to the Kaspen video question: file the video-link reply (its own narrow grant sends it).
+  await import('@/lib/inbox/videoReplyDraft').then((m) => m.draftVideoReply(input)).catch((err) => {
+    console.error('[inbox] video reply hook failed:', err instanceof Error ? err.message : err)
+  })
   return true
 }
 

@@ -13,6 +13,7 @@ import { approvePayloadError, INFLUENCER_ACTION_KEY, influencerPayloadError, LOO
 import { STAGE_ATTACHMENT_KEY, stageAttachmentPayloadError } from '@/lib/agent/attachmentActionPayload'
 import { LEAD_LIST_KEY, leadListPayloadError } from '@/lib/leads/lists/actionPayload'
 import { tryGrantSend } from '@/lib/actions/grant'
+import { VIDEO_REPLY_DRAFTED_BY } from '@/lib/inbox/videoReply'
 import { NEW_CAMPAIGN_KEY, NEW_CAMPAIGN_KIND, newCampaignPayloadError } from '@/lib/campaigns/newCampaignPayload'
 import { BANK_QUEUE_KEY, bankQueuePayloadError } from '@/lib/rotation/pushes'
 import { pushForItem } from '@/lib/webhooks/deliver'
@@ -251,7 +252,8 @@ export async function createAction(
     const grant = await tryGrantSend(row)
     if (grant.granted) {
       const route = routeItemForAction(row)
-      const text = `🤖 Auto-approved (campaign in Auto reply mode) — send_reply\n${String(payload.summary)}\nSending after the live thread re-check.`
+      const why = payload.drafted_by === VIDEO_REPLY_DRAFTED_BY ? 'plain yes to the video question' : 'campaign in Auto reply mode'
+      const text = `🤖 Auto-approved (${why}) — send_reply\n${String(payload.summary)}\nSending after the live thread re-check.`
       try {
         await alert({
           source: 'lume.actions', severity: 'info', title: titleFrom(text), body: text,

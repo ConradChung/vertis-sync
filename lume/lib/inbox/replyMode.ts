@@ -1,4 +1,5 @@
 import type { Json } from '@/lib/db/types'
+import type { VideoBlocker } from '@/lib/inbox/videoReply'
 
 /**
  * Per-campaign reply approval mode (inbox manager 3e; design doc "Client
@@ -75,6 +76,7 @@ export type GrantBlocker =
   | 'out_of_office'
   | 'reply_unrecorded'
   | 'lead_labeled_negative'
+  | VideoBlocker
 
 export interface GrantContext {
   mode: ReplyMode
@@ -141,4 +143,9 @@ export const GRANT_BLOCKER_TEXT: Record<GrantBlocker, string> = {
   out_of_office: 'Instantly marks the reply as out of office',
   reply_unrecorded: 'the reply has no interest status and was never recorded as positive',
   lead_labeled_negative: 'the lead was labeled BAD, unsubscribe, hostile or not interested before (any campaign)',
+  video_not_campaign: 'the video auto-reply only runs on the live Kaspen campaigns',
+  video_not_template: 'the reply is not the exact video-link reply',
+  video_not_plain_yes: "the lead's message is more than a plain yes",
+  video_not_first_reply: 'the lead has replied before',
+  video_not_asked: 'our last email to the lead did not ask the video question',
 }
