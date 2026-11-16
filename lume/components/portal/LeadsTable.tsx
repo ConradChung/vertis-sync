@@ -24,7 +24,7 @@ export function LeadsTable({ rows, now, stickyTop = 'top-0' }: { rows: PortalLea
         <col className="w-[12%]" />
         <col className="w-[116px]" />
       </colgroup>
-      <thead className={cn('sticky z-10', stickyTop)}>
+      <thead className={cn('sticky z-10 bg-(--bg) shadow-[0_1px_0_var(--line)]', stickyTop)}>
         <tr>
           <th className={cn(th, 'pl-4')}>Name</th>
           <th className={th}>Company</th>
