@@ -39,7 +39,7 @@ describe('portal AgentPanel', () => {
     expect(await screen.findByText('Found one at Greystar.')).toBeTruthy()
     const call = screen.getByRole('link', { name: /Call Sam Ortiz/ })
     expect(call.getAttribute('href')).toBe('tel:2145550199')
-    expect(screen.getByText('Company line — ask for Sam')).toBeTruthy()
+    expect(call.getAttribute('title')).toBe('Company line — ask for Sam')
 
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('/api/portal/agent?as=frank%40getzenport.com')

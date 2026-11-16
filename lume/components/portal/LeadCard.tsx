@@ -19,9 +19,8 @@ export function LeadCard({ lead, now, className }: { lead: PortalLead; now: Date
         <LocalTimeLabel lead={lead} now={now} className="min-w-0" />
         <LeadLinks lead={lead} />
       </div>
-      {(lead.campaign || lead.region || lead.opened || lead.replied) && (
+      {(lead.campaign || lead.opened || lead.replied) && (
         <footer className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-fg-46">
-          {lead.region && <span>{lead.region}</span>}
           {lead.campaign && <span className="min-w-0 truncate">{lead.campaign}</span>}
           <EngagementMarks lead={lead} />
         </footer>

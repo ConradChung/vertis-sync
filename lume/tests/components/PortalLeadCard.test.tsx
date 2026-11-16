@@ -22,11 +22,21 @@ describe('portal LeadCard', () => {
     expect(call.getAttribute('href')).toBe('tel:+12145550100')
     expect(call.textContent).toContain('+1 (214) 555-0100')
     expect(screen.queryByText(/Company line/)).toBeNull()
+    expect(screen.queryByTestId('company-line')).toBeNull()
   })
 
-  it('hints a company switchboard and who to ask for', () => {
+  it('marks a company switchboard with an icon and a tooltip, not a line of text', () => {
     render(<LeadCard lead={lead({ phone_type: 'company' })} now={NOW} />)
-    expect(screen.getByText('Company line — ask for Dana')).toBeTruthy()
+    const call = screen.getByRole('link', { name: /Call Dana Reyes .*company line/ })
+    expect(call.getAttribute('title')).toBe('Company line — ask for Dana')
+    expect(screen.getByTestId('company-line')).toBeTruthy()
+    expect(screen.queryByText(/Company line — ask for/)).toBeNull()
+  })
+
+  it('derives local time from country + state when the row has no zone', () => {
+    render(<LeadCard lead={lead({ timezone: null, city: 'Leeds', state: 'England', country: 'United Kingdom' })} now={NOW} />)
+    expect(screen.getByText('3:41 PM')).toBeTruthy()
+    expect(screen.getByText('· Leeds, United Kingdom')).toBeTruthy()
   })
 
   it('shows local time, status, markers and safe external links', () => {
@@ -42,8 +52,8 @@ describe('portal LeadCard', () => {
     expect(site.getAttribute('rel')).toBe('noopener noreferrer')
   })
 
-  it('falls back to city/country without a zone, and says when there is no phone', () => {
-    render(<LeadCard lead={lead({ timezone: null, phone: null })} now={NOW} />)
+  it('falls back to the location without any zone, and says when there is no phone', () => {
+    render(<LeadCard lead={lead({ timezone: null, country: null, phone: null })} now={NOW} />)
     expect(screen.getByText('Dallas, TX')).toBeTruthy()
     expect(screen.getByText('No phone')).toBeTruthy()
   })
