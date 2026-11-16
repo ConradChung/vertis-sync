@@ -7,6 +7,7 @@ import { Eye, LogOut } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
 import { createClient } from '@/lib/supabase/client'
 import { usePortalMe } from '@/hooks/usePortal'
+import { LumeMark } from '@/components/shell/LumeMark'
 
 /**
  * The portal's only chrome: client name, who is signed in, sign out. Nothing
@@ -32,12 +33,18 @@ export function PortalHeader() {
   return (
     <header className="sticky top-0 z-30 border-b border-(--line) bg-(--surface) pt-[env(safe-area-inset-top)] backdrop-blur-xl">
       <div className="mx-auto flex h-(--portal-header-h) w-full max-w-[1600px] items-center justify-between gap-3 px-4 md:px-8">
-        <div className="min-w-0">
-          <h1 className="truncate text-[17px] leading-tight font-semibold tracking-[-0.01em] text-fg">{me ? `${me.client} leads` : 'Leads'}</h1>
-          <p className="truncate text-[12px] text-fg-46">
-            {as && <span className="mr-1.5 rounded-full bg-secondary px-1.5 py-px text-[11px] text-fg-70">Preview</span>}
-            {me?.email ?? as ?? ' '}
-          </p>
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="glass grid size-10 shrink-0 place-items-center rounded-xl text-fg" title="Lume">
+            <LumeMark className="h-3.5 w-auto" />
+            <span className="sr-only">Lume</span>
+          </span>
+          <div className="min-w-0">
+            <h1 className="truncate text-[17px] leading-tight font-semibold tracking-[-0.01em] text-fg">{me ? `${me.client} leads` : 'Leads'}</h1>
+            <p className="truncate text-[12px] text-fg-46">
+              {as && <span className="mr-1.5 rounded-full bg-secondary px-1.5 py-px text-[11px] text-fg-70">Preview</span>}
+              {me?.email ?? as ?? ' '}
+            </p>
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <ThemeToggle />
