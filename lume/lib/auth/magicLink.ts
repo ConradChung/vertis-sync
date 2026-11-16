@@ -12,3 +12,20 @@ export function shouldSendMagicLink(email: string | undefined, allowed: string |
   if (!email || !EMAIL_SHAPE.test(email.trim())) return false
   return isOwner(email, allowed)
 }
+
+export type MagicLinkAudience = 'owner' | 'portal' | null
+
+/**
+ * Who a `/login` magic-link request is for: the owner, an active client-portal
+ * user (looked up only when the address is not the owner's), or nobody. The
+ * route answers `{ ok: true }` in every case, so this never becomes an oracle.
+ */
+export async function magicLinkAudience(
+  email: string | undefined,
+  allowed: string | undefined,
+  isPortalUser: (email: string) => Promise<boolean>
+): Promise<MagicLinkAudience> {
+  if (!email || !EMAIL_SHAPE.test(email.trim())) return null
+  if (isOwner(email, allowed)) return 'owner'
+  return (await isPortalUser(email.trim().toLowerCase())) ? 'portal' : null
+}

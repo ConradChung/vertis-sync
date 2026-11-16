@@ -4,6 +4,7 @@ import { isOwner } from '@/lib/auth/isOwner'
 import { isPublicPath } from '@/lib/auth/publicPaths'
 import { bearerMatches, hasBearerToken } from '@/lib/auth/bearer'
 import { isOperatorRevoked, verifyOperatorCookieWeb } from '@/lib/operators/revocation'
+import { getPortalUser, portalRouteDecision } from '@/lib/portal/access'
 
 const OPERATOR_COOKIE = 'lume_op'
 
@@ -24,6 +25,10 @@ const OPERATOR_COOKIE = 'lume_op'
  *    verify (forged, stale key derivation, malformed): signed out locally (Supabase signOut, local scope;
  *    every auth cookie and `lume_op` cleared) → /login, or 401 for the API.
  *    `/auth/*` is exempt so a re-issued key can sign in over a stale cookie.
+ *  - a signed-in non-owner who is an active client-portal user
+ *    (`lume_portal_users`): only /portal/** and /api/portal/* (never
+ *    /api/portal/sign-in-link); other pages → /portal, other APIs → 403.
+ *    Rule: `portalRouteDecision` in lib/portal/access.ts.
  */
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
@@ -57,6 +62,10 @@ export async function middleware(request: NextRequest) {
     if (pathname === '/login' && user && owner) {
       return redirectTo('/overview', request, response)
     }
+    // A signed-in client-portal user on the login form goes to the portal.
+    if (pathname === '/login' && user && !owner && (await getPortalUser(user.email))) {
+      return redirectTo('/portal', request, response)
+    }
     return response
   }
 
@@ -65,7 +74,11 @@ export async function middleware(request: NextRequest) {
   }
 
   if (!owner) {
-    return isApi ? jsonError('forbidden', 403, response) : redirectTo('/forbidden', request, response)
+    const isPortal = !!(await getPortalUser(user.email))
+    const decision = portalRouteDecision({ pathname, isOwner: false, isPortal, signedIn: true })
+    if (decision.action === 'allow') return response
+    if (decision.action === 'redirect') return redirectTo(decision.to, request, response)
+    return jsonError(decision.status === 401 ? 'unauthenticated' : 'forbidden', decision.status, response)
   }
 
   if (await operatorCookieRejected(request)) {
