@@ -1,18 +1,22 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
-import { shouldSendMagicLink } from '@/lib/auth/magicLink'
+import { magicLinkAudience } from '@/lib/auth/magicLink'
+import { getPortalUser } from '@/lib/portal/access'
 import { requestOrigin } from '@/lib/http/origin'
 
 const Body = z.object({ email: z.string().trim().max(254) })
 
 /**
- * Owner-gated magic link.
+ * Owner- and portal-gated magic link.
  *
- * Only the allowed email ever reaches Supabase; anyone else gets the same
- * `{ ok: true }` so the endpoint cannot be used to discover the owner's
- * address. `shouldCreateUser: false` means the owner's auth user must already
- * exist (see README). Public to the middleware; this is its own gate.
+ * Only the allowed email or an active client-portal user
+ * (`lume_portal_users`) ever reaches Supabase; anyone else gets the same
+ * `{ ok: true }` so the endpoint cannot be used to discover who has access.
+ * The owner's auth user must already exist (`shouldCreateUser: false`, see
+ * README); a portal user's is created on first request, since the portal
+ * allowlist already vouches for the address. The callback sends portal users
+ * to /portal. Public to the middleware; this is its own gate.
  */
 export async function POST(request: Request) {
   let email: string | undefined
@@ -22,16 +26,17 @@ export async function POST(request: Request) {
     // Malformed body: still no oracle. Same shape, same status.
   }
 
-  if (!shouldSendMagicLink(email, process.env.LUME_ALLOWED_EMAIL)) {
-    console.info('[magic-link] skipped: not the owner')
+  const audience = await magicLinkAudience(email, process.env.LUME_ALLOWED_EMAIL, async (e) => !!(await getPortalUser(e)))
+  if (!audience) {
+    console.info('[magic-link] skipped: not allowed')
     return NextResponse.json({ ok: true })
   }
 
   const supabase = await createClient()
   const { error } = await supabase.auth.signInWithOtp({
-    email: email!,
+    email: audience === 'portal' ? email!.trim().toLowerCase() : email!,
     options: {
-      shouldCreateUser: false,
+      shouldCreateUser: audience === 'portal',
       emailRedirectTo: `${requestOrigin(request)}/auth/callback`,
     },
   })
