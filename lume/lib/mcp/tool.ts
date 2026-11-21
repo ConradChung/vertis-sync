@@ -1,6 +1,7 @@
 import type { McpServer, ToolAnnotations, CallToolResult } from '@modelcontextprotocol/server'
 import type { z } from 'zod'
 import { auditToEvents, type AuditSink } from './audit'
+import { tableStore, withIdempotency, type IdemStore } from './idempotency'
 import { checkLimit, countFromEvents, type CallClass, type CallCounter } from './limits'
 import { McpUserError, redact, safeErrorMessage, truncate } from './sanitize'
 
@@ -20,9 +21,9 @@ export type ToolDef<S extends z.ZodObject = z.ZodObject> = {
   run: (args: z.infer<S>) => Promise<ToolOutput>
 }
 
-export type ToolDeps = { audit: AuditSink; count: CallCounter; now: () => Date }
+export type ToolDeps = { audit: AuditSink; count: CallCounter; now: () => Date; idem: IdemStore }
 
-export const defaultDeps: ToolDeps = { audit: auditToEvents, count: countFromEvents, now: () => new Date() }
+export const defaultDeps: ToolDeps = { audit: auditToEvents, count: countFromEvents, now: () => new Date(), idem: tableStore }
 
 export function defineTool<S extends z.ZodObject>(def: ToolDef<S>): ToolDef<S> {
   return def
@@ -60,7 +61,11 @@ export async function runTool<S extends z.ZodObject>(
   if (!limit.ok) return finish('rate_limited', text(limit.message, true), { error: limit.message })
 
   try {
-    const out = await def.run(args)
+    // Writes honour idempotency_key: a repeat returns the first result and writes nothing.
+    const out =
+      def.cls === 'write'
+        ? await withIdempotency(def.name, args as Record<string, unknown>, () => def.run(args), deps.idem)
+        : await def.run(args)
     const body = truncate(redact(JSON.stringify(out.data)), MAX_RESULT_CHARS)
     return finish('ok', text(body), { refs: out.refs })
   } catch (err) {
@@ -89,3 +94,14 @@ export const READ_ONLY: ToolAnnotations = {
   idempotentHint: true,
   openWorldHint: false,
 }
+
+/** Group B: changes Lume's own rows only (no outreach, no spend). Repeats are safe. */
+export const INTERNAL_WRITE: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+}
+
+/** Group B writes that add a new row each call (notes, tasks, lists, drafts) unless an idempotency_key is reused. */
+export const INTERNAL_APPEND: ToolAnnotations = { ...INTERNAL_WRITE, idempotentHint: false }

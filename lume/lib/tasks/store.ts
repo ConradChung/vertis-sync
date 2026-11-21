@@ -44,7 +44,7 @@ export interface TaskInsert {
   all_day: boolean
   action_kind: string | null
   action_payload: Record<string, Json> | null
-  created_by: 'owner' | 'agent'
+  created_by: 'owner' | 'agent' | 'mcp'
   conversation_id: string | null
 }
 

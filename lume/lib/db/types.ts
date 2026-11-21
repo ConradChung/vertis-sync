@@ -490,7 +490,7 @@ export interface LumeTaskRow {
   linear_url: string | null
   linear_synced_at: string | null
   linear_error: string | null
-  created_by: 'owner' | 'agent'
+  created_by: 'owner' | 'agent' | 'mcp'
   conversation_id: string | null
   created_at: string
   updated_at: string

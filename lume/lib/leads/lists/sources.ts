@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { fileInConversation } from '@/lib/agent/chatFiles'
 import { loadSourceRows } from '@/lib/apollo/source'
 import { exportRows, getExport } from '@/lib/influencers/store'
+import type { ExportReactor } from '@/lib/influencers/model'
 import { keptRows, reviewSetInScope } from '@/lib/leads/lists/reviewRows'
 import { EDITABLE_FIELDS, INLINE_MAX_ROWS, inlineItem, leadFromMapped, parsePastedRows, type ItemSource } from '@/lib/leads/lists/model'
 import type { IncomingRow } from '@/lib/leads/lists/store'
@@ -74,33 +75,7 @@ export async function rowsFromSource(src: AppendSource, ctx: { conversationId?: 
       const reactors = await exportRows(exp.reactor_ids)
       return {
         label: 'influencer export',
-        rows: reactors.map((r) => {
-          const cells = {
-            Name: r.name ?? '',
-            Title: r.title ?? '',
-            Company: r.company_name ?? '',
-            Website: r.company_website ?? '',
-            LinkedIn: r.linkedin_url ?? '',
-            City: r.city ?? '',
-            State: r.state ?? '',
-            Country: r.country ?? '',
-            'Door Count': r.door_count === null ? '' : String(r.door_count),
-            'Reacted To': (r.reacted_to ?? []).join('; '),
-          }
-          const raw = {
-            fullname: r.name,
-            jobtitle: r.title,
-            companyname: r.company_name,
-            website: r.company_website,
-            linkedinurl: r.linkedin_url,
-            city: r.city,
-            state: r.state,
-            country: r.country,
-            door_count: r.door_count,
-            reacted_to: (r.reacted_to ?? []).join('; '),
-          }
-          return typed('influencer_export')({ raw, item: normaliseLead(raw), cells })
-        }),
+        rows: reactors.map((r) => reactorRow(r, 'influencer_export')),
       }
     }
     case 'inline': {
@@ -119,4 +94,36 @@ export async function rowsFromSource(src: AppendSource, ctx: { conversationId?: 
       return { label: 'pasted rows', mapping: p.mapping, unmapped: p.unmapped, rows: p.rows.map(typed(ctx.by === 'agent' ? 'agent' : 'manual')) }
     }
   }
+}
+
+/** One influencer reactor as a lead-list row (the CSV export's columns). */
+export function reactorRow(
+  r: Pick<ExportReactor, 'name' | 'title' | 'company_name' | 'company_website' | 'linkedin_url' | 'city' | 'state' | 'country' | 'door_count' | 'reacted_to'>,
+  source: ItemSource,
+): IncomingRow {
+  const cells = {
+    Name: r.name ?? '',
+    Title: r.title ?? '',
+    Company: r.company_name ?? '',
+    Website: r.company_website ?? '',
+    LinkedIn: r.linkedin_url ?? '',
+    City: r.city ?? '',
+    State: r.state ?? '',
+    Country: r.country ?? '',
+    'Door Count': r.door_count === null ? '' : String(r.door_count),
+    'Reacted To': (r.reacted_to ?? []).join('; '),
+  }
+  const raw = {
+    fullname: r.name,
+    jobtitle: r.title,
+    companyname: r.company_name,
+    website: r.company_website,
+    linkedinurl: r.linkedin_url,
+    city: r.city,
+    state: r.state,
+    country: r.country,
+    door_count: r.door_count,
+    reacted_to: (r.reacted_to ?? []).join('; '),
+  }
+  return { source, raw, item: normaliseLead(raw), cells }
 }

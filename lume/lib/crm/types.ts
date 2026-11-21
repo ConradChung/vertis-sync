@@ -4,7 +4,8 @@ import type { Json } from '@/lib/db/types'
 
 export type CrmSource = 'instantly' | 'gmail' | 'muse' | 'user'
 export type ActivityKind = 'sent' | 'opened' | 'replied' | 'bounced' | 'stage_changed' | 'note' | 'meeting'
-export type ActivitySource = 'instantly' | 'gmail' | 'muse' | 'user' | 'agent'
+/** `mcp`: written by an agent through the Lume MCP server (lib/mcp). */
+export type ActivitySource = 'instantly' | 'gmail' | 'muse' | 'user' | 'agent' | 'mcp'
 
 export interface CrmStage {
   name: string

@@ -6,7 +6,7 @@ import { defineTool, READ_ONLY, runTool, type ToolDeps } from '@/lib/mcp/tool'
 
 function deps(count = 0) {
   const audits: AuditEntry[] = []
-  const d: ToolDeps = { audit: vi.fn(async (e: AuditEntry) => void audits.push(e)), count: vi.fn(async () => count), now: () => new Date() }
+  const d: ToolDeps = { audit: vi.fn(async (e: AuditEntry) => void audits.push(e)), count: vi.fn(async () => count), now: () => new Date(), idem: { get: async () => null, put: async () => true } }
   return { d, audits }
 }
 
@@ -58,5 +58,34 @@ describe('runTool', () => {
     const res = await runTool(tool(async () => ({ data: 'ok' })), {}, d)
     expect(res.content[0]).toMatchObject({ text: '"ok"' })
     spy.mockRestore()
+  })
+})
+
+describe('runTool idempotency for writes', () => {
+  const rows = new Map<string, import('@/lib/mcp/idempotency').IdemRow>()
+  const idem = { get: async (k: string) => rows.get(k) ?? null, put: async (r: import('@/lib/mcp/idempotency').IdemRow) => (rows.set(r.key, r), true) }
+  const write = (run: () => Promise<{ data: unknown }>, cls: 'write' | 'read' = 'write') =>
+    defineTool({ name: 'lume_test_write', title: 't', description: 'd', cls, input: z.object({ a: z.number(), idempotency_key: z.string().optional() }), annotations: READ_ONLY, run })
+
+  it('a write repeated with the same key runs once and is audited twice', async () => {
+    const { d, audits } = deps()
+    d.idem = idem
+    const run = vi.fn(async () => ({ data: { id: 'x1' } }))
+    const first = await runTool(write(run), { a: 1, idempotency_key: 'retry-0001' }, d)
+    const second = await runTool(write(run), { a: 1, idempotency_key: 'retry-0001' }, d)
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(first.content[0]).toEqual({ type: 'text', text: '{"id":"x1"}' })
+    expect(second.content[0]).toEqual({ type: 'text', text: '{"id":"x1","replayed":true}' })
+    expect(audits.map((a) => a.outcome)).toEqual(['ok', 'ok'])
+    const { sanitizeArgs } = await import('@/lib/mcp/sanitize')
+    expect(sanitizeArgs(audits[0].args as Record<string, unknown>)).toEqual({ a: 1, idempotency_key: '[omitted]' }) // stored audit masks *key* fields
+  })
+
+  it('reads never touch the idempotency store', async () => {
+    const { d } = deps()
+    const get = vi.fn(async () => null)
+    d.idem = { get, put: vi.fn(async () => true) }
+    await runTool(write(async () => ({ data: {} }), 'read'), { a: 1, idempotency_key: 'retry-0002' }, d)
+    expect(get).not.toHaveBeenCalled()
   })
 })

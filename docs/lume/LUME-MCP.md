@@ -12,7 +12,7 @@ through tools, behind the same approval gates as the dashboard.
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Route, auth, audit, rate limits, sanitizer, 22 read-only tools | built |
-| 2 | Internal writes (group B) + migration | not started |
+| 2 | Internal writes (group B) + migration | built, off by default; migration drafted (`docs/lume/drafts/lume_mcp_phase2.sql`), not applied |
 | 3 | Gated tools (group C): preview hash, 1 h confirm window, confirm allowlist | not started |
 
 ## Auth (phase 1)
@@ -99,3 +99,41 @@ Audit rows (`mcp.tool_call`) never reach a dashboard feed: every feed query filt
 
 - Confirms hand off to `/api/actions/<id>/execute` (own 300 s budget), not `after()` in `/api/mcp`.
 - Add a retry cap to the rotation-tick re-send of rows stuck in `approved` (today: re-dispatched every 15-min tick with no cap).
+
+## Write switch
+
+`LUME_MCP_WRITES` (Vercel env, per environment). Unset, or any value other
+than the two below, means **read-only**: write tools are not registered and do
+not appear in `tools/list`.
+
+| Value | Tools |
+|---|---|
+| unset | 22 read tools |
+| `internal` | + 7 group B tools |
+| `gated` | + group B + group C (phase 3) |
+
+Group B needs the phase 2 migration applied first (attribution columns, the
+idempotency table). Turning it on is an env change plus a redeploy.
+
+## Group B: internal writes
+
+Nothing leaves Lume and nothing costs money. Each takes an optional
+`idempotency_key` (a repeat returns the first result, `replayed: true`; the
+same key with other arguments is refused). Rate limit: 20 per minute.
+
+| Tool | Writes | Marked as MCP by | Undo |
+|---|---|---|---|
+| `lume_ack_alert` (≤50 ids, no ack-all) | `lume_alerts.acked_at` | `acked_via = 'mcp'` | `update lume_alerts set acked_at = null, acked_via = null where acked_via = 'mcp' and id in (…)` |
+| `lume_move_deal_stage` (Won/Lost refused) | `crm_set_stage()` → deal stage + `stage_changed` activity | `crm_activities.source = 'mcp'`, payload `via: mcp`, `from`/`to` | Move it back in the CRM (the activity shows `from`) |
+| `lume_add_deal_note` | `crm_activities` note | `source = 'mcp'` | `delete from crm_activities where source = 'mcp' and id = …` |
+| `lume_create_task` (never carries an action) | `lume_tasks` (+ Linear sync, as today) | `created_by = 'mcp'`, Calendar shows "by Claude (MCP)" | Cancel/delete in Calendar |
+| `lume_create_review_set` | new lead list from verified reactors (does not mark reactors exported) | list `created_by = 'mcp'`, rows `source = 'mcp'` | Delete the list in Leads → Lists |
+| `lume_draft_icp_brief`, `lume_draft_outbound_plan` | note in the "MCP drafts" Agent project | the project itself | Delete the note in the Agent tab |
+
+Every call also writes one `mcp.tool_call` event whose `payload.refs` names the
+rows it touched (alert ids, deal/activity id, task id, list id, note id):
+`lume_list_events` with `include_mcp_audit: true`, or
+`select created_at, payload from events where type = 'mcp.tool_call' and payload->>'class' = 'write' order by created_at desc`.
+
+Testing: `tests/mcp/internal.test.ts`, `idempotency.test.ts`, `config.test.ts`
+stub every lib and the Supabase client; no test writes to the database.
