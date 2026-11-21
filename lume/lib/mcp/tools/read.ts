@@ -76,6 +76,7 @@ const getCampaignStats = defineTool({
   annotations: { ...READ_ONLY, idempotentHint: true, openWorldHint: true },
   run: async ({ campaign_id, start_date, end_date }) => {
     if ((start_date && !end_date) || (!start_date && end_date)) throw new McpUserError('Pass both start_date and end_date, or neither.')
+    if (!process.env.INSTANTLY_API_KEY) throw new McpUserError('Instantly is not configured in this environment (preview deploys have no Instantly key). Use the production server for live stats.')
     let externalId: string | undefined
     let name: string | null = null
     if (campaign_id) {
