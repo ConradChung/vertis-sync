@@ -1,4 +1,5 @@
 import 'server-only'
+import { createHash } from 'node:crypto'
 import { INSTANTLY_BASE_URL, InstantlyError } from '@/lib/adapters/instantly'
 import { instantlyCall } from '@/lib/adapters/instantlyLeads'
 
@@ -50,6 +51,25 @@ export interface InstantlyCampaignDetail {
   stop_on_reply?: boolean
 }
 
+/**
+ * Fingerprint of what a duplicate copies from its source (inboxes, sending
+ * window, cap, sequence, stop-on-reply): sha256, first 32 hex. Stored on a
+ * create_campaign action at request time so the approval card and the result
+ * can say whether the source changed before the copy was made.
+ */
+export function sourceHash(src: InstantlyCampaignDetail): string {
+  const stable = (v: unknown): unknown =>
+    Array.isArray(v) ? v.map(stable) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, stable((v as Record<string, unknown>)[k])])) : v
+  const facts = {
+    email_list: [...(src.email_list ?? [])].map((e) => e.toLowerCase()).sort(),
+    campaign_schedule: src.campaign_schedule ?? null,
+    daily_limit: src.daily_limit ?? null,
+    sequences: src.sequences ?? null,
+    stop_on_reply: src.stop_on_reply ?? null,
+  }
+  return createHash('sha256').update(JSON.stringify(stable(facts))).digest('hex').slice(0, 32)
+}
+
 export async function getCampaignDetail(id: string): Promise<InstantlyCampaignDetail> {
   return (await request('GET', `/campaigns/${encodeURIComponent(id)}`)) as InstantlyCampaignDetail
 }
@@ -81,9 +101,11 @@ export async function sendReply(input: { eaccount: string; reply_to_uuid: string
 /**
  * Duplicate: same inboxes, sending window, cap and sequence as the source.
  * `sequences` replaces the copy (the no-location sibling: lib/validate/noLocation.ts).
- * Instantly creates it as a draft; nothing sends until it is launched.
+ * Instantly creates it as a draft (no status is sent, /activate is never
+ * called here); nothing sends until it is launched from the dashboard.
+ * `sourceHash` is the fingerprint of the source as copied.
  */
-export async function createCampaignFrom(sourceId: string, name: string, sequences?: unknown): Promise<{ id: string; name: string }> {
+export async function createCampaignFrom(sourceId: string, name: string, sequences?: unknown): Promise<{ id: string; name: string; sourceHash: string }> {
   const src = await getCampaignDetail(sourceId)
   const body: Record<string, unknown> = { name }
   if (src.email_list) body.email_list = src.email_list
@@ -94,7 +116,7 @@ export async function createCampaignFrom(sourceId: string, name: string, sequenc
   if (typeof src.stop_on_reply === 'boolean') body.stop_on_reply = src.stop_on_reply
   const created = (await request('POST', '/campaigns', body)) as { id?: string }
   if (!created.id) throw new InstantlyError(0, 'Instantly returned no campaign id')
-  return { id: created.id, name }
+  return { id: created.id, name, sourceHash: sourceHash(src) }
 }
 
 /**

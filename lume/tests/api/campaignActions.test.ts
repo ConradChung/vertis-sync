@@ -88,10 +88,12 @@ describe('POST /api/actions — campaign kinds', () => {
     expect(sendActionPrompt).toHaveBeenCalledTimes(1)
 
     // Names come from lume_campaigns / the email event; send_reply also reads the
-    // email from Instantly (GET /emails/<id>, cached). Nothing is ever written.
+    // email from Instantly (GET /emails/<id>, cached); create_campaign reads the
+    // source (GET /campaigns/<id>) to fingerprint it. Nothing is ever written.
     for (const [url, init] of fetchSpy.mock.calls as unknown as [string, RequestInit | undefined][]) {
       expect(init?.method ?? 'GET').toBe('GET')
-      expect(kind === 'send_reply' && url.includes('/api/v2/emails/')).toBe(true)
+      const allowed = kind === 'send_reply' ? url.includes('/api/v2/emails/') : kind === 'create_campaign' ? url.endsWith(`/api/v2/campaigns/${CID}`) : false
+      expect(allowed).toBe(true)
     }
   })
 

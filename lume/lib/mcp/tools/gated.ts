@@ -24,7 +24,8 @@ import { defineTool, READ_ONLY, type ToolDef } from '../tool'
  * Lume dashboard or Telegram, which runs the usual executor.
  *
  * lume_confirm_action lets MCP approve its own row only when all hold:
- *   - the kind is in LUME_MCP_CONFIRM_KINDS ∩ MCP_CONFIRM_CEILING (pause/resume),
+ *   - the kind is in LUME_MCP_CONFIRM_KINDS ∩ MCP_CONFIRM_CEILING (pause only;
+ *     resume restarts sending, so it always needs the owner),
  *   - the row was requested by MCP, is still awaiting, and is under 1 hour old,
  *   - the preview hash still matches the live facts (campaign status).
  * The approval then hands off to /api/actions/<id>/execute, like Telegram.
@@ -33,7 +34,7 @@ import { defineTool, READ_ONLY, type ToolDef } from '../tool'
 export const CONFIRM_WINDOW_MS = 60 * 60_000
 /** Mirrors lib/rules/tick.ts ACTION_TTL_MS: awaiting rows expire after 24 h. */
 const EXPIRES_AFTER_MS = 24 * 60 * 60_000
-const DEFAULT_CONFIRM_KINDS = 'pause_campaign,resume_campaign'
+const DEFAULT_CONFIRM_KINDS = 'pause_campaign'
 
 /** Runtime allowlist (config), narrowed to the code ceiling: config can only remove kinds. */
 export function confirmableKinds(env: Record<string, string | undefined> = process.env): Set<PendingActionKind> {
@@ -70,7 +71,7 @@ export function previewDetails(payload: Record<string, Json>): Record<string, Js
   return out
 }
 
-/** Facts a pause/resume confirm re-checks: the row and the campaign's live status. */
+/** Facts a pause confirm re-checks: the row and the campaign's live status. */
 export function previewHash(row: Pick<PendingActionRow, 'id' | 'kind' | 'payload'>, liveStatus: number | null): string {
   const facts = { id: row.id, kind: row.kind, campaign_id: String(row.payload?.campaign_id ?? ''), status: liveStatus }
   return createHash('sha256').update(JSON.stringify(facts)).digest('hex')
@@ -266,7 +267,7 @@ function pauseResume(kind: 'pause_campaign' | 'resume_campaign'): ToolDef {
   return defineTool({
     name: pausing ? 'lume_pause_campaign' : 'lume_resume_campaign',
     title: pausing ? 'Request a campaign pause' : 'Request a campaign resume',
-    description: `${pausing ? 'Requests pausing an active Instantly campaign' : 'Requests resuming a paused Instantly campaign (never a draft: that would launch it)'} (kind ${kind}). Reads the live status first and refuses if it is already ${pausing ? 'paused or not running' : 'running or not paused'}. Returns a preview_hash; the owner can approve in Lume or Telegram, or, within 1 hour, lume_confirm_action can approve it if this kind is on the confirm allowlist.`,
+    description: `${pausing ? 'Requests pausing an active Instantly campaign' : 'Requests resuming a paused Instantly campaign (never a draft: that would launch it)'} (kind ${kind}). Reads the live status first and refuses if it is already ${pausing ? 'paused or not running' : 'running or not paused'}. ${pausing ? 'Returns a preview_hash: the owner can approve in Lume or Telegram, or, within 1 hour, lume_confirm_action can approve it.' : 'Only the owner can approve a resume (Lume or Telegram); lume_confirm_action refuses it.'}`,
     cls: 'write',
     input: z.object({ campaign_id: campaignId, idempotency_key: idempotencyKey }),
     annotations: GATED_REQUEST,
@@ -358,7 +359,7 @@ export const confirmAction = defineTool({
   name: 'lume_confirm_action',
   title: 'Confirm an MCP-requested action',
   description:
-    'Approves a pending action this MCP server requested, and starts it. Only kinds on the confirm allowlist (pause_campaign, resume_campaign at most), only within 1 hour of the request, and only if preview_hash still matches the live campaign status; otherwise it refuses and the owner approves in Lume or Telegram. Starting it changes the live Instantly campaign.',
+    'Approves a pending action this MCP server requested, and starts it. Only pause_campaign (resume and everything else need the owner in Lume or Telegram), only within 1 hour of the request, and only if preview_hash still matches the live campaign status; otherwise it refuses and the owner approves in Lume or Telegram. Starting it changes the live Instantly campaign.',
   cls: 'confirm',
   input: z.object({
     action_id: uuid,

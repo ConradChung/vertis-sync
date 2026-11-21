@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { PageHead } from '@/components/shell/PageHead'
 import { ActionPlan, type ActionView } from '@/components/actions/ActionPlan'
 import { getAction } from '@/lib/actions/store'
+import { duplicateNotices } from '@/lib/actions/duplicateNotice'
 import { requireOwner } from '@/lib/auth/guards'
 import { uuidParam } from '@/lib/http/json'
 import type { Json } from '@/lib/db/types'
@@ -105,6 +106,7 @@ export default async function ActionPage({ params }: { params: Promise<{ id: str
   const row = await getAction(id)
   if (!row) notFound()
 
+  const notices = await duplicateNotices(row)
   const sop = row.kind === 'update_sequence' && Array.isArray(row.payload?.steps) ? sequenceSop(row.payload ?? {}, row.status === 'awaiting') : null
   const view: ActionView = {
     id: row.id,
@@ -117,6 +119,7 @@ export default async function ActionPage({ params }: { params: Promise<{ id: str
           ? [...sequenceDetails(row.payload ?? {}, (row.result as Record<string, Json> | null) ?? null), ...(sop ? [sop.line] : [])]
           : details(row.payload),
     ...(sop?.violations ? { sopViolations: sop.violations } : {}),
+    ...(notices.length ? { notices } : {}),
     ...(row.kind === 'update_sequence' ? { sequenceDiff: diffSequences(asSteps(row.payload?.before), asSteps(row.payload?.after)) } : {}),
     requestedBy: row.requested_by,
     status: row.status,

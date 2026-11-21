@@ -1,4 +1,5 @@
 import 'server-only'
+import { getCampaignDetail, sourceHash } from '@/lib/adapters/instantlyWrite'
 import { z } from 'zod'
 import { CAMPAIGN_ACTION_KINDS, parseCampaignPayload, type CampaignActionKind } from '@/lib/actions/payloads'
 import { getEmailLead, isInstantlyConfigured, listCampaigns } from '@/lib/adapters/instantly'
@@ -409,6 +410,18 @@ async function withServerExtras(kind: CampaignActionKind, raw: Record<string, un
   }
   const id = text(kind === 'create_campaign' ? p.source_campaign_id : p.campaign_id)
   if (id) p.campaign_name = await campaignName(id)
+  if (kind === 'create_campaign') {
+    // Server-only: fingerprint the source as it is now, so approval can show a change.
+    delete p.source_hash
+    // Only for a request that can be filed (shape errors are refused later without a call).
+    if (id && text(p.name)) {
+      try {
+        p.source_hash = sourceHash(await getCampaignDetail(id))
+      } catch (err) {
+        console.error('[actions/build] could not fingerprint the source campaign:', err instanceof Error ? err.message : err)
+      }
+    }
+  }
   return { payload: p }
 }
 

@@ -22,10 +22,11 @@ export const MCP_CREATABLE_KINDS: ReadonlySet<PendingActionKind> = new Set<Pendi
 ])
 
 /**
- * Kinds MCP may ever confirm itself. A ceiling in code: the runtime allowlist
- * (LUME_MCP_CONFIRM_KINDS) can only narrow it, never widen it.
+ * Kinds MCP may ever confirm itself: pause only. Resume restarts sending, so
+ * it always needs the owner (dashboard or Telegram). A ceiling in code: the
+ * runtime allowlist (LUME_MCP_CONFIRM_KINDS) can only narrow it, never widen it.
  */
-export const MCP_CONFIRM_CEILING: ReadonlySet<PendingActionKind> = new Set<PendingActionKind>(['pause_campaign', 'resume_campaign'])
+export const MCP_CONFIRM_CEILING: ReadonlySet<PendingActionKind> = new Set<PendingActionKind>(['pause_campaign'])
 
 /** Never decide an MCP-requested row through these: a person (dashboard, Telegram) or MCP's own confirm only. */
 export const MCP_FORBIDDEN_DECIDERS: ReadonlySet<string> = new Set(['grant', 'agent'])

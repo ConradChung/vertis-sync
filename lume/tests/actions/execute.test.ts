@@ -562,11 +562,18 @@ describe('executeAction dispatch table', () => {
     expect(ins.resumeCampaign).toHaveBeenCalledWith('camp-1')
   })
 
-  it('create_campaign: mirrors the source campaign', async () => {
+  it('create_campaign: mirrors the source campaign as a draft', async () => {
     store.claimExecution.mockResolvedValue(row('create_campaign', { source_campaign_id: 'camp-1', name: 'Copy' }))
-    ins.createCampaignFrom.mockResolvedValue({ id: 'camp-9', name: 'Copy' })
-    expect(await executeAction(ID)).toMatchObject({ status: 'executed', result: { campaign_id: 'camp-9' } })
+    ins.createCampaignFrom.mockResolvedValue({ id: 'camp-9', name: 'Copy', sourceHash: 'c'.repeat(32) })
+    expect(await executeAction(ID)).toMatchObject({ status: 'executed', result: { campaign_id: 'camp-9', status: 'draft', source_changed: null } })
     expect(ins.createCampaignFrom).toHaveBeenCalledWith('camp-1', 'Copy')
+    expect(ins.resumeCampaign).not.toHaveBeenCalled()
+  })
+
+  it.each([['a'.repeat(32), false], ['b'.repeat(32), true]])('create_campaign records whether the source changed since the request (%s)', async (asked, changed) => {
+    store.claimExecution.mockResolvedValue(row('create_campaign', { source_campaign_id: 'camp-1', name: 'Copy', source_hash: asked }))
+    ins.createCampaignFrom.mockResolvedValue({ id: 'camp-9', name: 'Copy', sourceHash: 'a'.repeat(32) })
+    expect(await executeAction(ID)).toMatchObject({ result: { source_hash_requested: asked, source_hash_copied: 'a'.repeat(32), source_changed: changed } })
   })
 
   it('a thrown adapter error → failed with result.error', async () => {

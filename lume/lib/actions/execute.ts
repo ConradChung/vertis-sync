@@ -585,7 +585,17 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
 
   async create_campaign(p) {
     const created = await createCampaignFrom(need(p, 'source_campaign_id'), need(p, 'name'))
-    return { source_campaign_id: need(p, 'source_campaign_id'), campaign_id: created.id, name: created.name }
+    const asked = typeof p.source_hash === 'string' ? p.source_hash : null
+    return {
+      source_campaign_id: need(p, 'source_campaign_id'),
+      campaign_id: created.id,
+      name: created.name,
+      status: 'draft',
+      source_hash_requested: asked,
+      source_hash_copied: created.sourceHash,
+      // null when the request carried no fingerprint (older rows).
+      source_changed: asked === null ? null : asked !== created.sourceHash,
+    }
   },
 
   /**

@@ -77,6 +77,8 @@ export const CAMPAIGN_PAYLOADS = {
     source_campaign_id: ID,
     name: z.string().trim().min(1).max(200),
     campaign_name: LABEL,
+    /** Server-written at request time (instantlyWrite.sourceHash): what the source looked like when asked. */
+    source_hash: z.string().regex(/^[0-9a-f]{32}$/).optional(),
   }),
 } as const satisfies Record<CampaignActionKind, z.ZodType>
 

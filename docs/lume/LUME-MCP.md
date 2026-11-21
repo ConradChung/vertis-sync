@@ -167,11 +167,11 @@ Order (campaign setup first):
 | `lume_suggest_campaign_setup` | read | tag, template, inboxes, schedule, limit for a job or list |
 | `lume_get_campaign_sequence` | read | live steps + `base_hash` |
 | `lume_create_campaign` | `new_campaign` | draft, never activated |
-| `lume_duplicate_campaign` | `create_campaign` | copies the source as it is at approval |
+| `lume_duplicate_campaign` | `create_campaign` | created as a draft, never started; source fingerprint stored at request, the approval card warns if the source changed, the result records it |
 | `lume_update_sequence` | `update_sequence` | `base_hash` required; executor re-checks the hash |
 | `lume_push_to_instantly` | `push_to_instantly` | outreach; eligible count previewed |
 | `lume_run_validation` | `send_lead_list` | validator credits after the ingest gate |
-| `lume_pause_campaign` / `lume_resume_campaign` | same | reads live status; resume never launches a draft |
+| `lume_pause_campaign` / `lume_resume_campaign` | same | reads live status; resume never launches a draft; only pause is MCP-confirmable |
 | `lume_assign_leads` | `assign_leads` | |
 | `lume_run_influencer_scrape` / `_reactions` / `_lookup` | `influencer_*` | Apify spend, estimate in preview |
 | `lume_confirm_action` | — | see below |
@@ -190,8 +190,9 @@ Enforced in the action core, for every caller:
 
 `lume_confirm_action(action_id, preview_hash, confirm: true)` approves only
 when: the row was requested by MCP; its kind is in `LUME_MCP_CONFIRM_KINDS`
-(default `pause_campaign,resume_campaign`) intersected with the code ceiling
-(pause/resume; config can narrow, never widen); it is still awaiting; it is at
+(default `pause_campaign`) intersected with the code ceiling (pause only:
+resume restarts sending, so it always needs the owner; config can narrow,
+never widen); it is still awaiting; it is at
 most 1 hour old (older rows stay approvable in Lume/Telegram until the 24 h
 expiry); and the preview hash still matches the campaign's live status. It
 then claims with `decided_via = 'mcp'` and hands off to
