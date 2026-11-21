@@ -12,7 +12,7 @@ through tools, behind the same approval gates as the dashboard.
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Route, auth, audit, rate limits, sanitizer, 22 read-only tools | built |
-| 2 | Internal writes (group B) + migration | built, off by default; migration drafted (`docs/lume/drafts/lume_mcp_phase2.sql`), not applied |
+| 2 | Internal writes (group B) + migration | built, off by default; migration applied 2026-11-21 (`supabase/migrations/20261121102719_lume_mcp.sql`); LUME_MCP_WRITES unset in production |
 | 3 | Gated tools (group C): preview hash, 1 h confirm window, confirm allowlist | not started |
 
 ## Auth (phase 1)
