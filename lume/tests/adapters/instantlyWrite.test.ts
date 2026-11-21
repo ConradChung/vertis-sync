@@ -96,3 +96,17 @@ describe('sourceHash', () => {
     expect(write.sourceHash({ ...base, ...over })).not.toBe(write.sourceHash(base))
   })
 })
+
+describe('createCampaignFrom refuses a changed source', () => {
+  const src = { id: 'S1', email_list: ['a@x.com'], daily_limit: 40, sequences: [], stop_on_reply: true }
+  it('throws SourceChangedError and never POSTs when the fingerprint differs', async () => {
+    fetchMock.mockResolvedValueOnce(json(src))
+    await expect(write.createCampaignFrom('S1', 'Copy', undefined, { expectSourceHash: 'f'.repeat(32) })).rejects.toBeInstanceOf(write.SourceChangedError)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][1].method).toBe('GET')
+  })
+  it('creates when the fingerprint matches', async () => {
+    fetchMock.mockResolvedValueOnce(json(src)).mockResolvedValueOnce(json({ id: 'C2' }))
+    expect((await write.createCampaignFrom('S1', 'Copy', undefined, { expectSourceHash: write.sourceHash(src) })).id).toBe('C2')
+  })
+})

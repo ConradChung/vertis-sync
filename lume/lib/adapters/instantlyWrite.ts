@@ -105,8 +105,26 @@ export async function sendReply(input: { eaccount: string; reply_to_uuid: string
  * called here); nothing sends until it is launched from the dashboard.
  * `sourceHash` is the fingerprint of the source as copied.
  */
-export async function createCampaignFrom(sourceId: string, name: string, sequences?: unknown): Promise<{ id: string; name: string; sourceHash: string }> {
+export class SourceChangedError extends Error {
+  constructor(readonly expected: string, readonly actual: string) {
+    super('the source campaign changed since the request')
+    this.name = 'SourceChangedError'
+  }
+}
+
+/**
+ * `opts.expectSourceHash`: refuse (SourceChangedError, before anything is
+ * created) when the source no longer matches the fingerprint taken at request.
+ */
+export async function createCampaignFrom(
+  sourceId: string,
+  name: string,
+  sequences?: unknown,
+  opts: { expectSourceHash?: string | null } = {}
+): Promise<{ id: string; name: string; sourceHash: string }> {
   const src = await getCampaignDetail(sourceId)
+  const now = sourceHash(src)
+  if (opts.expectSourceHash && opts.expectSourceHash !== now) throw new SourceChangedError(opts.expectSourceHash, now)
   const body: Record<string, unknown> = { name }
   if (src.email_list) body.email_list = src.email_list
   if (src.campaign_schedule) body.campaign_schedule = src.campaign_schedule
@@ -116,7 +134,7 @@ export async function createCampaignFrom(sourceId: string, name: string, sequenc
   if (typeof src.stop_on_reply === 'boolean') body.stop_on_reply = src.stop_on_reply
   const created = (await request('POST', '/campaigns', body)) as { id?: string }
   if (!created.id) throw new InstantlyError(0, 'Instantly returned no campaign id')
-  return { id: created.id, name, sourceHash: sourceHash(src) }
+  return { id: created.id, name, sourceHash: now }
 }
 
 /**

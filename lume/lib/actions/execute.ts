@@ -2,6 +2,7 @@ import 'server-only'
 import { decide, type DecideResult } from '@/lib/adapters/pipeline'
 import {
   createCampaignFrom,
+  SourceChangedError,
   getCampaignDetail,
   pauseCampaign,
   resumeCampaign,
@@ -584,8 +585,24 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
   },
 
   async create_campaign(p) {
-    const created = await createCampaignFrom(need(p, 'source_campaign_id'), need(p, 'name'))
     const asked = typeof p.source_hash === 'string' ? p.source_hash : null
+    let created: Awaited<ReturnType<typeof createCampaignFrom>>
+    try {
+      // Owner decision 2026-11-21: a source that changed since the request is
+      // refused, not copied, so a Telegram approval can never copy something
+      // other than what was requested. Rows without a fingerprint copy as before.
+      created = await createCampaignFrom(need(p, 'source_campaign_id'), need(p, 'name'), undefined, { expectSourceHash: asked })
+    } catch (err) {
+      if (err instanceof SourceChangedError) {
+        throw new ActionFailure('The source campaign changed since this copy was requested (inboxes, schedule, daily limit, sequence or stop-on-reply). Nothing was created; request the copy again.', {
+          reason: 'source_changed',
+          source_hash_requested: err.expected,
+          source_hash_now: err.actual,
+          source_changed: true,
+        })
+      }
+      throw err
+    }
     return {
       source_campaign_id: need(p, 'source_campaign_id'),
       campaign_id: created.id,
@@ -594,7 +611,7 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
       source_hash_requested: asked,
       source_hash_copied: created.sourceHash,
       // null when the request carried no fingerprint (older rows).
-      source_changed: asked === null ? null : asked !== created.sourceHash,
+      source_changed: asked === null ? null : false,
     }
   },
 

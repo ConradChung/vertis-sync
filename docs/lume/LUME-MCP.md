@@ -13,7 +13,7 @@ through tools, behind the same approval gates as the dashboard.
 |---|---|---|
 | 1 | Route, auth, audit, rate limits, sanitizer, 22 read-only tools | built |
 | 2 | Internal writes (group B) + migration | built, off by default; migration applied 2026-11-21 (`supabase/migrations/20261121102719_lume_mcp.sql`); LUME_MCP_WRITES unset in production |
-| 3 | Gated tools (group C): preview hash, 1 h confirm window, confirm allowlist | built on `feat/lume-mcp`, not deployed; migration drafted (`docs/lume/drafts/lume_mcp_phase3.sql`), not applied |
+| 3 | Gated tools (group C): preview hash, 1 h confirm window, confirm allowlist | built on `feat/lume-mcp`, not deployed; migration applied 2026-11-21 (`supabase/migrations/20261121111429_lume_mcp_phase3.sql`) |
 
 ## Auth (phase 1)
 
@@ -167,7 +167,7 @@ Order (campaign setup first):
 | `lume_suggest_campaign_setup` | read | tag, template, inboxes, schedule, limit for a job or list |
 | `lume_get_campaign_sequence` | read | live steps + `base_hash` |
 | `lume_create_campaign` | `new_campaign` | draft, never activated |
-| `lume_duplicate_campaign` | `create_campaign` | created as a draft, never started; source fingerprint stored at request, the approval card warns if the source changed, the result records it |
+| `lume_duplicate_campaign` | `create_campaign` | created as a draft, never started; source fingerprint stored at request; if the source changed by execution the copy is refused (`reason: source_changed`, nothing created), and the approval card warns beforehand |
 | `lume_update_sequence` | `update_sequence` | `base_hash` required; executor re-checks the hash |
 | `lume_push_to_instantly` | `push_to_instantly` | outreach; eligible count previewed |
 | `lume_run_validation` | `send_lead_list` | validator credits after the ingest gate |

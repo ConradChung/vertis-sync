@@ -18,7 +18,7 @@ describe('approval card: duplicate source changed?', () => {
   })
   it('warns when the source changed since the request', async () => {
     w.sourceHash.mockReturnValue('b'.repeat(32))
-    expect((await duplicateNotices(row()))[0]).toMatch(/changed since this was requested/)
+    expect((await duplicateNotices(row()))[0]).toMatch(/Confirm will be refused/)
   })
   it('says it cannot check when the source is unreadable or the row has no fingerprint', async () => {
     w.getCampaignDetail.mockRejectedValue(new Error('404'))
@@ -26,7 +26,7 @@ describe('approval card: duplicate source changed?', () => {
     expect((await duplicateNotices(row({ payload: { source_campaign_id: 'S1', name: 'Copy' } })))[0]).toMatch(/no source fingerprint/)
   })
   it('after it ran, reports from the result without calling Instantly', async () => {
-    expect((await duplicateNotices(row({ status: 'executed', result: { source_changed: true } })))[0]).toMatch(/had changed/)
+    expect((await duplicateNotices(row({ status: 'executed', result: { source_changed: true } })))[0]).toMatch(/copy was refused/)
     expect(await duplicateNotices(row({ status: 'executed', result: { source_changed: false } }))).toEqual([])
     expect(w.getCampaignDetail).not.toHaveBeenCalled()
   })

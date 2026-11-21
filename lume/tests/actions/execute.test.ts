@@ -44,6 +44,14 @@ vi.mock('@/lib/adapters/instantlyPush', () => ({ getPushPreview: vi.fn() }))
 const decide = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/adapters/pipeline', () => ({ decide }))
 
+const SourceChangedError = vi.hoisted(
+  () =>
+    class SourceChangedError extends Error {
+      constructor(readonly expected: string, readonly actual: string) {
+        super('changed')
+      }
+    },
+)
 const ins = vi.hoisted(() => ({
   getCampaignDetail: vi.fn(),
   pauseCampaign: vi.fn(),
@@ -51,7 +59,7 @@ const ins = vi.hoisted(() => ({
   sendReply: vi.fn(),
   createCampaignFrom: vi.fn(),
 }))
-vi.mock('@/lib/adapters/instantlyWrite', () => ins)
+vi.mock('@/lib/adapters/instantlyWrite', () => ({ ...ins, SourceChangedError }))
 
 const em = vi.hoisted(() => ({ getEmail: vi.fn(), getThreadEmails: vi.fn() }))
 vi.mock('@/lib/adapters/instantlyEmails', () => em)
@@ -566,14 +574,23 @@ describe('executeAction dispatch table', () => {
     store.claimExecution.mockResolvedValue(row('create_campaign', { source_campaign_id: 'camp-1', name: 'Copy' }))
     ins.createCampaignFrom.mockResolvedValue({ id: 'camp-9', name: 'Copy', sourceHash: 'c'.repeat(32) })
     expect(await executeAction(ID)).toMatchObject({ status: 'executed', result: { campaign_id: 'camp-9', status: 'draft', source_changed: null } })
-    expect(ins.createCampaignFrom).toHaveBeenCalledWith('camp-1', 'Copy')
+    expect(ins.createCampaignFrom).toHaveBeenCalledWith('camp-1', 'Copy', undefined, { expectSourceHash: null })
     expect(ins.resumeCampaign).not.toHaveBeenCalled()
   })
 
-  it.each([['a'.repeat(32), false], ['b'.repeat(32), true]])('create_campaign records whether the source changed since the request (%s)', async (asked, changed) => {
-    store.claimExecution.mockResolvedValue(row('create_campaign', { source_campaign_id: 'camp-1', name: 'Copy', source_hash: asked }))
+  it('create_campaign passes the request fingerprint so a changed source is refused before anything is created', async () => {
+    store.claimExecution.mockResolvedValue(row('create_campaign', { source_campaign_id: 'camp-1', name: 'Copy', source_hash: 'a'.repeat(32) }))
     ins.createCampaignFrom.mockResolvedValue({ id: 'camp-9', name: 'Copy', sourceHash: 'a'.repeat(32) })
-    expect(await executeAction(ID)).toMatchObject({ result: { source_hash_requested: asked, source_hash_copied: 'a'.repeat(32), source_changed: changed } })
+    expect(await executeAction(ID)).toMatchObject({ status: 'executed', result: { source_hash_requested: 'a'.repeat(32), source_changed: false } })
+    expect(ins.createCampaignFrom).toHaveBeenCalledWith('camp-1', 'Copy', undefined, { expectSourceHash: 'a'.repeat(32) })
+  })
+
+  it('create_campaign: a changed source fails the action with source_changed', async () => {
+    store.claimExecution.mockResolvedValue(row('create_campaign', { source_campaign_id: 'camp-1', name: 'Copy', source_hash: 'a'.repeat(32) }))
+    ins.createCampaignFrom.mockRejectedValue(new SourceChangedError('a'.repeat(32), 'b'.repeat(32)))
+    const out = await executeAction(ID)
+    expect(out).toMatchObject({ status: 'failed', result: { reason: 'source_changed', source_hash_now: 'b'.repeat(32), source_changed: true } })
+    expect(JSON.stringify(out)).toMatch(/Nothing was created/)
   })
 
   it('a thrown adapter error → failed with result.error', async () => {
