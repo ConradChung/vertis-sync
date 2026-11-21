@@ -99,6 +99,10 @@ Audit rows (`mcp.tool_call`) never reach a dashboard feed: every feed query filt
 
 - Confirms hand off to `/api/actions/<id>/execute` (own 300 s budget), not `after()` in `/api/mcp`.
 - Add a retry cap to the rotation-tick re-send of rows stuck in `approved` (today: re-dispatched every 15-min tick with no cap).
+- **On hold** until Duet has run on the read tools for a couple of days (owner, 2026-11-21).
+- MCP may only create the `pending_actions` kinds mapped to its own tools (allowlist in code, enforced at insert; test it).
+- Rows with `requested_by = 'mcp'` are never decided via `grant` or `agent` (enforce at decide time, ideally also a DB check; test it).
+- One clean full test run (no flakes, no timeouts) before `LUME_MCP_WRITES` is ever set in production.
 
 ## Write switch
 
