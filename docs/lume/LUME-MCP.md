@@ -87,3 +87,15 @@ HTTP", URL `http://localhost:3000/api/mcp`, header `Authorization: Bearer <token
 ## Dashboard impact
 
 Audit rows (`mcp.tool_call`) never reach a dashboard feed: every feed query filters by type, and `hooks/useRealtimeInvalidate.ts` drops their Realtime inserts so MCP polling never triggers screen refetches. `lume_overview().recent_events` (SQL, unused by the UI) does include them.
+
+## Preview deploy (2026-11-21)
+
+- Stable URL: `https://lume-mcp-preview.vercel.app/api/mcp` (a `vercel alias` onto the latest CLI preview; the Vercel project has no Git link, so there is no auto branch URL). After each `vercel deploy`, re-run `vercel alias set <new-deployment-url> lume-mcp-preview.vercel.app`.
+- `LUME_MCP_TOKEN` is set for **Preview only** (type sensitive). Previews are behind Vercel Authentication, so clients also send `x-vercel-protection-bypass` (Protection Bypass for Automation secret). Both values live only in `~/.config/lume-mcp/preview.env` (mode 600) on the owner's Mac.
+- Preview has no `INSTANTLY_API_KEY` (production-only, deliberately), so `lume_get_campaign_stats` returns "Instantly is not configured in this environment" there.
+- Connect: `set -a; . ~/.config/lume-mcp/preview.env; set +a; claude mcp add --transport http lume-preview https://lume-mcp-preview.vercel.app/api/mcp --header "Authorization: Bearer $LUME_MCP_TOKEN" --header "x-vercel-protection-bypass: $VERCEL_BYPASS"`
+
+## Phase 3 notes
+
+- Confirms hand off to `/api/actions/<id>/execute` (own 300 s budget), not `after()` in `/api/mcp`.
+- Add a retry cap to the rotation-tick re-send of rows stuck in `approved` (today: re-dispatched every 15-min tick with no cap).
