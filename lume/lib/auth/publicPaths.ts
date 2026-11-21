@@ -21,6 +21,7 @@ const PUBLIC_PATTERNS: RegExp[] = [
   // OAuth callback a client opens without a Lume session (signed link / state).
   /^\/api\/slack\/(events|interactions|install|oauth\/callback)$/,
   new RegExp(`^/api/actions/${UUID}/execute$`, 'i'), // telegram-inbox lume_ok
+  /^\/api\/mcp$/, // MCP server: checks its own bearer token (LUME_MCP_TOKEN) first thing
   /^\/_next\//, // framework assets
   /^\/favicon\.ico$/,
   // Static files from /public. Never under /api/, and never scripts/styles/
