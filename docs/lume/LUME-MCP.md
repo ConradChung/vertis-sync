@@ -15,6 +15,10 @@ through tools, behind the same approval gates as the dashboard.
 | 2 | Internal writes (group B) + migration | built, off by default; migration applied 2026-11-21 (`supabase/migrations/20261121102719_lume_mcp.sql`); LUME_MCP_WRITES unset in production |
 | 3 | Gated tools (group C): preview hash, 1 h confirm window, confirm allowlist | built on `feat/lume-mcp`, not deployed; migration applied 2026-11-21 (`supabase/migrations/20261121111429_lume_mcp_phase3.sql`) |
 
+## Open items
+
+- **company-check v2 migration not applied.** `supabase/migrations/20261112195122_lume_company_check_scope_property.sql` (commit `38c106f`) was never applied to the live database; production Lume already calls the v2 functions (`company_check_plan(..., p_scope)`). The `company-check` edge function is not deployed, but `main` now holds its source and lists it in `.github/workflows/deploy-functions.yml`, so **the next push to `main` touching `supabase/functions/` will deploy it. Apply the migration before then.** (Noted 2026-11-21; `main` merge pushed with `[skip ci]` to avoid deploying it.)
+
 ## Auth (phase 1)
 
 One static bearer token, `LUME_MCP_TOKEN` (at least 32 characters; generate with
