@@ -15,3 +15,6 @@ export function countOf(label: string, res: Res<unknown>): number {
   if (res.error) throw new Error(`${label}: ${res.error.message}`)
   return res.count ?? 0
 }
+
+/** `lead_bank.state` values (lume lead bank state machine). */
+export const BANK_STATES = ['queued', 'active', 'completed', 'replied', 'bounced', 'unsubscribed', 'skipped'] as const

@@ -72,4 +72,15 @@ describe('useRealtimeInvalidate', () => {
     vi.advanceTimersByTime(1)
     expect(cb).toHaveBeenCalledTimes(1)
   })
+
+  it('ignores MCP audit rows (mcp.tool_call) on every screen, filtered or not', () => {
+    const cb = vi.fn()
+    renderHook(() => useRealtimeInvalidate(cb, { tables: ['events'] }))
+    for (let i = 0; i < 5; i++) insert('events', { type: 'mcp.tool_call', source: 'mcp' })
+    vi.advanceTimersByTime(10_000)
+    expect(cb).not.toHaveBeenCalled()
+    insert('events', { type: 'reply' })
+    vi.advanceTimersByTime(300)
+    expect(cb).toHaveBeenCalledTimes(1)
+  })
 })

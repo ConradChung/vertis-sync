@@ -51,7 +51,7 @@ through to that check (same pattern as the webhook and cron routes).
 
 | Tool | Reads |
 |---|---|
-| `lume_get_overview` | Polling entry point: unacked/urgent alerts, lead bank queued vs `bank_threshold`, awaiting actions by kind, failed actions/validation/influencer/agent runs in the window, active validation jobs, last rotation run. ~0.4 s. |
+| `lume_get_overview` | Polling entry point: unacked alert counts by severity and source plus the top `top_alerts` (default 5, max 20) by urgency then recency; lead bank counts by state and the push bank threshold (a push larger than it is held as `queued` and rotated in, it is not a target level); awaiting actions by kind; failed actions/validation/influencer/agent runs in the window; active validation jobs; last rotation run. ~0.4 s, ~2 KB. |
 | `lume_list_campaigns` | `lume_campaigns` |
 | `lume_get_campaign_stats` | Instantly `/campaigns/analytics/overview` (live, cached 5 min per warm instance) |
 | `lume_list_alerts` | `lume_alerts` |
@@ -83,3 +83,7 @@ HTTP", URL `http://localhost:3000/api/mcp`, header `Authorization: Bearer <token
   the tool wrapper (audit, redaction, errors), and the handler listing all tools.
 - `LUME_MCP_LIVE=1 npx vitest run tests/mcp/live.smoke.test.ts` — calls each
   read tool's body against the real DB (read-only; skips audit and rate limits).
+
+## Dashboard impact
+
+Audit rows (`mcp.tool_call`) never reach a dashboard feed: every feed query filters by type, and `hooks/useRealtimeInvalidate.ts` drops their Realtime inserts so MCP polling never triggers screen refetches. `lume_overview().recent_events` (SQL, unused by the UI) does include them.

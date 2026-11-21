@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { getAnalyticsOverview } from '@/lib/adapters/instantly'
-import { countOf, must, sb } from '../db'
+import { BANK_STATES, countOf, must, sb } from '../db'
 import { DEFAULT_LIMIT, decodeCursor, olderThan, pageInput, pageOf } from '../page'
 import { McpUserError, truncate, untrusted } from '../sanitize'
 import { defineTool, READ_ONLY, type ToolDef } from '../tool'
@@ -162,7 +162,6 @@ const listEvents = defineTool({
 
 // ── Lead bank ────────────────────────────────────────────────────────────
 
-const BANK_STATES = ['queued', 'active', 'completed', 'replied', 'bounced', 'unsubscribed', 'skipped'] as const
 
 const getLeadBankSummary = defineTool({
   name: 'lume_get_lead_bank_summary',

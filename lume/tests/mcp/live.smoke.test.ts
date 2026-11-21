@@ -40,7 +40,7 @@ describe.skipIf(!live)('read tools against the live DB (read-only)', async () =>
       if (def.name === 'lume_get_overview') {
         expect(ms).toBeLessThan(3000)
         const o = data as any
-        console.log('overview counts', JSON.stringify({ alerts: o.alerts.unacked, urgent: o.alerts.urgent, bank: o.lead_bank, awaiting: o.pending_actions.awaiting, failed: o.failed_since, active: o.validation, rot: o.rotation }))
+        console.log('overview', Buffer.byteLength(JSON.stringify(o)), 'bytes', JSON.stringify({ ...o, alerts: { ...o.alerts, top: o.alerts.top.length } }))
       }
     }, 20_000)
   }
