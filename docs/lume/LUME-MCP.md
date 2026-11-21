@@ -13,7 +13,7 @@ through tools, behind the same approval gates as the dashboard.
 |---|---|---|
 | 1 | Route, auth, audit, rate limits, sanitizer, 22 read-only tools | built |
 | 2 | Internal writes (group B) + migration | built, off by default; migration applied 2026-11-21 (`supabase/migrations/20261121102719_lume_mcp.sql`); LUME_MCP_WRITES unset in production |
-| 3 | Gated tools (group C): preview hash, 1 h confirm window, confirm allowlist | not started |
+| 3 | Gated tools (group C): preview hash, 1 h confirm window, confirm allowlist | built on `feat/lume-mcp`, not deployed; migration drafted (`docs/lume/drafts/lume_mcp_phase3.sql`), not applied |
 
 ## Auth (phase 1)
 
@@ -151,3 +151,54 @@ rows it touched (alert ids, deal/activity id, task id, list id, note id):
 
 Testing: `tests/mcp/internal.test.ts`, `idempotency.test.ts`, `config.test.ts`
 stub every lib and the Supabase client; no test writes to the database.
+
+## Group C: gated actions (phase 3)
+
+Enabled only with `LUME_MCP_WRITES=gated` (owner's OK required). A request
+tool never acts: it runs the dashboard's own `buildActionRequest` (live counts,
+diffs, SOP gate, summary), files one `pending_actions` row with
+`requested_by = 'mcp'` through `createAction` (so the Telegram prompt goes out
+as usual), and returns the preview. The owner approves in Lume or Telegram.
+
+Order (campaign setup first):
+
+| Tool | Kind | Notes |
+|---|---|---|
+| `lume_suggest_campaign_setup` | read | tag, template, inboxes, schedule, limit for a job or list |
+| `lume_get_campaign_sequence` | read | live steps + `base_hash` |
+| `lume_create_campaign` | `new_campaign` | draft, never activated |
+| `lume_duplicate_campaign` | `create_campaign` | copies the source as it is at approval |
+| `lume_update_sequence` | `update_sequence` | `base_hash` required; executor re-checks the hash |
+| `lume_push_to_instantly` | `push_to_instantly` | outreach; eligible count previewed |
+| `lume_run_validation` | `send_lead_list` | validator credits after the ingest gate |
+| `lume_pause_campaign` / `lume_resume_campaign` | same | reads live status; resume never launches a draft |
+| `lume_assign_leads` | `assign_leads` | |
+| `lume_run_influencer_scrape` / `_reactions` / `_lookup` | `influencer_*` | Apify spend, estimate in preview |
+| `lume_confirm_action` | — | see below |
+| `lume_cancel_action` | — | rejects an awaiting MCP row (decided_via mcp) |
+
+Cut from v1: `lume_rotate_now` (instantly-rotate has no lock, so a manual run
+overlapping the cron can push the same rows twice; needs a lock and a service
+key first), `lume_approve_plan` (no plan-level action exists; each stage is its
+own action).
+
+Enforced in the action core, for every caller:
+- `createAction`: a `requested_by = 'mcp'` row may only have a kind in
+  `MCP_CREATABLE_KINDS` (`lib/actions/mcpPolicy.ts`).
+- `claimDecision`: `grant` and `agent` never claim an MCP row (also
+  `tryGrantSend` refuses it; DB check in the phase 3 migration).
+
+`lume_confirm_action(action_id, preview_hash, confirm: true)` approves only
+when: the row was requested by MCP; its kind is in `LUME_MCP_CONFIRM_KINDS`
+(default `pause_campaign,resume_campaign`) intersected with the code ceiling
+(pause/resume; config can narrow, never widen); it is still awaiting; it is at
+most 1 hour old (older rows stay approvable in Lume/Telegram until the 24 h
+expiry); and the preview hash still matches the campaign's live status. It
+then claims with `decided_via = 'mcp'` and hands off to
+`/api/actions/<id>/execute` (own 300 s budget), like Telegram. Rate limit:
+10 confirms per hour.
+
+Sweeper retry cap: each re-send of a row stuck in `approved` is counted
+(`dispatch_attempts`); after 4 re-sends (~1 h) the row is failed as
+`not_executed` with a Telegram/feed notice. Safe because an `approved` row
+never reached its handler.

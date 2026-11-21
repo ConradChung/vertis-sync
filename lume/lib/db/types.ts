@@ -214,7 +214,7 @@ export interface PendingActionRow {
   risk: 'high'
   status: PendingActionStatus
   claim_status: 'awaiting' | 'claimed'
-  requested_by: 'user' | 'agent' | 'rule'
+  requested_by: 'user' | 'agent' | 'rule' | 'mcp'
   agent_run_id: string | null
   rule_id: string | null
   telegram_message_id: number | null

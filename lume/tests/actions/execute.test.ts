@@ -6,7 +6,9 @@ const store = vi.hoisted(() => ({
   claimExecution: vi.fn(),
   finishAction: vi.fn(),
   getAction: vi.fn(),
-  getStaleApprovedIds: vi.fn(),
+  getStaleApproved: vi.fn(),
+  bumpDispatchAttempt: vi.fn(),
+  failUnexecutedActions: vi.fn(),
   failInterruptedActions: vi.fn(),
   insertQueuedLeads: vi.fn(),
   resolveLeadsByRefs: vi.fn(),
@@ -87,7 +89,7 @@ vi.mock('@/lib/supabase/server', () => ({
 }))
 
 import { nextRun as ruleNextRun } from '@/lib/rules/nextRun'
-import { EXECUTABLE_KINDS, executeAction, recoverInterruptedActions, sweepStuckActions } from '@/lib/actions/execute'
+import { EXECUTABLE_KINDS, executeAction, MAX_DISPATCH_ATTEMPTS, recoverInterruptedActions, sweepStuckActions } from '@/lib/actions/execute'
 import { POST as decidePOST, maxDuration } from '@/app/api/actions/[id]/decide/route'
 import { POST as executePOST } from '@/app/api/actions/[id]/execute/route'
 import { POST as createPOST } from '@/app/api/actions/route'
@@ -606,6 +608,8 @@ describe('sweepStuckActions', () => {
     fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
     vi.stubEnv('LUME_ACTION_SECRET', 'action-secret')
+    store.bumpDispatchAttempt.mockResolvedValue(true)
+    store.failUnexecutedActions.mockResolvedValue([])
   })
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -613,11 +617,11 @@ describe('sweepStuckActions', () => {
   })
 
   it('asks for at most 10 approved rows decided over 2 minutes ago and POSTs each to the execute route; never runs inline', async () => {
-    store.getStaleApprovedIds.mockResolvedValue([ID])
+    store.getStaleApproved.mockResolvedValue([{ id: ID, dispatch_attempts: 0 }])
     fetchSpy.mockResolvedValue(new Response('{}', { status: 200 }))
     const out = await sweepStuckActions(now, ORIGIN + '/')
-    expect(store.getStaleApprovedIds.mock.calls[0][0].toISOString()).toBe('2026-10-25T11:58:00.000Z')
-    expect(store.getStaleApprovedIds.mock.calls[0][1]).toBe(10)
+    expect(store.getStaleApproved.mock.calls[0][0].toISOString()).toBe('2026-10-25T11:58:00.000Z')
+    expect(store.getStaleApproved.mock.calls[0][1]).toBe(10)
     expect(fetchSpy).toHaveBeenCalledOnce()
     const [url, init] = fetchSpy.mock.calls[0]
     expect(url).toBe(`${ORIGIN}/api/actions/${ID}/execute`)
@@ -629,13 +633,13 @@ describe('sweepStuckActions', () => {
   })
 
   it('a dispatch that times out counts as dispatched (the execute route keeps running)', async () => {
-    store.getStaleApprovedIds.mockResolvedValue([ID])
+    store.getStaleApproved.mockResolvedValue([{ id: ID, dispatch_attempts: 0 }])
     fetchSpy.mockRejectedValue(Object.assign(new Error('timed out'), { name: 'TimeoutError' }))
     expect(await sweepStuckActions(now, ORIGIN)).toEqual([{ id: ID, outcome: 'dispatched' }])
   })
 
   it('a refused or unreachable dispatch is reported as an error', async () => {
-    store.getStaleApprovedIds.mockResolvedValue(['a', 'b'])
+    store.getStaleApproved.mockResolvedValue([{ id: 'a', dispatch_attempts: 0 }, { id: 'b', dispatch_attempts: 1 }])
     fetchSpy
       .mockResolvedValueOnce(new Response('{}', { status: 401 }))
       .mockRejectedValueOnce(new TypeError('fetch failed'))
@@ -647,13 +651,39 @@ describe('sweepStuckActions', () => {
 
   it('without LUME_ACTION_SECRET nothing is sent', async () => {
     vi.stubEnv('LUME_ACTION_SECRET', '')
-    store.getStaleApprovedIds.mockResolvedValue([ID])
+    store.getStaleApproved.mockResolvedValue([{ id: ID, dispatch_attempts: 0 }])
     expect(await sweepStuckActions(now, ORIGIN)).toEqual([{ id: ID, outcome: { error: 'LUME_ACTION_SECRET is not set' } }])
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
+  it('counts each re-send, conditional on the count it read', async () => {
+    store.getStaleApproved.mockResolvedValue([{ id: ID, dispatch_attempts: 2 }])
+    fetchSpy.mockResolvedValue(new Response('{}', { status: 200 }))
+    await sweepStuckActions(now, ORIGIN)
+    expect(store.bumpDispatchAttempt).toHaveBeenCalledWith(ID, 2)
+    expect(fetchSpy).toHaveBeenCalledOnce()
+  })
+
+  it('a row another tick already counted is skipped, not sent twice', async () => {
+    store.getStaleApproved.mockResolvedValue([{ id: ID, dispatch_attempts: 1 }])
+    store.bumpDispatchAttempt.mockResolvedValue(false)
+    expect(await sweepStuckActions(now, ORIGIN)).toEqual([])
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it(`retry cap: after ${MAX_DISPATCH_ATTEMPTS} re-sends the row is failed as not_executed and never sent again`, async () => {
+    store.getStaleApproved.mockResolvedValue([{ id: 'spent', dispatch_attempts: MAX_DISPATCH_ATTEMPTS }, { id: 'live', dispatch_attempts: MAX_DISPATCH_ATTEMPTS - 1 }])
+    store.failUnexecutedActions.mockResolvedValue([{ id: 'spent', kind: 'pause_campaign', payload: { summary: 'Pause X' }, status: 'failed' }])
+    fetchSpy.mockResolvedValue(new Response('{}', { status: 200 }))
+    const out = await sweepStuckActions(now, ORIGIN)
+    expect(store.failUnexecutedActions).toHaveBeenCalledWith(['spent'])
+    expect(out).toEqual([{ id: 'spent', outcome: 'gave_up' }, { id: 'live', outcome: 'dispatched' }])
+    expect(fetchSpy).toHaveBeenCalledOnce()
+    expect(fetchSpy.mock.calls[0][0]).toContain('/live/execute')
+  })
+
   it('nothing stale → nothing sent', async () => {
-    store.getStaleApprovedIds.mockResolvedValue([])
+    store.getStaleApproved.mockResolvedValue([])
     expect(await sweepStuckActions(now, ORIGIN)).toEqual([])
     expect(fetchSpy).not.toHaveBeenCalled()
   })

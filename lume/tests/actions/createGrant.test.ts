@@ -84,3 +84,18 @@ describe('createAction: webhook push (3f)', () => {
     expect(push.pushForItem).not.toHaveBeenCalled()
   })
 })
+
+describe('createAction: MCP may only file its own kinds', () => {
+  it.each(['send_reply', 'remove_leads', 'issue_operator_key', 'run_actor', 'decide_gate', 'delete_lead_list'] as const)('refuses %s requested by mcp, before any insert or prompt', async (kind) => {
+    await expect(createAction(kind, payload, 'mcp')).rejects.toThrow(/kind_not_allowed_for_mcp/)
+    expect(svc.insertPendingAction).not.toHaveBeenCalled()
+    expect(grant.tryGrantSend).not.toHaveBeenCalled()
+    expect(tg.sendActionPrompt).not.toHaveBeenCalled()
+  })
+  it('the same send_reply from a person still goes through', async () => {
+    grant.tryGrantSend.mockResolvedValue({ granted: false, reason: 'mode_owner' })
+    await createAction('send_reply', payload, 'user')
+    expect(svc.insertPendingAction).toHaveBeenCalledTimes(1)
+  })
+})
+

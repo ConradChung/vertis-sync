@@ -101,7 +101,7 @@ export async function runRotationTick(now: Date, origin: string): Promise<TickRe
   const swept: TickResult['swept'] = []
   try {
     for (const s of await sweepStuckActions(now, origin)) {
-      swept.push({ id: s.id, status: s.outcome === 'dispatched' ? 'dispatched' : `error: ${s.outcome.error}` })
+      swept.push({ id: s.id, status: typeof s.outcome === 'string' ? s.outcome : `error: ${s.outcome.error}` })
     }
   } catch (err) {
     errors.push(`sweep: ${msg(err)}`)

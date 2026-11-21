@@ -4,7 +4,7 @@ vi.mock('@/lib/supabase/service', () => ({ createServiceClient: () => { throw ne
 import { mcpWriteMode } from '@/lib/mcp/config'
 import { allTools, buildMcpHandler } from '@/lib/mcp/server'
 
-async function listTools(mode: 'off' | 'internal') {
+async function listTools(mode: 'off' | 'internal' | 'gated') {
   const res = await buildMcpHandler(allTools(mode))(new Request('http://localhost/api/mcp', {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-06-18' },
@@ -35,6 +35,14 @@ describe('write switch (LUME_MCP_WRITES)', () => {
     const tools = await listTools('internal')
     expect(tools).toHaveLength(29)
     expect(tools.filter((t) => t.annotations.readOnlyHint === false).map((t) => t.name).sort()).toHaveLength(7)
+  })
+
+  it('gated: + the 15 group C tools; read helpers stay read-only', async () => {
+    const tools = await listTools('gated')
+    expect(tools).toHaveLength(44)
+    const c = tools.filter((t) => t.name.startsWith('lume_') && !allTools('internal').some((x) => x.name === t.name))
+    expect(c).toHaveLength(15)
+    expect(c.filter((t) => t.annotations.readOnlyHint).map((t) => t.name).sort()).toEqual(['lume_get_campaign_sequence', 'lume_suggest_campaign_setup'])
   })
 
   it('defaults to the env and the env defaults to off', () => {

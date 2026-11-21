@@ -1,4 +1,5 @@
 import 'server-only'
+import { MCP_CREATABLE_KINDS, McpKindNotAllowedError } from '@/lib/actions/mcpPolicy'
 import { findAwaitingAction, findAwaitingRuleAction, insertPendingAction, isDbError, setActionMessageId } from '@/lib/db/service'
 import { buildActionPrompt } from '@/lib/adapters/telegram.messages'
 import { alert, alertLink, gateKey, telegramSkipped, titleFrom } from '@/lib/alerts'
@@ -124,6 +125,8 @@ export async function createAction(
   requestedBy: PendingActionRow['requested_by'],
   meta: CreateActionMeta = {}
 ): Promise<PendingActionRow> {
+  // MCP may only file the kinds its own tools map to (lib/actions/mcpPolicy.ts).
+  if (requestedBy === 'mcp' && !MCP_CREATABLE_KINDS.has(kind)) throw new McpKindNotAllowedError(kind)
   const ruleId = meta.ruleId ?? null
   let campaignKey: { field: string; value: string } | null = null
   if (isCampaignActionKind(kind)) {
