@@ -1,4 +1,5 @@
 import 'server-only'
+import { getCampaignDetail, sourceHash } from '@/lib/adapters/instantlyWrite'
 import { z } from 'zod'
 import { CAMPAIGN_ACTION_KINDS, parseCampaignPayload, type CampaignActionKind } from '@/lib/actions/payloads'
 import { getEmailLead, isInstantlyConfigured, listCampaigns } from '@/lib/adapters/instantly'
@@ -26,6 +27,7 @@ import { buildInfluencerApprove } from '@/lib/influencers/approveAction'
 import { buildDeleteLeadList, buildRemoveLeadRows, buildSendLeadList } from '@/lib/leads/lists/actions'
 import { buildNewCampaign } from '@/lib/campaigns/newCampaign'
 import { buildBankQueue } from '@/lib/rotation/pushesStore'
+import { buildCompanyCheck } from '@/lib/companyCheck/action'
 
 /**
  * Turn a requested action `{ kind, payload }` into the snapshot the owner
@@ -66,6 +68,8 @@ import { buildBankQueue } from '@/lib/rotation/pushesStore'
  *                     inboxes, tag, template and name checked live; the copy frozen
  *  bank_queue         { op: restart | move, source_job_id, campaign_id, to_campaign_id? } →
  *                     lib/rotation/pushesStore.ts: one push's lead bank queue, count frozen now
+ *  company_check      { job_id, icp?, scope?, max_usd? } → lib/companyCheck/action.ts: the job's companies
+ *                     in scope (all | sending) not yet checked for this ICP x $0.00706 and a hard cap the edge function stops at
  *  send_reply / pause_campaign / resume_campaign / create_campaign:
  *                     lib/actions/payloads.ts, with the display extras
  *                     written here (`withServerExtras`): the campaign name
@@ -117,9 +121,10 @@ const InfluencerApproveBody = z.object({ kind: z.literal('influencer_approve'), 
 const LeadListBody = z.object({ kind: z.enum(['send_lead_list', 'delete_lead_list', 'remove_lead_rows']), payload: z.record(z.string(), z.unknown()) })
 const NewCampaignBody = z.object({ kind: z.literal('new_campaign'), payload: z.record(z.string(), z.unknown()) })
 const BankQueueRequest = z.object({ kind: z.literal('bank_queue'), payload: z.record(z.string(), z.unknown()) })
+const CompanyCheckBody = z.object({ kind: z.literal('company_check'), payload: z.record(z.string(), z.unknown()) })
 
 /** Shape check for `POST /api/actions`; `buildActionRequest` validates each payload fully. */
-export const ActionRequestBody = z.union([JobBody, rotateActionBody, OtherBody, RunActorBody, UpdateSequenceBody, RemoveLeadsBody, LabelReplyBody, InfluencerBody, StageAttachmentBody, InfluencerLookupBody, InfluencerApproveBody, LeadListBody, NewCampaignBody, BankQueueRequest, CampaignBody])
+export const ActionRequestBody = z.union([JobBody, rotateActionBody, OtherBody, RunActorBody, UpdateSequenceBody, RemoveLeadsBody, LabelReplyBody, InfluencerBody, StageAttachmentBody, InfluencerLookupBody, InfluencerApproveBody, LeadListBody, NewCampaignBody, BankQueueRequest, CompanyCheckBody, CampaignBody])
 export type ActionRequest = z.infer<typeof ActionRequestBody>
 
 export type ActionBuild =
@@ -225,6 +230,8 @@ export async function buildActionRequest(input: unknown): Promise<ActionBuild> {
       return buildNewCampaign(req.payload)
     case 'bank_queue':
       return buildBankQueue(req.payload, campaignName)
+    case 'company_check':
+      return buildCompanyCheck(req.payload)
     case 'push_to_instantly':
     case 'launch_campaign':
       return buildJobAction(req.kind, (req.payload as { job_id: string }).job_id.toLowerCase())
@@ -403,6 +410,18 @@ async function withServerExtras(kind: CampaignActionKind, raw: Record<string, un
   }
   const id = text(kind === 'create_campaign' ? p.source_campaign_id : p.campaign_id)
   if (id) p.campaign_name = await campaignName(id)
+  if (kind === 'create_campaign') {
+    // Server-only: fingerprint the source as it is now, so approval can show a change.
+    delete p.source_hash
+    // Only for a request that can be filed (shape errors are refused later without a call).
+    if (id && text(p.name)) {
+      try {
+        p.source_hash = sourceHash(await getCampaignDetail(id))
+      } catch (err) {
+        console.error('[actions/build] could not fingerprint the source campaign:', err instanceof Error ? err.message : err)
+      }
+    }
+  }
   return { payload: p }
 }
 

@@ -26,7 +26,7 @@ export interface LeadList {
   id: string
   name: string
   notes: string | null
-  created_by: 'agent' | 'owner' | null
+  created_by: 'agent' | 'owner' | 'mcp' | null
   project_id: string | null
   project_default: boolean
   item_count: number
@@ -88,7 +88,7 @@ const now = () => new Date().toISOString()
 export async function createList(input: {
   name: string
   notes?: string | null
-  created_by: 'agent' | 'owner'
+  created_by: 'agent' | 'owner' | 'mcp'
   project_id?: string | null
   project_default?: boolean
   sheet_kind?: LeadList['sheet_kind']

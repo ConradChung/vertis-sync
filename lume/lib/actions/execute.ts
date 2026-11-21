@@ -2,6 +2,7 @@ import 'server-only'
 import { decide, type DecideResult } from '@/lib/adapters/pipeline'
 import {
   createCampaignFrom,
+  SourceChangedError,
   getCampaignDetail,
   pauseCampaign,
   resumeCampaign,
@@ -44,6 +45,7 @@ import { executeDeleteLeadList, executeRemoveLeadRows, executeSendLeadList } fro
 import type { RunOptions } from '@/lib/apify/pricing'
 import { executeNewCampaign } from '@/lib/campaigns/newCampaignExec'
 import { executeBankQueue } from '@/lib/rotation/pushesStore'
+import { executeCompanyCheck } from '@/lib/companyCheck/action'
 import type { Json, PendingActionRow } from '@/lib/db/types'
 import { nextRun } from '@/lib/rules/nextRun'
 import { parseRuleFilter } from '@/lib/rules/filter'
@@ -55,7 +57,7 @@ import {
   finishAction,
   getAction,
   getRule,
-  getStaleApprovedIds,
+  getStaleApproved, bumpDispatchAttempt, failUnexecutedActions,
   insertQueuedLeads,
   markSendAttempted,
   resolveLeadsByFilter,
@@ -497,6 +499,13 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
     return out.result
   },
 
+  /** The per-company web check of a validation job, after re-checking there is something to check and no run in progress. */
+  async company_check(p, action) {
+    const out = await executeCompanyCheck(p, action.id)
+    if (!out.ok) throw new ActionFailure(out.error, out.result)
+    return out.result
+  },
+
   /** A chat spreadsheet's sheet → the Import CSV path (ingest gate), after re-checking rows and email column. */
   async stage_attachment(p) {
     const out = await executeStageAttachment(p)
@@ -576,8 +585,34 @@ const HANDLERS: Record<PendingActionRow['kind'], Handler> = {
   },
 
   async create_campaign(p) {
-    const created = await createCampaignFrom(need(p, 'source_campaign_id'), need(p, 'name'))
-    return { source_campaign_id: need(p, 'source_campaign_id'), campaign_id: created.id, name: created.name }
+    const asked = typeof p.source_hash === 'string' ? p.source_hash : null
+    let created: Awaited<ReturnType<typeof createCampaignFrom>>
+    try {
+      // Owner decision 2026-11-21: a source that changed since the request is
+      // refused, not copied, so a Telegram approval can never copy something
+      // other than what was requested. Rows without a fingerprint copy as before.
+      created = await createCampaignFrom(need(p, 'source_campaign_id'), need(p, 'name'), undefined, { expectSourceHash: asked })
+    } catch (err) {
+      if (err instanceof SourceChangedError) {
+        throw new ActionFailure('The source campaign changed since this copy was requested (inboxes, schedule, daily limit, sequence or stop-on-reply). Nothing was created; request the copy again.', {
+          reason: 'source_changed',
+          source_hash_requested: err.expected,
+          source_hash_now: err.actual,
+          source_changed: true,
+        })
+      }
+      throw err
+    }
+    return {
+      source_campaign_id: need(p, 'source_campaign_id'),
+      campaign_id: created.id,
+      name: created.name,
+      status: 'draft',
+      source_hash_requested: asked,
+      source_hash_copied: created.sourceHash,
+      // null when the request carried no fingerprint (older rows).
+      source_changed: asked === null ? null : false,
+    }
   },
 
   /**
@@ -679,7 +714,10 @@ export const DISPATCH_TIMEOUT_MS = 2_500
 /** An `executing` row this old was cut mid-handler (execute's maxDuration is 300 s). */
 export const INTERRUPTED_AFTER_MS = 10 * 60_000
 
-export type SweepOutcome = 'dispatched' | { error: string }
+/** Re-sends of one approved row before the sweeper gives up and fails it (~1 h at one tick per 15 min). */
+export const MAX_DISPATCH_ATTEMPTS = 4
+
+export type SweepOutcome = 'dispatched' | 'gave_up' | { error: string }
 
 /**
  * Re-dispatch approved actions nobody executed (the Telegram path fires
@@ -690,14 +728,54 @@ export type SweepOutcome = 'dispatched' | { error: string }
  * Only the first ~2.5 s are awaited: an abort means the request went out and
  * the route is working, so it counts as dispatched. The route's claim makes a
  * duplicate dispatch a no-op. At most SWEEP_LIMIT per tick.
+ *
+ * Retry cap: each re-send is counted (`dispatch_attempts`). A row already
+ * re-sent MAX_DISPATCH_ATTEMPTS times is failed as 'not_executed' with a
+ * notice instead of being sent again forever; nothing ran, so approving a
+ * fresh action is the retry.
  */
 export async function sweepStuckActions(now: Date, origin: string): Promise<{ id: string; outcome: SweepOutcome }[]> {
-  const ids = await getStaleApprovedIds(new Date(now.getTime() - SWEEP_AFTER_MS), SWEEP_LIMIT)
-  if (!ids.length) return []
+  const rows = await getStaleApproved(new Date(now.getTime() - SWEEP_AFTER_MS), SWEEP_LIMIT)
+  if (!rows.length) return []
+  const spent = rows.filter((r) => r.dispatch_attempts >= MAX_DISPATCH_ATTEMPTS).map((r) => r.id)
+  const failed = await failUnexecutedActions(spent)
+  await Promise.all(failed.map(noticeNotExecuted))
+  const out: { id: string; outcome: SweepOutcome }[] = failed.map((r) => ({ id: r.id, outcome: 'gave_up' as const }))
+  const live = rows.filter((r) => r.dispatch_attempts < MAX_DISPATCH_ATTEMPTS)
+  if (!live.length) return out
   const secret = process.env.LUME_ACTION_SECRET
-  if (!secret) return ids.map((id) => ({ id, outcome: { error: 'LUME_ACTION_SECRET is not set' } }))
+  if (!secret) return [...out, ...live.map((r) => ({ id: r.id, outcome: { error: 'LUME_ACTION_SECRET is not set' } }))]
   const base = origin.replace(/\/+$/, '')
-  return Promise.all(ids.map(async (id) => ({ id, outcome: await dispatchExecute(`${base}/api/actions/${id}/execute`, secret) })))
+  const sent = await Promise.all(
+    live.map(async (r) => {
+      // Another tick (or a finished run) got there first: skip quietly.
+      if (!(await bumpDispatchAttempt(r.id, r.dispatch_attempts))) return null
+      return { id: r.id, outcome: await dispatchExecute(`${base}/api/actions/${r.id}/execute`, secret) }
+    }),
+  )
+  return [...out, ...sent.filter((s): s is { id: string; outcome: SweepOutcome } => s !== null)]
+}
+
+async function noticeNotExecuted(a: PendingActionRow): Promise<void> {
+  const link = actionLink(a.id)
+  const lines = [`⚠️ Not run — ${a.kind}`, summaryOf(a), `Approved, but it never started after ${MAX_DISPATCH_ATTEMPTS} re-sends. Nothing was done; request it again to retry.`]
+  if (link) lines.push(link)
+  const text = lines.join('\n')
+  const route = routeItemForAction(a)
+  try {
+    await alert({
+      source: 'lume.actions', severity: 'warn', title: titleFrom(text), body: text,
+      link: alertLink(`/actions/${a.id}`), campaign_id: route.campaign_id, scope: route.scope, owner_only: route.owner_only,
+      telegram: () => sendMessage(text, { disablePreview: true }),
+    })
+  } catch (err) {
+    console.error('[actions] telegram not-run notice failed:', err instanceof Error ? err.message : err)
+  }
+  try {
+    await logEvent({ type: 'lume.action.failed', source: 'lume', source_id: a.id, title: `${a.kind} not executed`, payload: { kind: a.kind, error: 'not_executed' } })
+  } catch (err) {
+    console.error('[actions] logEvent failed:', err instanceof Error ? err.message : err)
+  }
 }
 
 /**

@@ -6,7 +6,9 @@ const store = vi.hoisted(() => ({
   claimExecution: vi.fn(),
   finishAction: vi.fn(),
   getAction: vi.fn(),
-  getStaleApprovedIds: vi.fn(),
+  getStaleApproved: vi.fn(),
+  bumpDispatchAttempt: vi.fn(),
+  failUnexecutedActions: vi.fn(),
   failInterruptedActions: vi.fn(),
   insertQueuedLeads: vi.fn(),
   resolveLeadsByRefs: vi.fn(),
@@ -42,6 +44,14 @@ vi.mock('@/lib/adapters/instantlyPush', () => ({ getPushPreview: vi.fn() }))
 const decide = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/adapters/pipeline', () => ({ decide }))
 
+const SourceChangedError = vi.hoisted(
+  () =>
+    class SourceChangedError extends Error {
+      constructor(readonly expected: string, readonly actual: string) {
+        super('changed')
+      }
+    },
+)
 const ins = vi.hoisted(() => ({
   getCampaignDetail: vi.fn(),
   pauseCampaign: vi.fn(),
@@ -49,7 +59,7 @@ const ins = vi.hoisted(() => ({
   sendReply: vi.fn(),
   createCampaignFrom: vi.fn(),
 }))
-vi.mock('@/lib/adapters/instantlyWrite', () => ins)
+vi.mock('@/lib/adapters/instantlyWrite', () => ({ ...ins, SourceChangedError }))
 
 const em = vi.hoisted(() => ({ getEmail: vi.fn(), getThreadEmails: vi.fn() }))
 vi.mock('@/lib/adapters/instantlyEmails', () => em)
@@ -87,7 +97,7 @@ vi.mock('@/lib/supabase/server', () => ({
 }))
 
 import { nextRun as ruleNextRun } from '@/lib/rules/nextRun'
-import { EXECUTABLE_KINDS, executeAction, recoverInterruptedActions, sweepStuckActions } from '@/lib/actions/execute'
+import { EXECUTABLE_KINDS, executeAction, MAX_DISPATCH_ATTEMPTS, recoverInterruptedActions, sweepStuckActions } from '@/lib/actions/execute'
 import { POST as decidePOST, maxDuration } from '@/app/api/actions/[id]/decide/route'
 import { POST as executePOST } from '@/app/api/actions/[id]/execute/route'
 import { POST as createPOST } from '@/app/api/actions/route'
@@ -136,7 +146,7 @@ const lastFinish = () => store.finishAction.mock.calls.at(-1)!
 describe('executeAction dispatch table', () => {
   it('has a handler for every kind the DB allows', () => {
     expect(EXECUTABLE_KINDS.sort()).toEqual([
-      'activate_rule', 'assign_leads', 'bank_queue', 'create_campaign', 'crm_close_deal', 'decide_gate', 'delete_lead_list', 'delete_rule', 'influencer_approve', 'influencer_lookup', 'influencer_reactions', 'influencer_run',
+      'activate_rule', 'assign_leads', 'bank_queue', 'company_check', 'create_campaign', 'crm_close_deal', 'decide_gate', 'delete_lead_list', 'delete_rule', 'influencer_approve', 'influencer_lookup', 'influencer_reactions', 'influencer_run',
       'issue_operator_key', 'label_reply', 'launch_campaign', 'new_campaign', 'pause_campaign', 'push_to_instantly', 'remove_lead_rows', 'remove_leads', 'resume_campaign', 'run_actor', 'send_lead_list', 'send_reply',
       'stage_attachment', 'update_sequence',
     ])
@@ -560,11 +570,27 @@ describe('executeAction dispatch table', () => {
     expect(ins.resumeCampaign).toHaveBeenCalledWith('camp-1')
   })
 
-  it('create_campaign: mirrors the source campaign', async () => {
+  it('create_campaign: mirrors the source campaign as a draft', async () => {
     store.claimExecution.mockResolvedValue(row('create_campaign', { source_campaign_id: 'camp-1', name: 'Copy' }))
-    ins.createCampaignFrom.mockResolvedValue({ id: 'camp-9', name: 'Copy' })
-    expect(await executeAction(ID)).toMatchObject({ status: 'executed', result: { campaign_id: 'camp-9' } })
-    expect(ins.createCampaignFrom).toHaveBeenCalledWith('camp-1', 'Copy')
+    ins.createCampaignFrom.mockResolvedValue({ id: 'camp-9', name: 'Copy', sourceHash: 'c'.repeat(32) })
+    expect(await executeAction(ID)).toMatchObject({ status: 'executed', result: { campaign_id: 'camp-9', status: 'draft', source_changed: null } })
+    expect(ins.createCampaignFrom).toHaveBeenCalledWith('camp-1', 'Copy', undefined, { expectSourceHash: null })
+    expect(ins.resumeCampaign).not.toHaveBeenCalled()
+  })
+
+  it('create_campaign passes the request fingerprint so a changed source is refused before anything is created', async () => {
+    store.claimExecution.mockResolvedValue(row('create_campaign', { source_campaign_id: 'camp-1', name: 'Copy', source_hash: 'a'.repeat(32) }))
+    ins.createCampaignFrom.mockResolvedValue({ id: 'camp-9', name: 'Copy', sourceHash: 'a'.repeat(32) })
+    expect(await executeAction(ID)).toMatchObject({ status: 'executed', result: { source_hash_requested: 'a'.repeat(32), source_changed: false } })
+    expect(ins.createCampaignFrom).toHaveBeenCalledWith('camp-1', 'Copy', undefined, { expectSourceHash: 'a'.repeat(32) })
+  })
+
+  it('create_campaign: a changed source fails the action with source_changed', async () => {
+    store.claimExecution.mockResolvedValue(row('create_campaign', { source_campaign_id: 'camp-1', name: 'Copy', source_hash: 'a'.repeat(32) }))
+    ins.createCampaignFrom.mockRejectedValue(new SourceChangedError('a'.repeat(32), 'b'.repeat(32)))
+    const out = await executeAction(ID)
+    expect(out).toMatchObject({ status: 'failed', result: { reason: 'source_changed', source_hash_now: 'b'.repeat(32), source_changed: true } })
+    expect(JSON.stringify(out)).toMatch(/Nothing was created/)
   })
 
   it('a thrown adapter error → failed with result.error', async () => {
@@ -606,6 +632,8 @@ describe('sweepStuckActions', () => {
     fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
     vi.stubEnv('LUME_ACTION_SECRET', 'action-secret')
+    store.bumpDispatchAttempt.mockResolvedValue(true)
+    store.failUnexecutedActions.mockResolvedValue([])
   })
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -613,11 +641,11 @@ describe('sweepStuckActions', () => {
   })
 
   it('asks for at most 10 approved rows decided over 2 minutes ago and POSTs each to the execute route; never runs inline', async () => {
-    store.getStaleApprovedIds.mockResolvedValue([ID])
+    store.getStaleApproved.mockResolvedValue([{ id: ID, dispatch_attempts: 0 }])
     fetchSpy.mockResolvedValue(new Response('{}', { status: 200 }))
     const out = await sweepStuckActions(now, ORIGIN + '/')
-    expect(store.getStaleApprovedIds.mock.calls[0][0].toISOString()).toBe('2026-10-25T11:58:00.000Z')
-    expect(store.getStaleApprovedIds.mock.calls[0][1]).toBe(10)
+    expect(store.getStaleApproved.mock.calls[0][0].toISOString()).toBe('2026-10-25T11:58:00.000Z')
+    expect(store.getStaleApproved.mock.calls[0][1]).toBe(10)
     expect(fetchSpy).toHaveBeenCalledOnce()
     const [url, init] = fetchSpy.mock.calls[0]
     expect(url).toBe(`${ORIGIN}/api/actions/${ID}/execute`)
@@ -629,13 +657,13 @@ describe('sweepStuckActions', () => {
   })
 
   it('a dispatch that times out counts as dispatched (the execute route keeps running)', async () => {
-    store.getStaleApprovedIds.mockResolvedValue([ID])
+    store.getStaleApproved.mockResolvedValue([{ id: ID, dispatch_attempts: 0 }])
     fetchSpy.mockRejectedValue(Object.assign(new Error('timed out'), { name: 'TimeoutError' }))
     expect(await sweepStuckActions(now, ORIGIN)).toEqual([{ id: ID, outcome: 'dispatched' }])
   })
 
   it('a refused or unreachable dispatch is reported as an error', async () => {
-    store.getStaleApprovedIds.mockResolvedValue(['a', 'b'])
+    store.getStaleApproved.mockResolvedValue([{ id: 'a', dispatch_attempts: 0 }, { id: 'b', dispatch_attempts: 1 }])
     fetchSpy
       .mockResolvedValueOnce(new Response('{}', { status: 401 }))
       .mockRejectedValueOnce(new TypeError('fetch failed'))
@@ -647,13 +675,39 @@ describe('sweepStuckActions', () => {
 
   it('without LUME_ACTION_SECRET nothing is sent', async () => {
     vi.stubEnv('LUME_ACTION_SECRET', '')
-    store.getStaleApprovedIds.mockResolvedValue([ID])
+    store.getStaleApproved.mockResolvedValue([{ id: ID, dispatch_attempts: 0 }])
     expect(await sweepStuckActions(now, ORIGIN)).toEqual([{ id: ID, outcome: { error: 'LUME_ACTION_SECRET is not set' } }])
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
+  it('counts each re-send, conditional on the count it read', async () => {
+    store.getStaleApproved.mockResolvedValue([{ id: ID, dispatch_attempts: 2 }])
+    fetchSpy.mockResolvedValue(new Response('{}', { status: 200 }))
+    await sweepStuckActions(now, ORIGIN)
+    expect(store.bumpDispatchAttempt).toHaveBeenCalledWith(ID, 2)
+    expect(fetchSpy).toHaveBeenCalledOnce()
+  })
+
+  it('a row another tick already counted is skipped, not sent twice', async () => {
+    store.getStaleApproved.mockResolvedValue([{ id: ID, dispatch_attempts: 1 }])
+    store.bumpDispatchAttempt.mockResolvedValue(false)
+    expect(await sweepStuckActions(now, ORIGIN)).toEqual([])
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it(`retry cap: after ${MAX_DISPATCH_ATTEMPTS} re-sends the row is failed as not_executed and never sent again`, async () => {
+    store.getStaleApproved.mockResolvedValue([{ id: 'spent', dispatch_attempts: MAX_DISPATCH_ATTEMPTS }, { id: 'live', dispatch_attempts: MAX_DISPATCH_ATTEMPTS - 1 }])
+    store.failUnexecutedActions.mockResolvedValue([{ id: 'spent', kind: 'pause_campaign', payload: { summary: 'Pause X' }, status: 'failed' }])
+    fetchSpy.mockResolvedValue(new Response('{}', { status: 200 }))
+    const out = await sweepStuckActions(now, ORIGIN)
+    expect(store.failUnexecutedActions).toHaveBeenCalledWith(['spent'])
+    expect(out).toEqual([{ id: 'spent', outcome: 'gave_up' }, { id: 'live', outcome: 'dispatched' }])
+    expect(fetchSpy).toHaveBeenCalledOnce()
+    expect(fetchSpy.mock.calls[0][0]).toContain('/live/execute')
+  })
+
   it('nothing stale → nothing sent', async () => {
-    store.getStaleApprovedIds.mockResolvedValue([])
+    store.getStaleApproved.mockResolvedValue([])
     expect(await sweepStuckActions(now, ORIGIN)).toEqual([])
     expect(fetchSpy).not.toHaveBeenCalled()
   })

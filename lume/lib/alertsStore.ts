@@ -46,13 +46,14 @@ export type AckTarget = { ids: string[]; all?: undefined } | { all: true; ids?: 
 /**
  * Acknowledge unacked alerts: the given ids, or every unacked one. Already
  * acked rows are left as they were (first ack wins). `operatorId` records the
- * Grok Bot that acked; null for the owner. Returns the ids acked by this call.
+ * Grok Bot that acked; null for the owner. `via: 'mcp'` marks an agent ack through the MCP server. Returns the ids acked by this call.
  */
-export async function ackAlerts(target: AckTarget, operatorId: string | null): Promise<string[]> {
+export async function ackAlerts(target: AckTarget, operatorId: string | null, via?: 'mcp'): Promise<string[]> {
   if (!target.all && target.ids.length === 0) return []
   let q = createServiceClient()
     .from('lume_alerts')
-    .update({ acked_at: new Date().toISOString(), acked_by_operator: operatorId })
+    // `acked_via` is set only for MCP acks (null = dashboard, operator, reply inbox).
+    .update({ acked_at: new Date().toISOString(), acked_by_operator: operatorId, ...(via ? { acked_via: via } : {}) })
     .is('acked_at', null)
   if (!target.all) q = q.in('id', target.ids)
   const res = await q.select('id')

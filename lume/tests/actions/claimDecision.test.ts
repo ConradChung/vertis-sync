@@ -13,6 +13,10 @@ function client() {
         filters.push([col, v])
         return b
       }
+      b.neq = (col: string, v: unknown) => {
+        filters.push([`neq:${col}`, v])
+        return b
+      }
       b.or = (expr: string) => {
         filters.push(['or', expr])
         return b
@@ -47,6 +51,14 @@ describe('claimDecision', () => {
     // Only an untouched row is claimable: a Telegram tap or Lume click that won first leaves nothing.
     expect(filters).toEqual(expect.arrayContaining([['id', 'a1'], ['claim_status', 'awaiting'], ['status', 'awaiting']]))
     expect(updates[0]).not.toHaveProperty('decided_by_operator')
+  })
+  it.each(['agent', 'grant'] as const)("decided_via '%s' never claims an MCP-requested row", async (via) => {
+    await claimDecision('a1', true, via)
+    expect(filters).toContainEqual(['neq:requested_by', 'mcp'])
+  })
+  it.each(['lume', 'operator', 'mcp'] as const)("decided_via '%s' may claim an MCP-requested row", async (via) => {
+    await claimDecision('a1', true, via)
+    expect(filters.some(([c]) => c === 'neq:requested_by')).toBe(false)
   })
   it("records decided_via 'operator' and the deciding Grok Bot", async () => {
     await claimDecision('a1', false, 'operator', 'op-1')

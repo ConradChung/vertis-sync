@@ -20,7 +20,7 @@ export const INLINE_MAX_ROWS = 200
 /** Most rows one paste may carry. */
 export const PASTE_MAX_ROWS = 5_000
 
-export const ITEM_SOURCES = ['attachment', 'actor_run', 'review_set', 'influencer_export', 'manual', 'agent'] as const
+export const ITEM_SOURCES = ['attachment', 'actor_run', 'review_set', 'influencer_export', 'manual', 'agent', 'mcp'] as const
 export type ItemSource = (typeof ITEM_SOURCES)[number]
 
 /** The fields the owner edits in a cell (and the agent passes inline). */

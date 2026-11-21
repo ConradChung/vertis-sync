@@ -104,6 +104,8 @@ const KIND_SCOPE: Record<PendingActionKind, VerticalScope | null> = {
   // The influencer LinkedIn lookup (Perplexity): a paid data order.
   influencer_lookup: 'orders',
   influencer_approve: 'orders',
+  // The per-company web check of a validation job's leads (Perplexity + Haiku).
+  company_check: 'validation',
   send_lead_list: 'validation',
   delete_lead_list: null,
   remove_lead_rows: null,

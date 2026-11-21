@@ -409,7 +409,7 @@ function TaskDetail({ task, onSaved }: { task: LumeTaskRow; onSaved: () => void 
           )}
         </dd>
         <dt className="text-fg-46">Created</dt>
-        <dd className="text-fg-70">by {task.created_by === 'agent' ? 'the agent' : 'you'}</dd>
+        <dd className="text-fg-70">by {task.created_by === 'agent' ? 'the agent' : task.created_by === 'mcp' ? 'Claude (MCP)' : 'you'}</dd>
       </dl>
 
       {resched && (

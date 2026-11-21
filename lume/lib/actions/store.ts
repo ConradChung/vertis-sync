@@ -1,4 +1,5 @@
 import 'server-only'
+import { MCP_FORBIDDEN_DECIDERS } from '@/lib/actions/mcpPolicy'
 import { createServiceClient } from '@/lib/supabase/service'
 import type { PostgrestError } from '@supabase/supabase-js'
 import { DbError } from '@/lib/db/service'
@@ -49,12 +50,12 @@ export async function getActionStatuses(ids: string[]): Promise<Map<string, stri
 export async function claimDecision(
   id: string,
   approve: boolean,
-  via: 'lume' | 'agent' | 'operator' | 'grant' = 'lume',
+  via: 'lume' | 'agent' | 'operator' | 'grant' | 'mcp' = 'lume',
   operatorId?: string | null,
   payload?: Record<string, Json>
 ): Promise<PendingActionRow | null> {
   const sb = createServiceClient()
-  const res = await sb
+  const q = sb
     .from('pending_actions')
     .update({
       claim_status: 'claimed',
@@ -67,7 +68,10 @@ export async function claimDecision(
     .eq('id', id)
     .eq('claim_status', 'awaiting')
     .eq('status', 'awaiting')
-    .select()
+  // An MCP-requested row is never decided by a grant or the agent's skip
+  // mode: only a person (dashboard, Telegram, operator) or MCP's own confirm.
+  const guarded = MCP_FORBIDDEN_DECIDERS.has(via) ? q.neq('requested_by', 'mcp') : q
+  const res = await guarded.select()
   if (res.error) throw new DbError('claimDecision', res.error)
   return ((res.data ?? []) as PendingActionRow[])[0] ?? null
 }
@@ -206,19 +210,55 @@ export async function listAwaitingReplyActions(campaignId: string, leadEmail: st
   return [...ids].map((id) => ({ id }))
 }
 
-/** Approved rows nobody executed: the Telegram path's waitUntil was cut. */
-export async function getStaleApprovedIds(olderThan: Date, limit = 20): Promise<string[]> {
+/** Approved rows nobody executed (the Telegram path's waitUntil was cut), with how often the sweeper re-sent each. */
+export async function getStaleApproved(olderThan: Date, limit = 20): Promise<{ id: string; dispatch_attempts: number }[]> {
   const sb = createServiceClient()
   const res = await sb
     .from('pending_actions')
-    .select('id')
+    .select('id, dispatch_attempts')
     .eq('status', 'approved')
     .is('executed_at', null)
     .lt('decided_at', olderThan.toISOString())
     .order('decided_at', { ascending: true })
     .limit(limit)
-  if (res.error) throw new DbError('getStaleApprovedIds', res.error)
-  return ((res.data ?? []) as { id: string }[]).map((r) => r.id)
+  if (res.error) throw new DbError('getStaleApproved', res.error)
+  return ((res.data ?? []) as { id: string; dispatch_attempts: number | null }[]).map((r) => ({ id: r.id, dispatch_attempts: r.dispatch_attempts ?? 0 }))
+}
+
+/**
+ * Count one sweeper re-send. Conditional on the count read, so two ticks
+ * never both send the same attempt. False when the row moved on (executed,
+ * failed) or another tick counted it first.
+ */
+export async function bumpDispatchAttempt(id: string, seen: number): Promise<boolean> {
+  const res = await createServiceClient()
+    .from('pending_actions')
+    .update({ dispatch_attempts: seen + 1 })
+    .eq('id', id)
+    .eq('status', 'approved')
+    .is('executed_at', null)
+    .eq('dispatch_attempts', seen)
+    .select('id')
+  if (res.error) throw new DbError('bumpDispatchAttempt', res.error)
+  return (res.data ?? []).length > 0
+}
+
+/**
+ * Approved rows the sweeper gave up on → `failed` (error 'not_executed').
+ * Safe: an approved row never reached its handler (execute claims it to
+ * `executing` first), so nothing happened. One conditional UPDATE.
+ */
+export async function failUnexecutedActions(ids: string[]): Promise<PendingActionRow[]> {
+  if (!ids.length) return []
+  const res = await createServiceClient()
+    .from('pending_actions')
+    .update({ status: 'failed', error: 'not_executed', result: { error: 'not_executed' }, executed_at: new Date().toISOString() })
+    .in('id', ids)
+    .eq('status', 'approved')
+    .is('executed_at', null)
+    .select()
+  if (res.error) throw new DbError('failUnexecutedActions', res.error)
+  return (res.data ?? []) as PendingActionRow[]
 }
 
 /**

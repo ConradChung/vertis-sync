@@ -6,7 +6,7 @@ import { jobName } from '@/lib/validate/jobs'
  * them with cheap queries.
  */
 
-export type ProgressKind = 'validation' | 'apify' | 'influencer_run' | 'influencer_lookup' | 'leadsfriday_order' | 'job_batch'
+export type ProgressKind = 'validation' | 'apify' | 'influencer_run' | 'influencer_lookup' | 'leadsfriday_order' | 'job_batch' | 'company_check'
 
 export interface ProgressItem {
   key: string
@@ -199,6 +199,41 @@ export function fromLookupBatch(b: LookupBatchLike, counts: Record<string, numbe
     finished: b.status !== 'looking_up',
     error: b.error,
     href: listId ? `/import/leads?list=${listId}` : '/import/leads',
+  })
+}
+
+export interface CompanyCheckRunLike {
+  id: string
+  job_id: string
+  job_name: string | null
+  status: string
+  companies_total: number
+  spent_usd: number | string
+  max_usd: number | string | null
+  error: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** A company check run: companies settled (checked, cached or failed) of its total, spend against the approved cap. */
+export function fromCompanyCheckRun(r: CompanyCheckRunLike, items: Record<string, number>): ProgressItem {
+  const total = Object.values(items).reduce((n, v) => n + v, 0) || r.companies_total
+  return base({
+    key: `company_check:${r.id}`,
+    kind: 'company_check',
+    label: 'Company check',
+    title: r.job_name ?? r.job_id,
+    status: r.status,
+    done: total - (items.pending ?? 0),
+    total,
+    cost_usd: num(r.spent_usd),
+    cap_usd: num(r.max_usd),
+    started_at: r.created_at,
+    updated_at: r.updated_at,
+    finished: r.status !== 'running',
+    error: r.error,
+    href: '/validate',
+    job_id: r.job_id,
   })
 }
 

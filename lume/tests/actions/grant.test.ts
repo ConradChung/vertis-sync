@@ -50,6 +50,11 @@ describe('the reply grant', () => {
     await vi.waitFor(() => expect(exec.executeAction).toHaveBeenCalledWith('a-1'))
   })
 
+  it('never grants an MCP-requested reply, and never claims it', async () => {
+    const out = await tryGrantSend({ ...row(), requested_by: 'mcp' } as unknown as PendingActionRow)
+    expect(out).toEqual({ granted: false, reason: 'policy' })
+    expect(store.claimDecision).not.toHaveBeenCalled()
+  })
   it('Owner and Client modes never claim (client is owner until 3g)', async () => {
     for (const m of ['owner', 'client']) {
       modes.getReplyMode.mockResolvedValue(m)

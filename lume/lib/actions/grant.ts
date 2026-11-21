@@ -66,6 +66,8 @@ export type GrantOutcome = { granted: true; row: PendingActionRow } | { granted:
 
 export async function tryGrantSend(row: PendingActionRow): Promise<GrantOutcome> {
   if (row.kind !== 'send_reply') return { granted: false, reason: 'mode_owner' }
+  // Belt and braces: claimDecision also refuses 'grant' on MCP rows.
+  if (row.requested_by === 'mcp') return { granted: false, reason: 'policy' }
   let reason: GrantBlocker | null
   try {
     reason = await evaluateGrant(row.payload)

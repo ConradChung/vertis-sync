@@ -100,8 +100,8 @@ function explain(node: FlowNode, job: JobProgress | null, route?: PushRoute | nu
   }
 }
 
-/** The gate's choices inside the panel: a focusable group (J/K, A/R) carrying the gate key. */
-function StepGate({ gate, focusedKey, busyKeys, countOpenKey, onAction, onCountOpenChange, onFocusGate, blockedFor, relabel, children }: StepGateProps & { gate: GateRow; relabel?: Readonly<Record<string, string>>; children?: ReactNode }) {
+/** The gate's choices inside the panel: a focusable group (J/K, A/R) carrying the gate key. Also the ICP check's approval. */
+export function StepGate({ gate, focusedKey, busyKeys, countOpenKey, onAction, onCountOpenChange, onFocusGate, blockedFor, relabel, children }: StepGateProps & { gate: GateRow; relabel?: Readonly<Record<string, string>>; children?: ReactNode }) {
   const key = gateKey(gate)
   const titleId = useId()
   return (

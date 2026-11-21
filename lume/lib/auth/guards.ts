@@ -5,6 +5,7 @@ import { secretMatches } from '@/lib/auth/secret'
 import { internalBearerMatches } from '@/lib/auth/internalBearer'
 import { hasBearerToken } from '@/lib/auth/bearer'
 import { verifiedSessionUser, type SessionUser } from '@/lib/auth/session'
+import { getPortalUser, type PortalUser } from '@/lib/portal/access'
 
 export { secretMatches }
 
@@ -70,6 +71,39 @@ export async function requireOwnerSession(req: Request): Promise<Pass<{ via: 'se
     return { ok: false, response: NextResponse.json({ error: 'session_required' }, { status: 403 }) }
   }
   return auth
+}
+
+export type PortalAuth = Pass<{ user: PortalUser; viewer: 'portal' | 'owner' }>
+
+/**
+ * For `/api/portal/*` route handlers (read-only client portal).
+ *
+ *  - an active portal user's own cookie session → that portal user;
+ *  - the owner's cookie session → the portal user named by `?as=<email>`
+ *    (preview; 400 `as_required` without it, 404 `portal_user_not_found`
+ *    when it is not an active portal user);
+ *  - no session → 401; any other account → 403.
+ *
+ * The internal bearer is never accepted here (the owner agent has no reason
+ * to read through the portal). The returned user's campaign / LinkedIn-set
+ * ids come from `lume_portal_users` only: never trust ids from the request.
+ */
+export async function requirePortalUser(req: Request): Promise<PortalAuth | Fail> {
+  const supabase = await createClient()
+  const session = await verifiedSessionUser(supabase.auth)
+  if (!session) {
+    return { ok: false, response: NextResponse.json({ error: 'unauthenticated' }, { status: 401 }) }
+  }
+  if (isOwner(session.email, process.env.LUME_ALLOWED_EMAIL)) {
+    const as = new URL(req.url).searchParams.get('as')?.trim()
+    if (!as) return { ok: false, response: NextResponse.json({ error: 'as_required' }, { status: 400 }) }
+    const user = await getPortalUser(as)
+    if (!user) return { ok: false, response: NextResponse.json({ error: 'portal_user_not_found' }, { status: 404 }) }
+    return { ok: true, user, viewer: 'owner' }
+  }
+  const user = await getPortalUser(session.email)
+  if (!user) return { ok: false, response: NextResponse.json({ error: 'forbidden' }, { status: 403 }) }
+  return { ok: true, user, viewer: 'portal' }
 }
 
 /** Where a shared secret is presented: a header name, or `{ query }` for a URL parameter. */

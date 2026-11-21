@@ -21,6 +21,8 @@ export interface ActionView {
   sequenceDiff?: StepDiff[]
   /** update_sequence awaiting: what the SOP lint says about it now (rule, step, variant per line). */
   sopViolations?: string[]
+  /** Warnings worth reading before Confirm (e.g. a duplicate's source changed since the request). */
+  notices?: string[]
   requestedBy: string
   status: string
   decidedVia: string | null
@@ -143,6 +145,14 @@ export function ActionPlan({ action }: { action: ActionView }) {
               <li key={v}>{v}</li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {action.notices && action.notices.length > 0 && (
+        <div role="alert" className="rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-[12px] text-fg">
+          {action.notices.map((n) => (
+            <p key={n}>{n}</p>
+          ))}
         </div>
       )}
 

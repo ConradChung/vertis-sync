@@ -3,9 +3,11 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { getRun, isApifyConfigured, listAccountRuns, type AccountRun } from '@/lib/adapters/apify'
 import { listRecentJobs } from '@/lib/db/service'
 import { sheetsForBatches } from '@/lib/leads/lists/influencerSheets'
+import { checkSummary, recentCheckRuns } from '@/lib/companyCheck/store'
 import {
   fromApifyRun,
   fromApolloOrder,
+  fromCompanyCheckRun,
   fromInfluencerRun,
   fromJobBatch,
   fromLookupBatch,
@@ -19,8 +21,8 @@ import {
 
 /**
  * GET /api/progress: every live process (validation jobs, Apify runs,
- * influencer reaction runs, LinkedIn lookups, Leadsfriday orders, job-search
- * batches) plus those finished in the last 24 h. Each source is one cheap
+ * influencer reaction runs, LinkedIn lookups, company checks, Leadsfriday
+ * orders, job-search batches) plus those finished in the last 24 h. Each source is one cheap
  * query and fails on its own (listed in `unavailable`). Apify's getRun is
  * called only for runs that are live, at most MAX_LIVE_APIFY.
  */
@@ -105,6 +107,14 @@ export async function buildProgress(now = new Date()): Promise<ProgressPayload> 
         if (!batches.length) return []
         const [counts, sheets] = await Promise.all([lookupCounts(batches.map((b) => b.id)), sheetsForBatches(batches.map((b) => b.id))])
         return batches.map((b) => fromLookupBatch(b as never, counts.get(b.id) ?? {}, sheets.get(b.id) ?? null))
+      },
+    },
+    {
+      name: 'company_checks',
+      load: async () => {
+        const runs = await recentCheckRuns(since)
+        const sums = await Promise.all(runs.map((r) => checkSummary(r.id)))
+        return runs.map((r, i) => fromCompanyCheckRun(r, sums[i]?.items ?? {}))
       },
     },
     {

@@ -3,6 +3,9 @@
 import { useEffect, useId, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
+/** One row per MCP tool call; no screen shows it, so it never triggers a refetch. */
+export const MCP_AUDIT_TYPE = 'mcp.tool_call'
+
 export type RealtimeTable = 'events' | 'pending_actions' | 'agent_runs'
 
 /** What a filter sees for each change. `record` is the new row (INSERT/UPDATE). */
@@ -81,6 +84,8 @@ export function useRealtimeInvalidate(onChange: () => void, options: RealtimeInv
 
     const handler = (table: RealtimeTable, eventType: 'INSERT' | 'UPDATE') => (payload: { new?: unknown }) => {
       const record = (payload?.new ?? {}) as Record<string, unknown>
+      // MCP audit rows (lib/mcp/audit.ts) are bookkeeping, never a screen change.
+      if (table === 'events' && record.type === MCP_AUDIT_TYPE) return
       const filter = filterRef.current
       if (filter && !filter({ table, eventType, record })) return
       schedule()

@@ -1815,6 +1815,61 @@ const SPECS: Built[] = [
   ),
   tiered(
     {
+      name: 'get_company_check',
+      description:
+        "Price and track the company check of a validation job (job_id from get_validation_queue / get_validation_stats): ONE web-research call per distinct company " +
+        '(deduped by domain) saying what the company really does, its property type (residential / multifamily / commercial / mixed), roughly how many doors, and whether it fits the ICP. ' +
+        'scope: all (every valid lead, default) or sending (only leads still queued or active in the lead bank; pulled leads left out). ' +
+        'Returns the ICP used (icp, else the job\'s, else the Kaspen preset for a Kaspen job, else the property-management default), ' +
+        'valid leads, distinct companies, how many are already checked for this ICP (free) and unchecked, the per-company unit price with where each part comes from (pricing), ' +
+        'the total estimate, the per-lead price and the default cap; the icp_status the city enrichment already wrote (free); and, once a check ran, its spend vs the estimate, ' +
+        'per-status counts, companies and leads by verdict (fit / not_fit / unclear) and by property type, and a page of per-company results (what_it_does, icp_fit, confidence, evidence, evidence_url, property_type, doors). Spends nothing.',
+      inputSchema: z
+        .object({
+          job_id: uuid,
+          icp: z.string().trim().min(3).max(1000).optional().describe('the ICP to judge fit against, in words; omit to use the job\'s'),
+          scope: z.enum(['all', 'sending']).optional().describe('all valid leads (default) or only those still sending from the lead bank'),
+          fit: z.enum(['fit', 'not_fit', 'unclear']).optional().describe('only results with this verdict'),
+          type: z.enum(['residential', 'mixed', 'multifamily', 'commercial', 'other', 'unknown']).optional().describe('only results with this property type'),
+          limit: z.number().int().min(1).max(200).optional(),
+          offset: z.number().int().min(0).optional(),
+        })
+        .strict(),
+      run: async ({ job_id, icp, scope, fit, type, limit, offset }, { call }) => {
+        const q = new URLSearchParams({ job_id: job_id.toLowerCase() })
+        if (icp) q.set('icp', icp)
+        if (scope) q.set('scope', scope)
+        if (fit) q.set('fit', fit)
+        if (type) q.set('type', type)
+        if (limit !== undefined) q.set('limit', String(limit))
+        if (offset !== undefined) q.set('offset', String(offset))
+        return (await call(`/api/company-check?${q}`)) as ToolResult
+      },
+    },
+    'read'
+  ),
+  tiered(
+    {
+      name: 'check_companies',
+      description:
+        "Propose the paid company check of a validation job: one Perplexity Sonar call + a Haiku parse per company not yet checked for this ICP (what it does, property type, doors, fit; $0.00706 each, from get_company_check), " +
+        'with a hard cap (max_usd, default the estimate + 10 %, at most 50 per approval) it stops at. Only after you quoted get_company_check for this job, ICP and scope in this chat. ' +
+        'Results are cached per domain, so a re-run or another job never pays twice for the same company; a capped run continues with another approval.',
+      inputSchema: z
+        .object({
+          job_id: uuid,
+          icp: z.string().trim().min(3).max(1000).optional(),
+          scope: z.enum(['all', 'sending']).optional().describe('the same scope you quoted (default all)'),
+          max_usd: z.number().positive().max(50).optional(),
+          estimate_shown_to_owner: z.literal(true).describe('true only if you showed get_company_check for this job and ICP in this chat'),
+        })
+        .strict(),
+      payload: ({ job_id, icp, scope, max_usd }) => ({ job_id: job_id.toLowerCase(), ...(icp ? { icp } : {}), ...(scope ? { scope } : {}), ...(max_usd !== undefined ? { max_usd } : {}) }),
+    },
+    'high'
+  ),
+  tiered(
+    {
       name: 'approve_reactions',
       description:
         'Propose the reactions scrape of a PM influencer run that is awaiting_approval (get_influencer_run): the approval shows the EXACT bill from top posts ' +

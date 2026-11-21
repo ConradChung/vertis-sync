@@ -60,6 +60,7 @@ describe('buildTools', () => {
       delete_lead_list: { list_id: JOB },
       lookup_influencer_candidates: { batch_id: JOB },
       approve_influencer_candidates: { ids: [JOB] },
+      check_companies: { job_id: JOB.toUpperCase(), icp: 'a property manager', estimate_shown_to_owner: true },
     }
     const { fetch, createAction, tool } = setup()
     for (const [name, tier] of Object.entries(TOOL_TIERS)) {

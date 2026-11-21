@@ -196,6 +196,7 @@ export type PendingActionKind =
   | 'remove_lead_rows'
   | 'new_campaign'
   | 'bank_queue'
+  | 'company_check'
 
 export type PendingActionStatus =
   | 'awaiting'
@@ -213,7 +214,7 @@ export interface PendingActionRow {
   risk: 'high'
   status: PendingActionStatus
   claim_status: 'awaiting' | 'claimed'
-  requested_by: 'user' | 'agent' | 'rule'
+  requested_by: 'user' | 'agent' | 'rule' | 'mcp'
   agent_run_id: string | null
   rule_id: string | null
   telegram_message_id: number | null
@@ -489,7 +490,7 @@ export interface LumeTaskRow {
   linear_url: string | null
   linear_synced_at: string | null
   linear_error: string | null
-  created_by: 'owner' | 'agent'
+  created_by: 'owner' | 'agent' | 'mcp'
   conversation_id: string | null
   created_at: string
   updated_at: string

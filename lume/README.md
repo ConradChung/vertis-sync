@@ -364,6 +364,19 @@ reactors), `influencer_exports`.
   animation so the global rule in `globals.css` can switch them off. Re-adding
   `border-beam` from the Magic UI registry will overwrite its gate; re-apply it.
 
+## MCP server (Claude)
+
+`/api/mcp` exposes Lume to Claude as MCP tools: read-only in phase 1, gated
+writes later. Set `LUME_MCP_TOKEN` (32+ chars) in Vercel, then:
+
+```bash
+claude mcp add --transport http lume https://<lume-host>/api/mcp \
+  --header "Authorization: Bearer $LUME_MCP_TOKEN"
+```
+
+Every call writes an `mcp.tool_call` row to `events`. Details, tool list and
+rules: [docs/lume/LUME-MCP.md](../docs/lume/LUME-MCP.md).
+
 ## Develop
 
 ```sh
