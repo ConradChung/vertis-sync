@@ -95,6 +95,16 @@ Audit rows (`mcp.tool_call`) never reach a dashboard feed: every feed query filt
 - Preview has no `INSTANTLY_API_KEY` (production-only, deliberately), so `lume_get_campaign_stats` returns "Instantly is not configured in this environment" there.
 - Connect: `set -a; . ~/.config/lume-mcp/preview.env; set +a; claude mcp add --transport http lume-preview https://lume-mcp-preview.vercel.app/api/mcp --header "Authorization: Bearer $LUME_MCP_TOKEN" --header "x-vercel-protection-bypass: $VERCEL_BYPASS"`
 
+
+## Duet (production, decided 2026-11-21: 6a)
+
+Duet connects as a custom connector using the dialog's **Request headers**
+with the static production token. OAuth 2.1 is a later phase.
+
+- URL: `https://lume-amber-alpha.vercel.app/api/mcp` (production domain, not behind Vercel Authentication; no bypass header).
+- Header: `Authorization: Bearer <LUME_MCP_TOKEN>`, the Production-scoped value (separate from the preview token). Owner's copy: `~/.config/lume-mcp/production.env`.
+- Rotate: generate a new value, replace `LUME_MCP_TOKEN` (Production) in Vercel, redeploy, update the Duet connector header. The old token stops working with the redeploy.
+
 ## Phase 3 notes
 
 - Confirms hand off to `/api/actions/<id>/execute` (own 300 s budget), not `after()` in `/api/mcp`.
