@@ -1,0 +1,17 @@
+{
+  "_note": "Live 10-domain check for GTM-17. Expected verdicts were picked by hand from what each company sells. Edit if a site changes.",
+  "property_manager": [
+    "greystar.com",
+    "fsresidential.com",
+    "associa.us",
+    "bhmanagement.com",
+    "lincolnapts.com"
+  ],
+  "not_property_manager": [
+    "appfolio.com",
+    "buildium.com",
+    "entrata.com",
+    "yardi.com",
+    "rentmanager.com"
+  ]
+}
