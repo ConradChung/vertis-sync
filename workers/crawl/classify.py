@@ -379,50 +379,111 @@ def to_result(domain: str, info: dict, verdict: Optional[ICPVerdict], error: Opt
             "property_type": None, "doors_hint": None}
 
 
+def timed_out_result(domain: str) -> dict:
+    return {"domain": domain, "verdict": "timed_out", "confidence": None,
+            "reason": "deadline reached before this site finished", "linkedin_url": None,
+            "doors_hint": None, "property_type": None, "pages": [], "snippet_chars": 0}
+
+
+async def crawl_one(crawler, domain: str, run_cfg, max_subpages: int) -> dict:
+    """Homepage (https, then http://www.), then up to `max_subpages` high-signal subpages."""
+    info = {"snippet": "", "pages": [], "error": None, "linkedin_url": None}
+    r = None
+    for url in (f"https://{domain}", f"http://www.{domain}"):
+        try:
+            r = await crawler.arun(url, config=run_cfg)
+        except Exception as e:  # browser/navigation crash on one site
+            r, info["error"] = None, str(e)
+        if r is not None and r.success:
+            break
+    if r is None or not r.success:
+        info["error"] = (getattr(r, "error_message", None) or info["error"] or "homepage crawl failed")[:200]
+        return info
+    info["error"] = None
+    text = fit_md(r)
+    info["snippet"] = text
+    info["pages"].append("/")
+    info["linkedin_url"] = linkedin_from_html(getattr(r, "html", None))
+    if max_subpages and needs_sniper(text):
+        for u in pick_subpages(r, domain, max_subpages):
+            try:
+                sr = await crawler.arun(u, config=run_cfg)
+            except Exception:
+                continue
+            if not info["linkedin_url"]:
+                info["linkedin_url"] = linkedin_from_html(getattr(sr, "html", None))
+            st = fit_md(sr)
+            if st:
+                info["snippet"] += f"\n\n## [{urlparse(sr.url).path}]\n{st}"
+                info["pages"].append(urlparse(sr.url).path)
+    info["snippet"] = info["snippet"][:SNIPPET_CAP]
+    return info
+
+
 async def classify_domains(
     domains: list[str],
     rules: Optional[str] = None,
     *,
+    deadline_at: Optional[float] = None,
     model: str = DEFAULT_MODEL,
     concurrency: int = 4,
     llm_concurrency: int = 8,
     max_subpages: int = 2,
     client=None,
-    crawl=None,
+    crawl_fn=None,
 ) -> list[dict]:
-    """Crawl + classify `domains` (already normalised, deduped by the caller is fine).
+    """Crawl + classify each domain as its own pipeline (crawl → Claude), `concurrency` at a time.
 
-    `client` (AsyncAnthropic) and `crawl` (async fn(domains) -> crawl_batch output)
+    `deadline_at` is a time.monotonic() instant: whatever hasn't finished by then is
+    cancelled and returned as verdict "timed_out", so callers keep partial results
+    and requeue the rest. `client` (AsyncAnthropic) and `crawl_fn` (async domain -> info)
     are injectable for tests. Results come back in input order."""
     system = SYSTEM_TMPL.format(rules=(rules or PM_RULES).strip())
     uniq = list(dict.fromkeys(domains))
-    if crawl is None:
-        from crawl4ai import AsyncWebCrawler
-
-        browser_cfg, run_cfg, make_dispatcher = build_crawler_bits("pruning", concurrency)
-
-        async def crawl(ds):
-            async with AsyncWebCrawler(config=browser_cfg) as crawler:
-                return await crawl_batch(crawler, ds, run_cfg, make_dispatcher, max_subpages)
     if client is None:
         from anthropic import AsyncAnthropic
 
-        client = AsyncAnthropic(max_retries=3)
+        client = AsyncAnthropic(max_retries=2)
+    crawl_sem = asyncio.Semaphore(concurrency)
+    llm_sem = asyncio.Semaphore(llm_concurrency)
 
-    crawled = await crawl(uniq)
-    sem = asyncio.Semaphore(llm_concurrency)
-
-    async def one(d: str) -> dict:
-        info = crawled.get(d) or {"snippet": "", "pages": [], "error": "not crawled", "linkedin_url": None}
+    async def one(d: str, crawl) -> dict:
+        async with crawl_sem:
+            info = await crawl(d)
         if info.get("error") and not info.get("snippet"):
             return to_result(d, info, None)
         try:
-            v = await classify(client, model, system, d, info["snippet"], sem)
+            v = await classify(client, model, system, d, info["snippet"], llm_sem)
         except Exception as e:  # one bad domain never fails the batch
             return to_result(d, info, None, error=f"llm_error: {e}")
         return to_result(d, info, v)
 
-    by_domain = dict(zip(uniq, await asyncio.gather(*(one(d) for d in uniq))))
+    async def run_all(crawl) -> dict[str, dict]:
+        tasks = {d: asyncio.create_task(one(d, crawl)) for d in uniq}
+        timeout = None if deadline_at is None else max(0.0, deadline_at - time.monotonic())
+        done, pending = await asyncio.wait(tasks.values(), timeout=timeout)
+        for t in pending:
+            t.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        out = {}
+        for d, t in tasks.items():
+            if t not in done:
+                out[d] = timed_out_result(d)
+            elif t.exception() is not None:
+                out[d] = to_result(d, {}, None, error=f"crash: {t.exception()}")
+            else:
+                out[d] = t.result()
+        return out
+
+    if crawl_fn is not None:
+        by_domain = await run_all(crawl_fn)
+    else:
+        from crawl4ai import AsyncWebCrawler
+
+        browser_cfg, run_cfg, _ = build_crawler_bits("pruning", concurrency)
+        async with AsyncWebCrawler(config=browser_cfg) as crawler:
+            by_domain = await run_all(lambda d: crawl_one(crawler, d, run_cfg, max_subpages))
     return [by_domain[d] for d in domains]
 
 

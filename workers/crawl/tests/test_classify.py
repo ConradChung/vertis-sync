@@ -1,5 +1,6 @@
 """Unit tests: no browser, no network. The crawl and the Anthropic client are fakes."""
 import asyncio
+import time
 import types
 
 import pytest
@@ -21,15 +22,15 @@ def fake_client(verdicts: dict[str, bool], fail: set[str] = frozenset()):
     return types.SimpleNamespace(messages=types.SimpleNamespace(parse=parse))
 
 
-def fake_crawl(snippets: dict[str, str | None], linkedin: dict[str, str] = {}):
-    async def crawl(ds):
-        out = {}
-        for d in ds:
-            s = snippets.get(d)
-            out[d] = {"snippet": s or "", "pages": ["/"] if s else [],
-                      "error": None if s else "net::ERR_NAME_NOT_RESOLVED",
-                      "linkedin_url": linkedin.get(d)}
-        return out
+def fake_crawl(snippets: dict[str, str | None], linkedin: dict[str, str] = {}, delay: dict[str, float] = {}):
+    """Per-domain crawl_fn: async domain -> info, optionally slow."""
+    async def crawl(d):
+        if d in delay:
+            await asyncio.sleep(delay[d])
+        s = snippets.get(d)
+        return {"snippet": s or "", "pages": ["/"] if s else [],
+                "error": None if s else "net::ERR_NAME_NOT_RESOLVED",
+                "linkedin_url": linkedin.get(d)}
     return crawl
 
 
@@ -58,7 +59,7 @@ def test_classify_domains_shapes_results_in_input_order():
     rows = run(engine.classify_domains(
         ["vendor.com", "pm.com", "dead.com"],
         client=fake_client({"pm.com": True, "vendor.com": False}),
-        crawl=fake_crawl({"pm.com": "We manage 5,000 apartments", "vendor.com": "Software for PMs"},
+        crawl_fn=fake_crawl({"pm.com": "We manage 5,000 apartments", "vendor.com": "Software for PMs"},
                          linkedin={"pm.com": "https://www.linkedin.com/company/pm"}),
     ))
     assert [r["domain"] for r in rows] == ["vendor.com", "pm.com", "dead.com"]
@@ -76,7 +77,7 @@ def test_llm_failure_on_one_domain_does_not_fail_batch():
     rows = run(engine.classify_domains(
         ["a.com", "b.com"],
         client=fake_client({"a.com": True, "b.com": True}, fail={"b.com"}),
-        crawl=fake_crawl({"a.com": "manage homes", "b.com": "manage homes"}),
+        crawl_fn=fake_crawl({"a.com": "manage homes", "b.com": "manage homes"}),
     ))
     assert rows[0]["verdict"] == "property_manager"
     assert rows[1]["verdict"] == "error" and rows[1]["reason"].startswith("llm_error")
@@ -92,5 +93,40 @@ def test_default_rules_are_pm_vs_vendor():
             estimated_doors=None, reason="r"))
 
     client = types.SimpleNamespace(messages=types.SimpleNamespace(parse=parse))
-    run(engine.classify_domains(["x.com"], client=client, crawl=fake_crawl({"x.com": "text"})))
+    run(engine.classify_domains(["x.com"], client=client, crawl_fn=fake_crawl({"x.com": "text"})))
     assert "vendors selling to property managers" in seen["system"]
+
+
+def test_deadline_returns_finished_sites_and_marks_the_rest_timed_out():
+    rows = run(engine.classify_domains(
+        ["fast.com", "slow.com", "fast2.com"],
+        deadline_at=time.monotonic() + 0.3,
+        client=fake_client({"fast.com": True, "fast2.com": False, "slow.com": True}),
+        crawl_fn=fake_crawl({"fast.com": "manage homes", "fast2.com": "software", "slow.com": "manage homes"},
+                            delay={"slow.com": 5}),
+    ))
+    assert [r["domain"] for r in rows] == ["fast.com", "slow.com", "fast2.com"]
+    assert rows[0]["verdict"] == "property_manager"
+    assert rows[2]["verdict"] == "not_property_manager"
+    assert rows[1]["verdict"] == "timed_out" and rows[1]["confidence"] is None
+
+
+def test_deadline_cancels_queued_sites_behind_slow_ones():
+    t0 = time.monotonic()
+    rows = run(engine.classify_domains(
+        [f"s{i}.com" for i in range(6)],
+        deadline_at=time.monotonic() + 0.3,
+        concurrency=2,
+        client=fake_client({f"s{i}.com": True for i in range(6)}),
+        crawl_fn=fake_crawl({f"s{i}.com": "x" for i in range(6)}, delay={f"s{i}.com": 5 for i in range(6)}),
+    ))
+    assert time.monotonic() - t0 < 2, "must return at the deadline, not after the slow crawls"
+    assert {r["verdict"] for r in rows} == {"timed_out"}
+
+
+def test_no_deadline_waits_for_everything():
+    rows = run(engine.classify_domains(
+        ["a.com"], client=fake_client({"a.com": True}),
+        crawl_fn=fake_crawl({"a.com": "manage homes"}, delay={"a.com": 0.1}),
+    ))
+    assert rows[0]["verdict"] == "property_manager"
