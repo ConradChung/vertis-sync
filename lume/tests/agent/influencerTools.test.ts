@@ -66,6 +66,15 @@ describe('start_influencer_run / approve_reactions', () => {
     expect(out).toMatchObject({ status: 'awaiting_approval', deep_link: '/actions/a1', summary: 'built influencer_run' })
     expect(fetch).not.toHaveBeenCalled()
   })
+  it('start forwards post_urls only when given', async () => {
+    const U = 'https://www.linkedin.com/feed/update/urn:li:activity:7250000000000000001'
+    const { run, prepare, tool } = setup()
+    await run('start_influencer_run', { slugs: ['peter-lohmann'], post_urls: [U], max_verify_usd: 2, estimate_shown_to_owner: true })
+    expect(prepare).toHaveBeenCalledWith({ kind: 'influencer_run', payload: { slugs: ['peter-lohmann'], max_verify_usd: 2, post_urls: [U] } })
+    const s = tool('start_influencer_run').inputSchema
+    expect(s.safeParse({ slugs: ['peter-lohmann'], post_urls: [], estimate_shown_to_owner: true }).success).toBe(false)
+    expect(s.safeParse({ slugs: ['peter-lohmann'], post_urls: Array(11).fill(U), estimate_shown_to_owner: true }).success).toBe(false)
+  })
   it('start needs the estimate shown first and valid slugs', () => {
     const { tool } = setup()
     const s = tool('start_influencer_run').inputSchema

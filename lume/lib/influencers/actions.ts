@@ -2,11 +2,12 @@ import 'server-only'
 import { z } from 'zod'
 import type { Json } from '@/lib/db/types'
 import { callInfluencerFn } from '@/lib/adapters/influencerFn'
-import { estimateRun, reactionsMaxChargeUsd } from '@/lib/influencers/model'
+import { estimateRun, PRICES, reactionsMaxChargeUsd, type InfluencerRow } from '@/lib/influencers/model'
 import { getApifyCapUsd } from '@/lib/settings/store'
 import { MaxVerifyUsd, Slug } from '@/lib/influencers/schemas'
 import { activeRun, apifyMonthSpend, getInfluencersByIds, getInfluencersBySlugs, getRun } from '@/lib/influencers/store'
 import { INFLUENCER_PIPELINE, type InfluencerActionBuild } from '@/lib/influencers/actionPayload'
+import { checkPostUrls } from '@/lib/influencers/postUrls'
 
 /**
  * The two approvals of the PM influencer reactions pipeline (server-side
@@ -15,7 +16,10 @@ import { INFLUENCER_PIPELINE, type InfluencerActionBuild } from '@/lib/influence
  *
  *  influencer_run        { slugs, max_verify_usd? } → the posts scrape + Haiku
  *                        top-posts ranking, priced from each influencer's last
- *                        run; the run stops after top posts.
+ *                        run; the run stops after top posts. With post_urls
+ *                        (one influencer, 1-10 chosen posts) there is no posts
+ *                        scrape: the run goes straight to awaiting the
+ *                        reactions approval, billed at the per-post cap.
  *  influencer_reactions  { run_id, max_verify_usd? } → the EXACT reactions bill
  *                        the run computed at top posts, then triage and
  *                        Perplexity verify under max_verify_usd.
@@ -39,13 +43,25 @@ async function capLeft(): Promise<{ left: number | null; line: string }> {
 /** A call whose outcome is unknown (timeout, connection lost): it may have run. */
 const uncertainCall = (error: string) => error === 'timeout' || error === 'unreachable'
 
-const RunBody = z.object({ slugs: z.array(Slug).min(1).max(100), max_verify_usd: MaxVerifyUsd.optional() })
+const RunBody = z.object({
+  slugs: z.array(Slug).min(1).max(100),
+  max_verify_usd: MaxVerifyUsd.optional(),
+  /** URL mode: chosen posts by the ONE influencer in slugs (checked by checkPostUrls: 1-10 after dedupe). */
+  post_urls: z.array(z.unknown()).max(50).optional(),
+})
 const ReactionsBody = z.object({ run_id: z.string().uuid(), max_verify_usd: MaxVerifyUsd.optional() })
 
 export async function buildInfluencerRun(raw: Record<string, unknown>): Promise<InfluencerActionBuild> {
   const body = RunBody.safeParse(raw)
   if (!body.success) return fail(400, 'invalid_payload')
   const slugs = [...new Set(body.data.slugs)]
+  let postUrls: string[] | null = null
+  if (body.data.post_urls !== undefined) {
+    if (slugs.length !== 1) return fail(400, 'post_urls needs exactly one influencer in slugs (the author of every post)')
+    const urls = checkPostUrls(body.data.post_urls)
+    if (!urls.ok) return fail(400, urls.error)
+    postUrls = urls.urls
+  }
   const rows = await getInfluencersBySlugs(slugs)
   const unknown = slugs.filter((s) => !rows.some((r) => r.slug === s))
   if (unknown.length) return fail(404, `unknown_influencers: ${unknown.join(', ')}`)
@@ -54,6 +70,7 @@ export async function buildInfluencerRun(raw: Record<string, unknown>): Promise<
   if (await activeRun()) return fail(409, 'run_in_progress')
   const maxVerify = body.data.max_verify_usd ?? 10
   const ordered = slugs.map((s) => rows.find((r) => r.slug === s)!)
+  if (postUrls) return buildUrlRun(ordered[0], postUrls, maxVerify)
   const est = estimateRun(ordered, { maxVerifyUsd: maxVerify })
   const names = ordered.map((r) => r.name)
   const who = names.length > 4 ? `${names.slice(0, 4).join(', ')} +${names.length - 4} more` : names.join(', ')
@@ -79,6 +96,50 @@ export async function buildInfluencerRun(raw: Record<string, unknown>): Promise<
       total_usd_range: est.total_usd as unknown as Json,
       expected_leads: est.leads as unknown as Json,
       warnings: est.warnings,
+      apify_cap_left_usd: cap.left,
+      summary: summary + cap.line,
+    },
+  }
+}
+
+/** "$2" for whole dollars, "$2.50" otherwise. */
+const fmtCap = (n: number) => (Number.isInteger(n) ? `$${n}` : fmt(n))
+
+/**
+ * URL mode: the chosen posts only. Likes are unknown, so the bill is the
+ * per-post reactions cap (max_reactions_per_post × $1.5/1k per post), the
+ * number the edge function sets as the run's reactions estimate; no posts
+ * scrape. The run then waits on the usual influencer_reactions approval.
+ */
+async function buildUrlRun(row: InfluencerRow, postUrls: string[], maxVerify: number): Promise<InfluencerActionBuild> {
+  const n = postUrls.length
+  const reactions = n * row.max_reactions_per_post
+  const usd = Math.round(((reactions * PRICES.reactions_per_1k) / 1000) * 100) / 100
+  const hardCap = reactionsMaxChargeUsd(usd)
+  const summary =
+    `${row.name} · ${n} chosen post${n === 1 ? '' : 's'} · reactions ≤${reactions.toLocaleString('en-US')} (${fmt(usd)}, Apify hard cap ${fmt(hardCap)}) · verify cap ${fmtCap(maxVerify)}. ` +
+    `No posts scrape or top-posts ranking: approving files the run, which then waits for the reactions approval (reactions bill ${fmt(usd)}; ` +
+    `Perplexity verify capped at ${fmt(maxVerify)}). `
+  const cap = await capLeft()
+  return {
+    ok: true,
+    kind: 'influencer_run',
+    payload: {
+      pipeline: INFLUENCER_PIPELINE,
+      influencer_ids: [row.id],
+      slugs: [row.slug],
+      names: [row.name],
+      post_urls: postUrls,
+      max_verify_usd: maxVerify,
+      posts_usd: 0,
+      posts_reserve_usd: 0,
+      reactions_max: reactions,
+      reactions_usd: usd,
+      reactions_max_charge_usd: hardCap,
+      reactions_usd_range: { low: usd, expected: usd, high: usd },
+      perplexity_usd_range: { low: 0, high: maxVerify },
+      total_usd_range: { low: usd, high: Math.round((usd + maxVerify) * 100) / 100 },
+      warnings: [],
       apify_cap_left_usd: cap.left,
       summary: summary + cap.line,
     },
@@ -141,7 +202,12 @@ export async function executeInfluencerRun(p: Record<string, Json>, actionId: st
     perplexity_usd_range: p.perplexity_usd_range ?? null,
     total_usd_range: p.total_usd_range ?? null,
   }
-  const r = await callInfluencerFn({ action: 'start', influencer_ids: ids, max_verify_usd: p.max_verify_usd, start_action_id: actionId, estimate })
+  const postUrls = Array.isArray(p.post_urls) ? p.post_urls.filter((x): x is string => typeof x === 'string') : null
+  const r = await callInfluencerFn(
+    postUrls
+      ? { action: 'start', influencer_ids: ids, post_urls: postUrls, max_verify_usd: p.max_verify_usd, start_action_id: actionId, estimate }
+      : { action: 'start', influencer_ids: ids, max_verify_usd: p.max_verify_usd, start_action_id: actionId, estimate }
+  )
   if (!r.ok) {
     const uncertain = uncertainCall(r.error)
     return {
@@ -150,6 +216,12 @@ export async function executeInfluencerRun(p: Record<string, Json>, actionId: st
       result: uncertain
         ? { http_status: r.status, uncertain: true, note: 'The start may have gone through: check get_influencer_run before retrying.' }
         : { http_status: r.status },
+    }
+  }
+  if (postUrls) {
+    return {
+      ok: true,
+      result: { run_id: String(r.body.run_id ?? ''), status: String(r.body.status ?? 'awaiting_approval'), stage: String(r.body.stage ?? 'reactions'), post_urls: postUrls },
     }
   }
   return { ok: true, result: { run_id: String(r.body.run_id ?? ''), status: String(r.body.status ?? 'running'), stage: 'posts' } }
