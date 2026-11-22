@@ -6,6 +6,10 @@
 //        creates the run (one active run at a time; idempotent per
 //        start_action_id) and runs stages posts + top_posts, then STOPS at
 //        awaiting_approval with the exact reactions bill.
+// POST { action: 'start', influencer_ids: [one], post_urls: [1..10], ... }
+//        targeted run: the owner names the posts, so posts + top_posts are
+//        skipped. The run is created at awaiting_approval / reactions with the
+//        bill priced at the influencer's cap per post (likes are unknown).
 // POST { action: 'approve_reactions', run_id, approved_usd, reactions_action_id?, max_verify_usd? }
 //        only after the owner approved that bill in Lume: continues with
 //        reactions, triage, verify, doors, output.
@@ -62,7 +66,7 @@ import {
 } from '../_shared/influencer/cost.ts'
 import { parseJsonResponse, type JsonRequest } from '../_shared/influencer/haiku.ts'
 import { deepWellFormed } from '../_shared/text.ts'
-import { applyRelevance, buildPostsInput, flattenPosts, parseRelevance, RELEVANCE_BATCH, relevanceRequest, topN } from '../_shared/influencer/posts.ts'
+import { applyRelevance, buildPostsInput, flattenPosts, MAX_TARGET_POSTS, normalizePostUrl, parseRelevance, RELEVANCE_BATCH, relevanceRequest, targetPostRows, topN } from '../_shared/influencer/posts.ts'
 import { aggregateReactors, buildReactionsInput, flattenReactions } from '../_shared/influencer/reactions.ts'
 import { parseTriage, TRIAGE_BATCH, triageRequest, triageTodo, type TriageLabel } from '../_shared/influencer/triage.ts'
 import {
@@ -971,8 +975,18 @@ async function start(body: Record<string, unknown>, waitUntil: (p: Promise<unkno
     const existing = (await rest('GET', `influencer_runs?start_action_id=eq.${body.start_action_id}&select=id,status`)) as { id: string; status: string }[]
     if (existing.length) return reply({ ok: true, run_id: existing[0].id, status: existing[0].status, existing: true }, 200)
   }
+  let targets: string[] | null = null
+  if (body.post_urls !== undefined) {
+    const raw = Array.isArray(body.post_urls) ? body.post_urls : []
+    const norm = raw.map(normalizePostUrl)
+    if (!raw.length || norm.some((u) => u === null)) return reply({ error: 'bad_post_urls' }, 400)
+    targets = [...new Set(norm as string[])]
+    if (targets.length > MAX_TARGET_POSTS) return reply({ error: 'too_many_post_urls', max: MAX_TARGET_POSTS }, 400)
+    if (ids.length !== 1) return reply({ error: 'post_urls_need_one_influencer' }, 400)
+  }
   const infl = (await rest('GET', `influencers?id=in.${inList(ids)}&active=is.true&select=id`)) as { id: string }[]
   if (infl.length !== ids.length) return reply({ error: 'influencer_not_found_or_inactive' }, 400)
+  if (targets) return await startTargeted(body, ids[0], targets, cap)
   let created: { id: string }[]
   try {
     created = (await rest('POST', 'influencer_runs', {
@@ -986,6 +1000,41 @@ async function start(body: Record<string, unknown>, waitUntil: (p: Promise<unkno
   const runId = created[0].id
   waitUntil(advance(runId, null, deps))
   return reply({ ok: true, run_id: runId, status: 'running', stage: 'posts' }, 202)
+}
+
+/** Targeted run: straight to the reactions bill for the owner's posts. No Apify spend here. */
+async function startTargeted(body: Record<string, unknown>, influencerId: string, urls: string[], cap: number): Promise<Response> {
+  const [inf] = await getInfluencers([influencerId])
+  const est = estimateReactions(urls.map(() => ({ likes: inf.max_reactions_per_post })), inf.max_reactions_per_post)
+  const estimate = [{ influencer_id: inf.id, slug: inf.slug, name: inf.name, posts: urls.length, reactions: est.reactions, usd: est.usd }]
+  const now = new Date().toISOString()
+  let created: { id: string }[]
+  try {
+    created = (await rest('POST', 'influencer_runs', {
+      influencer_ids: [influencerId], max_verify_usd: cap, start_action_id: body.start_action_id ?? null,
+      status: 'awaiting_approval', stage: 'reactions', awaiting_since: now,
+      reactions_estimate: estimate, reactions_estimate_usd: est.usd,
+      counts: { targeted_posts: urls.length, top_posts: urls.length, reactions_estimate: est.reactions },
+      estimate: body.estimate && typeof body.estimate === 'object' && !Array.isArray(body.estimate) ? body.estimate : {},
+    }, 'return=representation')) as { id: string }[]
+  } catch (err) {
+    if (err instanceof RestError && err.status === 409) return reply({ error: 'run_in_progress' }, 409)
+    throw err
+  }
+  const runId = created[0].id
+  try {
+    await rest('POST', 'influencer_posts?on_conflict=run_id,influencer_id,post_id', targetPostRows(runId, influencerId, urls), 'resolution=merge-duplicates,return=minimal')
+  } catch (err) {
+    // A bill with no posts behind it must never be approvable.
+    await rest('PATCH', `influencer_runs?id=eq.${runId}`, {
+      status: 'failed', error: 'target posts not saved', finished_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }, 'return=minimal').catch(() => {})
+    throw err
+  }
+  const plural = urls.length === 1 ? '' : 's'
+  await notify(runId, 'influencer_reactions_bill', 'urgent',
+    `PM influencer run (chosen posts): reactions bill ready, up to ${est.reactions} reactions for $${est.usd.toFixed(2)}. Ask Lume to approve_reactions (or cancel).\n• ${inf.name}: ${urls.length} chosen post${plural}, ${est.reactions} reactions max, $${est.usd.toFixed(2)}`)
+  return reply({ ok: true, run_id: runId, status: 'awaiting_approval', stage: 'reactions', reactions_estimate_usd: est.usd }, 202)
 }
 
 async function approveReactions(body: Record<string, unknown>, waitUntil: (p: Promise<unknown>) => void, deps: Deps): Promise<Response> {

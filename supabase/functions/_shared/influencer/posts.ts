@@ -116,3 +116,34 @@ export function topN<T extends { pm_relevant?: boolean | null; likes?: number | 
     .slice(0, n)
     .map((r, i) => ({ ...r, rank: i + 1 }))
 }
+
+// ---------------------------------------------------------------------------
+// Targeted runs: the owner names the posts (start { post_urls }) instead of
+// the posts + top_posts stages picking them.
+
+export const MAX_TARGET_POSTS = 10
+const POST_URL_RE = /^https:\/\/(www\.)?linkedin\.com\/(posts\/[A-Za-z0-9_%-]+|feed\/update\/urn:li:(activity|share|ugcPost):\d+)\/?$/i
+
+/** Canonical form of a LinkedIn post URL (query/hash dropped, no trailing slash, www host), or null. */
+export function normalizePostUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const s = raw.trim().split('#')[0].split('?')[0]
+  if (s.length > 500 || !POST_URL_RE.test(s)) return null
+  return s.replace(/\/+$/, '').replace(/^https:\/\/linkedin\.com\//i, 'https://www.linkedin.com/')
+}
+
+/** Stable post id for a target URL: the activity/share/ugcPost number when present, else the URL slug. */
+export function postIdFromUrl(url: string): string {
+  const m = url.match(/[-:](?:activity|share|ugcPost)[-:](\d{6,})/i)
+  if (m) return m[1]
+  return (url.split('/').pop() ?? url).slice(0, 100)
+}
+
+/** influencer_posts rows for a targeted run: chosen by the owner, ranked in the order given. */
+export function targetPostRows(runId: string, influencerId: string, urls: string[]) {
+  return urls.map((post_url, i) => ({
+    run_id: runId, influencer_id: influencerId, post_id: postIdFromUrl(post_url), post_url,
+    posted_at: null, likes: 0, comments: 0, shares: 0, text: null,
+    pm_relevant: true, relevance_reason: 'chosen by the owner', rank: i + 1,
+  }))
+}
