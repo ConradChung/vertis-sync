@@ -35,7 +35,7 @@ describe('buildProgress', () => {
     db.table('job_batches').push({ id: 'jb', status: 'resolving', batch_date: '2026-11-06', companies_pulled: 10, companies_added: 3, contacts_total: null, error: null, created_at: iso(90), updated_at: iso(2) })
     const out = await buildProgress(NOW)
     expect(out.running.map((i) => i.key)).toEqual(['influencer_lookup:b1', 'influencer_run:ir', 'validation:j1', 'leadsfriday_order:o', 'job_batch:jb'])
-    expect(out.running[0]).toMatchObject({ done: 1, total: 2, href: '/import/leads?list=list-1' })
+    expect(out.running[0]).toMatchObject({ done: 1, total: 2, href: '/runs/influencer_lookup/b1' })
     expect(out.unavailable).toBeUndefined()
   })
 

@@ -94,6 +94,13 @@ export async function getCheckRun(jobId: string, icpKey: string, scope: CheckSco
   return (res.data as CheckRun | null) ?? null
 }
 
+/** One run by its id (the run detail page); null when missing. */
+export async function getCheckRunById(id: string): Promise<CheckRun | null> {
+  const res = await db().from('company_check_runs').select(RUN_COLS).eq('id', id).maybeSingle()
+  if (res.error) throw new DbError('getCheckRunById', res.error)
+  return (res.data as CheckRun | null) ?? null
+}
+
 export async function checkSummary(runId: string): Promise<CheckSummary> {
   const res = await db().rpc('company_check_summary', { p_run_id: runId })
   if (res.error) throw new DbError('checkSummary', res.error)

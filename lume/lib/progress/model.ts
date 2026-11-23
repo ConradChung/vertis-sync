@@ -1,5 +1,8 @@
 import { jobName } from '@/lib/validate/jobs'
 
+/** Every card's Open goes to its own run: `/runs/<kind>/<id>` (app/(app)/runs). */
+export const runHref = (kind: ProgressKind, id: string) => `/runs/${kind}/${encodeURIComponent(id)}`
+
 /**
  * Progress: one queue of every live process (pure mappers). Each source
  * becomes a ProgressItem; GET /api/progress (lib/progress/build.ts) gathers
@@ -97,7 +100,7 @@ export function fromValidationJob(j: ValidationJobLike): ProgressItem {
     updated_at: j.updated_at,
     finished: !live,
     error: j.status === 'failed' || j.status === 'cancelled' ? (j.error_message?.trim() || 'No reason recorded.') : (j.error_message?.trim() || null),
-    href: `/progress?job=${j.id}`,
+    href: runHref('validation', j.id),
     job_id: j.id,
     vertical_id: j.vertical_id ?? null,
     tag_table: 'validation_jobs',
@@ -133,8 +136,7 @@ export function fromApifyRun(r: ApifyRunLike): ProgressItem {
     updated_at: r.finishedAt ?? started,
     finished: !live,
     error: !live && r.status !== 'SUCCEEDED' ? (r.statusMessage ?? r.status.toLowerCase()) : null,
-    href: r.consoleUrl,
-    external: true,
+    href: runHref('apify', r.id),
   })
 }
 
@@ -153,16 +155,6 @@ export interface InfluencerRunLike {
   reactions_action_id?: string | null
 }
 
-/**
- * Where "Open" goes: Leads once a finished run has candidates there; otherwise
- * the run's own approval (its status and result), since Leads is empty until then.
- */
-function influencerRunHref(r: InfluencerRunLike): string {
-  if (r.status === 'done' && (num(r.counts?.candidates) ?? 0) > 0) return '/import/leads'
-  const action = r.reactions_action_id ?? r.start_action_id
-  return action ? `/actions/${action}` : '/import/leads'
-}
-
 const LIVE_INF_RUN = new Set(['running', 'awaiting_approval'])
 
 export function fromInfluencerRun(r: InfluencerRunLike): ProgressItem {
@@ -179,7 +171,7 @@ export function fromInfluencerRun(r: InfluencerRunLike): ProgressItem {
     updated_at: r.finished_at ?? r.updated_at,
     finished: !LIVE_INF_RUN.has(r.status),
     error: r.error,
-    href: influencerRunHref(r),
+    href: runHref('influencer_run', r.id),
   })
 }
 
@@ -194,7 +186,9 @@ export interface LookupBatchLike {
   updated_at: string
 }
 
-export function fromLookupBatch(b: LookupBatchLike, counts: Record<string, number>, listId: string | null): ProgressItem {
+/** `_listId` (the batch's sheet) is kept for callers; the sheet link now lives on the run page. */
+export function fromLookupBatch(b: LookupBatchLike, counts: Record<string, number>, _listId?: string | null): ProgressItem {
+  void _listId
   const total = Object.values(counts).reduce((n, v) => n + v, 0)
   return base({
     key: `influencer_lookup:${b.id}`,
@@ -210,7 +204,7 @@ export function fromLookupBatch(b: LookupBatchLike, counts: Record<string, numbe
     updated_at: b.updated_at,
     finished: b.status !== 'looking_up',
     error: b.error,
-    href: listId ? `/import/leads?list=${listId}` : '/import/leads',
+    href: runHref('influencer_lookup', b.id),
   })
 }
 
@@ -244,7 +238,7 @@ export function fromCompanyCheckRun(r: CompanyCheckRunLike, items: Record<string
     updated_at: r.updated_at,
     finished: r.status !== 'running',
     error: r.error,
-    href: '/validate',
+    href: runHref('company_check', r.id),
     job_id: r.job_id,
   })
 }
@@ -274,7 +268,7 @@ export function fromApolloOrder(o: ApolloOrderLike): ProgressItem {
     updated_at: o.updated_at,
     finished: !LIVE_ORDER.has(o.status),
     error: o.error,
-    href: '/import',
+    href: runHref('leadsfriday_order', o.id),
     vertical_id: o.vertical_id ?? null,
     tag_table: 'apollo_orders',
   })
@@ -309,7 +303,7 @@ export function fromJobBatch(b: JobBatchLike): ProgressItem {
     updated_at: b.updated_at,
     finished: !LIVE_BATCH.has(b.status),
     error: b.error,
-    href: '/import',
+    href: runHref('job_batch', b.id),
     vertical_id: b.vertical_id ?? null,
     tag_table: 'job_batches',
   })
