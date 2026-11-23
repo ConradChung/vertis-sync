@@ -43,7 +43,7 @@ Deno.test('a vendor never reaches ready (crawl says not_property_manager)', asyn
   s.people.push(person({ id: 2, linkedin_url: 'https://www.linkedin.com/in/x2', stage: 'draft', crawl_verdict: null }))
   await stageDraft(deps(), c, 'commenter')
   assertEquals([s.get(2).stage, s.get(2).skip_reason], ['skipped', 'vendor'])
-  assertThrows(() => assertReady({ crawl_verdict: 'not_property_manager' }))
+  assertThrows(() => assertReady({ crawl_verdict: 'not_property_manager', segment: 'pm' }))
   assertEquals(s.people.some((p) => p.stage === 'ready'), false)
 })
 
@@ -57,7 +57,7 @@ Deno.test('full commenter path → ready; crawl doors_hint sets the count and sk
   assertEquals([p.door_count, p.door_count_source, p.door_count_confidence, p.doors_hint], [5000, 'https://whitfieldpm.com', 'medium', '5,000 units'])
   assertEquals(f.calls.perplexity, 1) // verify only, no doors call
   assertEquals(p.contacts, [{ name: 'Sam Ortiz', title: 'COO', linkedin_url: 'https://www.linkedin.com/in/samortiz' }])
-  assertEquals((p.drafts as { opening: string }).opening, 'Saw you in our thread earlier.')
+  assertEquals((p.drafts as { opening: string }).opening, 'saw you in our thread earlier.') // no comment text → plain opening
   assertEquals(p.connected, null)
   assertEquals(paid(s, 'crawl').length, 1)
   assertEquals(paid(s, 'crawl')[0].usd, 0.0002)
@@ -137,7 +137,7 @@ Deno.test('reactors: crawl → doors (no paid call) → contacts → draft with 
   assertEquals(p.stage, 'ready')
   assertEquals(p.door_count, 300)
   assertEquals(f.calls.perplexity, 0)
-  assertEquals((p.drafts as { opening: string; dm: string }).opening, '{opening line}')
+  assertEquals((p.drafts as { opening: string; dm: string }).opening, '{opening line}.')
   assertEquals(paid(s, 'crawl').length, 1)
 })
 
@@ -147,4 +147,62 @@ Deno.test('stopped lane: no paid stage runs', async () => {
   await runCommenterStages(deps(), {})
   assertEquals(f.calls, { haiku: 0, perplexity: 0, crawl: 0, apollo: 0 })
   assertEquals(s.get(1).stage, 'triage')
+})
+
+Deno.test('comment reply: Haiku responds to the comment; first message has no pitch; Kaspen + demo only after they reply', async () => {
+  const { s, f, deps } = setup([{ stage: 'triage', first_name: 'Dana', commented_at: '2026-11-21T18:00:00Z', comment_text: 'After-hours owner calls are the worst.' }])
+  const c: Counts = {}
+  await runCommenterStages(deps(), c)
+  const p = s.get(1)
+  assertEquals(p.stage, 'ready')
+  const d = p.drafts as Record<string, string>
+  assertEquals(d.source, 'comment')
+  assert(d.dm.startsWith('Hey Dana, saw your comment on my post, and the point about after-hours owner calls'), d.dm)
+  assert(d.dm.endsWith('How are you covering after-hours calls today?'), d.dm)
+  for (const t of [d.dm, d.connection_note, d.followup_dm]) assert(!/kaspen|demo/i.test(t), t)
+  assert(d.after_reply.includes('Kaspen') && d.after_reply.endsWith('Would you like to see a quick demo?'))
+  assertEquals(d.followup_dm, 'Thanks for connecting, Dana! How are you covering after-hours calls today?')
+  assert(!('no_note_followup' in d))
+  assert(paid(s, 'haiku').length >= 3) // triage, verify parse, reply
+})
+
+Deno.test('comment reply: a bad reply retries once, then ships with the plain opening', async () => {
+  const { s, f, deps } = setup([{ stage: 'draft', crawl_verdict: 'property_manager', company_name: 'Acme', comment_text: 'Great post' }])
+  f.reply = null
+  const c: Counts = {}
+  await stageDraft(deps(), c, 'commenter')
+  assertEquals([s.get(1).stage, s.get(1).attempts, c.draft_retry], ['draft', 1, 1])
+  await stageDraft(deps(), c, 'commenter')
+  const d = s.get(1).drafts as Record<string, string>
+  assertEquals(s.get(1).stage, 'ready')
+  assertEquals(d.source, 'template')
+  assert(/^Hey \S+, saw your comment on my post\. I run/.test(d.dm), d.dm)
+  assert(d.dm.endsWith('How is business at Acme?'))
+})
+
+Deno.test('owner-operator: kept, crawled with owner rules, labelled, readied; a vendor verdict still skips', async () => {
+  const { s, f, deps } = setup([{ stage: 'triage' }])
+  f.verify.is_pm_company = false
+  f.verify.is_owner_operator = true
+  await runCommenterStages(deps(), {})
+  const p = s.get(1)
+  assertEquals([p.segment, p.crawl_verdict, p.stage], ['owner_operator', 'owner_operator', 'ready'])
+  assert(f.crawlRules[0]?.includes('own and operate rental real estate'))
+  assertEquals(assertReady({ crawl_verdict: 'owner_operator', segment: 'owner_operator' }), 'ready')
+  // A PM row can never be readied by an owner-operator verdict.
+  assertThrows(() => assertReady({ crawl_verdict: 'owner_operator', segment: 'pm' }))
+
+  const v = setup([{ stage: 'triage' }])
+  v.f.verify.is_pm_company = false
+  v.f.verify.is_owner_operator = true
+  v.f.crawlVerdict = 'not_property_manager'
+  await runCommenterStages(v.deps(), {})
+  assertEquals([v.s.get(1).stage, v.s.get(1).skip_reason], ['skipped', 'vendor'])
+})
+
+Deno.test('neither PM nor owner-operator → not_pm', async () => {
+  const { s, f, deps } = setup([{ stage: 'triage' }])
+  f.verify.is_pm_company = false
+  await runCommenterStages(deps(), {})
+  assertEquals([s.get(1).stage, s.get(1).skip_reason], ['skipped', 'not_pm'])
 })

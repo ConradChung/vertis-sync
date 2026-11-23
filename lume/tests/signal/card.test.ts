@@ -18,7 +18,7 @@ const opts = (over: Partial<{ premium: boolean; connectionsLoaded: boolean }> = 
 const all = (blocks: unknown) => JSON.stringify(blocks)
 
 describe('buildSignalCard', () => {
-  it('renders header, doors, location, ≤3 contacts, the escaped comment with links and relative time, buttons and footer', () => {
+  it('renders header, doors, location, no contacts section, the escaped comment with links and relative time, buttons and footer', () => {
     const { blocks, text } = buildSignalCard(person(), opts())
     const s = all(blocks)
     expect(text).toContain('Ada Lovelace (Acme Property Mgmt)')
@@ -26,9 +26,10 @@ describe('buildSignalCard', () => {
     expect(s).toContain('<https://acmepm.com|Acme Property Mgmt>')
     expect(s).toContain('~1,200 (high confidence · <https://acmepm.com/about|source>)')
     expect(s).toContain('Vancouver, BC')
-    expect(s).toContain('Bob Owner')
-    expect(s).toContain('Di')
-    expect(s).not.toContain('• Ed')
+    expect(s).toContain("PM commented on Frank's post")
+    expect(s).not.toContain('Bob Owner') // Apollo contacts are never shown
+    expect(s).not.toContain('Contacts')
+    expect(s).not.toContain('owner-operator')
     expect(s).toContain('&lt;@channel&gt; &amp; so true')
     expect(s).not.toContain('<@channel>')
     expect(s).toContain('|comment>')
@@ -45,36 +46,41 @@ describe('buildSignalCard', () => {
     expect(all(buildSignalCard(person({ door_count: null }), opts()).blocks)).toContain('*Doors:* unknown')
   })
 
-  it('connected null, not premium: both versions labelled, plus the no-note follow-up, each in a code block', () => {
-    const s = all(buildSignalCard(person(), opts()).blocks)
+  it('connected null: DM, note, after they accept, after they reply, each in a code block; no no-note version', () => {
+    const s = all(buildSignalCard(person(), opts({ premium: true, noteLimit: 300 } as never)).blocks)
     expect(s).toContain("*If you're connected → DM*\\n```Hi Ada, thanks for the comment.```")
-    expect(s).toContain('*If not connected → connection note (36/200 chars)*\\n```Hi Ada, saw your comment on my post.```')
-    expect(s).toContain('*Follow-up after they accept*\\n```Thanks for connecting!```')
-    expect(s).toContain('*No-note request → send this after they accept*\\n```Hey Ada, thanks for accepting.```')
+    expect(s).toContain('*If not connected → connection note (36/300 chars)*\\n```Hi Ada, saw your comment on my post.```')
+    expect(s).toContain('*After they accept*\\n```Thanks for connecting!```')
+    expect(s).toContain("*After they reply (either way) → Kaspen + demo*\\n```I'm also a co-founder of Kaspen. Would you like to see a quick demo?```")
+    expect(s).not.toContain('No-note')
+    expect(s.indexOf('→ DM')).toBeLessThan(s.indexOf('After they reply'))
   })
 
-  it('connected null, premium: no no-note version', () => {
-    const s = all(buildSignalCard(person(), opts({ premium: true })).blocks)
-    expect(s).toContain("If you're connected → DM")
-    expect(s).toContain('If not connected → connection note')
-    expect(s).not.toContain('No-note request')
+  it('owner-operator: labelled in the header, fallback and a note line', () => {
+    const r = person({ segment: 'owner_operator', crawl_verdict: 'owner_operator' })
+    const { blocks, text } = buildSignalCard(r, opts())
+    const s = all(blocks)
+    expect(s).toContain("Owner-operator commented on Frank's post")
+    expect(s).toContain('owner-operator')
+    expect(text).toContain('Owner-operator commented')
+    // An owner-operator verdict on a PM row is refused.
+    expect(() => buildSignalCard(person({ crawl_verdict: 'owner_operator' }), opts())).toThrow(/refused/)
   })
 
   it('connected true: only the DM', () => {
     const s = all(buildSignalCard(person({ connected: true }), opts()).blocks)
     expect(s).toContain('DM*')
     expect(s).not.toContain('connection note')
-    expect(s).not.toContain('Follow-up after they accept')
-    expect(s).not.toContain('No-note request')
+    expect(s).not.toContain('After they accept')
+    expect(s).toContain('After they reply')
   })
 
   it('connected false: note + follow-up (+ no-note when not premium), no DM', () => {
     const s = all(buildSignalCard(person({ connected: false }), opts()).blocks)
     expect(s).not.toContain('→ DM')
     expect(s).toContain('Not connected → connection note (36/200 chars)')
-    expect(s).toContain('Follow-up after they accept')
-    expect(s).toContain('No-note request')
-    expect(all(buildSignalCard(person({ connected: false }), opts({ premium: true })).blocks)).not.toContain('No-note request')
+    expect(s).toContain('After they accept')
+    expect(s).toContain('After they reply')
   })
 
   it('treats connected as unknown until Connections.csv is loaded', () => {
@@ -138,7 +144,7 @@ describe('buildSignalDigest', () => {
   })
 
   it('caps at 8 people, then "+N more", and stays under 50 blocks even with long drafts', () => {
-    const long = { dm: 'd'.repeat(2500), connection_note: 'n'.repeat(190), followup_dm: 'f'.repeat(2500), no_note_followup: 'x'.repeat(2500) }
+    const long = { dm: 'd'.repeat(2500), connection_note: 'n'.repeat(190), followup_dm: 'f'.repeat(2500), after_reply: 'x'.repeat(2500) }
     for (const rs of [reactors(20), reactors(20).map((r) => ({ ...r, drafts: long }))]) {
       const d = buildSignalDigest(post, rs, { ...opts(), reactorOpening: null })
       expect(d.blocks.length).toBeLessThanOrEqual(SLACK_BLOCK_LIMIT)
@@ -159,10 +165,10 @@ describe('edit modal and text preview', () => {
     const m = buildSignalEditModal(person(), 200) as { callback_id: string; private_metadata: string; blocks: { block_id: string; element: { multiline: boolean; initial_value?: string; max_length: number } }[] }
     expect(m.callback_id).toBe('signal_edit')
     expect(m.private_metadata).toBe('42')
-    expect(m.blocks.map((b) => b.block_id)).toEqual(['signal_opening', 'signal_dm', 'signal_connection_note', 'signal_followup_dm', 'signal_no_note_followup'])
+    expect(m.blocks.map((b) => b.block_id)).toEqual(['signal_dm', 'signal_connection_note', 'signal_followup_dm', 'signal_after_reply'])
     expect(m.blocks.every((b) => b.element.multiline)).toBe(true)
-    expect(m.blocks[1].element.initial_value).toBe('Hi Ada, thanks for the comment.')
-    expect(m.blocks[2].element.max_length).toBe(200)
+    expect(m.blocks[0].element.initial_value).toBe('Hi Ada, thanks for the comment.')
+    expect(m.blocks[1].element.max_length).toBe(200)
   })
 
   it('renderCardAsText turns blocks into readable text', () => {

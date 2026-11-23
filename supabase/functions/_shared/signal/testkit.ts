@@ -136,7 +136,7 @@ export function person(p: Partial<Person>): Person {
     comment_url: null, commented_at: null, stage: 'triage', skip_reason: null, attempts: 0, last_error: null, triage: null,
     company_name: null, company_website: null, title: null, location: null, is_decision_maker: null, crawl_verdict: null,
     crawl_reason: null, doors_hint: null, door_count: null, door_count_source: null, door_count_confidence: null, contacts: null,
-    connected: null, drafts: null, alert_status: null, spend_usd: 0, ...p,
+    connected: null, drafts: null, segment: 'pm', alert_status: null, spend_usd: 0, ...p,
   }
 }
 
@@ -155,7 +155,13 @@ export function gateFor(store: FakeStore, opts: { usage?: number; cycle?: Cycle 
 export class Fakes {
   calls = { haiku: 0, perplexity: 0, crawl: 0, apollo: 0 }
   triageLabel: 'likely' | 'possible' | 'no' = 'likely'
-  verify = { is_pm_company: true, is_decision_maker: true, company_website: 'https://whitfieldpm.com', door_count: null as number | null }
+  verify = { is_pm_company: true, is_owner_operator: false, is_decision_maker: true, company_website: 'https://whitfieldpm.com', door_count: null as number | null }
+  /** Haiku's comment reply (drafts); null → a malformed reply. */
+  reply: { response: string; question: string } | null = {
+    response: 'saw your comment on my post, and the point about after-hours owner calls is spot on.',
+    question: 'How are you covering after-hours calls today?',
+  }
+  crawlRules: (string | undefined)[] = []
   crawlVerdict: CrawlResult['verdict'] = 'property_manager'
   doorsHint: string | null = null
   failHaiku = 0
@@ -172,9 +178,14 @@ export class Fakes {
       const ids = req.messages[0].content.split('\n').map((l) => l.split('\t')[0]).filter((x) => /^\d+$/.test(x))
       return { json: { results: ids.map((id) => ({ id, label: this.triageLabel, company: 'Whitfield Property Management' })) }, usd: 0.0006 }
     }
+    if (req.system.includes('two short pieces of a LinkedIn message')) {
+      const opening = /starts exactly with "([^"]+)"/.exec(req.system)?.[1] ?? ''
+      const r = this.reply
+      return { json: r ? { ...r, response: r.response.replace(/^saw (your comment on my post|you in our thread earlier)/i, opening) } : { nope: 1 }, usd: 0.0005 }
+    }
     return {
       json: {
-        is_pm_company: this.verify.is_pm_company, is_decision_maker: this.verify.is_decision_maker, title: 'Owner',
+        is_pm_company: this.verify.is_pm_company, is_owner_operator: this.verify.is_owner_operator, is_decision_maker: this.verify.is_decision_maker, title: 'Owner',
         company_name: 'Whitfield Property Management', company_website: this.verify.company_website, location: 'Austin, TX',
         city: 'Austin', state: 'TX', country: 'United States', door_count: this.verify.door_count,
         door_count_source: this.verify.door_count ? 'https://whitfieldpm.com/about' : '', door_count_confidence: this.verify.door_count ? 'high' : '',
@@ -191,8 +202,9 @@ export class Fakes {
     }
     return { answer: 'Whitfield PM manages homes.', citations: ['https://whitfieldpm.com/about'], cost: 0.006 }
   }
-  crawl = async (domains: string[], _deadline: number): Promise<CrawlResult[]> => {
+  crawl = async (domains: string[], _deadline: number, rules?: string): Promise<CrawlResult[]> => {
     this.calls.crawl++
+    this.crawlRules.push(rules)
     return domains.map((domain) => ({ domain, verdict: this.crawlVerdict, reason: 'r', doors_hint: this.doorsHint, confidence: 'high' }))
   }
   apollo = async (_domain: string): Promise<Contact[]> => {

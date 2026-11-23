@@ -8,16 +8,20 @@ import { esc, type Block } from '@/lib/slack/card'
  *  - Everything from LinkedIn, the crawl and the drafts is untrusted: escaped
  *    with esc(), links only for well-formed http(s) URLs, drafts inside code
  *    blocks (so they copy cleanly and cannot format the post).
- *  - buildSignalCard refuses a row whose crawl verdict is not
- *    'property_manager' (second guard against vendors after the edge fn).
+ *  - buildSignalCard refuses a row the crawl did not confirm as a property
+ *    manager or (segment owner_operator) an owner-operator: second guard
+ *    against vendors after the edge fn. Owner-operators are labelled.
+ *  - Drafts: DM if connected; connection note if not; one message after
+ *    they accept; then the Kaspen line + demo ask, after they reply.
  *  - Decided states: approved keeps the drafts visible, skipped collapses.
  */
 
 export const SIGNAL_ACTION_IDS = { approve: 'signal_approve', edit: 'signal_edit', skip: 'signal_skip' } as const
 export const SIGNAL_EDIT_CALLBACK_ID = 'signal_edit'
-export const SIGNAL_DRAFT_FIELDS = ['opening', 'dm', 'connection_note', 'followup_dm', 'no_note_followup'] as const
+export const SIGNAL_DRAFT_FIELDS = ['dm', 'connection_note', 'followup_dm', 'after_reply'] as const
 export type SignalDraftField = (typeof SIGNAL_DRAFT_FIELDS)[number]
-export type SignalDrafts = Partial<Record<SignalDraftField, string | null>>
+/** The drafts JSON: the editable texts plus what they were built from (opening, question, source). */
+export type SignalDrafts = Partial<Record<SignalDraftField | 'opening' | 'question' | 'source', string | null>>
 export const SIGNAL_EDIT_INPUT_ID = 'value'
 export const signalEditBlockId = (f: SignalDraftField) => `signal_${f}`
 export const SIGNAL_DRAFT_MAX = 3000
@@ -48,6 +52,8 @@ export interface SignalPersonRow {
   comment_text: string | null
   comment_url: string | null
   commented_at: string | null
+  /** 'pm' (management company) or 'owner_operator' (owns and self-manages rentals). */
+  segment?: 'pm' | 'owner_operator' | null
   crawl_verdict: string | null
   door_count: number | null
   door_count_source: string | null
@@ -130,10 +136,6 @@ export function codeBlock(s: string): string {
   return '```' + esc(clip(s.trim(), 2800)).replace(/```/g, 'ʼʼʼ') + '```'
 }
 
-function contactsOf(v: unknown): SignalContact[] {
-  return (Array.isArray(v) ? v : []).filter((c): c is SignalContact => !!c && typeof c === 'object' && !Array.isArray(c) && !!text((c as SignalContact).name)).slice(0, 3)
-}
-
 function doorsText(r: SignalPersonRow): string {
   if (typeof r.door_count !== 'number' || !Number.isFinite(r.door_count) || r.door_count <= 0) return '*Doors:* unknown'
   const bits: string[] = []
@@ -154,18 +156,23 @@ function headline(r: SignalPersonRow): string {
   return parts.join(' · ')
 }
 
-function contactLines(r: SignalPersonRow): string | null {
-  const cs = contactsOf(r.contacts)
-  if (!cs.length) return null
-  return cs.map((c) => `• ${link(c.linkedin_url, clip(oneLine(c.name!), 80))}${text(c.title) ? ` — ${esc(clip(oneLine(c.title!), 100))}` : ''}`).join('\n')
+export const isOwnerOperator = (r: Pick<SignalPersonRow, 'segment'>) => r.segment === 'owner_operator'
+
+/** A crawl-confirmed PM, or a crawl-confirmed owner-operator (segment and verdict both say so). */
+export function crawlPassed(r: Pick<SignalPersonRow, 'crawl_verdict' | 'segment'>): boolean {
+  return r.crawl_verdict === 'property_manager' || (isOwnerOperator(r) && r.crawl_verdict === 'owner_operator')
 }
 
-/** Refuse anything the crawl did not call a property manager. */
-export function assertPropertyManager(r: Pick<SignalPersonRow, 'id' | 'crawl_verdict'>): void {
-  if (r.crawl_verdict !== 'property_manager') {
+/** Refuse anything the crawl did not confirm. */
+export function assertPropertyManager(r: Pick<SignalPersonRow, 'id' | 'crawl_verdict' | 'segment'>): void {
+  if (!crawlPassed(r)) {
     throw new Error(`signal card refused: person ${r.id} crawl_verdict is ${r.crawl_verdict ?? 'null'}, not property_manager`)
   }
 }
+
+/** Who they are, for the header and fallback. */
+const kindLabel = (r: Pick<SignalPersonRow, 'segment'>) => (isOwnerOperator(r) ? 'Owner-operator' : 'PM')
+export const OWNER_OPERATOR_NOTE = '🏠 *owner-operator*: owns and self-manages rentals, not a management company'
 
 /** The draft versions that apply, labelled, in send order. */
 export function draftSections(r: Pick<SignalPersonRow, 'connected' | 'drafts'>, opts: SignalCardOpts): { label: string; body: string | null }[] {
@@ -176,12 +183,12 @@ export function draftSections(r: Pick<SignalPersonRow, 'connected' | 'drafts'>, 
   const dm = { label: connected === true ? "You're connected → DM" : "If you're connected → DM", body: text(d.dm) }
   const notConnected = [
     { label: connected === false ? `Not connected → ${noteLabel}` : `If not connected → ${noteLabel}`, body: note },
-    { label: 'Follow-up after they accept', body: text(d.followup_dm) },
-    ...(opts.premium ? [] : [{ label: 'No-note request → send this after they accept', body: text(d.no_note_followup) }]),
+    { label: 'After they accept', body: text(d.followup_dm) },
   ]
-  if (connected === true) return [dm]
-  if (connected === false) return notConnected
-  return [dm, ...notConnected]
+  const afterReply = { label: 'After they reply (either way) → Kaspen + demo', body: text(d.after_reply) }
+  if (connected === true) return [dm, afterReply]
+  if (connected === false) return [...notConnected, afterReply]
+  return [dm, ...notConnected, afterReply]
 }
 
 const renderDraft = (s: { label: string; body: string | null }) => `*${s.label}*\n${s.body ? codeBlock(s.body) : '_(no draft)_'}`
@@ -203,10 +210,10 @@ const context = (t: string): Block => ({ type: 'context', elements: [{ type: 'mr
 const section = (t: string): Block => ({ type: 'section', text: { type: 'mrkdwn', text: clip(t, 3000) } })
 
 /** Plain one-line fallback (notifications). */
-export function signalFallbackText(r: Pick<SignalPersonRow, 'name' | 'company_name'>): string {
+export function signalFallbackText(r: Pick<SignalPersonRow, 'name' | 'company_name' | 'segment'>): string {
   const name = text(r.name) ? oneLine(r.name!) : 'Someone'
   const company = text(r.company_name) ? ` (${oneLine(r.company_name!)})` : ''
-  return esc(clip(`PM commented on Frank's post: ${name}${company}`, 200))
+  return esc(clip(`${kindLabel(r)} commented on Frank's post: ${name}${company}`, 200))
 }
 
 // ── commenter card ───────────────────────────────────────────────────────
@@ -223,14 +230,13 @@ export function buildSignalCard(row: SignalPersonRow, opts: SignalCardOpts): { t
     }
   }
 
-  const blocks: Block[] = [{ type: 'header', text: { type: 'plain_text', text: "💬 PM commented on Frank's post", emoji: true } }, section(headline(row))]
+  const blocks: Block[] = [{ type: 'header', text: { type: 'plain_text', text: `💬 ${kindLabel(row)} commented on Frank's post`, emoji: true } }, section(headline(row))]
+  if (isOwnerOperator(row)) blocks.push(context(OWNER_OPERATOR_NOTE))
 
   const facts = [doorsText(row)]
   const loc = text(row.location)
   facts.push(`*Location:* ${loc ? esc(clip(oneLine(loc), 150)) : 'unknown'}`)
   blocks.push({ type: 'section', fields: facts.map((t) => ({ type: 'mrkdwn', text: t })) })
-  const contacts = contactLines(row)
-  if (contacts) blocks.push(section(`*Contacts:*\n${contacts}`))
 
   const comment = text(row.comment_text)
   const links = [row.comment_url && safeUrl(row.comment_url) ? link(row.comment_url, 'comment') : null, opts.post?.post_url && safeUrl(opts.post.post_url) ? link(opts.post.post_url, 'post') : null].filter(Boolean)
@@ -269,14 +275,13 @@ function reactorBlocks(r: SignalPersonRow, opts: SignalCardOpts): Block[] {
   const info = [headline(r), doorsText(r)]
   const loc = text(r.location)
   if (loc) info.push(`*Location:* ${esc(clip(oneLine(loc), 100))}`)
-  const contacts = contactLines(r)
-  if (contacts) info.push(contacts)
+  if (isOwnerOperator(r)) info.push(OWNER_OPERATOR_NOTE)
   return packSections([info.join('\n'), ...draftSections(r, opts).map(renderDraft)])
 }
 
 export function buildSignalDigest(post: SignalPostRow, reactors: SignalPersonRow[], opts: SignalDigestOpts): { text: string; blocks: Block[]; shown: number[] } {
   const now = opts.now ?? new Date()
-  const pms = reactors.filter((r) => r.crawl_verdict === 'property_manager')
+  const pms = reactors.filter(crawlPassed)
   const head: Block[] = [{ type: 'header', text: { type: 'plain_text', text: `👍 ${pms.length} PM${pms.length === 1 ? '' : 's'} reacted to Frank's post`, emoji: true } }]
   const excerpt = text(post.text_excerpt)
   const when = relTime(post.posted_at, now)
@@ -310,11 +315,10 @@ export function buildSignalDigest(post: SignalPostRow, reactors: SignalPersonRow
 // ── edit modal ───────────────────────────────────────────────────────────
 
 const FIELD_LABEL: Record<SignalDraftField, string> = {
-  opening: 'Opening',
   dm: 'DM (if connected)',
-  connection_note: 'Connection note',
-  followup_dm: 'Follow-up after they accept',
-  no_note_followup: 'No-note request follow-up',
+  connection_note: 'Connection note (if not connected)',
+  followup_dm: 'After they accept',
+  after_reply: 'After they reply (Kaspen + demo)',
 }
 
 export function buildSignalEditModal(row: Pick<SignalPersonRow, 'id' | 'drafts'>, noteLimit?: number): Block {

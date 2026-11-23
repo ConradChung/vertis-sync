@@ -78,14 +78,14 @@ describe('interactions router', () => {
   it('routes the signal edit submit, and answers an over-long connection note synchronously', async () => {
     const values = (note: string) => ({ signal_dm: { value: { value: 'dm' } }, signal_connection_note: { value: { value: note } } })
     const sub = (note: string) => ({ type: 'view_submission', team: { id: 'T0AAA' }, user: { id: 'U0USER' }, view: { callback_id: 'signal_edit', private_metadata: '42', state: { values: values(note) } } })
-    const bad = await interactions(signed(form(sub('x'.repeat(201)))))
-    expect(await bad.json()).toMatchObject({ response_action: 'errors', errors: { signal_connection_note: expect.stringContaining('200') } })
+    const bad = await interactions(signed(form(sub('x'.repeat(301)))))
+    expect(await bad.json()).toMatchObject({ response_action: 'errors', errors: { signal_connection_note: expect.stringContaining('300') } })
     await runJobs()
     expect(sd.signalSaveEdit).not.toHaveBeenCalled()
 
     expect((await interactions(signed(form(sub('short note'))))).status).toBe(200)
     await runJobs()
-    expect(sd.signalSaveEdit).toHaveBeenCalledWith({ team: 'T0AAA', user: 'U0USER' }, 42, { opening: null, dm: 'dm', connection_note: 'short note', followup_dm: null, no_note_followup: null })
+    expect(sd.signalSaveEdit).toHaveBeenCalledWith({ team: 'T0AAA', user: 'U0USER' }, 42, { dm: 'dm', connection_note: 'short note', followup_dm: null, after_reply: null })
     expect(decide.clientSaveEdit).not.toHaveBeenCalled()
   })
 })

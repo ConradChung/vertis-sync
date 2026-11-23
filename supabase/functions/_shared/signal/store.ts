@@ -48,6 +48,7 @@ export interface Person {
   title: string | null
   location: string | null
   is_decision_maker: boolean | null
+  segment: 'pm' | 'owner_operator'
   crawl_verdict: string | null
   crawl_reason: string | null
   doors_hint: string | null

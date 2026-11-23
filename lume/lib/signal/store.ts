@@ -15,7 +15,7 @@ import type { SignalDrafts, SignalPersonRow, SignalPostRow } from '@/lib/slack/s
  */
 
 export const PERSON_COLS =
-  'id, kind, stage, linkedin_url, name, headline, title, company_name, company_website, location, post_id, comment_text, comment_url, commented_at, crawl_verdict, door_count, door_count_source, door_count_confidence, contacts, connected, drafts, alert_status, slack_team_id, slack_channel_id, slack_ts, decided_by, decided_at'
+  'id, kind, stage, linkedin_url, name, headline, title, company_name, company_website, location, post_id, comment_text, comment_url, commented_at, segment, crawl_verdict, door_count, door_count_source, door_count_confidence, contacts, connected, drafts, alert_status, slack_team_id, slack_channel_id, slack_ts, decided_by, decided_at'
 
 export type SignalPerson = SignalPersonRow & { slack_team_id: string | null; slack_channel_id: string | null; slack_ts: string | null }
 

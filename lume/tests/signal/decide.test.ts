@@ -72,19 +72,19 @@ describe('edit round trip', () => {
     expect(await signalOpenEdit(actor, '1700.0001', 42, 'trig-1')).toBe('opened')
     const [, , { trigger_id, view }] = calls('views.open')[0]
     expect(trigger_id).toBe('trig-1')
-    expect(view).toEqual(buildSignalEditModal(posted(), 200))
+    expect(view).toEqual(buildSignalEditModal(posted(), 300))
 
     // Slack echoes the modal's blocks back as state.values on submit.
     const values: Record<string, Record<string, { type: string; value: string | null }>> = {}
     for (const b of view.blocks as { block_id: string; element: { initial_value?: string } }[]) values[b.block_id] = { value: { type: 'plain_text_input', value: b.element.initial_value ?? null } }
     values.signal_dm.value.value = 'Hi Ada, edited DM.'
-    values.signal_no_note_followup.value.value = null
+    values.signal_after_reply.value.value = null
     const payload = { type: 'view_submission', team: { id: TEAM }, user: { id: 'U0SALES' }, view: { callback_id: view.callback_id, private_metadata: view.private_metadata, state: { values } } }
     const it = parseInteraction(`payload=${encodeURIComponent(JSON.stringify(payload))}`)
     expect(it).toMatchObject({ kind: 'signal_edit_submit', team: TEAM, user: 'U0SALES', person_id: 42 })
     if (it?.kind !== 'signal_edit_submit') throw new Error('not parsed')
 
-    const saved = { opening: 'Hi Ada', dm: 'Hi Ada, edited DM.', connection_note: 'Hi Ada, saw your comment on my post.', followup_dm: 'Thanks for connecting!', no_note_followup: null }
+    const saved = { dm: 'Hi Ada, edited DM.', connection_note: 'Hi Ada, saw your comment on my post.', followup_dm: 'Thanks for connecting!', after_reply: null }
     store.decideSignalPerson.mockResolvedValue(posted({ alert_status: 'edited', decided_by: 'U0SALES', drafts: saved }))
     expect(await signalSaveEdit({ team: it.team, user: it.user }, it.person_id, it.drafts)).toBe('saved')
     expect(store.decideSignalPerson).toHaveBeenCalledWith(42, ['posted', 'edited'], { alert_status: 'edited', decided_by: 'U0SALES', drafts: saved })

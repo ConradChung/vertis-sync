@@ -5,13 +5,15 @@
 // at that stage) before the next one runs, so a retry never pays twice for a
 // finished step. Paid calls go through the Gate (caps first, then a settled
 // comments_filter row with person_id). Two failures at a stage → 'error'.
-// Only crawl_verdict = 'property_manager' can reach 'ready'.
+// Only a crawl-confirmed PM (crawl_verdict 'property_manager') or a crawl-confirmed
+// owner-operator (segment 'owner_operator', crawl_verdict 'owner_operator') can reach 'ready'.
 import { groundDoorCount, parseVerifyJson, type PplxAnswer, verifyParseRequest, doorQuestion } from '../influencer/verify.ts'
+import { crawlPassed, OWNER_OPERATOR_CRAWL_RULES, OWNER_OPERATOR_VERDICT, ownerDoorQuestion, parseOwnerOperator, signalVerifyParseRequest } from './owner.ts'
 import type { JsonRequest } from '../influencer/haiku.ts'
 import { normalizeTarget } from '../research/crawl.ts'
 import { profileSlug } from './comments.ts'
 import { parseDoorsHint } from './doors.ts'
-import { buildDrafts, commenterOpening, type Facts, REACTOR_PLACEHOLDER } from './drafts.ts'
+import { buildDrafts, commenterOpening, type Facts, parseReply, REACTOR_PLACEHOLDER, type Reply, REPLY_EST_USD, replyRequest } from './drafts.ts'
 import type { Gate } from './gate.ts'
 import type { Person, Stage, Store } from './store.ts'
 import { parseSignalTriage, SIGNAL_TRIAGE_BATCH, signalTriageRequest, signalVerificationQuestion } from './triage.ts'
@@ -44,7 +46,7 @@ export interface FilterDeps {
   haiku(req: JsonRequest): Promise<{ json: unknown; usd: number }>
   perplexity(question: string): Promise<PplxAnswer>
   /** null when CRAWL_WORKER_URL / SECRET aren't set. */
-  crawl: ((domains: string[], deadlineS: number) => Promise<CrawlResult[]>) | null
+  crawl: ((domains: string[], deadlineS: number, rules?: string) => Promise<CrawlResult[]>) | null
   apollo(domain: string): Promise<Contact[]>
   facts: Facts
   reactorOpening: string | null
@@ -134,9 +136,11 @@ export async function stageVerify(d: FilterDeps, c: Counts): Promise<void> {
     try {
       const a = await d.perplexity(signalVerificationQuestion(r.name ?? '', r.headline ?? '', r.company_guess))
       await charge(d, r, 'perplexity', a.cost)
-      const { json, usd } = await d.haiku(verifyParseRequest(r.name ?? '', r.headline ?? '', a.answer, a.citations))
+      const { json, usd } = await d.haiku(signalVerifyParseRequest(r.name ?? '', r.headline ?? '', a.answer, a.citations))
       await charge(d, r, 'haiku', usd)
       const p = groundDoorCount(parseVerifyJson(json), a.citations)
+      // A PM company wins; otherwise someone who owns and self-manages rentals is kept as an owner-operator.
+      const segment = p.is_pm_company ? 'pm' : parseOwnerOperator(json) ? 'owner_operator' : null
       const facts: Partial<Person> = {
         company_name: p.company_name || r.company_guess || null,
         company_website: p.company_website || null,
@@ -147,11 +151,11 @@ export async function stageVerify(d: FilterDeps, c: Counts): Promise<void> {
         door_count_source: p.door_count_source || null,
         door_count_confidence: p.door_count_confidence || null,
       }
-      if (!p.is_pm_company) {
+      if (!segment) {
         if (await skip(d, r, 'verify', 'not_pm', facts)) bump(c, 'skipped_not_pm')
       } else if (!domainOf(p.company_website)) {
         if (await skip(d, r, 'verify', 'no_website', facts)) bump(c, 'skipped_no_website')
-      } else if (await advance(d, r, 'verify', { ...facts, stage: 'crawl' })) bump(c, 'verified')
+      } else if (await advance(d, r, 'verify', { ...facts, segment, stage: 'crawl' })) bump(c, segment === 'pm' ? 'verified' : 'verified_owner_operator')
     } catch (err) {
       await fail(d, r, 'verify', err, c)
     }
@@ -176,11 +180,20 @@ export async function stageCrawl(d: FilterDeps, c: Counts, kind: 'commenter' | '
   // The worker returns what finished by the deadline (the rest as timed_out): fit it into the tick.
   const deadlineS = Math.min(CRAWL_DEADLINE_S, Math.floor(d.timeLeft() / 1000) - 15)
   if (deadlineS < 15) return
+  // Owner-operators are checked with their own rules (a real rental operator, not a vendor).
+  for (const owner of [false, true]) {
+    const group = todo.filter((t) => (t.p.segment === 'owner_operator') === owner)
+    if (group.length) await crawlGroup(d, c, group, deadlineS, owner)
+  }
+}
+
+async function crawlGroup(d: FilterDeps, c: Counts, todo: { p: Person; domain: string }[], deadlineS: number, owner: boolean): Promise<void> {
+  if (!d.crawl) return
   const domains = [...new Set(todo.map((t) => t.domain))]
   if (!(await d.gate.allow('comments_filter', r4(CRAWL_SITE_USD * domains.length)))) return
   let results: CrawlResult[]
   try {
-    results = await d.crawl(domains, deadlineS)
+    results = owner ? await d.crawl(domains, deadlineS, OWNER_OPERATOR_CRAWL_RULES) : await d.crawl(domains, deadlineS)
   } catch (err) {
     for (const t of todo) await fail(d, t.p, 'crawl', err, c)
     return
@@ -190,16 +203,18 @@ export async function stageCrawl(d: FilterDeps, c: Counts, kind: 'commenter' | '
   for (const { p, domain } of todo) {
     await charge(d, p, 'crawl', CRAWL_SITE_USD)
     const res = byDomain.get(domain)
-    const verdict = res?.verdict ?? 'timed_out'
+    const raw = res?.verdict ?? 'timed_out'
+    // Under the owner-operator rules a qualified site is stored as 'owner_operator', never as a PM.
+    const verdict = owner && raw === 'property_manager' ? OWNER_OPERATOR_VERDICT : raw
     const base: Partial<Person> = { crawl_verdict: verdict, crawl_reason: res?.reason ?? null }
-    if (verdict === 'property_manager') {
+    if (verdict === 'property_manager' || verdict === OWNER_OPERATOR_VERDICT) {
       const hint = res?.doors_hint ?? null
       const patch: Partial<Person> = { ...base, doors_hint: hint, stage: 'doors' }
       const n = parseDoorsHint(hint)
       if (n !== null && p.door_count === null) {
         Object.assign(patch, { door_count: n, door_count_source: p.company_website, door_count_confidence: 'medium' })
       }
-      if (await advance(d, p, 'crawl', patch)) bump(c, 'crawled_pm')
+      if (await advance(d, p, 'crawl', patch)) bump(c, owner ? 'crawled_owner_operator' : 'crawled_pm')
     } else if (verdict === 'not_property_manager') {
       if (await skip(d, p, 'crawl', 'vendor', base)) bump(c, 'skipped_vendor')
     } else if (verdict === 'unreachable' || verdict === 'error') {
@@ -228,7 +243,9 @@ export async function stageDoors(d: FilterDeps, c: Counts, kind: 'commenter' | '
     if (d.timeLeft() < 45_000) return
     if (!(await d.gate.allow('comments_filter', PPLX_EST_USD))) return
     try {
-      const a = await d.perplexity(doorQuestion(r.company_name ?? '', r.location ?? ''))
+      const a = await d.perplexity(r.segment === 'owner_operator'
+        ? ownerDoorQuestion(r.company_name ?? '', r.location ?? '')
+        : doorQuestion(r.company_name ?? '', r.location ?? ''))
       await charge(d, r, 'doors', a.cost)
       const { json, usd } = await d.haiku(verifyParseRequest(r.name ?? '', r.headline ?? '', a.answer, a.citations))
       await charge(d, r, 'haiku', usd)
@@ -272,16 +289,34 @@ export async function stageContacts(d: FilterDeps, c: Counts, kind: 'commenter' 
 export async function stageDraft(d: FilterDeps, c: Counts, kind: 'commenter' | 'reactor'): Promise<void> {
   const rows = await d.store.peopleAt('draft', kind, 25)
   for (const r of rows) {
-    // Hard rule: only a crawl-confirmed property manager can be alerted. Vendors never reach 'ready'.
-    if (r.crawl_verdict !== 'property_manager') {
+    // Hard rule: only a crawl-confirmed PM or owner-operator can be alerted. Vendors never reach 'ready'.
+    if (!crawlPassed(r)) {
       if (await skip(d, r, 'draft', 'vendor')) bump(c, 'skipped_vendor')
       continue
     }
+    const company = r.company_name ?? r.company_guess
+    const opening = r.kind === 'commenter'
+      ? commenterOpening(r.commented_at, d.now())
+      : (d.reactorOpening?.trim() || REACTOR_PLACEHOLDER)
+    // The response to their comment (Haiku, from the comment text only). The first failure retries
+    // next tick; after that the card ships with the plain opening rather than not at all.
+    let reply: Reply | null = null
+    const comment = (r.comment_text ?? '').trim()
+    if (r.kind === 'commenter' && comment && (r.attempts ?? 0) < 1) {
+      if (d.timeLeft() < 20_000) return
+      if (!(await d.gate.allow('comments_filter', REPLY_EST_USD))) return
+      try {
+        const { json, usd } = await d.haiku(replyRequest({ first_name: r.first_name, company_name: company, comment, opening }))
+        await charge(d, r, 'haiku', usd)
+        reply = parseReply(json, opening)
+      } catch (err) {
+        await d.store.patchPerson(r.id, { attempts: 1, last_error: `draft: ${msg(err)}` }, 'draft')
+        bump(c, 'draft_retry')
+        continue
+      }
+    }
     try {
-      const opening = r.kind === 'commenter'
-        ? commenterOpening(r.commented_at, d.now())
-        : (d.reactorOpening?.trim() || REACTOR_PLACEHOLDER)
-      const drafts = buildDrafts({ first_name: r.first_name, company_name: r.company_name ?? r.company_guess, opening }, d.facts)
+      const drafts = buildDrafts({ first_name: r.first_name, company_name: company, opening, reply }, d.facts)
       if (await advance(d, r, 'draft', { drafts: drafts as unknown, connected: null, stage: assertReady(r) })) bump(c, 'ready')
     } catch (err) {
       await fail(d, r, 'draft', err, c)
@@ -289,9 +324,9 @@ export async function stageDraft(d: FilterDeps, c: Counts, kind: 'commenter' | '
   }
 }
 
-/** The one way a row becomes 'ready'. Throws unless the crawl worker said property_manager. */
-export function assertReady(p: Pick<Person, 'crawl_verdict'>): 'ready' {
-  if (p.crawl_verdict !== 'property_manager') throw new Error('only crawl_verdict=property_manager can reach ready')
+/** The one way a row becomes 'ready'. Throws unless the crawl worker confirmed a PM (or an owner-operator). */
+export function assertReady(p: Pick<Person, 'crawl_verdict' | 'segment'>): 'ready' {
+  if (!crawlPassed(p)) throw new Error('only a crawl-confirmed property manager or owner-operator can reach ready')
   return 'ready'
 }
 
@@ -315,11 +350,11 @@ export async function runReactorStages(d: FilterDeps, c: Counts): Promise<void> 
 // HTTP adapters (used by the edge function; tests inject fakes)
 
 export function crawlClient(url: string, secret: string, f: typeof fetch = fetch) {
-  return async (domains: string[], deadlineS = CRAWL_DEADLINE_S): Promise<CrawlResult[]> => {
+  return async (domains: string[], deadlineS = CRAWL_DEADLINE_S, rules?: string): Promise<CrawlResult[]> => {
     const res = await f(`${url.replace(/\/+$/, '')}/classify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Worker-Secret': secret },
-      body: JSON.stringify({ domains: domains.slice(0, CRAWL_BATCH), deadline_s: deadlineS }),
+      body: JSON.stringify({ domains: domains.slice(0, CRAWL_BATCH), deadline_s: deadlineS, ...(rules ? { rules } : {}) }),
       signal: AbortSignal.timeout((deadlineS + 10) * 1000),
     })
     if (!res.ok) throw new Error(`crawl worker ${res.status}: ${(await res.text()).slice(0, 200)}`)

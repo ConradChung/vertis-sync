@@ -13,8 +13,8 @@
 export const SIGNAL_CONFIG_KEY = 'signal_config'
 
 export const FRANK_FACTS = {
-  linkedin_premium: false,
-  connection_note_max_chars: 200,
+  linkedin_premium: true,
+  connection_note_max_chars: 300,
   connections_csv_loaded: false,
 } as const
 

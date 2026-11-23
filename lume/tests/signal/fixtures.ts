@@ -25,7 +25,7 @@ export const person = (over: Partial<SignalPersonRow> = {}): SignalPersonRow => 
     { name: 'Ed', title: 'extra', linkedin_url: null },
   ],
   connected: null,
-  drafts: { opening: 'Hi Ada', dm: 'Hi Ada, thanks for the comment.', connection_note: 'Hi Ada, saw your comment on my post.', followup_dm: 'Thanks for connecting!', no_note_followup: 'Hey Ada, thanks for accepting.' },
+  drafts: { opening: 'Hi Ada', dm: 'Hi Ada, thanks for the comment.', connection_note: 'Hi Ada, saw your comment on my post.', followup_dm: 'Thanks for connecting!', after_reply: "I'm also a co-founder of Kaspen. Would you like to see a quick demo?" },
   alert_status: null,
   decided_by: null,
   decided_at: null,
