@@ -306,9 +306,16 @@ export async function stageDraft(d: FilterDeps, c: Counts, kind: 'commenter' | '
       if (d.timeLeft() < 20_000) return
       if (!(await d.gate.allow('comments_filter', REPLY_EST_USD))) return
       try {
-        const { json, usd } = await d.haiku(replyRequest({ first_name: r.first_name, company_name: company, comment, opening }))
-        await charge(d, r, 'haiku', usd)
-        reply = parseReply(json, opening)
+        // Two tries in this tick (a rejected reply is cheap to redo); then the row retries next tick.
+        for (let i = 0; i < 2 && !reply; i++) {
+          const { json, usd } = await d.haiku(replyRequest({ first_name: r.first_name, company_name: company, comment, opening }))
+          await charge(d, r, 'haiku', usd)
+          try {
+            reply = parseReply(json, opening, r.first_name)
+          } catch (err) {
+            if (i === 1) throw err
+          }
+        }
       } catch (err) {
         await d.store.patchPerson(r.id, { attempts: 1, last_error: `draft: ${msg(err)}` }, 'draft')
         bump(c, 'draft_retry')

@@ -172,6 +172,7 @@ Deno.test('comment reply: a bad reply retries once, then ships with the plain op
   const c: Counts = {}
   await stageDraft(deps(), c, 'commenter')
   assertEquals([s.get(1).stage, s.get(1).attempts, c.draft_retry], ['draft', 1, 1])
+  assertEquals(f.calls.haiku, 2) // two tries in the tick
   await stageDraft(deps(), c, 'commenter')
   const d = s.get(1).drafts as Record<string, string>
   assertEquals(s.get(1).stage, 'ready')
