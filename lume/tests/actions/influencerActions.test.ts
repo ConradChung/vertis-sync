@@ -75,6 +75,40 @@ describe('buildInfluencerRun (approval 1)', () => {
   })
 })
 
+describe('buildInfluencerRun in URL mode (chosen posts)', () => {
+  const U1 = 'https://www.linkedin.com/posts/pslohmann_pm-activity-7250000000000000000-AbCd'
+  const U2 = 'https://www.linkedin.com/feed/update/urn:li:activity:7250000000000000001'
+  it('bills max_reactions_per_post per post, carries the normalized URLs and says so', async () => {
+    store.getInfluencersBySlugs.mockResolvedValue([peter])
+    const b = await buildInfluencerRun({ slugs: ['peter-lohmann'], max_verify_usd: 2, post_urls: [`${U1}/?utm_source=share#x`] })
+    if (!b.ok) throw new Error(b.error)
+    expect(b.kind).toBe('influencer_run')
+    expect(b.payload).toMatchObject({
+      pipeline: INFLUENCER_PIPELINE, influencer_ids: [P], slugs: ['peter-lohmann'], post_urls: [U1], max_verify_usd: 2,
+      posts_usd: 0, reactions_max: 1000, reactions_usd: 1.5, reactions_max_charge_usd: 1.7,
+    })
+    expect(b.payload.summary.startsWith('Peter Lohmann · 1 chosen post · reactions ≤1,000 ($1.50, Apify hard cap $1.70) · verify cap $2. ')).toBe(true)
+    expect(b.payload.summary).toMatch(/Shared Apify cap: \$8\.50 of \$29 left/)
+    expect(influencerPayloadError('influencer_run', b.payload)).toBeNull()
+  })
+  it('dedupes and prices several posts', async () => {
+    store.getInfluencersBySlugs.mockResolvedValue([inf({ max_reactions_per_post: 300 })])
+    const b = await buildInfluencerRun({ slugs: ['peter-lohmann'], post_urls: [U1, U2, `${U2}/`] })
+    if (!b.ok) throw new Error(b.error)
+    expect(b.payload).toMatchObject({ post_urls: [U1, U2], reactions_max: 600, reactions_usd: 0.9, reactions_max_charge_usd: 1.04, max_verify_usd: 10 })
+    expect(b.payload.summary).toMatch(/^Peter Lohmann · 2 chosen posts · reactions ≤600 \(\$0\.90, Apify hard cap \$1\.04\) · verify cap \$10\./)
+  })
+  it('needs exactly one influencer and 1-10 valid post URLs', async () => {
+    store.getInfluencersBySlugs.mockResolvedValue([peter, deb])
+    expect(await buildInfluencerRun({ slugs: ['peter-lohmann', 'deb-newell'], post_urls: [U1] })).toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/exactly one influencer/) })
+    store.getInfluencersBySlugs.mockResolvedValue([peter])
+    expect(await buildInfluencerRun({ slugs: ['peter-lohmann'], post_urls: ['https://www.linkedin.com/in/pslohmann'] })).toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/invalid post_urls/) })
+    expect(await buildInfluencerRun({ slugs: ['peter-lohmann'], post_urls: [] })).toMatchObject({ ok: false, status: 400 })
+    const eleven = Array.from({ length: 11 }, (_, i) => `https://www.linkedin.com/feed/update/urn:li:activity:${i + 1}`)
+    expect(await buildInfluencerRun({ slugs: ['peter-lohmann'], post_urls: eleven })).toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/at most 10/) })
+  })
+})
+
 describe('buildInfluencerReactions (approval 2)', () => {
   it('shows the exact bill per influencer and the Apify cap', async () => {
     store.getRun.mockResolvedValue(awaiting)
@@ -101,6 +135,15 @@ describe('executeInfluencerRun re-checks before starting', () => {
     fn.callInfluencerFn.mockResolvedValue({ ok: true, status: 202, body: { ok: true, run_id: RUN, status: 'running' } })
     expect(await executeInfluencerRun(payload, ACTION)).toEqual({ ok: true, result: { run_id: RUN, status: 'running', stage: 'posts' } })
     expect(fn.callInfluencerFn.mock.calls[0][0]).toMatchObject({ action: 'start', influencer_ids: [P, D], max_verify_usd: 5, start_action_id: ACTION })
+    expect(Object.keys(fn.callInfluencerFn.mock.calls[0][0])).toEqual(['action', 'influencer_ids', 'max_verify_usd', 'start_action_id', 'estimate'])
+  })
+  it('URL mode forwards post_urls and reports the run waiting on the reactions approval', async () => {
+    const U = 'https://www.linkedin.com/feed/update/urn:li:activity:7250000000000000001'
+    store.getInfluencersByIds.mockResolvedValue([peter])
+    fn.callInfluencerFn.mockResolvedValue({ ok: true, status: 202, body: { ok: true, run_id: RUN, status: 'awaiting_approval', stage: 'reactions', reactions_estimate_usd: 1.5 } })
+    const out = await executeInfluencerRun({ pipeline: INFLUENCER_PIPELINE, influencer_ids: [P], post_urls: [U], max_verify_usd: 2, posts_usd: 0, summary: 's' }, ACTION)
+    expect(out).toEqual({ ok: true, result: { run_id: RUN, status: 'awaiting_approval', stage: 'reactions', post_urls: [U] } })
+    expect(fn.callInfluencerFn.mock.calls[0][0]).toMatchObject({ action: 'start', influencer_ids: [P], post_urls: [U], max_verify_usd: 2, start_action_id: ACTION })
   })
   it('fails when an influencer was deactivated or another run became active; nothing is called', async () => {
     store.getInfluencersByIds.mockResolvedValue([peter, { ...deb, active: false }])
@@ -156,6 +199,11 @@ describe('influencerPayloadError (createAction)', () => {
     expect(influencerPayloadError('influencer_run', { pipeline: 'x', influencer_ids: [P], max_verify_usd: 5 })).toMatch(/pipeline/)
     expect(influencerPayloadError('influencer_run', { pipeline: INFLUENCER_PIPELINE, influencer_ids: ['ABCDEF00-1111-4111-8111-111111111111'], max_verify_usd: 5 })).toMatch(/lowercase/)
     expect(influencerPayloadError('influencer_run', { pipeline: INFLUENCER_PIPELINE, influencer_ids: [P], max_verify_usd: 51 })).toMatch(/max_verify/)
+    const U = 'https://www.linkedin.com/feed/update/urn:li:activity:1'
+    expect(influencerPayloadError('influencer_run', { pipeline: INFLUENCER_PIPELINE, influencer_ids: [P], max_verify_usd: 5, post_urls: [U] })).toBeNull()
+    expect(influencerPayloadError('influencer_run', { pipeline: INFLUENCER_PIPELINE, influencer_ids: [P, D], max_verify_usd: 5, post_urls: [U] })).toMatch(/exactly one/)
+    expect(influencerPayloadError('influencer_run', { pipeline: INFLUENCER_PIPELINE, influencer_ids: [P], max_verify_usd: 5, post_urls: ['https://x.com/a'] })).toMatch(/post_urls/)
+    expect(influencerPayloadError('influencer_run', { pipeline: INFLUENCER_PIPELINE, influencer_ids: [P], max_verify_usd: 5, post_urls: [] })).toMatch(/post_urls/)
     expect(influencerPayloadError('influencer_reactions', { run_id: RUN, max_verify_usd: 5 })).toMatch(/reactions_usd/)
     expect(influencerPayloadError('influencer_reactions', { run_id: RUN, reactions_usd: 1, max_verify_usd: 5 })).toBeNull()
   })
