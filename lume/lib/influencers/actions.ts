@@ -109,7 +109,8 @@ const fmtCap = (n: number) => (Number.isInteger(n) ? `$${n}` : fmt(n))
  * URL mode: the chosen posts only. Likes are unknown, so the bill is the
  * per-post reactions cap (max_reactions_per_post × $1.5/1k per post), the
  * number the edge function sets as the run's reactions estimate; no posts
- * scrape. The run then waits on the usual influencer_reactions approval.
+ * scrape. One card (owner, 2026-11-22): the bill is known up front, so
+ * approving it files the run AND approves that exact bill (`one_tap`).
  */
 async function buildUrlRun(row: InfluencerRow, postUrls: string[], maxVerify: number): Promise<InfluencerActionBuild> {
   const n = postUrls.length
@@ -118,8 +119,8 @@ async function buildUrlRun(row: InfluencerRow, postUrls: string[], maxVerify: nu
   const hardCap = reactionsMaxChargeUsd(usd)
   const summary =
     `${row.name} · ${n} chosen post${n === 1 ? '' : 's'} · reactions ≤${reactions.toLocaleString('en-US')} (${fmt(usd)}, Apify hard cap ${fmt(hardCap)}) · verify cap ${fmtCap(maxVerify)}. ` +
-    `No posts scrape or top-posts ranking: approving files the run, which then waits for the reactions approval (reactions bill ${fmt(usd)}; ` +
-    `Perplexity verify capped at ${fmt(maxVerify)}). `
+    `No posts scrape or top-posts ranking. Approving starts the reactions scrape now (one approval; bill ${fmt(usd)}), ` +
+    `then Haiku triage and Perplexity verify capped at ${fmt(maxVerify)}. `
   const cap = await capLeft()
   return {
     ok: true,
@@ -130,6 +131,7 @@ async function buildUrlRun(row: InfluencerRow, postUrls: string[], maxVerify: nu
       slugs: [row.slug],
       names: [row.name],
       post_urls: postUrls,
+      one_tap: true,
       max_verify_usd: maxVerify,
       posts_usd: 0,
       posts_reserve_usd: 0,
@@ -203,9 +205,11 @@ export async function executeInfluencerRun(p: Record<string, Json>, actionId: st
     total_usd_range: p.total_usd_range ?? null,
   }
   const postUrls = Array.isArray(p.post_urls) ? p.post_urls.filter((x): x is string => typeof x === 'string') : null
+  // Only cards filed with one_tap said "approving starts the reactions scrape"; older ones keep two approvals.
+  const oneTap = postUrls !== null && p.one_tap === true && typeof p.reactions_usd === 'number'
   const r = await callInfluencerFn(
     postUrls
-      ? { action: 'start', influencer_ids: ids, post_urls: postUrls, max_verify_usd: p.max_verify_usd, start_action_id: actionId, estimate }
+      ? { action: 'start', influencer_ids: ids, post_urls: postUrls, max_verify_usd: p.max_verify_usd, start_action_id: actionId, estimate, ...(oneTap ? { one_tap: true } : {}) }
       : { action: 'start', influencer_ids: ids, max_verify_usd: p.max_verify_usd, start_action_id: actionId, estimate }
   )
   if (!r.ok) {
@@ -219,12 +223,36 @@ export async function executeInfluencerRun(p: Record<string, Json>, actionId: st
     }
   }
   if (postUrls) {
-    return {
-      ok: true,
-      result: { run_id: String(r.body.run_id ?? ''), status: String(r.body.status ?? 'awaiting_approval'), stage: String(r.body.stage ?? 'reactions'), post_urls: postUrls },
-    }
+    const runId = String(r.body.run_id ?? '')
+    const waiting = { run_id: runId, status: String(r.body.status ?? 'awaiting_approval'), stage: String(r.body.stage ?? 'reactions'), post_urls: postUrls }
+    if (!oneTap) return { ok: true, result: waiting }
+    return { ok: true, result: await approveOneTap(p, actionId, runId, Number(r.body.reactions_estimate_usd), waiting) }
   }
   return { ok: true, result: { run_id: String(r.body.run_id ?? ''), status: String(r.body.status ?? 'running'), stage: 'posts' } }
+}
+
+/** Cents: the card shows the bill rounded to the cent; the run stores it to 4 decimals. */
+const SAME_BILL_USD = 0.005
+
+/**
+ * The single card's second half: approve the reactions bill the owner just saw,
+ * only if the run's bill is that bill. Any refusal leaves the run waiting with a
+ * note (file lume_run_influencer_reactions for it); nothing is spent then.
+ */
+async function approveOneTap(p: Record<string, Json>, actionId: string, runId: string, runUsd: number, waiting: Record<string, Json>): Promise<Record<string, Json>> {
+  const seen = Number(p.reactions_usd)
+  if (!runId || !Number.isFinite(runUsd) || Math.abs(runUsd - seen) > SAME_BILL_USD) {
+    return { ...waiting, note: `The run's reactions bill (${Number.isFinite(runUsd) ? fmt(runUsd) : 'unknown'}) is not the ${fmt(seen)} approved, so it waits for a reactions approval.` }
+  }
+  const a = await callInfluencerFn({ action: 'approve_reactions', run_id: runId, approved_usd: runUsd, reactions_action_id: actionId, max_verify_usd: p.max_verify_usd })
+  if (!a.ok) {
+    return {
+      ...waiting,
+      ...(uncertainCall(a.error) ? { uncertain: true } : {}),
+      note: `Run filed, but starting the reactions failed (${a.error}); check get_influencer_run, then approve its reactions if it still waits.`,
+    }
+  }
+  return { run_id: runId, status: 'running', stage: 'reactions', post_urls: waiting.post_urls, approved_usd: runUsd }
 }
 
 export async function executeInfluencerReactions(p: Record<string, Json>, actionId: string): Promise<ExecOutcome> {

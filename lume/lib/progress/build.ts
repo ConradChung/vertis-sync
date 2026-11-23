@@ -86,7 +86,7 @@ export async function buildProgress(now = new Date()): Promise<ProgressPayload> 
       load: async () => {
         const { data, error } = await sb
           .from('influencer_runs')
-          .select('id,status,stage,influencer_ids,cost,counts,error,created_at,updated_at,finished_at')
+          .select('id,status,stage,influencer_ids,cost,counts,error,created_at,updated_at,finished_at,start_action_id,reactions_action_id')
           .or(`status.in.(running,awaiting_approval),updated_at.gte.${since}`)
           .order('created_at', { ascending: false })
           .limit(20)

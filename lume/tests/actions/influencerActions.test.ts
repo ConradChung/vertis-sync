@@ -85,8 +85,9 @@ describe('buildInfluencerRun in URL mode (chosen posts)', () => {
     expect(b.kind).toBe('influencer_run')
     expect(b.payload).toMatchObject({
       pipeline: INFLUENCER_PIPELINE, influencer_ids: [P], slugs: ['peter-lohmann'], post_urls: [U1], max_verify_usd: 2,
-      posts_usd: 0, reactions_max: 1000, reactions_usd: 1.5, reactions_max_charge_usd: 1.7,
+      posts_usd: 0, reactions_max: 1000, reactions_usd: 1.5, reactions_max_charge_usd: 1.7, one_tap: true,
     })
+    expect(b.payload.summary).toMatch(/Approving starts the reactions scrape now \(one approval; bill \$1\.50\)/)
     expect(b.payload.summary.startsWith('Peter Lohmann · 1 chosen post · reactions ≤1,000 ($1.50, Apify hard cap $1.70) · verify cap $2. ')).toBe(true)
     expect(b.payload.summary).toMatch(/Shared Apify cap: \$8\.50 of \$29 left/)
     expect(influencerPayloadError('influencer_run', b.payload)).toBeNull()
@@ -144,6 +145,39 @@ describe('executeInfluencerRun re-checks before starting', () => {
     const out = await executeInfluencerRun({ pipeline: INFLUENCER_PIPELINE, influencer_ids: [P], post_urls: [U], max_verify_usd: 2, posts_usd: 0, summary: 's' }, ACTION)
     expect(out).toEqual({ ok: true, result: { run_id: RUN, status: 'awaiting_approval', stage: 'reactions', post_urls: [U] } })
     expect(fn.callInfluencerFn.mock.calls[0][0]).toMatchObject({ action: 'start', influencer_ids: [P], post_urls: [U], max_verify_usd: 2, start_action_id: ACTION })
+  })
+  describe('one_tap (single card for chosen posts)', () => {
+    const U = 'https://www.linkedin.com/feed/update/urn:li:activity:7250000000000000001'
+    const card = { pipeline: INFLUENCER_PIPELINE, influencer_ids: [P], post_urls: [U], one_tap: true, reactions_usd: 1.5, max_verify_usd: 2, posts_usd: 0, summary: 's' }
+    const started = { ok: true, status: 202, body: { ok: true, run_id: RUN, status: 'awaiting_approval', stage: 'reactions', reactions_estimate_usd: 1.5 } }
+    it('files the run without a bill alert, then approves exactly that bill', async () => {
+      store.getInfluencersByIds.mockResolvedValue([peter])
+      fn.callInfluencerFn.mockResolvedValueOnce(started).mockResolvedValueOnce({ ok: true, status: 202, body: { ok: true } })
+      expect(await executeInfluencerRun(card, ACTION)).toEqual({ ok: true, result: { run_id: RUN, status: 'running', stage: 'reactions', post_urls: [U], approved_usd: 1.5 } })
+      expect(fn.callInfluencerFn.mock.calls[0][0]).toMatchObject({ action: 'start', post_urls: [U], one_tap: true, start_action_id: ACTION })
+      expect(fn.callInfluencerFn.mock.calls[1][0]).toEqual({ action: 'approve_reactions', run_id: RUN, approved_usd: 1.5, reactions_action_id: ACTION, max_verify_usd: 2 })
+    })
+    it('a different bill on the run is not approved: the run waits, with a note', async () => {
+      store.getInfluencersByIds.mockResolvedValue([peter])
+      fn.callInfluencerFn.mockResolvedValueOnce({ ...started, body: { ...started.body, reactions_estimate_usd: 3 } })
+      const out = await executeInfluencerRun(card, ACTION)
+      expect(out).toMatchObject({ ok: true, result: { run_id: RUN, status: 'awaiting_approval', note: expect.stringMatching(/\$3\.00.*\$1\.50/) } })
+      expect(fn.callInfluencerFn).toHaveBeenCalledTimes(1)
+    })
+    it('a refused approve leaves the run waiting and says so', async () => {
+      store.getInfluencersByIds.mockResolvedValue([peter])
+      fn.callInfluencerFn.mockResolvedValueOnce(started).mockResolvedValueOnce({ ok: false, status: 409, error: 'not_awaiting_or_bill_changed' })
+      expect(await executeInfluencerRun(card, ACTION)).toMatchObject({ ok: true, result: { status: 'awaiting_approval', note: expect.stringMatching(/not_awaiting_or_bill_changed/) } })
+    })
+    it('an older card without one_tap keeps two approvals', async () => {
+      store.getInfluencersByIds.mockResolvedValue([peter])
+      fn.callInfluencerFn.mockResolvedValueOnce(started)
+      const old: Record<string, unknown> = { ...card }
+      delete old.one_tap
+      expect(await executeInfluencerRun(old as never, ACTION)).toMatchObject({ ok: true, result: { status: 'awaiting_approval' } })
+      expect(fn.callInfluencerFn).toHaveBeenCalledTimes(1)
+      expect(fn.callInfluencerFn.mock.calls[0][0]).not.toHaveProperty('one_tap')
+    })
   })
   it('fails when an influencer was deactivated or another run became active; nothing is called', async () => {
     store.getInfluencersByIds.mockResolvedValue([peter, { ...deb, active: false }])

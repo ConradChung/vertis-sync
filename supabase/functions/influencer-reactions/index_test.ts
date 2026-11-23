@@ -752,6 +752,24 @@ Deno.test('start post_urls: creates the run at the reactions bill, saves the pos
   } finally { f.restore() }
 })
 
+Deno.test('start post_urls one_tap: same run, no bill alert (the single card already approved it)', async () => {
+  const f = stubFetch([
+    ...common,
+    [is('influencer_runs?start_action_id', 'GET'), () => json([])],
+    [is('influencers?id=in.', 'GET'), (u: string) => json(u.includes('select=id,name') ? [influencer] : [{ id: INF }])],
+    [is('influencer_runs', 'POST'), () => json([{ id: RUN }], 201)],
+    [is('influencer_posts', 'POST'), () => new Response(null, { status: 201 })],
+  ])
+  try {
+    const res = await handle(post({ action: 'start', influencer_ids: [INF], max_verify_usd: 2, start_action_id: ACTION, post_urls: [TARGET], one_tap: true }), noWait)
+    assertEquals(res.status, 202)
+    assertEquals((await res.json()).status, 'awaiting_approval')
+    assert(!f.calls.some((c) => c.url.includes('rpc/lume_alert_upsert')), 'no bill alert')
+    assert(!f.calls.some((c) => c.url.includes('api.telegram.org')), 'no telegram')
+    assert(!f.calls.some((c) => c.url.includes('api.apify.com')), 'no Apify call from start')
+  } finally { f.restore() }
+})
+
 Deno.test('start post_urls: if the posts cannot be saved the run is failed, never left approvable', async () => {
   const f = stubFetch([
     ...common,

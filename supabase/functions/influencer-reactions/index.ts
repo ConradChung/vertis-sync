@@ -1032,7 +1032,9 @@ async function startTargeted(body: Record<string, unknown>, influencerId: string
     throw err
   }
   const plural = urls.length === 1 ? '' : 's'
-  await notify(runId, 'influencer_reactions_bill', 'urgent',
+  // one_tap: the owner already approved this exact bill on Lume's single card, which
+  // approves the reactions right after this returns; a "bill ready" alert would only confuse.
+  if (body.one_tap !== true) await notify(runId, 'influencer_reactions_bill', 'urgent',
     `PM influencer run (chosen posts): reactions bill ready, up to ${est.reactions} reactions for $${est.usd.toFixed(2)}. Ask Lume to approve_reactions (or cancel).\n• ${inf.name}: ${urls.length} chosen post${plural}, ${est.reactions} reactions max, $${est.usd.toFixed(2)}`)
   return reply({ ok: true, run_id: runId, status: 'awaiting_approval', stage: 'reactions', reactions_estimate_usd: est.usd }, 202)
 }

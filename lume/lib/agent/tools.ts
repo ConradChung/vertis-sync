@@ -1738,7 +1738,7 @@ const SPECS: Built[] = [
         'with the exact reactions bill, which needs approve_reactions. max_verify_usd caps the Perplexity spend later (default 10, at most 50). One run at a time. ' +
         'post_urls (optional): when the owner gave specific LinkedIn post URLs (linkedin.com/posts/... or /feed/update/urn:li:activity:...), pass 1-10 of them ' +
         'with exactly ONE slug (their author); the run skips the posts scrape and top-10 ranking, and the reactions bill is posts × max_reactions_per_post × $1.5/1k ' +
-        '(quote that as the estimate), still approved with approve_reactions.',
+        '(quote that as the estimate). One approval: approving this card also approves that reactions bill and starts the scrape (no approve_reactions needed).',
       inputSchema: z.object({
         slugs: z.array(Slug).min(1).max(100),
         max_verify_usd: MaxVerifyUsd.optional(),

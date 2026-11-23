@@ -27,6 +27,14 @@ describe('progress items', () => {
     })
   })
 
+  it('influencer run Open: its approval until a finished run has candidates in Leads', () => {
+    const r = { id: 'ir', status: 'awaiting_approval', stage: 'reactions', influencer_ids: ['a'], cost: null, counts: {}, error: null, created_at: iso(3), updated_at: iso(2), finished_at: null }
+    expect(fromInfluencerRun({ ...r, start_action_id: 'start-1' }).href).toBe('/actions/start-1')
+    expect(fromInfluencerRun({ ...r, status: 'running', start_action_id: 'start-1', reactions_action_id: 'rx-1' }).href).toBe('/actions/rx-1')
+    expect(fromInfluencerRun({ ...r, status: 'done', counts: { candidates: 0 }, start_action_id: 'start-1' }).href).toBe('/actions/start-1')
+    expect(fromInfluencerRun({ ...r, status: 'done', counts: { candidates: 4 }, start_action_id: 'start-1' }).href).toBe('/import/leads')
+  })
+
   it('LinkedIn lookup: done / total and $ spent of the cap; the sheet in Leads', () => {
     expect(fromLookupBatch({ id: 'b', name: 'PM Influencers', status: 'looking_up', spent_usd: '0.40', max_lookup_usd: '1.19', created_at: iso(10), updated_at: iso(1), error: null }, { pending_lookup: 40, found: 65, not_found: 7, approved: 21 }, 'list-1')).toMatchObject({
       kind: 'influencer_lookup', title: 'PM Influencers', done: 93, total: 133, cost_usd: 0.4, cap_usd: 1.19, href: '/import/leads?list=list-1', finished: false,

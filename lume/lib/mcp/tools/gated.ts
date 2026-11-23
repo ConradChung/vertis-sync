@@ -344,7 +344,7 @@ export const runInfluencerScrape = gatedTool({
   title: 'Request an influencer scrape',
   description:
     "Requests scraping tracked influencers' recent posts and reactors (kind influencer_run). Spends Apify credit; the preview shows the estimate and what is left of the monthly cap. " +
-    'To run on specific posts only, pass post_url (one LinkedIn post URL) or post_urls (1-10), all by the ONE influencer in slugs: no posts scrape, and the run goes straight to the reactions bill, priced at the per-post cap.',
+    'To run on specific posts only, pass post_url (one LinkedIn post URL) or post_urls (1-10), all by the ONE influencer in slugs: no posts scrape; the bill is the per-post reactions cap, and approving this one card also starts the reactions scrape (no second approval).',
   kind: 'influencer_run',
   input: z.object({
     slugs: z.array(z.string().trim().min(1).max(80)).min(1).max(100).describe('Influencer slugs (lume_list_influencers).'),

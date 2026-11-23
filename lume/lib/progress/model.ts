@@ -149,6 +149,18 @@ export interface InfluencerRunLike {
   created_at: string
   updated_at: string
   finished_at: string | null
+  start_action_id?: string | null
+  reactions_action_id?: string | null
+}
+
+/**
+ * Where "Open" goes: Leads once a finished run has candidates there; otherwise
+ * the run's own approval (its status and result), since Leads is empty until then.
+ */
+function influencerRunHref(r: InfluencerRunLike): string {
+  if (r.status === 'done' && (num(r.counts?.candidates) ?? 0) > 0) return '/import/leads'
+  const action = r.reactions_action_id ?? r.start_action_id
+  return action ? `/actions/${action}` : '/import/leads'
 }
 
 const LIVE_INF_RUN = new Set(['running', 'awaiting_approval'])
@@ -167,7 +179,7 @@ export function fromInfluencerRun(r: InfluencerRunLike): ProgressItem {
     updated_at: r.finished_at ?? r.updated_at,
     finished: !LIVE_INF_RUN.has(r.status),
     error: r.error,
-    href: '/import/leads',
+    href: influencerRunHref(r),
   })
 }
 
