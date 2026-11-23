@@ -41,7 +41,7 @@ describe('Apify bounds (parity with supabase/functions/_shared/influencer/cost.t
   it('the edge function uses the same unit prices and formulas', () => {
     const src = readFileSync(join(__dirname, '../../../supabase/functions/_shared/influencer/cost.ts'), 'utf8')
     expect(src).toContain('PRICE_PER_1K_POSTS = 2')
-    expect(src).toContain('PRICE_PER_1K_REACTIONS = 1.5')
+    expect(src).toContain('PRICE_PER_1K_REACTIONS = 2')
     expect(src).toContain('Math.max(0, estimateUsd) * 1.1 + 0.05')
     expect(src).toContain(': Math.max(0, lastPosts)) * 1.5')
   })
@@ -55,7 +55,7 @@ describe('estimateInfluencer', () => {
     expect(e.posts_usd).toBe(0.63)
     expect(e.posts_reserve_usd).toBe(1.06)
     expect(e.reactions).toEqual({ low: 780, expected: 1114, high: 1448 })
-    expect(e.reactions_usd).toEqual({ low: 1.17, expected: 1.67, high: 2.17 })
+    expect(e.reactions_usd).toEqual({ low: 1.56, expected: 2.23, high: 2.9 })
     // a re-run: between 30% and 100% of the reactors are new and need verifying
     expect(e.new_reactors).toEqual({ low: 251, high: 837 })
     expect(e.leads_per_reactor).toBeCloseTo(71 / 837, 5)
@@ -88,7 +88,7 @@ describe('estimateRun', () => {
     expect(r.influencers).toBe(2)
     expect(r.posts_usd_now).toBe(0.72)
     expect(r.posts_reserve_usd).toBe(1.29)
-    expect(r.reactions_usd).toEqual({ low: 1.64, expected: 2.34, high: 3.04 })
+    expect(r.reactions_usd).toEqual({ low: 2.18, expected: 3.12, high: 4.05 })
     expect(r.perplexity_usd.high).toBeGreaterThan(r.perplexity_usd.low)
     expect(r.perplexity_usd.high).toBeLessThanOrEqual(10)
     expect(r.last_run_cost_usd).toBe(4.59)

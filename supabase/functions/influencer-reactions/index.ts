@@ -25,7 +25,7 @@
 // Stages (influencer_runs.stage):
 //   posts      harvestapi~linkedin-profile-posts per influencer (lookback_days)
 //   top_posts  Haiku PM-relevance (20 per call), top 10 by likes, exact
-//              reactions bill (sum of min(likes, cap) x $1.5/1k) -> awaiting_approval
+//              reactions bill (sum of min(likes, cap) x $2/1k) -> awaiting_approval
 //   reactions  harvestapi~linkedin-post-reactions per influencer (top-10 URLs,
 //              maxItems = the influencer's cap); merged into influencer_reactors
 //              (deduped by LinkedIn URL, reacted_to / reacted_posts unions)
@@ -86,6 +86,7 @@ import {
   VERIFY_WORKERS,
 } from '../_shared/influencer/verify.ts'
 import { influencerStats, runCounts, type StatReactor } from '../_shared/influencer/stats.ts'
+import { knownSignalReactorIds } from '../_shared/signal/reactions.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -180,6 +181,13 @@ async function fetchRetry(ctx: Ctx, url: string, init: RequestInit, timeoutMs: n
 }
 
 const rpc = (fn: string, args: Record<string, unknown>) => rest('POST', `rpc/${fn}`, args, 'return=representation')
+
+/** The fetch-style rest() the shared signal helpers take (service-role headers set). */
+const signalRest = (path: string, init: RequestInit = {}) => {
+  const headers = new Headers(REST_HEADERS)
+  new Headers(init.headers).forEach((v, k) => headers.set(k, v))
+  return fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...init, headers })
+}
 
 function apify(path: string, init: RequestInit = {}, timeoutMs = 20_000): Promise<Response> {
   return fetch(`${APIFY}${path}`, {
@@ -629,14 +637,19 @@ async function stageReactions(ctx: Ctx): Promise<StepResult> {
 
 async function stageTriage(ctx: Ctx): Promise<StepResult> {
   const rows = (await rest('GET',
-    `influencer_reactors?last_seen_run=eq.${ctx.run.id}&triage=is.null&select=id,headline&order=id&limit=${TRIAGE_BATCH}`)) as { id: number; headline: string | null }[]
+    `influencer_reactors?last_seen_run=eq.${ctx.run.id}&triage=is.null&select=id,headline,linkedin_url,linkedin_id&order=id&limit=${TRIAGE_BATCH}`)) as
+    { id: number; headline: string | null; linkedin_url: string | null; linkedin_id: string | null }[]
   if (!rows.length) {
     await patchRun(ctx, { stage: 'verify' })
     ctx.run.stage = 'verify'
     return 'continue'
   }
-  const { noCall, ask } = triageTodo(rows)
-  const labels: Record<number, TriageLabel> = Object.fromEntries(noCall.map((id) => [id, 'no' as const]))
+  // GTM-14: on a run Lume filed for Frank's posts, people already in signal_people
+  // (commenters win) are labelled 'no' before any Haiku / Perplexity spend.
+  const known = new Set(await knownSignalReactorIds(signalRest, ctx.run.id, rows))
+  if (known.size) addCount(ctx, 'signal_known', known.size)
+  const { noCall, ask } = triageTodo(rows.filter((r) => !known.has(r.id)))
+  const labels: Record<number, TriageLabel> = Object.fromEntries([...noCall, ...known].map((id) => [id, 'no' as const]))
   if (ask.length) {
     const { json, usd } = await haiku(ctx, triageRequest(ask))
     addCost(ctx, 'anthropic', usd)

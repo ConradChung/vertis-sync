@@ -241,8 +241,8 @@ Deno.test('top_posts: ranks the top 10 and stops at awaiting_approval with the e
     assertEquals(ranked.map((p: { rank: number }) => p.rank), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     const patch = bodies(f.calls, is('influencer_runs', 'PATCH')).at(-1)
     // likes 1200..300, all under the 1000 cap except 1200, 1100 -> 1000 + 1000 + 1000 + 900 + ... + 300 = 7200
-    assertEquals([patch.status, patch.stage, patch.reactions_estimate_usd, patch.lease_token], ['awaiting_approval', 'reactions', 10.8, null])
-    assertEquals(patch.reactions_estimate[0], { influencer_id: INF, slug: 'peter-lohmann', name: 'Peter Lohmann', posts: 10, reactions: 7200, usd: 10.8 })
+    assertEquals([patch.status, patch.stage, patch.reactions_estimate_usd, patch.lease_token], ['awaiting_approval', 'reactions', 14.4, null])
+    assertEquals(patch.reactions_estimate[0], { influencer_id: INF, slug: 'peter-lohmann', name: 'Peter Lohmann', posts: 10, reactions: 7200, usd: 14.4 })
     assert(f.calls.some((c) => c.url.endsWith('rpc/lume_alert_upsert')), 'the owner is pinged')
   } finally { f.restore() }
 })
@@ -273,7 +273,7 @@ Deno.test('reactions: an existing reservation is never started again; a finished
     const [merge] = bodies(f.calls, (u) => u.endsWith('rpc/lume_influencer_merge_reactions'))
     assertEquals(merge, { p_apify_row: APROW, p_rows: [{ linkedin_url: 'https://www.linkedin.com/in/AAA', linkedin_id: 'AAA', name: 'Alice', headline: 'Owner', slug: 'peter-lohmann', post_ids: ['1', '2'] }] })
     const done = bodies(f.calls, is('influencer_apify_runs', 'PATCH'))[0]
-    assertEquals([done.status, done.item_count, done.cost_usd], ['succeeded', 2, 0.003])
+    assertEquals([done.status, done.item_count, done.cost_usd], ['succeeded', 2, 0.004])
   } finally { f.restore() }
 })
 
@@ -733,12 +733,12 @@ Deno.test('start post_urls: creates the run at the reactions bill, saves the pos
       post_urls: [`${TARGET}/?utm_source=share`, TARGET],
     }), (p) => waits.push(p))
     assertEquals(res.status, 202)
-    assertEquals(await res.json(), { ok: true, run_id: RUN, status: 'awaiting_approval', stage: 'reactions', reactions_estimate_usd: 1.5 })
+    assertEquals(await res.json(), { ok: true, run_id: RUN, status: 'awaiting_approval', stage: 'reactions', reactions_estimate_usd: 2 })
     await Promise.all(waits)
 
     const [run] = bodies(f.calls, is('influencer_runs', 'POST'))
-    assertEquals([run.status, run.stage, run.max_verify_usd, run.start_action_id, run.reactions_estimate_usd], ['awaiting_approval', 'reactions', 2, ACTION, 1.5])
-    assertEquals(run.reactions_estimate, [{ influencer_id: INF, slug: 'peter-lohmann', name: 'Peter Lohmann', posts: 1, reactions: 1000, usd: 1.5 }])
+    assertEquals([run.status, run.stage, run.max_verify_usd, run.start_action_id, run.reactions_estimate_usd], ['awaiting_approval', 'reactions', 2, ACTION, 2])
+    assertEquals(run.reactions_estimate, [{ influencer_id: INF, slug: 'peter-lohmann', name: 'Peter Lohmann', posts: 1, reactions: 1000, usd: 2 }])
     assertEquals(run.counts, { targeted_posts: 1, top_posts: 1, reactions_estimate: 1000 })
 
     const [rows] = bodies(f.calls, is('influencer_posts', 'POST'))
@@ -746,7 +746,7 @@ Deno.test('start post_urls: creates the run at the reactions bill, saves the pos
     assertEquals([rows[0].run_id, rows[0].influencer_id, rows[0].post_id, rows[0].post_url, rows[0].rank, rows[0].pm_relevant],
       [RUN, INF, '7524216718781599744', TARGET, 1, true])
 
-    assert(f.calls.some((c) => c.url.includes('rpc/lume_alert_upsert') && (c.body ?? '').includes('$1.50')), 'bill alert sent')
+    assert(f.calls.some((c) => c.url.includes('rpc/lume_alert_upsert') && (c.body ?? '').includes('$2.00')), 'bill alert sent')
     assert(!f.calls.some((c) => c.url.includes('api.apify.com')), 'no Apify call before approval')
     assert(!f.calls.some((c) => c.url.endsWith('rpc/lume_influencer_claim_run')), 'not advanced')
   } finally { f.restore() }
@@ -804,11 +804,11 @@ Deno.test('reactions stage on a targeted run scrapes exactly the chosen post wit
   let rowsCall = 0
   const f = stubFetch([
     [db('rpc/lume_influencer_claim_run'), () => json([claimed('reactions', {
-      reactions_estimate: [{ influencer_id: INF, slug: 'peter-lohmann', name: 'Peter Lohmann', posts: 1, reactions: 1000, usd: 1.5 }],
-      reactions_estimate_usd: 1.5, reactions_approved_usd: 1.5,
+      reactions_estimate: [{ influencer_id: INF, slug: 'peter-lohmann', name: 'Peter Lohmann', posts: 1, reactions: 1000, usd: 2 }],
+      reactions_estimate_usd: 2, reactions_approved_usd: 2,
     })])],
     [is('influencers', 'GET'), () => json([influencer])],
-    [is('influencer_apify_runs', 'GET'), () => json(rowsCall++ === 0 ? [] : [{ id: APROW, influencer_id: INF, kind: 'reactions', status: 'running', apify_run_id: 'runTTTTTTTT1', estimate_usd: 1.7, cost_usd: 1.7 }])],
+    [is('influencer_apify_runs', 'GET'), () => json(rowsCall++ === 0 ? [] : [{ id: APROW, influencer_id: INF, kind: 'reactions', status: 'running', apify_run_id: 'runTTTTTTTT1', estimate_usd: 2.25, cost_usd: 2.25 }])],
     [is('influencer_posts', 'GET'), () => json([{ post_url: TARGET }])],
     [(u) => u === 'https://api.apify.com/v2/users/me/usage/monthly', () => json({ data: { totalUsageCreditsUsdAfterVolumeDiscount: 4 } })],
     [db('rpc/lume_influencer_reserve_apify'), () => json({ ok: true, existing: false, id: APROW })],
@@ -819,9 +819,45 @@ Deno.test('reactions stage on a targeted run scrapes exactly the chosen post wit
   try {
     await advance(RUN, null, { now: c.now, sleep: c.sleep, startedAt: 0, handOff: () => Promise.resolve(true) })
     const reserve = bodies(f.calls, (u) => u.endsWith('rpc/lume_influencer_reserve_apify'))[0]
-    assertEquals([reserve.p_kind, reserve.p_estimate], ['reactions', 1.7])
+    assertEquals([reserve.p_kind, reserve.p_estimate], ['reactions', 2.25])
     const start = f.calls.find((x) => x.url.includes('/acts/harvestapi~linkedin-post-reactions/runs'))!
-    assert(start.url.includes('maxTotalChargeUsd=1.7'), start.url)
+    assert(start.url.includes('maxTotalChargeUsd=2.25'), start.url)
     assertEquals(JSON.parse(start.body!).posts, [TARGET])
+  } finally { f.restore() }
+})
+
+Deno.test('GTM-14 triage: on a run filed for Frank\'s posts, people already in signal_people are labelled no before Haiku', async () => {
+  const SIG = '66666666-6666-4666-8666-666666666666'
+  let asked = ''
+  let reads = 0
+  const f = stubFetch([
+    ...common,
+    [db('rpc/lume_influencer_claim_run'), () => json([claimed('triage', { id: SIG })])],
+    [is('influencer_reactors?last_seen_run', 'GET'), () => {
+      if (reads++) throw new Error('stop here')
+      return json([
+        { id: 1, headline: 'Owner, Acme PM', linkedin_url: 'https://www.linkedin.com/in/known/', linkedin_id: 'K1' },
+        { id: 2, headline: 'Owner, Beta PM', linkedin_url: 'https://www.linkedin.com/in/new', linkedin_id: 'N2' },
+      ])
+    }],
+    [db('rpc/lume_influencer_fail_run'), () => json({ ok: true, abort: [] })],
+    [is(`influencer_runs?id=eq.${SIG}&select=start_action_id`, 'GET'), () => json([{ start_action_id: ACTION }])],
+    [is('signal_posts?reactions_action_id', 'GET'), () => json([{ post_id: '111' }])],
+    [is('signal_people?or=', 'GET'), () => json([{ linkedin_url: 'https://www.linkedin.com/in/known', linkedin_id: null }])],
+    [(u) => u === 'https://api.anthropic.com/v1/messages', (_u, b) => {
+      asked = b ?? ''
+      return json({ stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 5 }, content: [{ type: 'text', text: JSON.stringify({ results: [{ id: '2', label: 'likely' }] }) }] })
+    }],
+    [is('influencer_reactors', 'PATCH'), () => json([])],
+    [is('influencer_runs', 'PATCH'), () => json([{ id: SIG }])],
+  ])
+  try {
+    await advance(SIG, null, { handOff: () => Promise.resolve(true) })
+    assert(asked.includes('Beta PM') && !asked.includes('Acme PM'), 'only the unknown reactor is classified')
+    const no = f.calls.find((c) => c.method === 'PATCH' && c.url.includes('influencer_reactors') && (c.body ?? '').includes('"no"'))
+    assert(no && no.url.includes('id=in.(1)'), 'the known reactor is labelled no')
+    const likely = f.calls.find((c) => c.method === 'PATCH' && c.url.includes('influencer_reactors') && (c.body ?? '').includes('"likely"'))
+    assert(likely && likely.url.includes('id=in.(2)'))
+    assertEquals(bodies(f.calls, is('influencer_runs', 'PATCH')).find((b) => b.counts)?.counts.signal_known, 1)
   } finally { f.restore() }
 })

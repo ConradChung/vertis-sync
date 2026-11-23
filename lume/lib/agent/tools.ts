@@ -1698,7 +1698,7 @@ const SPECS: Built[] = [
     {
       name: 'estimate_influencer_run',
       description:
-        "Price a PM influencer reactions run before proposing it, from each influencer's last-run numbers and the unit prices ($2/1k posts, $1.5/1k reactions, " +
+        "Price a PM influencer reactions run before proposing it, from each influencer's last-run numbers and the unit prices ($2/1k posts, $2/1k reactions, " +
         '~$0.006 per Perplexity call): the posts cost now (approval 1), the expected reactions cost range (the exact bill comes after top posts, approval 2), ' +
         'the Perplexity range (capped by max_verify_usd), expected verified leads and 700+ leads, per influencer, warnings for zero-yield influencers, ' +
         'and the Apify month-to-date spend vs the shared $29 monthly cap. Without slugs: every active influencer.',
@@ -1737,7 +1737,7 @@ const SPECS: Built[] = [
         'exactly these influencers in this chat. The approval covers the posts scrape (Apify, capped) and the Haiku top-10 ranking; the run then STOPS ' +
         'with the exact reactions bill, which needs approve_reactions. max_verify_usd caps the Perplexity spend later (default 10, at most 50). One run at a time. ' +
         'post_urls (optional): when the owner gave specific LinkedIn post URLs (linkedin.com/posts/... or /feed/update/urn:li:activity:...), pass 1-10 of them ' +
-        'with exactly ONE slug (their author); the run skips the posts scrape and top-10 ranking, and the reactions bill is posts × max_reactions_per_post × $1.5/1k ' +
+        'with exactly ONE slug (their author); the run skips the posts scrape and top-10 ranking, and the reactions bill is posts × max_reactions_per_post × $2/1k ' +
         '(quote that as the estimate). One approval: approving this card also approves that reactions bill and starts the scrape (no approve_reactions needed).',
       inputSchema: z.object({
         slugs: z.array(Slug).min(1).max(100),
@@ -1886,7 +1886,7 @@ const SPECS: Built[] = [
       name: 'approve_reactions',
       description:
         'Propose the reactions scrape of a PM influencer run that is awaiting_approval (get_influencer_run): the approval shows the EXACT bill from top posts ' +
-        '(reactions per influencer at $1.5/1k, Apify charge capped), then triage and Perplexity verify under max_verify_usd (optionally changed here). ' +
+        '(reactions per influencer at $2/1k, Apify charge capped), then triage and Perplexity verify under max_verify_usd (optionally changed here). ' +
         'Show Conrad the bill per influencer before calling it.',
       inputSchema: z.object({ run_id: uuid, max_verify_usd: MaxVerifyUsd.optional() }),
       payload: ({ run_id, max_verify_usd }) => ({ run_id: run_id.toLowerCase(), ...(max_verify_usd !== undefined ? { max_verify_usd } : {}) }),
