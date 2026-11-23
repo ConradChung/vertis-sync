@@ -53,6 +53,26 @@ describe('POST /api/hooks/gate-opened alerts (G4)', () => {
   })
 })
 
+describe('gate-opened says why a ping was not sent', () => {
+  it('a skipped ping logs its reason and records it on the event', async () => {
+    h.sendGatePing.mockResolvedValue({ ok: false, skipped: true, reason: 'missing token' })
+    const res = await hook({ kind: 'stall', target_table: 'validation_jobs', target_id: ID })
+    expect(await res.json()).toEqual({ ok: true, pinged: false })
+    expect(console.warn).toHaveBeenCalledWith(`[hooks/gate-opened] ping for stall:${ID} skipped: missing token`)
+    expect(h.logEvent).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ pinged: false, notify_status: 'skipped', notify_error: 'missing token' }) }))
+  })
+
+  it('channel disabled and API errors are named too', async () => {
+    process.env.ALERT_CHANNELS = 'feed'
+    await hook({ kind: 'stall', target_table: 'validation_jobs', target_id: ID })
+    expect(console.warn).toHaveBeenCalledWith(`[hooks/gate-opened] ping for stall:${ID} skipped: telegram channel disabled (ALERT_CHANNELS)`)
+    delete process.env.ALERT_CHANNELS
+    h.sendGatePing.mockResolvedValue({ ok: false, error: 'Telegram 401: Unauthorized' })
+    await hook({ kind: 'stall', target_table: 'validation_jobs', target_id: ID })
+    expect(console.warn).toHaveBeenCalledWith(`[hooks/gate-opened] ping for stall:${ID} failed: Telegram 401: Unauthorized`)
+  })
+})
+
 describe('gate-opened shares the pipelines\' keys (G4 fix)', () => {
   it.each(['stall', 'jobs_stall', 'jobs_fill', 'jobs_review', 'jobs_write', 'push_review', 'campaign_choice', 'lume_action'])(
     '%s: <target id>:<kind>, no instance suffix', async (kind) => {

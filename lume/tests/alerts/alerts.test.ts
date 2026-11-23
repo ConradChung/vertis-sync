@@ -129,7 +129,7 @@ describe('alert', () => {
   })
 
   it('telegramSkipped is the adapter-shaped "not sent" result for feed-only mode', () => {
-    expect(telegramSkipped).toEqual({ ok: false, skipped: true })
+    expect(telegramSkipped).toEqual({ ok: false, skipped: true, reason: 'telegram channel disabled (ALERT_CHANNELS)' })
   })
 })
 

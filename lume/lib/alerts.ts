@@ -3,6 +3,7 @@ import { maskKeyText } from '@/lib/operators/mask'
 import { createServiceClient } from '@/lib/supabase/service'
 import { configuredBaseUrl } from '@/lib/http/origin'
 import type { TelegramResult } from '@/lib/adapters/telegram'
+import { CHANNEL_DISABLED } from '@/lib/adapters/telegram.notify'
 
 /**
  * One switch for Lume's own notifications (Phase G4), the twin of the edge
@@ -99,8 +100,11 @@ export function alertLink(path: string): string {
   return base ? `${base}${path}` : path
 }
 
-/** What callers treat as the Telegram result when Telegram is switched off. */
-export const telegramSkipped: TelegramResult = { ok: false, skipped: true }
+/**
+ * What callers treat as the Telegram result when Telegram is switched off
+ * (`alert()` returned undefined): skipped, with the reason recorded on the row.
+ */
+export const telegramSkipped: TelegramResult = { ok: false, skipped: true, reason: CHANNEL_DISABLED }
 
 /** Same cap as the edge helper: a hung feed write never holds the caller longer. */
 export const FEED_TIMEOUT_MS = 5_000
