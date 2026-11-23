@@ -169,3 +169,8 @@ revoke all on function public.signal_lane_spend(text[], timestamptz) from public
 
 -- Dedupe looks up lead_review_items by linkedin_key alone; the existing index leads with set_id.
 create index if not exists lead_review_items_linkedin_key on public.lead_review_items (linkedin_key) where linkedin_key is not null;
+
+-- People already in GTM-14 are skipped on Frank's reactions runs without being marked
+-- rejected. Every run's triage query skips rows with a skip_reason; stats don't count it.
+alter table public.influencer_reactors add column if not exists skip_reason text
+  check (skip_reason in ('already_in_signal'));

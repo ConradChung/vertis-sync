@@ -637,7 +637,7 @@ async function stageReactions(ctx: Ctx): Promise<StepResult> {
 
 async function stageTriage(ctx: Ctx): Promise<StepResult> {
   const rows = (await rest('GET',
-    `influencer_reactors?last_seen_run=eq.${ctx.run.id}&triage=is.null&select=id,headline,linkedin_url,linkedin_id&order=id&limit=${TRIAGE_BATCH}`)) as
+    `influencer_reactors?last_seen_run=eq.${ctx.run.id}&triage=is.null&skip_reason=is.null&select=id,headline,linkedin_url,linkedin_id&order=id&limit=${TRIAGE_BATCH}`)) as
     { id: number; headline: string | null; linkedin_url: string | null; linkedin_id: string | null }[]
   if (!rows.length) {
     await patchRun(ctx, { stage: 'verify' })
@@ -645,11 +645,17 @@ async function stageTriage(ctx: Ctx): Promise<StepResult> {
     return 'continue'
   }
   // GTM-14: on a run Lume filed for Frank's posts, people already in signal_people
-  // (commenters win) are labelled 'no' before any Haiku / Perplexity spend.
-  const known = new Set(await knownSignalReactorIds(signalRest, ctx.run.id, rows))
-  if (known.size) addCount(ctx, 'signal_known', known.size)
-  const { noCall, ask } = triageTodo(rows.filter((r) => !known.has(r.id)))
-  const labels: Record<number, TriageLabel> = Object.fromEntries([...noCall, ...known].map((id) => [id, 'no' as const]))
+  // (commenters win) get skip_reason='already_in_signal' before any Haiku / Perplexity
+  // spend. Not a rejection: triage stays null, so stats never count them as rejected,
+  // and every run's triage query skips rows with a skip_reason ("known, don't re-check").
+  const known = [...new Set(await knownSignalReactorIds(signalRest, ctx.run.id, rows))]
+  if (known.length) {
+    await rest('PATCH', `influencer_reactors?id=in.${inList(known)}&skip_reason=is.null`, { skip_reason: 'already_in_signal', updated_at: new Date().toISOString() })
+    addCount(ctx, 'signal_known', known.length)
+  }
+  const knownSet = new Set(known)
+  const { noCall, ask } = triageTodo(rows.filter((r) => !knownSet.has(r.id)))
+  const labels: Record<number, TriageLabel> = Object.fromEntries(noCall.map((id) => [id, 'no' as const]))
   if (ask.length) {
     const { json, usd } = await haiku(ctx, triageRequest(ask))
     addCost(ctx, 'anthropic', usd)

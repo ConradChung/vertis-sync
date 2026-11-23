@@ -826,7 +826,7 @@ Deno.test('reactions stage on a targeted run scrapes exactly the chosen post wit
   } finally { f.restore() }
 })
 
-Deno.test('GTM-14 triage: on a run filed for Frank\'s posts, people already in signal_people are labelled no before Haiku', async () => {
+Deno.test('GTM-14 triage: on a run filed for Frank\'s posts, people already in signal_people get skip_reason already_in_signal (not a rejection) before Haiku', async () => {
   const SIG = '66666666-6666-4666-8666-666666666666'
   let asked = ''
   let reads = 0
@@ -854,8 +854,11 @@ Deno.test('GTM-14 triage: on a run filed for Frank\'s posts, people already in s
   try {
     await advance(SIG, null, { handOff: () => Promise.resolve(true) })
     assert(asked.includes('Beta PM') && !asked.includes('Acme PM'), 'only the unknown reactor is classified')
-    const no = f.calls.find((c) => c.method === 'PATCH' && c.url.includes('influencer_reactors') && (c.body ?? '').includes('"no"'))
-    assert(no && no.url.includes('id=in.(1)'), 'the known reactor is labelled no')
+    const skip = f.calls.find((c) => c.method === 'PATCH' && c.url.includes('influencer_reactors') && (c.body ?? '').includes('already_in_signal'))
+    assert(skip && skip.url.includes('id=in.(1)') && skip.url.includes('skip_reason=is.null'), 'the known reactor gets the skip flag')
+    assert(!f.calls.some((c) => c.method === 'PATCH' && c.url.includes('influencer_reactors') && (c.body ?? '').includes('"no"')), 'nobody is marked rejected')
+    const read = f.calls.find((c) => c.method === 'GET' && c.url.includes('influencer_reactors?last_seen_run'))!
+    assert(read.url.includes('skip_reason=is.null'), 'triage never re-reads skipped rows (any run)')
     const likely = f.calls.find((c) => c.method === 'PATCH' && c.url.includes('influencer_reactors') && (c.body ?? '').includes('"likely"'))
     assert(likely && likely.url.includes('id=in.(2)'))
     assertEquals(bodies(f.calls, is('influencer_runs', 'PATCH')).find((b) => b.counts)?.counts.signal_known, 1)
