@@ -311,7 +311,7 @@ export async function stageDraft(d: FilterDeps, c: Counts, kind: 'commenter' | '
           const { json, usd } = await d.haiku(replyRequest({ first_name: r.first_name, company_name: company, comment, opening }))
           await charge(d, r, 'haiku', usd)
           try {
-            reply = parseReply(json, opening, r.first_name)
+            reply = parseReply(json, opening, r.first_name, `${comment}\n${company ?? ''}`) // their company name may carry digits
           } catch (err) {
             if (i === 1) throw err
           }

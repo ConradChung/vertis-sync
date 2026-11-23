@@ -7,9 +7,31 @@ import { FACTS } from './testkit.ts'
 const NOW = new Date('2026-11-23T20:00:00Z')
 const GUARDED = /ucla|google|berkeley|graduat/i
 const ALIK = {
-  response: 'saw your comment on my post, and you nailed it: tenants and owners do not keep office hours, so it is great the AI bots are carrying the after-hours load.',
+  response: 'saw your comment on my post about tenants and owners not keeping office hours, and your AI bots helping.',
   question: 'How much of the after-hours owner and tenant traffic do the bots handle on their own?',
 }
+const ALIK_COMMENT = 'Tenants do not keep office hours, and neither do the owners reaching out about a lease, lol. Glad my AI bots are a big help and the underlying system of record!'
+const CHUCK_COMMENT = "Lead response time and showing-to-application conversion deserve daily attention during slower leasing periods. I'd also track missed calls and follow-up delays, since small gaps there can quietly add days to vacancy Frank J. ."
+
+Deno.test('opener: no digits or day names that are not in the comment; under 25 words', () => {
+  const q = 'How do you track missed calls today?'
+  for (const response of [
+    'saw your comment on my post, tenants messaging at 11pm is the norm.',
+    'saw your comment on my post, a missed call on a Friday can cost a lot.',
+    'saw your comment on my post, follow-up gaps add 7 days to vacancy.',
+    'saw your comment on my post about weekends and missed calls adding vacancy.',
+  ]) assertThrows(() => parseReply({ response, question: q }, OPENING_EARLIER, 'Chuck', CHUCK_COMMENT), Error, 'invented')
+  assertThrows(() => parseReply({ response: 'saw your comment on my post about missed calls', question: 'Who calls back by 9am?' }, OPENING_EARLIER, 'Chuck', CHUCK_COMMENT), Error, 'invented')
+  const long = `saw your comment on my post about ${'missed calls and follow-up delays '.repeat(4).trim()}.`
+  assertThrows(() => parseReply({ response: long, question: q }, OPENING_EARLIER, 'Chuck', CHUCK_COMMENT), Error, '25 words')
+  // In the comment → allowed.
+  assertEquals(parseReply({ response: 'saw your comment on my post about the 24/7 coverage', question: q }, OPENING_EARLIER, 'A', 'We moved to 24/7 coverage').response,
+    'saw your comment on my post about the 24/7 coverage.')
+  assertEquals(parseReply({ response: 'saw your comment on my post about Friday showings', question: q }, OPENING_EARLIER, 'A', 'Friday showings are busy').response,
+    'saw your comment on my post about Friday showings.')
+  assertEquals(parseReply(ALIK, OPENING_EARLIER, 'Alik', ALIK_COMMENT).response, ALIK.response)
+  assertEquals(parseReply({ ...ALIK, question: 'How is Realty 25 AZ covering nights?' }, OPENING_EARLIER, 'Alik', `${ALIK_COMMENT}\nRealty 25 AZ`).question, 'How is Realty 25 AZ covering nights?')
+})
 
 Deno.test('opening: same PT day → thread earlier; otherwise comment on my post (lower case after the comma)', () => {
   assertEquals(commenterOpening('2026-11-23T09:00:00Z', NOW), OPENING_TODAY) // 01:00 PT same day
@@ -24,7 +46,7 @@ Deno.test('facts file: Premium, 300-char notes', () => {
 })
 
 Deno.test('first message = response, operator line, one question; no Kaspen or demo until after they reply', () => {
-  const reply = parseReply(ALIK, OPENING_EARLIER)
+  const reply = parseReply(ALIK, OPENING_EARLIER, 'Alik', ALIK_COMMENT)
   const d = buildDrafts({ first_name: 'Alik', company_name: 'Realty 25 AZ', opening: OPENING_EARLIER, reply }, realFacts)
   assertEquals(d.dm,
     `Hey Alik, ${ALIK.response} I run a property management company of about 1,000 units in Vancouver, so I always love connecting with fellow operators who are scaling. ${ALIK.question}`)
@@ -47,7 +69,7 @@ Deno.test('notes are not padded: a short reply gives a short note', () => {
 })
 
 Deno.test('note over the limit falls back to shorter forms, never over the limit', () => {
-  const long = { response: `saw your comment on my post, ${'and the detail about leasing velocity '.repeat(5).trim()}.`, question: 'How fast do you lease?' }
+  const long = { response: `saw your comment on my post, ${'and the detail about leasing velocity '.repeat(9).trim()}.`, question: 'How fast do you lease?' }
   const d = buildDrafts({ first_name: 'Ana', company_name: 'X', opening: OPENING_EARLIER, reply: long }, realFacts)
   assert(d.connection_note.length <= 300, d.connection_note)
   const tiny = buildDrafts({ first_name: 'Al', company_name: 'X', opening: OPENING_EARLIER, reply: null }, { ...FACTS, connection_note_max_chars: 60 })
