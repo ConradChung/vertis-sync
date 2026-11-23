@@ -21,7 +21,7 @@ export const LUME_ENV_NAMES: readonly EnvName[] = [
   req('LUME_HOOK_SECRET'),
   req('LUME_MCP_TOKEN'),
   opt('LUME_MCP_WRITES'),
-  req('LUME_MCP_CONFIRM_KINDS'),
+  opt('LUME_MCP_CONFIRM_KINDS'),
   req('LUME_INTERNAL_SECRET'),
   req('LUME_URL'),
   opt('LUME_INTERNAL_URL'),
