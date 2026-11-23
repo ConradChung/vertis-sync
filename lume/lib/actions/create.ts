@@ -20,7 +20,9 @@ import { BANK_QUEUE_KEY, bankQueuePayloadError } from '@/lib/rotation/pushes'
 import { companyCheckPayloadError } from '@/lib/companyCheck/model'
 import { pushForItem } from '@/lib/webhooks/deliver'
 import { pushSummary } from '@/lib/webhooks/push'
-import { sendActionPrompt, sendMessage } from '@/lib/adapters/telegram'
+import { sendActionPrompt, sendMessage, type TelegramResult } from '@/lib/adapters/telegram'
+import { notifyOutcome, notifyPatch, type NotifyPatch } from '@/lib/adapters/telegram.notify'
+import { setActionNotify } from '@/lib/actions/store'
 import { slackOnAction } from '@/lib/slack/hooks'
 
 /**
@@ -68,6 +70,12 @@ import { slackOnAction } from '@/lib/slack/hooks'
  *
  * Telegram unconfigured: the row is still created; the prompt is skipped
  * (the adapter logs it) and `telegram_message_id` stays null.
+ *
+ * Every prompt attempt is recorded on the row (`recordNotify`):
+ * `notify_status` 'sent' (+ `notified_at`), 'skipped' ("missing token",
+ * "missing chat id", "telegram channel disabled (ALERT_CHANNELS)") or
+ * 'failed' (e.g. "Telegram 401: Unauthorized"), never with the token. A
+ * failed record is logged, never thrown.
  */
 
 /** Kinds that are always about one validation job. */
@@ -265,8 +273,9 @@ export async function createAction(
       const route = routeItemForAction(row)
       const why = payload.drafted_by === VIDEO_REPLY_DRAFTED_BY ? 'plain yes to the video question' : 'campaign in Auto reply mode'
       const text = `🤖 Auto-approved (${why}) — send_reply\n${String(payload.summary)}\nSending after the live thread re-check.`
+      let notice: TelegramResult | undefined
       try {
-        await alert({
+        notice = await alert({
           source: 'lume.actions', severity: 'info', title: titleFrom(text), body: text,
           link: alertLink(`/actions/${row.id}`), campaign_id: route.campaign_id, scope: route.scope, owner_only: route.owner_only,
           dedupe_key: gateKey(row.id, 'lume_action'),
@@ -274,8 +283,10 @@ export async function createAction(
         })
       } catch (err) {
         console.error('[actions] auto-approval notice failed:', err instanceof Error ? err.message : err)
+        notice = { ok: false, error: `notice threw: ${err instanceof Error ? err.message : String(err)}` }
       }
-      return grant.row
+      const patch = await recordNotify(row.id, notice)
+      return { ...grant.row, ...patch }
     }
   }
 
@@ -283,12 +294,19 @@ export async function createAction(
   // Telegram prompt as before while ALERT_CHANNELS includes telegram.
   const promptText = buildActionPrompt(row).text
   const route = routeItemForAction(row)
-  const sent = (await alert({
-    source: 'lume.actions', severity: 'urgent', title: titleFrom(promptText), body: promptText,
-    link: alertLink(`/actions/${row.id}`), campaign_id: route.campaign_id, scope: route.scope, owner_only: route.owner_only,
-    dedupe_key: gateKey(row.id, 'lume_action'),
-    telegram: () => sendActionPrompt(row),
-  })) ?? telegramSkipped
+  let sent: TelegramResult
+  try {
+    sent = (await alert({
+      source: 'lume.actions', severity: 'urgent', title: titleFrom(promptText), body: promptText,
+      link: alertLink(`/actions/${row.id}`), campaign_id: route.campaign_id, scope: route.scope, owner_only: route.owner_only,
+      dedupe_key: gateKey(row.id, 'lume_action'),
+      telegram: () => sendActionPrompt(row),
+    })) ?? telegramSkipped
+  } catch (err) {
+    // The adapter never throws; anything else must not lose the row either.
+    sent = { ok: false, error: `prompt threw: ${err instanceof Error ? err.message : String(err)}` }
+  }
+  const notify = await recordNotify(row.id, sent)
   // 3f: wake the vertical's Grok routine. A reply is "a draft awaits approval";
   // anything else "needs confirmation". Name and company only; never blocks.
   const pushType = kind === 'send_reply' ? 'draft_awaiting' : 'needs_confirmation'
@@ -297,12 +315,28 @@ export async function createAction(
   if (sent.ok && sent.messageId !== null) {
     try {
       await setActionMessageId(row.id, sent.messageId)
-      return { ...row, telegram_message_id: sent.messageId }
+      return { ...row, ...notify, telegram_message_id: sent.messageId }
     } catch (err) {
       // The action exists and the prompt went out; a missing message id only
       // means the Telegram message is not edited on decision.
       console.error('[actions] could not store telegram_message_id:', err instanceof Error ? err.message : err)
     }
   }
-  return row
+  return { ...row, ...notify }
+}
+
+/**
+ * Store the prompt's outcome on the row. `undefined` = the telegram channel
+ * is off. Never throws: a failed update is logged and the patch still
+ * returned, so the caller's response shows what happened.
+ */
+async function recordNotify(id: string, result: TelegramResult | undefined): Promise<NotifyPatch> {
+  const patch = notifyPatch(notifyOutcome(result))
+  if (patch.notify_status !== 'sent') console.warn(`[actions] telegram prompt for ${id} ${patch.notify_status}: ${patch.notify_error}`)
+  try {
+    await setActionNotify(id, patch)
+  } catch (err) {
+    console.error(`[actions] could not record notify_status for ${id}:`, err instanceof Error ? err.message : err)
+  }
+  return patch
 }

@@ -4,6 +4,7 @@ import { gateOpenedSchema } from '@/lib/api/gateOpened'
 import { getGate, logEvent } from '@/lib/db/service'
 import { sendGatePing } from '@/lib/adapters/telegram'
 import { buildGatePing } from '@/lib/adapters/telegram.messages'
+import { notifyOutcome } from '@/lib/adapters/telegram.notify'
 import { alert, alertLink, gateKey, telegramSkipped, titleFrom } from '@/lib/alerts'
 import { scopeForGate, scopeForGateKind } from '@/lib/operators/route'
 import { pushForItem } from '@/lib/webhooks/deliver'
@@ -60,6 +61,9 @@ export async function POST(req: Request) {
     telegram: () => sendGatePing(kind, target_id, title),
   })) ?? telegramSkipped
   const pinged = ping.ok
+  // Never skip without a trace: say why the ping did not go out (no token in it).
+  const notify = notifyOutcome(ping)
+  if (!pinged) console.warn(`[hooks/gate-opened] ping for ${kind}:${target_id} ${notify.status}: ${notify.error}`)
 
   // 3f: a new Needs-confirmation item; wake the vertical's Grok routine (never blocks).
   // A lume_action gate is a pending action: createAction already pushed it.
@@ -75,7 +79,7 @@ export async function POST(req: Request) {
       source: 'lume',
       source_id: target_id,
       title: title ? `${kind} · ${title}` : kind,
-      payload: { kind, target_table, pinged, telegram_message_id: pinged ? ping.messageId : null },
+      payload: { kind, target_table, pinged, telegram_message_id: pinged ? ping.messageId : null, notify_status: notify.status, notify_error: notify.error },
     })
   } catch (err) {
     console.error('[hooks/gate-opened] logEvent failed:', err instanceof Error ? err.message : err)

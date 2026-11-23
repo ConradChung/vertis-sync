@@ -7,6 +7,7 @@ import type { Json, PendingActionRow } from '@/lib/db/types'
 import { applyFilter, type RuleFilter, type RuleFilterQuery } from '@/lib/rules/filter'
 import { maskOperatorKeys } from '@/lib/operators/mask'
 import { leadGeo } from '@/lib/copy/jurisdiction'
+import type { NotifyPatch } from '@/lib/adapters/telegram.notify'
 
 /**
  * The `pending_actions` state machine, as conditional PATCHes. Each transition
@@ -190,6 +191,17 @@ export async function markSendAttempted(id: string): Promise<void> {
     .select('id')
   if (res.error) throw new DbError('markSendAttempted', res.error)
   if (!(res.data ?? []).length) throw new Error('markSendAttempted: the row is not executing')
+}
+
+/**
+ * Record how the Telegram prompt for an action went (`notify_status` 'sent' |
+ * 'skipped' | 'failed', `notify_error` ≤ 300 chars, `notified_at` when sent).
+ * The patch comes from `notifyPatch` (lib/adapters/telegram.notify.ts). Throws
+ * DbError; createAction catches and logs it, so a failed record never blocks.
+ */
+export async function setActionNotify(id: string, patch: NotifyPatch): Promise<void> {
+  const res = await createServiceClient().from('pending_actions').update(patch).eq('id', id)
+  if (res.error) throw new DbError('setActionNotify', res.error)
 }
 
 /**

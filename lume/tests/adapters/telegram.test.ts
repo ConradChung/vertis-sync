@@ -28,7 +28,7 @@ describe('telegram adapter — unconfigured', () => {
   it('skips with a warning and never calls the network', async () => {
     const text = 'hello there, this is a fairly long message that will be truncated in the log line'
     const r = await sendMessage(text)
-    expect(r).toEqual({ ok: false, skipped: true })
+    expect(r).toEqual({ ok: false, skipped: true, reason: 'missing token' })
     expect(fetchMock).not.toHaveBeenCalled()
     expect(warn).toHaveBeenCalledWith(`[telegram] not configured — skipped: ${text.slice(0, 60)}`)
     expect(text.length).toBeGreaterThan(60)
@@ -36,16 +36,37 @@ describe('telegram adapter — unconfigured', () => {
 
   it('sendGatePing with LUME_URL set carries the link and no linkOmitted flag', async () => {
     const r = await sendGatePing('stall', ID, 'leads.csv')
-    expect(r).toEqual({ ok: false, skipped: true })
+    expect(r).toEqual({ ok: false, skipped: true, reason: 'missing token' })
     expect(warn.mock.calls.some((c) => String(c[0]).includes('LUME_URL unset'))).toBe(false)
+  })
+
+  it('a token without a chat id is skipped as "missing chat id"', async () => {
+    process.env.TELEGRAM_BOT_TOKEN = 'tok'
+    try {
+      expect(await sendMessage('x')).toEqual({ ok: false, skipped: true, reason: 'missing chat id' })
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally {
+      delete process.env.TELEGRAM_BOT_TOKEN
+    }
+  })
+
+  it('a whitespace-only token counts as missing', async () => {
+    process.env.TELEGRAM_BOT_TOKEN = '   '
+    process.env.TELEGRAM_CHAT_ID = '42'
+    try {
+      expect(await sendMessage('x')).toEqual({ ok: false, skipped: true, reason: 'missing token' })
+    } finally {
+      delete process.env.TELEGRAM_BOT_TOKEN
+      delete process.env.TELEGRAM_CHAT_ID
+    }
   })
 
   it('sendGatePing / sendActionPrompt with LUME_URL unset omit the link and say so', async () => {
     delete process.env.LUME_URL
     const ping = await sendGatePing('stall', ID, 'leads.csv')
-    expect(ping).toEqual({ ok: false, skipped: true, linkOmitted: true })
+    expect(ping).toEqual({ ok: false, skipped: true, reason: 'missing token', linkOmitted: true })
     const prompt = await sendActionPrompt(action)
-    expect(prompt).toEqual({ ok: false, skipped: true, linkOmitted: true })
+    expect(prompt).toEqual({ ok: false, skipped: true, reason: 'missing token', linkOmitted: true })
     const unsetWarnings = warn.mock.calls.filter((c) => c[0] === '[telegram] LUME_URL unset — deep link omitted')
     expect(unsetWarnings).toHaveLength(2)
   })
@@ -77,24 +98,25 @@ describe('telegram adapter — configured', () => {
     expect(body.text).toBe(`🔗 leads.csv — open in Lume\nhttps://lume.example.com/progress?gate=stall:${ID}`)
   })
 
-  it('redacts the bot token from logged errors', async () => {
+  it('drops the token and the token-bearing URL from logged errors', async () => {
     fetchMock.mockRejectedValue(new Error(`fetch failed for https://api.telegram.org/bot${TOKEN}/sendMessage`))
     const r = await sendMessage('x')
-    expect(r.ok).toBe(false)
-    if (!r.ok && !r.skipped) {
-      expect(r.error).not.toContain(TOKEN)
-      expect(r.error).toContain('<token>')
-    }
+    expect(r).toEqual({ ok: false, error: 'Telegram request failed: fetch failed for <telegram api>' })
     const logged = error.mock.calls.map((c) => c.join(' ')).join('\n')
     expect(logged).not.toContain(TOKEN)
-    expect(logged).toContain('<token>')
+    expect(logged).not.toContain('api.telegram.org/bot')
   })
 
-  it('redacts the token from an API error description too', async () => {
+  it('an API error is "Telegram <status>: <description>", token redacted', async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ ok: false, description: `Unauthorized: bot${TOKEN}` }), { status: 401 })
     )
     const r = await sendMessage('x')
-    expect(r).toEqual({ ok: false, error: 'Unauthorized: bot<token>' })
+    expect(r).toEqual({ ok: false, error: 'Telegram 401: Unauthorized: bot<token>' })
+  })
+
+  it('a plain API error reads like "Telegram 401: Unauthorized"', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: false, error_code: 401, description: 'Unauthorized' }), { status: 401 }))
+    expect(await sendMessage('x')).toEqual({ ok: false, error: 'Telegram 401: Unauthorized' })
   })
 })
