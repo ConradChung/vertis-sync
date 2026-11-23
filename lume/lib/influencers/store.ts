@@ -115,6 +115,19 @@ export async function getRun(id: string): Promise<InfluencerRun | null> {
   return (res.data as unknown as InfluencerRun | null) ?? null
 }
 
+/** The run an approved influencer action started or continued (start_action_id / reactions_action_id); null when none. */
+export async function runIdForAction(actionId: string): Promise<string | null> {
+  const sb = createServiceClient()
+  const res = await sb
+    .from('influencer_runs')
+    .select('id')
+    .or(`start_action_id.eq.${actionId},reactions_action_id.eq.${actionId}`)
+    .order('created_at', { ascending: false })
+    .limit(1)
+  if (res.error) throw new DbError('runIdForAction', res.error)
+  return ((res.data ?? [])[0] as { id: string } | undefined)?.id ?? null
+}
+
 export async function listRuns(limit = 5): Promise<InfluencerRun[]> {
   const sb = createServiceClient()
   const res = await sb.from('influencer_runs').select(RUN_COLS).order('created_at', { ascending: false }).limit(limit)
@@ -219,11 +232,27 @@ export async function influencerNames(): Promise<Record<string, string>> {
   return Object.fromEntries(((res.data ?? []) as { slug: string; name: string }[]).map((r) => [r.slug, r.name]))
 }
 
-export interface ApifyRunRow { influencer_id: string; kind: 'posts' | 'reactions'; status: string; error: string | null; cost_usd: number | string }
+export interface ApifyRunRow {
+  influencer_id: string
+  kind: 'posts' | 'reactions'
+  status: string
+  error: string | null
+  cost_usd: number | string
+  actor_id: string | null
+  apify_run_id: string | null
+  dataset_id: string | null
+  item_count: number | null
+  started_at: string | null
+  finished_at: string | null
+}
 
 export async function getApifyRuns(runId: string): Promise<ApifyRunRow[]> {
   const sb = createServiceClient()
-  const res = await sb.from('influencer_apify_runs').select('influencer_id, kind, status, error, cost_usd').eq('run_id', runId)
+  const res = await sb
+    .from('influencer_apify_runs')
+    .select('influencer_id, kind, status, error, cost_usd, actor_id, apify_run_id, dataset_id, item_count, started_at, finished_at')
+    .eq('run_id', runId)
+    .order('created_at', { ascending: true })
   if (res.error) throw new DbError('getInfluencerApifyRuns', res.error)
   return (res.data ?? []) as ApifyRunRow[]
 }

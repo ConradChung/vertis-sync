@@ -151,5 +151,22 @@ describe('GET /api/influencers/runs/<id>', () => {
       apify_month_to_date_ledger_usd: 28.6, monthly_cap_usd: 29, cap_left_usd: 0.4,
     })
     expect(body.influencers).toEqual([{ slug: 'peter-lohmann', name: 'Peter Lohmann' }, { slug: 'deb-newell', name: 'Deb Newell' }])
+    expect(body.apify_runs).toHaveLength(4)
+    expect(body.apify_runs[3]).toMatchObject({ kind: 'reactions', status: 'failed', influencer_name: 'Deb Newell' })
+  })
+
+  it('returns each Apify run with its actor, run and dataset ids', async () => {
+    const P = '11111111-1111-4111-8111-111111111111'
+    h.getRun.mockResolvedValue({ id: RUN, status: 'running', stage: 'triage', influencer_ids: [P], counts: { reactions: 57, targeted_posts: 1 }, cost: { apify_reactions: 0.1 } })
+    h.getInfluencersByIds.mockResolvedValue([{ id: P, slug: 'peter-lohmann', name: 'Peter Lohmann' }])
+    const row = {
+      influencer_id: P, kind: 'reactions', status: 'succeeded', error: null, cost_usd: '0.1', actor_id: 'harvestapi~linkedin-post-reactions',
+      apify_run_id: 'DAacaf6Y5jfKjfAm7', dataset_id: 'V3v1OQSLOoB7RJ49g', item_count: 57, started_at: '2026-11-22T00:00:00Z', finished_at: '2026-11-22T00:01:00Z',
+    }
+    h.getApifyRuns.mockResolvedValue([row])
+    h.apifyMonthSpend.mockResolvedValue(1)
+    const body = await (await runGET(new Request('http://x'), ctx({ id: RUN }))).json()
+    expect(body.apify_runs).toEqual([{ ...row, influencer_name: 'Peter Lohmann' }])
+    expect(body.run).toMatchObject({ stage: 'triage', counts: { reactions: 57 }, cost: { apify_reactions: 0.1 } })
   })
 })

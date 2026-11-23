@@ -6,10 +6,11 @@ import { apifyMonthSpend, getApifyRuns, getInfluencersByIds, getRun } from '@/li
 import { getApifyCapUsd } from '@/lib/settings/store'
 
 /**
- * `GET /api/influencers/runs/<id>` → `{ run, influencers, budget }`: status,
+ * `GET /api/influencers/runs/<id>` → `{ run, influencers, budget, apify_runs }`: status,
  * stage, counts, estimate and actual cost per vendor; budget names the
  * influencers the shared Apify cap skipped (posts / reactions) and the cap
- * left this month (ledger).
+ * left this month (ledger); apify_runs is every Apify run the pipeline
+ * started (actor, Apify run + dataset ids, items, cost, status, error).
  */
 type Ctx = { params: Promise<{ id: string }> }
 
@@ -28,6 +29,7 @@ export async function GET(req: Request, ctx: Ctx) {
     return NextResponse.json({
       run,
       influencers: infl.map((i) => ({ slug: i.slug, name: i.name })),
+      apify_runs: apifyRuns.map((a) => ({ ...a, influencer_name: name(a.influencer_id) })),
       budget: {
         posts_budget_skipped: skipped('posts'),
         reactions_budget_skipped: skipped('reactions'),

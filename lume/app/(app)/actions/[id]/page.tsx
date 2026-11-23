@@ -2,6 +2,9 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { PageHead } from '@/components/shell/PageHead'
 import { ActionPlan, type ActionView } from '@/components/actions/ActionPlan'
+import { InfluencerRunLive } from '@/components/actions/InfluencerRunLive'
+import { isLiveRunAction, runIdFromAction } from '@/lib/influencers/runView'
+import { runIdForAction } from '@/lib/influencers/store'
 import { getAction } from '@/lib/actions/store'
 import { duplicateNotices } from '@/lib/actions/duplicateNotice'
 import { requireOwner } from '@/lib/auth/guards'
@@ -107,6 +110,8 @@ export default async function ActionPage({ params }: { params: Promise<{ id: str
   if (!row) notFound()
 
   const notices = await duplicateNotices(row)
+  // An approved influencer run: the live run view under the card.
+  const runId = isLiveRunAction(row) ? (runIdFromAction(row) ?? (await runIdForAction(row.id))) : null
   const sop = row.kind === 'update_sequence' && Array.isArray(row.payload?.steps) ? sequenceSop(row.payload ?? {}, row.status === 'awaiting') : null
   const view: ActionView = {
     id: row.id,
@@ -134,6 +139,7 @@ export default async function ActionPage({ params }: { params: Promise<{ id: str
     <>
       <PageHead eyebrow="Pending action" title="Confirm action" sub="Nothing runs until you press Confirm — here or in Telegram." />
       <ActionPlan action={view} />
+      {runId && <InfluencerRunLive runId={runId} />}
     </>
   )
 }
