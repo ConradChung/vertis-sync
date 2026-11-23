@@ -25,6 +25,14 @@ driven from Telegram, with two Next.js front ends.
 - **Every stage waits on a tap.** No pipeline step that spends money or sends
   anything advances without an explicit owner decision (Telegram button, or
   Lume's equivalent).
+  **One exception, the GTM-14 comments lane only** (`signal-comments`, owner
+  approval 2026-11-22): polling Frank's posts/comments and the filter spend it
+  triggers (Haiku, Perplexity, door counts) run under a standing approval,
+  capped at $10 Apify + $5 filter per Apify billing cycle and $1 per PT day
+  across the lane. Any cap stops the lane and posts one #sales message; 80% of
+  either cycle cap posts one warning. Nothing is sent to leads (cards hand over
+  text to copy). The reactions lane still files its Monday one-tap card. No
+  other pipeline may cite this exception.
 - **Lume decides through `telegram-inbox`**, via its `X-Lume-Secret`
   entrypoint (`LUME_ACTION_SECRET`), so Telegram and Lume race for the same
   conditional-PATCH claim. Lume never writes pipeline state directly and

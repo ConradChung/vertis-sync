@@ -1,0 +1,15 @@
+{
+  "_readme": "The ONLY facts GTM-14 drafts may state about Frank. Edit freely; push to main redeploys signal-comments. Facts are used in order, so keep the operator fact first. Add a fact only if it is true of Frank today.",
+  "sender_first_name": "Frank",
+  "facts": [
+    "I run a property management company of about 1,000 units in Vancouver.",
+    "I'm a co-founder of Kaspen."
+  ],
+  "unconfirmed_do_not_use": [
+    "graduating UCLA this Dec",
+    "a few friends from Google and Berkeley"
+  ],
+  "linkedin_premium": false,
+  "connection_note_max_chars": 200,
+  "connections_csv_loaded": false
+}
