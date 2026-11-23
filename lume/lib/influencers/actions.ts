@@ -107,7 +107,7 @@ const fmtCap = (n: number) => (Number.isInteger(n) ? `$${n}` : fmt(n))
 
 /**
  * URL mode: the chosen posts only. Likes are unknown, so the bill is the
- * per-post reactions cap (max_reactions_per_post × $1.5/1k per post), the
+ * per-post reactions cap (max_reactions_per_post × $2/1k per post), the
  * number the edge function sets as the run's reactions estimate; no posts
  * scrape. One card (owner, 2026-11-22): the bill is known up front, so
  * approving it files the run AND approves that exact bill (`one_tap`).

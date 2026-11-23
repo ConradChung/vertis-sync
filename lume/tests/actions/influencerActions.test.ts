@@ -85,10 +85,10 @@ describe('buildInfluencerRun in URL mode (chosen posts)', () => {
     expect(b.kind).toBe('influencer_run')
     expect(b.payload).toMatchObject({
       pipeline: INFLUENCER_PIPELINE, influencer_ids: [P], slugs: ['peter-lohmann'], post_urls: [U1], max_verify_usd: 2,
-      posts_usd: 0, reactions_max: 1000, reactions_usd: 1.5, reactions_max_charge_usd: 1.7, one_tap: true,
+      posts_usd: 0, reactions_max: 1000, reactions_usd: 2, reactions_max_charge_usd: 2.25, one_tap: true,
     })
-    expect(b.payload.summary).toMatch(/Approving starts the reactions scrape now \(one approval; bill \$1\.50\)/)
-    expect(b.payload.summary.startsWith('Peter Lohmann · 1 chosen post · reactions ≤1,000 ($1.50, Apify hard cap $1.70) · verify cap $2. ')).toBe(true)
+    expect(b.payload.summary).toMatch(/Approving starts the reactions scrape now \(one approval; bill \$2\.00\)/)
+    expect(b.payload.summary.startsWith('Peter Lohmann · 1 chosen post · reactions ≤1,000 ($2.00, Apify hard cap $2.25) · verify cap $2. ')).toBe(true)
     expect(b.payload.summary).toMatch(/Shared Apify cap: \$8\.50 of \$29 left/)
     expect(influencerPayloadError('influencer_run', b.payload)).toBeNull()
   })
@@ -96,8 +96,8 @@ describe('buildInfluencerRun in URL mode (chosen posts)', () => {
     store.getInfluencersBySlugs.mockResolvedValue([inf({ max_reactions_per_post: 300 })])
     const b = await buildInfluencerRun({ slugs: ['peter-lohmann'], post_urls: [U1, U2, `${U2}/`] })
     if (!b.ok) throw new Error(b.error)
-    expect(b.payload).toMatchObject({ post_urls: [U1, U2], reactions_max: 600, reactions_usd: 0.9, reactions_max_charge_usd: 1.04, max_verify_usd: 10 })
-    expect(b.payload.summary).toMatch(/^Peter Lohmann · 2 chosen posts · reactions ≤600 \(\$0\.90, Apify hard cap \$1\.04\) · verify cap \$10\./)
+    expect(b.payload).toMatchObject({ post_urls: [U1, U2], reactions_max: 600, reactions_usd: 1.2, reactions_max_charge_usd: 1.37, max_verify_usd: 10 })
+    expect(b.payload.summary).toMatch(/^Peter Lohmann · 2 chosen posts · reactions ≤600 \(\$1\.20, Apify hard cap \$1\.37\) · verify cap \$10\./)
   })
   it('needs exactly one influencer and 1-10 valid post URLs', async () => {
     store.getInfluencersBySlugs.mockResolvedValue([peter, deb])

@@ -35,10 +35,10 @@ import reactionsSample from './fixtures/reactions_sample.json' with { type: 'jso
 // ---------------------------------------------------------------------------
 // cost
 
-Deno.test('reactions estimate: likes capped per post, $1.5 per 1k (test_pipeline)', () => {
-  assertEquals(estimateReactions([{ likes: 1500 }, { likes: 200 }, { likes: 0 }], 1000), { reactions: 1200, usd: 1.8 })
+Deno.test('reactions estimate: likes capped per post, $2 per 1k (test_pipeline)', () => {
+  assertEquals(estimateReactions([{ likes: 1500 }, { likes: 200 }, { likes: 0 }], 1000), { reactions: 1200, usd: 2.4 })
   assertEquals(estimateReactions([{ likes: 1500 }], 0).reactions, 1500)
-  assertEquals(PRICE_PER_1K_REACTIONS, 1.5)
+  assertEquals(PRICE_PER_1K_REACTIONS, 2)
   assertEquals(PRICE_PER_1K_POSTS, 2)
 })
 
@@ -56,7 +56,7 @@ Deno.test('posts reserve: 1.5x last run posts at $2/1k + 10 cents; unknown -> 30
 })
 
 Deno.test('apify actual cost: the larger of usageTotalUsd and items x unit price', () => {
-  assertEquals(apifyActualUsd({ usageTotalUsd: 0.01 }, 1114, PRICE_PER_1K_REACTIONS), 1.671)
+  assertEquals(apifyActualUsd({ usageTotalUsd: 0.01 }, 1114, PRICE_PER_1K_REACTIONS), 2.228)
   assertEquals(apifyActualUsd({ usageTotalUsd: 3 }, 10, PRICE_PER_1K_REACTIONS), 3)
   assertEquals(apifyActualUsd({}, 0, PRICE_PER_1K_POSTS), 0)
 })

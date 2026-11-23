@@ -25,7 +25,7 @@
 // Stages (influencer_runs.stage):
 //   posts      harvestapi~linkedin-profile-posts per influencer (lookback_days)
 //   top_posts  Haiku PM-relevance (20 per call), top 10 by likes, exact
-//              reactions bill (sum of min(likes, cap) x $1.5/1k) -> awaiting_approval
+//              reactions bill (sum of min(likes, cap) x $2/1k) -> awaiting_approval
 //   reactions  harvestapi~linkedin-post-reactions per influencer (top-10 URLs,
 //              maxItems = the influencer's cap); merged into influencer_reactors
 //              (deduped by LinkedIn URL, reacted_to / reacted_posts unions)
