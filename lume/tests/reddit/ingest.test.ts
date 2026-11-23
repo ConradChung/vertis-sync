@@ -81,13 +81,13 @@ describe('ingestF5bot', () => {
     expect(db.rows.every((x) => x.alert_status === 'dry_run' && Array.isArray(x.card))).toBe(true)
   })
 
-  it("Reddit unreadable → still stored with F5Bot's snippet, no handle", async () => {
+  it('Reddit unreadable → still stored, no handle, no junk snippet', async () => {
     const r = await ingestF5bot({ body: PLAIN }, async () => {
       throw new Error('reddit 403')
     })
     expect(r).toMatchObject({ inserted: 2, unreadable: 2, posted: 2 })
     expect(db.rows[0]).toMatchObject({ author: null, keyword: 'appfolio', fetch_error: 'reddit 403' })
-    expect(String(db.rows[0].snippet)).toContain('fees keep going up')
+    expect(db.rows[0].snippet).toBeNull() // no Reddit text, and F5Bot's header is never used as a snippet
     expect(JSON.stringify(posts()[0][2].blocks)).toContain('unknown handle')
   })
 
@@ -120,5 +120,19 @@ describe('ingestF5bot', () => {
     const r = await ingestF5bot({ body: 'hello' }, fetchOk)
     expect(r).toMatchObject({ ok: true, links: 0, inserted: 0 })
     expect(api.slackApi).not.toHaveBeenCalled()
+  })
+})
+
+describe("ingestF5bot on F5Bot's real layout", () => {
+  it('title from the hit line, no header junk as snippet, hot from the title', async () => {
+    const { REAL_PLAIN } = await import('./fixtures')
+    signalStore.getSignalConfig.mockResolvedValue(cfg())
+    await ingestF5bot({ body: REAL_PLAIN }, async () => {
+      throw new Error('reddit 403')
+    })
+    expect(db.rows.map((x) => [x.author, x.title, x.snippet, x.keyword, x.hot])).toEqual([
+      ['CoolWax', 'Maintenance Management System Recommendations', null, 'appfolio', false],
+      ['TransportationOld902', "Don't love Buildium, switching from it?", null, 'buildium', true],
+    ])
   })
 })

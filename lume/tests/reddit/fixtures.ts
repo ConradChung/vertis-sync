@@ -36,3 +36,16 @@ export const COMMENT_JSON = [
   { kind: 'Listing', data: { children: [{ kind: 't3', data: { id: '1gx3def', author: 'op_person', subreddit: 'Landlord', title: 'Best software for a small portfolio?', selftext: 'Which one?', created_utc: 1763890000 } }] } },
   { kind: 'Listing', data: { children: [{ kind: 't1', data: { id: 'lyq9xyz', author: 'rental_rita', subreddit: 'Landlord', body: 'Buildium has been fine for us, support is slow though.', created_utc: 1763895000 } }] } },
 ]
+
+const enc = (u: string) => `https://f5bot.com/url?u=${encodeURIComponent(u)}&i=100040257&h=3876ca8d`
+/** F5Bot's real plain-text layout (Nov 23): hit line `(/r/Sub/): 'Title' by author <redirect link>`, no excerpt, 13-char comment ids. */
+export const REAL_PLAIN = `F5Bot found something!
+
+Keyword: "appfolio"
+
+Reddit Comments (/r/PropertyManagement/): 'Maintenance Management System Recommendations' by CoolWax ${enc('https://www.reddit.com/r/PropertyManagement/comments/1y1f63z/c/19sxv5w0vh7t9?context=3')}
+
+Reddit Posts (/r/PropertyManagement/): 'Don't love Buildium, switching from it?' by TransportationOld902 ${enc('https://www.reddit.com/r/PropertyManagement/comments/1y00b49/buildium_price_questions/')}
+
+Stray 100% sign here.
+`

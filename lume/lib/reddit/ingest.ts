@@ -84,17 +84,19 @@ export async function ingestF5bot(email: F5botEmail, fetchThing: RedditFetch = f
       fetchError = msg(err)
     }
     if (fetchError) out.unreadable++
-    const snippet = clip(thing?.text) ?? clip(link.context)
+    // F5Bot's plain email has no excerpt: without Reddit's text the card shows the title only.
+    const title = clip(thing?.title ?? link.f5Title, 300)
+    const snippet = clip(thing?.text)
     const inserted = await insertMention({
       permalink: link.key,
       url: link.url,
       kind: link.kind,
       subreddit: thing?.subreddit ?? link.subreddit,
-      author: thing?.author ?? authorFromContext(link.context),
-      title: clip(thing?.title, 300),
+      author: thing?.author ?? link.f5Author ?? authorFromContext(link.context),
+      title,
       snippet,
-      keyword: findKeyword(thing?.title, thing?.text) ?? findKeyword(link.context, email.subject),
-      hot: isHot(thing?.title, thing?.text ?? link.context),
+      keyword: findKeyword(title, thing?.text) ?? findKeyword(link.context, email.subject),
+      hot: isHot(title, thing?.text),
       reddit_created_at: thing?.createdAt ?? null,
       fetch_error: fetchError,
       email_message_id: email.message_id ?? null,

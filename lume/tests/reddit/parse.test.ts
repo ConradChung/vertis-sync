@@ -96,3 +96,15 @@ describe('authorFromContext', () => {
     expect(authorFromContext('Keyword: appfolio /r/PropertyManagement: Looking for alternatives')).toBeNull()
   })
 })
+
+describe("F5Bot's real layout", () => {
+  it('reads full 13-char comment ids through the redirect, with title and author from the hit line', async () => {
+    const { REAL_PLAIN } = await import('./fixtures')
+    const links = extractRedditLinks(REAL_PLAIN)
+    expect(links.map((l) => [l.kind, l.key, l.f5Title, l.f5Author])).toEqual([
+      ['comment', 'https://www.reddit.com/r/propertymanagement/comments/1y1f63z/_/19sxv5w0vh7t9/', 'Maintenance Management System Recommendations', 'CoolWax'],
+      ['post', 'https://www.reddit.com/r/propertymanagement/comments/1y00b49/_/', "Don't love Buildium, switching from it?", 'TransportationOld902'],
+    ])
+    expect(links[0].url).toBe('https://www.reddit.com/r/PropertyManagement/comments/1y1f63z/c/19sxv5w0vh7t9/')
+  })
+})

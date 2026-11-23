@@ -22,21 +22,34 @@ export interface RedditLink {
   subreddit: string
   postId: string
   commentId: string | null
-  /** Email text just before the link (F5Bot's own snippet), cleaned. */
+  /** Email text around the link (F5Bot's own text for this hit), cleaned. */
   context: string
+  /** From F5Bot's hit line `(/r/sub/): 'Title' by author <link>`, when present. */
+  f5Title: string | null
+  f5Author: string | null
 }
 
-const LINK = /https?:\/\/(?:[a-z0-9-]+\.)?reddit\.com\/r\/([A-Za-z0-9_]{2,21})\/comments\/([a-z0-9]{3,12})(?:\/([^/\s?#"'<>)]*))?(?:\/([a-z0-9]{3,12}))?\/?/gi
+/** F5Bot's hit line ends right before the link: `(/r/Sub/): 'Thread title' by author_name`. */
+const F5_HIT = /\(\/?r\/[A-Za-z0-9_]{2,21}\/?\):\s*'([\s\S]{1,300}?)'\s+by\s+([A-Za-z0-9_-]{3,20})\s*(?:https?:\/\/\S*)?\s*$/
+export function parseF5Hit(before: string): { title: string | null; author: string | null } {
+  const m = F5_HIT.exec(before)
+  return m ? { title: m[1].replace(/\s+/g, ' ').trim() || null, author: m[2] } : { title: null, author: null }
+}
+
+const LINK = /https?:\/\/(?:[a-z0-9-]+\.)?reddit\.com\/r\/([A-Za-z0-9_]{2,21})\/comments\/([a-z0-9]{3,20})(?:\/([^/\s?#"'<>)&]*))?(?:\/([a-z0-9]{3,20}))?\/?/gi
 
 const decodeEntities = (s: string) =>
   s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/&nbsp;/g, ' ')
 
+/** Percent-decode each encoded run on its own, so one stray % can't hide every link. */
 function tryDecode(s: string): string {
-  try {
-    return decodeURIComponent(s)
-  } catch {
-    return s
-  }
+  return s.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+    try {
+      return decodeURIComponent(run)
+    } catch {
+      return run
+    }
+  })
 }
 
 /** HTML → text good enough for snippets (tags dropped, entities decoded). */
@@ -79,12 +92,14 @@ export function extractRedditLinks(text: string, html = ''): RedditLink[] {
       // F5Bot's own text for this hit: what sits between the previous link and the next one.
       const prev = mi > 0 ? (matches[mi - 1].index ?? 0) + matches[mi - 1][0].length : 0
       const next = mi + 1 < matches.length ? (matches[mi + 1].index ?? src.length) : src.length
-      const ctxRaw = `${src.slice(Math.max(prev, at - 400), at)} ${src.slice(at + raw.length, Math.min(next, at + raw.length + 400))}`
+      const beforeRaw = src.slice(Math.max(prev, at - 400), at)
+      const ctxRaw = `${beforeRaw} ${src.slice(at + raw.length, Math.min(next, at + raw.length + 400))}`
       if (seen.has(key)) continue
       seen.add(key)
       const url = `https://www.reddit.com/r/${subreddit}/comments/${post}/${slug || '_'}/${comment ? `${comment}/` : ''}`
       const context = si >= 2 ? clean(htmlToText(ctxRaw)) : clean(ctxRaw)
-      out.push({ key, url, kind: commentId ? 'comment' : 'post', subreddit, postId, commentId, context: context.slice(-SNIPPET_MAX) })
+      const hit = parseF5Hit(si >= 2 ? clean(htmlToText(beforeRaw)) : clean(beforeRaw))
+      out.push({ key, url, kind: commentId ? 'comment' : 'post', subreddit, postId, commentId, context: context.slice(-SNIPPET_MAX), f5Title: hit.title, f5Author: hit.author })
       if (out.length >= MAX_LINKS) return out
     }
   }
