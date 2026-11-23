@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useId, useState } from 'react'
 import useSWR from 'swr'
 import { toast } from 'sonner'
@@ -28,6 +29,8 @@ import {
 } from '@/lib/companyCheck/view'
 import type { GateRow } from '@/lib/db/types'
 import { sendJson } from '@/lib/validate/client'
+import { pendingCheckBox } from '@/lib/approvals/view'
+import { OWNER_TZ } from '@/lib/time/owner'
 import { cn } from '@/lib/utils'
 
 const fmt = new Intl.NumberFormat('en-US')
@@ -198,8 +201,7 @@ export function IcpCheck({ jobId, banked, gates, onRequested, ...gateProps }: Ic
 
       {gate ? (
         <StepGate gate={gate} {...gateProps}>
-          <p className="text-[12px] text-lime">Waiting for your confirmation — this spends money.</p>
-          {gate.subtitle && <p className="text-[12.5px] leading-relaxed text-fg">{gate.subtitle}</p>}
+          <PendingCheck gate={gate} />
         </StepGate>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
@@ -219,7 +221,41 @@ export function IcpCheck({ jobId, banked, gates, onRequested, ...gateProps }: Ic
   )
 }
 
-function Quote({ o, error, stale }: { o: CheckOverview | undefined; error: unknown; stale: boolean }) {
+const filedFmt = new Intl.DateTimeFormat('en-US', { timeZone: OWNER_TZ, dateStyle: 'medium', timeStyle: 'short' })
+
+/**
+ * The filed company_check action's OWN numbers (its payload, as the gate's
+ * counts), labelled "Pending action" so its cap is never mistaken for the
+ * live quote's ("New request estimate") below the form.
+ */
+export function PendingCheck({ gate }: { gate: Pick<GateRow, 'target_id' | 'counts' | 'created_at'> }) {
+  const box = pendingCheckBox(gate)
+  return (
+    <div aria-label="Pending action" role="group" className="flex flex-col gap-2 rounded-xl border border-lime/25 bg-lime/[0.05] px-4 py-3.5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-[11px] font-medium tracking-[0.12em] text-lime uppercase">{box.heading}</p>
+        <span className="text-[11px] text-fg-46">filed {filedFmt.format(new Date(box.filed))} PT</span>
+      </div>
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-1.5 text-[12px]">
+        {box.rows.map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt className="text-fg-46">{k}</dt>
+            <dd className={cn('min-w-0 break-words text-fg tabular-nums', k === 'ICP' && 'line-clamp-3')}>{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="text-[11.5px] text-fg-70">
+        Waiting for your confirmation — this spends money. Confirm or Cancel below, or{' '}
+        <Link href={box.href} className="text-violet-soft hover:text-fg">
+          open the action
+        </Link>
+        .
+      </p>
+    </div>
+  )
+}
+
+export function Quote({ o, error, stale }: { o: CheckOverview | undefined; error: unknown; stale: boolean }) {
   if (error && !o) return <p className="text-[12px] text-amber" role="alert">Couldn&apos;t load the quote.</p>
   if (!o) return <ShimmerBar className="h-20 w-full" />
   const rows: [string, string][] = [
@@ -228,10 +264,11 @@ function Quote({ o, error, stale }: { o: CheckOverview | undefined; error: unkno
     ['Already checked', `${fmt.format(o.plan.cached)} (free)`],
     ['To check', fmt.format(o.unchecked)],
     ['Estimate', `${usd(o.estimate.usd)} · $${o.estimate.unit_usd} per company${o.estimate.per_lead_usd != null ? ` · $${o.estimate.per_lead_usd.toFixed(4)} per lead` : ''}`],
-    ['Hard cap', usd(o.estimate.default_cap_usd)],
+    ['Hard cap (new request)', usd(o.estimate.default_cap_usd)],
   ]
   return (
-    <div className={cn('flex flex-col gap-2.5 rounded-xl bg-(--glass-fill) px-4 py-3.5 transition-opacity', stale && 'opacity-60')} aria-busy={stale || undefined}>
+    <div role="group" aria-label="New request estimate" className={cn('flex flex-col gap-2.5 rounded-xl bg-(--glass-fill) px-4 py-3.5 transition-opacity', stale && 'opacity-60')} aria-busy={stale || undefined}>
+      <p className="text-[11px] font-medium tracking-[0.12em] text-fg-46 uppercase">New request estimate</p>
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-1.5 text-[12px]">
         {rows.map(([k, v]) => (
           <div key={k} className="contents">

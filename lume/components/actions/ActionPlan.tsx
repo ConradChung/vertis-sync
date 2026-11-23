@@ -5,7 +5,7 @@ import { OWNER_TZ } from '@/lib/time/owner'
 import { OneTimeLink } from '@/components/operator/OneTimeLink'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { toast } from 'sonner'
+import { decideAction, type Decision } from '@/components/actions/decide'
 import { Button } from '@/components/ui/button'
 import { GlassCard } from '@/components/ui/glass-card'
 import { cn } from '@/lib/utils'
@@ -23,6 +23,8 @@ export interface ActionView {
   sopViolations?: string[]
   /** Warnings worth reading before Confirm (e.g. a duplicate's source changed since the request). */
   notices?: string[]
+  /** The Telegram prompt never went out ("Telegram not sent: missing token"); lib/approvals/view.ts notifyWarning. */
+  notifyWarning?: string | null
   requestedBy: string
   status: string
   decidedVia: string | null
@@ -68,24 +70,11 @@ export function ActionPlan({ action }: { action: ActionView }) {
   const [signIn, setSignIn] = useState<string | null>(null)
   const awaiting = action.status === 'awaiting'
 
-  async function decide(decision: 'approve' | 'reject') {
+  async function decide(decision: Decision) {
     setBusy(decision)
     try {
-      const res = await fetch(`/api/actions/${action.id}/decide`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision }),
-      })
-      const body = (await res.json().catch(() => ({}))) as { status?: string; error?: string | null; sign_in_url?: string }
-      if (typeof body.sign_in_url === 'string') setSignIn(body.sign_in_url)
-      if (res.status === 409) toast.info('Already handled — someone decided this first')
-      else if (!res.ok && res.status !== 202) toast.error(body.error ?? `Failed (${res.status})`)
-      else if (decision === 'reject') toast.success('Cancelled')
-      else if (res.status === 202) toast.info('Approved — still running')
-      else if (body.status === 'failed') toast.error(`Failed: ${body.error ?? 'see details'}`)
-      else toast.success('Done')
-    } catch {
-      toast.error('Network error')
+      const { signInUrl } = await decideAction(action.id, decision)
+      if (signInUrl) setSignIn(signInUrl)
     } finally {
       setBusy(null)
       router.refresh()
@@ -146,6 +135,12 @@ export function ActionPlan({ action }: { action: ActionView }) {
             ))}
           </ul>
         </div>
+      )}
+
+      {action.notifyWarning && (
+        <p role="status" className="rounded-lg border border-amber/30 bg-amber/10 px-3 py-2 text-[12px] text-amber">
+          {action.notifyWarning}
+        </p>
       )}
 
       {action.notices && action.notices.length > 0 && (

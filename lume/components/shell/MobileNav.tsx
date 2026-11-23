@@ -6,7 +6,8 @@ import { Ellipsis, Search } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
 import { OperatorChip } from '@/components/shell/OperatorChip'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
-import { TABS, isActiveTab } from '@/components/shell/tabs'
+import { APPROVALS_HREF, TABS, isActiveTab } from '@/components/shell/tabs'
+import { NavBadge } from '@/components/shell/NavBadge'
 import { FLOW, TOOLS, type NavTab } from '@/components/shell/nav'
 import { cn } from '@/lib/utils'
 import { LumeMark } from './LumeMark'
@@ -56,11 +57,14 @@ export function MobileNav({
   pathname,
   warm,
   operator = null,
+  pending = 0,
 }: {
   pathname: string
   warm: (href: string) => void
   /** Grok Bot operator chip label (vertical name or "Master"), when one holds the session. */
   operator?: string | null
+  /** Awaiting pending actions: a badge on More (Approvals lives there) and on Approvals in the sheet. */
+  pending?: number
 }) {
   useVisualViewport()
   // The agent chat (/agent) takes the whole phone screen: its own slim header
@@ -130,12 +134,13 @@ export function MobileNav({
           aria-haspopup="dialog"
           aria-expanded={more}
           className={cn(
-            'flex flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl text-[10.5px] font-medium text-fg-46 outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            'relative flex flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl text-[10.5px] font-medium text-fg-46 outline-none focus-visible:ring-2 focus-visible:ring-ring',
             restActive && 'bg-primary text-primary-foreground light:ring-1 light:ring-(--lime-edge)'
           )}
         >
           <Ellipsis className="size-5" strokeWidth={1.75} aria-hidden />
           {restActive ? TABS.find((t) => isActiveTab(pathname, t.href))?.label : 'More'}
+          <NavBadge count={pending} className="absolute top-1 right-[calc(50%-22px)]" />
         </button>
       </nav>
       </>
@@ -145,7 +150,7 @@ export function MobileNav({
         <SheetContent side="bottom" className="rounded-t-[24px] px-4 pt-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)]">
           <SheetTitle className="sr-only">Navigate</SheetTitle>
           <NavGroup title="Flow" tabs={FLOW.filter((t) => !t.primary)} pathname={pathname} warm={warm} />
-          <NavGroup title="Tools" tabs={TOOLS.filter((t) => !t.primary)} pathname={pathname} warm={warm} />
+          <NavGroup title="Tools" tabs={TOOLS.filter((t) => !t.primary)} pathname={pathname} warm={warm} pending={pending} />
         </SheetContent>
       </Sheet>
     </>
@@ -153,7 +158,7 @@ export function MobileNav({
 }
 
 /** One labelled group of the More sheet; flow tabs show their step number. */
-function NavGroup({ title, tabs, pathname, warm }: { title: string; tabs: NavTab[]; pathname: string; warm: (href: string) => void }) {
+function NavGroup({ title, tabs, pathname, warm, pending = 0 }: { title: string; tabs: NavTab[]; pathname: string; warm: (href: string) => void; pending?: number }) {
   if (!tabs.length) return null
   return (
     <section className="mb-3 last:mb-0">
@@ -176,6 +181,7 @@ function NavGroup({ title, tabs, pathname, warm }: { title: string; tabs: NavTab
                 {t.step ? <span aria-hidden className="font-mono text-[13px] opacity-70">{t.step}</span> : null}
                 <Icon className="size-5" strokeWidth={1.75} aria-hidden />
                 {t.label}
+                {t.href === APPROVALS_HREF && <NavBadge count={pending} className="ml-auto" />}
               </Link>
             </li>
           )

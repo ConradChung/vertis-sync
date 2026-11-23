@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { PageHead } from '@/components/shell/PageHead'
 import { ActionPlan, type ActionView } from '@/components/actions/ActionPlan'
@@ -14,6 +15,7 @@ import { diffSequences, type EditStep } from '@/lib/campaigns/sequence'
 import { payloadLintSteps } from '@/lib/campaigns/sequenceAction'
 import { sopGate } from '@/lib/copy/sopGate'
 import { formatViolation } from '@/lib/copy/sopLint'
+import { companyCheckRows, notifyWarning } from '@/lib/approvals/view'
 
 export const metadata: Metadata = { title: 'Confirm action' }
 export const dynamic = 'force-dynamic'
@@ -122,9 +124,12 @@ export default async function ActionPage({ params }: { params: Promise<{ id: str
         ? runActorDetails(row.payload ?? {}, (row.result as Record<string, Json> | null) ?? null)
         : row.kind === 'update_sequence'
           ? [...sequenceDetails(row.payload ?? {}, (row.result as Record<string, Json> | null) ?? null), ...(sop ? [sop.line] : [])]
-          : details(row.payload),
+          : row.kind === 'company_check'
+            ? companyCheckRows(row.payload)
+            : details(row.payload),
     ...(sop?.violations ? { sopViolations: sop.violations } : {}),
     ...(notices.length ? { notices } : {}),
+    notifyWarning: notifyWarning(row),
     ...(row.kind === 'update_sequence' ? { sequenceDiff: diffSequences(asSteps(row.payload?.before), asSteps(row.payload?.after)) } : {}),
     requestedBy: row.requested_by,
     status: row.status,
@@ -137,7 +142,13 @@ export default async function ActionPage({ params }: { params: Promise<{ id: str
 
   return (
     <>
-      <PageHead eyebrow="Pending action" title="Confirm action" sub="Nothing runs until you press Confirm — here or in Telegram." />
+      <PageHead eyebrow="Pending action" title="Confirm action" sub="Nothing runs until you press Confirm — here or in Telegram."
+        actions={
+          <Link href="/actions" className="text-[13px] text-fg-46 hover:text-fg">
+            All approvals
+          </Link>
+        }
+      />
       <ActionPlan action={view} />
       {runId && <InfluencerRunLive runId={runId} />}
     </>

@@ -68,6 +68,14 @@ describe('describeGate', () => {
     expect(describeGate(g, verticals)).toMatchObject({ priority: 'money', cost: 'Apify hard cap $5.00, estimate $1.25, ceiling $20.00' })
   })
 
+  it('company_check is money and shows its estimate and hard cap', () => {
+    const g = gate('lume_action', {
+      target_table: 'pending_actions', target_id: 'a4', title: 'company_check',
+      counts: { job_id: 'j1', estimate_usd: 3.53, max_usd: 3.89 },
+    })
+    expect(describeGate(g, verticals)).toMatchObject({ priority: 'money', cost: 'estimate $3.53, hard cap $3.89' })
+  })
+
   it('push_to_instantly routes by campaign and counts eligible leads', () => {
     const g = gate('lume_action', { target_table: 'pending_actions', title: 'push_to_instantly', counts: { campaign_id: 'camp-r', eligible: 42 } })
     expect(describeGate(g, verticals)).toMatchObject({ priority: 'validation', vertical_id: 'v-r', leads: 42 })
