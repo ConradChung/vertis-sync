@@ -17,7 +17,7 @@ through tools, behind the same approval gates as the dashboard.
 
 ## Open items
 
-- **company-check v2 migration not applied.** `supabase/migrations/20261112195122_lume_company_check_scope_property.sql` (commit `38c106f`) was never applied to the live database; production Lume already calls the v2 functions (`company_check_plan(..., p_scope)`). The `company-check` edge function is not deployed, but `main` now holds its source and lists it in `.github/workflows/deploy-functions.yml`, so **the next push to `main` touching `supabase/functions/` will deploy it. Apply the migration before then.** (Noted 2026-11-21; `main` merge pushed with `[skip ci]` to avoid deploying it.)
+- **company-check v2 migration applied 2026-11-22 (GTM-27)** as ledger version `20261123070129` (file renamed to match); `company-check` is back in the deploy list.
 
 ## Auth (phase 1)
 
