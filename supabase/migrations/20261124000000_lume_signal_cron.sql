@@ -1,3 +1,6 @@
+-- HELD (owner, 2026-11-22): do not apply until the owner has seen the dry-run cards.
+-- Rename to the ledger version once applied.
+
 -- GTM-14 launch: one pg_cron tick every 30 min.
 --   1. signal-comments edge fn (service role) — polls, filters, ingests reactor runs.
 --   2. Lume /api/cron/signal-alerts (X-Lume-Hook-Secret) — posts ready cards / digests / notices
