@@ -1735,13 +1735,26 @@ const SPECS: Built[] = [
       description:
         'Propose a PM influencer reactions run for the chosen influencers (slugs from list_influencers). Only after you quoted estimate_influencer_run for ' +
         'exactly these influencers in this chat. The approval covers the posts scrape (Apify, capped) and the Haiku top-10 ranking; the run then STOPS ' +
-        'with the exact reactions bill, which needs approve_reactions. max_verify_usd caps the Perplexity spend later (default 10, at most 50). One run at a time.',
+        'with the exact reactions bill, which needs approve_reactions. max_verify_usd caps the Perplexity spend later (default 10, at most 50). One run at a time. ' +
+        'post_urls (optional): when the owner gave specific LinkedIn post URLs (linkedin.com/posts/... or /feed/update/urn:li:activity:...), pass 1-10 of them ' +
+        'with exactly ONE slug (their author); the run skips the posts scrape and top-10 ranking, and the reactions bill is posts × max_reactions_per_post × $1.5/1k ' +
+        '(quote that as the estimate), still approved with approve_reactions.',
       inputSchema: z.object({
         slugs: z.array(Slug).min(1).max(100),
         max_verify_usd: MaxVerifyUsd.optional(),
-        estimate_shown_to_owner: z.literal(true).describe('true only if you showed estimate_influencer_run for these influencers in this chat'),
+        post_urls: z
+          .array(z.string().max(500))
+          .min(1)
+          .max(10)
+          .optional()
+          .describe('specific LinkedIn post URLs by the one influencer in slugs (1-10); omit to use the auto-picked top 10'),
+        estimate_shown_to_owner: z.literal(true).describe('true only if you showed estimate_influencer_run for these influencers in this chat (with post_urls: the per-post reactions bill)'),
       }),
-      payload: ({ slugs, max_verify_usd }) => ({ slugs, ...(max_verify_usd !== undefined ? { max_verify_usd } : {}) }),
+      payload: ({ slugs, max_verify_usd, post_urls }) => ({
+        slugs,
+        ...(max_verify_usd !== undefined ? { max_verify_usd } : {}),
+        ...(post_urls !== undefined ? { post_urls } : {}),
+      }),
     },
     'high'
   ),

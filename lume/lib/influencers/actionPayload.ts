@@ -1,4 +1,5 @@
 import type { Json, PendingActionKind } from '@/lib/db/types'
+import { checkPostUrls } from '@/lib/influencers/postUrls'
 
 /** Pure checks for the two influencer pending-action kinds (used by createAction). */
 
@@ -18,6 +19,11 @@ export function influencerPayloadError(kind: 'influencer_run' | 'influencer_reac
       return 'payload.influencer_ids must be lowercase uuids'
     }
     if (typeof p.max_verify_usd !== 'number' || !(p.max_verify_usd > 0) || p.max_verify_usd > 50) return 'payload.max_verify_usd must be in (0, 50]'
+    if (p.post_urls !== undefined && p.post_urls !== null) {
+      if (p.influencer_ids.length !== 1) return 'payload.post_urls needs exactly one influencer'
+      const urls = checkPostUrls(p.post_urls)
+      if (!urls.ok) return `payload.${urls.error}`
+    }
     return null
   }
   if (typeof p.run_id !== 'string' || !LOWER_UUID.test(p.run_id)) return 'payload.run_id must be a lowercase uuid'
