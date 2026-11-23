@@ -1,4 +1,5 @@
 import { ACTION_IDS, EDIT_BLOCK_ID, EDIT_CALLBACK_ID, EDIT_INPUT_ID } from '@/lib/slack/card'
+import { REDDIT_ACTION_IDS } from '@/lib/reddit/card'
 import { SIGNAL_ACTION_IDS, SIGNAL_DRAFT_FIELDS, SIGNAL_EDIT_CALLBACK_ID, SIGNAL_EDIT_INPUT_ID, signalEditBlockId, type SignalDrafts } from '@/lib/slack/signalCard'
 
 /**
@@ -62,6 +63,8 @@ export type SlackInteraction =
   // GTM-14 signal cards (#sales): value is the signal_people id.
   | { kind: 'signal_button'; decision: 'approve' | 'edit' | 'skip'; team: string; user: string; channel: string; message_ts: string; person_id: number; trigger_id: string }
   | { kind: 'signal_edit_submit'; team: string; user: string; person_id: number; drafts: SignalDrafts }
+  // GTM-15 Reddit mention cards (#sales): value is the signal_reddit_mentions id.
+  | { kind: 'reddit_button'; decision: 'contacted' | 'skip'; team: string; user: string; channel: string; message_ts: string; mention_id: number }
   | null
 
 const SIGNAL_DECISION: Record<string, 'approve' | 'edit' | 'skip'> = {
@@ -91,6 +94,15 @@ export function parseInteraction(rawForm: string): SlackInteraction {
   if (p.type === 'block_actions') {
     const a = obj(Array.isArray(p.actions) ? p.actions[0] : null)
     const signal = typeof a.action_id === 'string' && Object.hasOwn(SIGNAL_DECISION, a.action_id) ? SIGNAL_DECISION[a.action_id] : null
+    const reddit = a.action_id === REDDIT_ACTION_IDS.contacted ? 'contacted' : a.action_id === REDDIT_ACTION_IDS.skip ? 'skip' : null
+    if (reddit) {
+      const c = obj(p.container)
+      const channel = match(CHANNEL, c.channel_id) ?? match(CHANNEL, obj(p.channel).id)
+      const message_ts = match(TS, c.message_ts) ?? match(TS, obj(p.message).ts)
+      const mention_id = positiveId(a.value)
+      if (!channel || !message_ts || !mention_id) return null
+      return { kind: 'reddit_button', decision: reddit, team, user, channel, message_ts, mention_id }
+    }
     if (signal) {
       const c = obj(p.container)
       const channel = match(CHANNEL, c.channel_id) ?? match(CHANNEL, obj(p.channel).id)

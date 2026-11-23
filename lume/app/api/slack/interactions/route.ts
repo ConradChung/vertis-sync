@@ -36,6 +36,12 @@ export async function POST(req: Request) {
 
   after(async () => {
     try {
+      // GTM-15 Reddit mention cards (#sales).
+      if (it.kind === 'reddit_button') {
+        const rd = await import('@/lib/slack/redditDecide')
+        await rd.redditButton({ team: it.team, user: it.user, channel: it.channel }, it.message_ts, it.mention_id, it.decision)
+        return
+      }
       // GTM-14 signal cards (#sales) go to their own handler; lead posts below are unchanged.
       if (it.kind === 'signal_button' || it.kind === 'signal_edit_submit') {
         const sd = await import('@/lib/slack/signalDecide')
