@@ -41,6 +41,7 @@ create table if not exists public.signal_people (
   name                  text,
   first_name            text,
   headline              text,
+  company_guess         text,                             -- from the Haiku headline pass; handed to Perplexity
   kind                  text not null check (kind in ('commenter','reactor')),  -- commenter wins
   post_id               text references public.signal_posts(post_id),
   comment_text          text,
@@ -60,6 +61,7 @@ create table if not exists public.signal_people (
   is_decision_maker     boolean,
   crawl_verdict         text,
   crawl_reason          text,
+  doors_hint            text,                             -- crawl worker free text; numeric count → door_count, Perplexity doors skipped
   door_count            int,
   door_count_source     text,
   door_count_confidence text check (door_count_confidence in ('high','medium','low')),
