@@ -158,12 +158,14 @@ export function parseReply(json: unknown, opening: string, firstName?: string | 
   const o = (json && typeof json === 'object' ? json : {}) as Record<string, unknown>
   const response = typeof o.response === 'string' ? oneLine(o.response) : ''
   let question = typeof o.question === 'string' ? oneLine(o.question) : ''
-  // The greeting already names them: "Chuck, how do you…" → "How do you…".
+  // The greeting already names them: "Chuck, how do you…" → "How do you…"
   const name = oneLine(firstName ?? '')
   if (name && question.toLowerCase().startsWith(`${name.toLowerCase()}, `)) {
     const q = question.slice(name.length + 2)
     question = q.charAt(0).toUpperCase() + q.slice(1)
   }
+  // …and "…your team, Chuck?" → "…your team?"
+  if (name && question.toLowerCase().endsWith(`, ${name.toLowerCase()}?`)) question = `${question.slice(0, -(name.length + 3))}?`
   if (!response || !question) throw new Error('reply: missing response or question')
   if (!response.toLowerCase().startsWith(opening.toLowerCase())) throw new Error('reply: response must start with the opening')
   const rest = response.slice(opening.length)

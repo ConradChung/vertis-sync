@@ -70,6 +70,7 @@ Deno.test('parseReply refuses replies that break the rules', () => {
   assertEquals(parseReply({ response: 'Saw your comment on my post, love the AI bots', question: 'How do you staff nights?' }, OPENING_EARLIER).response,
     'saw your comment on my post, love the AI bots.')
   assertEquals(parseReply({ ...ALIK, question: 'Alik, how do the bots hand off?' }, OPENING_EARLIER, 'Alik').question, 'How do the bots hand off?')
+  assertEquals(parseReply({ ...ALIK, question: 'How do the bots hand off, Alik?' }, OPENING_EARLIER, 'Alik').question, 'How do the bots hand off?')
   // A bare "me" is a reaction, not a claim about Frank.
   assertEquals(parseReply({ response: 'saw your comment on my post, and the late-night lease line stuck with me', question: 'How do you staff nights?' }, OPENING_EARLIER).response,
     'saw your comment on my post, and the late-night lease line stuck with me.')
