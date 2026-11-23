@@ -1,4 +1,7 @@
-import { Bot, CalendarDays, ClipboardCheck, FlaskConical, LayoutDashboard, Megaphone, Repeat2, Settings, ShieldCheck, Sheet, Upload, Users, type LucideIcon } from 'lucide-react'
+import { Bot, Inbox, CalendarDays, ClipboardCheck, FlaskConical, LayoutDashboard, Megaphone, Repeat2, Settings, ShieldCheck, Sheet, Upload, Users, type LucideIcon } from 'lucide-react'
+
+/** The tab that carries the pending-approvals badge. */
+export const APPROVALS_HREF = '/actions'
 
 /** Primary navigation. `primary` tabs sit in the phone bottom bar; the rest live under More. */
 export const TABS: readonly { href: string; label: string; icon: LucideIcon; primary?: boolean }[] = [
@@ -12,6 +15,7 @@ export const TABS: readonly { href: string; label: string; icon: LucideIcon; pri
   { href: '/crm', label: 'CRM', icon: Users, primary: true },
   { href: '/agent', label: 'Agent', icon: Bot, primary: true },
   { href: '/playground', label: 'Playground', icon: FlaskConical },
+  { href: '/actions', label: 'Approvals', icon: Inbox },
   { href: '/operator', label: 'Operator', icon: ClipboardCheck },
   { href: '/settings', label: 'Settings', icon: Settings },
 ]

@@ -16,6 +16,9 @@ import { FLOW, TOOLS, tabForChord } from '@/components/shell/nav'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Kbd } from '@/components/ui/kbd'
 import { LumeMark } from './LumeMark'
+import { NavBadge } from '@/components/shell/NavBadge'
+import { APPROVALS_HREF } from '@/components/shell/tabs'
+import { usePendingCount } from '@/hooks/usePendingCount'
 
 export { TABS, isActiveTab } from '@/components/shell/tabs'
 
@@ -29,6 +32,8 @@ export { TABS, isActiveTab } from '@/components/shell/tabs'
  */
 export function TopBar({ operator = null }: { operator?: string | null } = {}) {
   const pathname = usePathname()
+  // Awaiting pending actions (polled every 30 s): the Approvals badge, desktop and phone.
+  const pending = usePendingCount()
   const { cache, mutate } = useSWRConfig()
   const warm = useCallback(
     (href: string) => prefetchTab(href, { mutate, hasData: (key) => cache.get(key)?.data !== undefined }),
@@ -55,7 +60,7 @@ export function TopBar({ operator = null }: { operator?: string | null } = {}) {
   return (
     <>
     {/* Phones get a slim header + bottom tab bar (MobileNav); the corner controls below are sm and up. */}
-    <MobileNav pathname={pathname} warm={warm} operator={operator} />
+    <MobileNav pathname={pathname} warm={warm} operator={operator} pending={pending} />
     {/* A frosted band under the corner controls so page text scrolling up fades out behind them
         instead of running under the page name (owner, 2026-11-09). */}
     <div
@@ -63,7 +68,7 @@ export function TopBar({ operator = null }: { operator?: string | null } = {}) {
       data-top-band
       className="pointer-events-none fixed inset-x-0 top-0 z-20 h-[calc(var(--topbar-h)+20px)] bg-gradient-to-b from-(--background) via-(--background)/80 to-transparent backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_55%,transparent)]"
     />
-    <Launcher pathname={pathname} warm={warm} />
+    <Launcher pathname={pathname} warm={warm} pending={pending} />
     <div className="glass fixed top-4 right-4 z-30 flex h-11 items-center gap-0.5 rounded-2xl bg-(--bar-fill) px-1 shadow-(--bar-shadow) backdrop-blur-xl max-sm:hidden">
       <button
         type="button"
@@ -88,7 +93,7 @@ export function TopBar({ operator = null }: { operator?: string | null } = {}) {
  * (1 Import … 5 Campaigns) and the tools as a grid. Alt + a step's number or a
  * tool's letter jumps there from anywhere, without opening the panel.
  */
-function Launcher({ pathname, warm }: { pathname: string; warm: (href: string) => void }) {
+function Launcher({ pathname, warm, pending }: { pathname: string; warm: (href: string) => void; pending: number }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   useEffect(() => setOpen(false), [pathname])
@@ -115,14 +120,15 @@ function Launcher({ pathname, warm }: { pathname: string; warm: (href: string) =
     <div className="fixed top-4 left-4 z-30 flex items-center gap-3 max-sm:hidden">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
-          aria-label="Open navigation"
+          aria-label={pending > 0 ? `Open navigation (${pending} waiting for approval)` : 'Open navigation'}
           title="Navigate"
           className={cn(
-            'glass grid size-11 place-items-center rounded-2xl bg-(--bar-fill) text-fg shadow-(--bar-shadow) backdrop-blur-xl outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring',
+            'glass relative grid size-11 place-items-center rounded-2xl bg-(--bar-fill) text-fg shadow-(--bar-shadow) backdrop-blur-xl outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring',
             open && 'bg-secondary'
           )}
         >
           <LumeMark className="h-3.5 w-auto" />
+          <NavBadge count={pending} className="absolute -top-1.5 -right-1.5" />
         </PopoverTrigger>
         <PopoverContent align="start" sideOffset={8} className="w-[400px] gap-0 rounded-2xl bg-black/55 p-2 ring-white/10 backdrop-blur-2xl backdrop-saturate-150 light:bg-white/55 light:ring-black/10">
           <p className="px-2.5 pt-1.5 pb-1 text-[11px] font-medium tracking-[0.12em] text-fg-46 uppercase">Flow</p>
@@ -165,12 +171,13 @@ function Launcher({ pathname, warm }: { pathname: string; warm: (href: string) =
                   onFocus={() => warm(t.href)}
                   title={t.key ? `${t.label} (⌥${t.key})` : t.label}
                   className={cn(
-                    'flex flex-col items-center gap-1.5 rounded-xl px-1 py-2.5 text-[12px] text-fg-70 outline-none hover:bg-secondary hover:text-fg focus-visible:bg-secondary focus-visible:text-fg',
+                    'relative flex flex-col items-center gap-1.5 rounded-xl px-1 py-2.5 text-[12px] text-fg-70 outline-none hover:bg-secondary hover:text-fg focus-visible:bg-secondary focus-visible:text-fg',
                     active && 'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground light:ring-1 light:ring-(--lime-edge)'
                   )}
                 >
                   <Icon className="size-5" strokeWidth={1.75} aria-hidden />
                   {t.label}
+                  {t.href === APPROVALS_HREF && <NavBadge count={pending} className="absolute top-1 right-1" />}
                 </Link>
               )
             })}

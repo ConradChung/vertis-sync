@@ -6,12 +6,12 @@ import { TABS } from '@/components/shell/tabs'
  * utilities around it. Tabs not named here fall into the tools.
  */
 const FLOW_ORDER = ['/import', '/import/leads', '/progress', '/rotate', '/campaigns'] as const
-const TOOL_ORDER = ['/overview', '/agent', '/crm', '/calendar', '/playground', '/operator', '/settings']
+const TOOL_ORDER = ['/overview', '/actions', '/agent', '/crm', '/calendar', '/playground', '/operator', '/settings']
 
 export type NavTab = (typeof TABS)[number] & { step?: number; key?: string }
 
 /** Alt + key jumps to a tool from anywhere on desktop (flow steps use Alt + their number). */
-const TOOL_KEYS: Record<string, string> = { '/overview': 'O', '/agent': 'A', '/crm': 'C', '/calendar': 'K', '/playground': 'P', '/operator': 'R', '/settings': 'S' }
+const TOOL_KEYS: Record<string, string> = { '/overview': 'O', '/actions': 'Y', '/agent': 'A', '/crm': 'C', '/calendar': 'K', '/playground': 'P', '/operator': 'R', '/settings': 'S' }
 
 export const FLOW: NavTab[] = FLOW_ORDER.flatMap((href, i) => {
   const t = TABS.find((x) => x.href === href)

@@ -89,7 +89,7 @@ const btn = (label: string, action: string, targetId: string, tone: GateButton['
   spends: SPENDING_ACTIONS.has(action),
 })
 
-const ACTION_LABEL: Record<string, string> = {
+export const ACTION_LABEL: Record<string, string> = {
   push_to_instantly: 'Push leads to Instantly',
   launch_campaign: 'Launch campaign',
   assign_leads: 'Assign leads to a campaign',
@@ -133,7 +133,7 @@ function priorityOf(gate: GateRow): Priority {
       return 'validation'
     case 'lume_action': {
       const kind = gate.title ?? ''
-      if (kind === 'run_actor') return 'money'
+      if (kind === 'run_actor' || kind === 'company_check') return 'money'
       if (kind === 'decide_gate') {
         const action = str(gate.counts?.callback_data)?.split(':')[0] ?? ''
         if (SPENDING_ACTIONS.has(action)) return 'money'
@@ -202,6 +202,12 @@ function costOf(gate: GateRow, leads: number | null): string | null {
           cap !== null ? `ceiling ${formatUsd(cap)}` : null,
         ].filter(Boolean)
         return parts.length ? parts.join(', ') : 'Apify run (capped)'
+      }
+      if (kind === 'company_check') {
+        const est = num(c.estimate_usd)
+        const cap = num(c.max_usd)
+        const parts = [est !== null ? `estimate ${formatUsd(est)}` : null, cap !== null ? `hard cap ${formatUsd(cap)}` : null].filter(Boolean)
+        return parts.length ? parts.join(', ') : 'ICP check (capped)'
       }
       const lfo = lfoCountOf(str(c.callback_data))
       if (lfo !== null) return leadsfridayCostText(lfo)

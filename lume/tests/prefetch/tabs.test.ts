@@ -41,6 +41,7 @@ describe('prefetchTab', () => {
   })
 
   it('covers every data tab in the bar', () => {
-    for (const t of TABS) if (t.href !== '/agent') expect(TAB_KEYS[t.href], t.href).toBeDefined()
+    // /actions reads /api/actions/pending, which the nav badge already polls on every page (always warm).
+    for (const t of TABS) if (t.href !== '/agent' && t.href !== '/actions') expect(TAB_KEYS[t.href], t.href).toBeDefined()
   })
 })
