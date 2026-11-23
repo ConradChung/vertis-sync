@@ -89,6 +89,21 @@ describe('request tools file a pending action and only that', () => {
     expect(m.dispatch).not.toHaveBeenCalled()
   })
 
+  it('lume_run_influencer_scrape forwards post_urls only when given', async () => {
+    const url = 'https://www.linkedin.com/posts/pslohmann_x-share-7524216718781599744-lKM4'
+    await run('lume_run_influencer_scrape', { slugs: ['peter-lohmann'], max_verify_usd: 2, post_urls: [url] })
+    expect(m.build.mock.calls[0][0].payload).toEqual({ slugs: ['peter-lohmann'], max_verify_usd: 2, post_urls: [url] })
+    m.build.mockClear()
+    await run('lume_run_influencer_scrape', { slugs: ['peter-lohmann'] })
+    expect(m.build.mock.calls[0][0].payload).toEqual({ slugs: ['peter-lohmann'] })
+  })
+
+  it('lume_run_influencer_scrape refuses more than 10 post_urls before building', async () => {
+    const urls = Array.from({ length: 11 }, (_, i) => `https://www.linkedin.com/posts/p_x-activity-${7000000 + i}-a`)
+    await expect((async () => run('lume_run_influencer_scrape', { slugs: ['a'], post_urls: urls }))()).rejects.toThrow()
+    expect(m.build).not.toHaveBeenCalled()
+  })
+
   it('a refused build files nothing and says why', async () => {
     m.build.mockResolvedValue({ ok: false, status: 409, error: 'nothing_to_push' })
     await expect(run('lume_push_to_instantly', { job_id: JOB })).rejects.toThrow(/nothing_to_push.*Nothing was filed/)
