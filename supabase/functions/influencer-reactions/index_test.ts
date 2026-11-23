@@ -825,3 +825,39 @@ Deno.test('reactions stage on a targeted run scrapes exactly the chosen post wit
     assertEquals(JSON.parse(start.body!).posts, [TARGET])
   } finally { f.restore() }
 })
+
+Deno.test('GTM-14 triage: on a run filed for Frank\'s posts, people already in signal_people are labelled no before Haiku', async () => {
+  const SIG = '66666666-6666-4666-8666-666666666666'
+  let asked = ''
+  let reads = 0
+  const f = stubFetch([
+    ...common,
+    [db('rpc/lume_influencer_claim_run'), () => json([claimed('triage', { id: SIG })])],
+    [is('influencer_reactors?last_seen_run', 'GET'), () => {
+      if (reads++) throw new Error('stop here')
+      return json([
+        { id: 1, headline: 'Owner, Acme PM', linkedin_url: 'https://www.linkedin.com/in/known/', linkedin_id: 'K1' },
+        { id: 2, headline: 'Owner, Beta PM', linkedin_url: 'https://www.linkedin.com/in/new', linkedin_id: 'N2' },
+      ])
+    }],
+    [db('rpc/lume_influencer_fail_run'), () => json({ ok: true, abort: [] })],
+    [is(`influencer_runs?id=eq.${SIG}&select=start_action_id`, 'GET'), () => json([{ start_action_id: ACTION }])],
+    [is('signal_posts?reactions_action_id', 'GET'), () => json([{ post_id: '111' }])],
+    [is('signal_people?or=', 'GET'), () => json([{ linkedin_url: 'https://www.linkedin.com/in/known', linkedin_id: null }])],
+    [(u) => u === 'https://api.anthropic.com/v1/messages', (_u, b) => {
+      asked = b ?? ''
+      return json({ stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 5 }, content: [{ type: 'text', text: JSON.stringify({ results: [{ id: '2', label: 'likely' }] }) }] })
+    }],
+    [is('influencer_reactors', 'PATCH'), () => json([])],
+    [is('influencer_runs', 'PATCH'), () => json([{ id: SIG }])],
+  ])
+  try {
+    await advance(SIG, null, { handOff: () => Promise.resolve(true) })
+    assert(asked.includes('Beta PM') && !asked.includes('Acme PM'), 'only the unknown reactor is classified')
+    const no = f.calls.find((c) => c.method === 'PATCH' && c.url.includes('influencer_reactors') && (c.body ?? '').includes('"no"'))
+    assert(no && no.url.includes('id=in.(1)'), 'the known reactor is labelled no')
+    const likely = f.calls.find((c) => c.method === 'PATCH' && c.url.includes('influencer_reactors') && (c.body ?? '').includes('"likely"'))
+    assert(likely && likely.url.includes('id=in.(2)'))
+    assertEquals(bodies(f.calls, is('influencer_runs', 'PATCH')).find((b) => b.counts)?.counts.signal_known, 1)
+  } finally { f.restore() }
+})
