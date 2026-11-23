@@ -1,4 +1,5 @@
 import { ACTION_IDS, EDIT_BLOCK_ID, EDIT_CALLBACK_ID, EDIT_INPUT_ID } from '@/lib/slack/card'
+import { SIGNAL_ACTION_IDS, SIGNAL_DRAFT_FIELDS, SIGNAL_EDIT_CALLBACK_ID, SIGNAL_EDIT_INPUT_ID, signalEditBlockId, type SignalDrafts } from '@/lib/slack/signalCard'
 
 /**
  * Parse Slack's (already signature-verified) event and interaction bodies
@@ -58,7 +59,21 @@ export function parseEvent(raw: string): SlackEvent {
 export type SlackInteraction =
   | { kind: 'button'; decision: 'approve' | 'edit' | 'skip'; team: string; user: string; channel: string; message_ts: string; action_id: string; trigger_id: string }
   | { kind: 'edit_submit'; team: string; user: string; post_id: number; body: string }
+  // GTM-14 signal cards (#sales): value is the signal_people id.
+  | { kind: 'signal_button'; decision: 'approve' | 'edit' | 'skip'; team: string; user: string; channel: string; message_ts: string; person_id: number; trigger_id: string }
+  | { kind: 'signal_edit_submit'; team: string; user: string; person_id: number; drafts: SignalDrafts }
   | null
+
+const SIGNAL_DECISION: Record<string, 'approve' | 'edit' | 'skip'> = {
+  [SIGNAL_ACTION_IDS.approve]: 'approve',
+  [SIGNAL_ACTION_IDS.edit]: 'edit',
+  [SIGNAL_ACTION_IDS.skip]: 'skip',
+}
+const positiveId = (v: unknown): number | null => {
+  if (typeof v !== 'string' || !/^\d{1,15}$/.test(v)) return null
+  const n = Number(v)
+  return Number.isSafeInteger(n) && n > 0 ? n : null
+}
 
 export const EDIT_MAX_CHARS = 3000
 
@@ -75,6 +90,15 @@ export function parseInteraction(rawForm: string): SlackInteraction {
   if (!team || !user) return null
   if (p.type === 'block_actions') {
     const a = obj(Array.isArray(p.actions) ? p.actions[0] : null)
+    const signal = typeof a.action_id === 'string' && Object.hasOwn(SIGNAL_DECISION, a.action_id) ? SIGNAL_DECISION[a.action_id] : null
+    if (signal) {
+      const c = obj(p.container)
+      const channel = match(CHANNEL, c.channel_id) ?? match(CHANNEL, obj(p.channel).id)
+      const message_ts = match(TS, c.message_ts) ?? match(TS, obj(p.message).ts)
+      const person_id = positiveId(a.value)
+      if (!channel || !message_ts || !person_id) return null
+      return { kind: 'signal_button', decision: signal, team, user, channel, message_ts, person_id, trigger_id: str(p.trigger_id) ?? '' }
+    }
     const decision = a.action_id === ACTION_IDS.approve ? 'approve' : a.action_id === ACTION_IDS.edit ? 'edit' : a.action_id === ACTION_IDS.skip ? 'skip' : null
     const container = obj(p.container)
     const channel = match(CHANNEL, container.channel_id) ?? match(CHANNEL, obj(p.channel).id)
@@ -86,6 +110,17 @@ export function parseInteraction(rawForm: string): SlackInteraction {
   }
   if (p.type === 'view_submission') {
     const view = obj(p.view)
+    if (view.callback_id === SIGNAL_EDIT_CALLBACK_ID) {
+      const person_id = positiveId(view.private_metadata)
+      const values = obj(obj(view.state).values)
+      if (!person_id) return null
+      const drafts: SignalDrafts = {}
+      for (const f of SIGNAL_DRAFT_FIELDS) {
+        const v = obj(obj(values[signalEditBlockId(f)])[SIGNAL_EDIT_INPUT_ID]).value
+        drafts[f] = typeof v === 'string' ? v : null
+      }
+      return { kind: 'signal_edit_submit', team, user, person_id, drafts }
+    }
     if (view.callback_id !== EDIT_CALLBACK_ID) return null
     const postId = Number(view.private_metadata)
     const body = str(obj(obj(obj(obj(view.state).values)[EDIT_BLOCK_ID])[EDIT_INPUT_ID]).value)

@@ -1,0 +1,33 @@
+import type { SignalPersonRow } from '@/lib/slack/signalCard'
+
+export const person = (over: Partial<SignalPersonRow> = {}): SignalPersonRow => ({
+  id: 42,
+  kind: 'commenter',
+  stage: 'ready',
+  linkedin_url: 'https://www.linkedin.com/in/ada-pm',
+  name: 'Ada Lovelace',
+  title: 'Director of Operations',
+  company_name: 'Acme Property Mgmt',
+  company_website: 'https://acmepm.com',
+  location: 'Vancouver, BC',
+  post_id: '7400',
+  comment_text: 'Great point <@channel> & so true',
+  comment_url: 'https://www.linkedin.com/feed/update/urn:li:activity:7400?commentUrn=1',
+  commented_at: '2026-11-23T09:00:00Z',
+  crawl_verdict: 'property_manager',
+  door_count: 1200,
+  door_count_source: 'https://acmepm.com/about',
+  door_count_confidence: 'high',
+  contacts: [
+    { name: 'Bob Owner', title: 'CEO', linkedin_url: 'https://www.linkedin.com/in/bob' },
+    { name: 'Cy', title: 'COO', linkedin_url: null },
+    { name: 'Di', title: 'VP', linkedin_url: 'https://www.linkedin.com/in/di' },
+    { name: 'Ed', title: 'extra', linkedin_url: null },
+  ],
+  connected: null,
+  drafts: { opening: 'Hi Ada', dm: 'Hi Ada, thanks for the comment.', connection_note: 'Hi Ada, saw your comment on my post.', followup_dm: 'Thanks for connecting!', no_note_followup: 'Hey Ada, thanks for accepting.' },
+  alert_status: null,
+  decided_by: null,
+  decided_at: null,
+  ...over,
+})
