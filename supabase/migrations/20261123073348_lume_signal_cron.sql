@@ -1,12 +1,10 @@
--- HELD (owner, 2026-11-22): do not apply until the owner has seen the dry-run cards.
--- Rename to the ledger version once applied.
+-- Applied 2026-11-22 on the owner's go-live (ledger 20261123073348), after the dry-run cards were OK'd.
 
 -- GTM-14 launch: one pg_cron tick every 30 min.
 --   1. signal-comments edge fn (service role) — polls, filters, ingests reactor runs.
 --   2. Lume /api/cron/signal-alerts (X-Lume-Hook-Secret) — posts ready cards / digests / notices
 --      (dry_run in signal_config keeps it from posting).
 --   3. Lume /api/cron/signal-reactions — files the Monday one-tap reactions card when due.
--- Applied only after the owner approves going live; the dry run invokes these by hand.
 
 create or replace function public.lume_signal_tick()
 returns void language plpgsql security definer set search_path = public, extensions as $$
