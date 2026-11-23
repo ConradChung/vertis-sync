@@ -1,0 +1,68 @@
+[
+  {
+    "type": "comment",
+    "id": "7331190065471078400",
+    "linkedinUrl": "https://www.linkedin.com/feed/update/urn:li:activity:7328838056403173380?commentUrn=urn%3Ali%3Acomment%3A%28activity%3A7328838056403173380%2C7331190065471078400%29",
+    "commentary": "Great point on owner reporting. We switched last year.",
+    "createdAt": "2026-11-22T17:31:58.534Z",
+    "numComments": 1,
+    "numShares": null,
+    "numImpressions": null,
+    "reactionTypeCounts": [{ "type": "LIKE", "count": 1 }],
+    "actor": {
+      "id": "ACoAAFsE9LEBl7BKtsoGeoDZz0IvKfmiGgiEtX8",
+      "name": "Dana Whitfield, CPM",
+      "linkedinUrl": "https://www.linkedin.com/in/Dana-Whitfield-3a94a6367/?miniProfileUrn=urn%3Ali%3Afs",
+      "position": "Owner at Whitfield Property Management",
+      "pictureUrl": "https://media.licdn.com/x.jpg",
+      "author": false
+    },
+    "createdAtTimestamp": 1795455118534,
+    "pinned": false,
+    "contributed": false,
+    "edited": false,
+    "postId": "7328838056403173380",
+    "replies": [
+      {
+        "type": "comment",
+        "id": "7331190065471078401",
+        "linkedinUrl": "https://www.linkedin.com/feed/update/urn:li:activity:7328838056403173380?commentUrn=urn%3Ali%3Acomment%3A%28activity%3A7328838056403173380%2C7331190065471078401%29",
+        "commentary": "Thanks Dana!",
+        "createdAt": "2026-11-22T18:00:00.000Z",
+        "actor": {
+          "id": "ACoAAFRANK000000000000000000000000000",
+          "name": "Frank",
+          "linkedinUrl": "https://www.linkedin.com/in/frank22",
+          "position": "Co-founder at Kaspen",
+          "author": true
+        },
+        "postId": "7328838056403173380"
+      }
+    ]
+  },
+  {
+    "type": "comment",
+    "id": "7331190065471078500",
+    "linkedinUrl": "https://www.linkedin.com/feed/update/urn:li:activity:7328838056403173380?commentUrn=urn%3Ali%3Acomment%3A%28activity%3A7328838056403173380%2C7331190065471078500%29",
+    "commentary": "❤️",
+    "createdAtTimestamp": 1795400000000,
+    "actor": {
+      "id": "ACoAABBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "name": "Dr. luis ortega",
+      "linkedinUrl": "https://linkedin.com/in/luis-ortega-pm",
+      "position": "Founder | Ortega Rentals",
+      "author": false
+    },
+    "postId": "7328838056403173380"
+  },
+  {
+    "type": "reply",
+    "id": "7331190065471078600",
+    "commentary": "Agree with Luis",
+    "createdAt": "2026-11-21T09:00:00Z",
+    "actor": { "id": "ACoAACCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC", "name": "Pat Lee", "position": "Sales at PropTech Co", "author": false },
+    "postId": "7328838056403173380"
+  },
+  { "type": "post", "id": "x" },
+  { "type": "comment", "id": "no-actor", "commentary": "orphan" }
+]

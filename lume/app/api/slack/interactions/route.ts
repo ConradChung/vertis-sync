@@ -2,6 +2,8 @@ import { after, NextResponse } from 'next/server'
 import { EDIT_BLOCK_ID } from '@/lib/slack/card'
 import { editBodyError, parseInteraction } from '@/lib/slack/payloads'
 import { readSlackRequest } from '@/lib/slack/request'
+import { signalEditErrors } from '@/lib/slack/signalCard'
+import { signalCardOpts } from '@/lib/signal/config'
 
 /**
  * Slack interactivity (3g): the Approve / Edit / Skip buttons on a lead post
@@ -27,8 +29,21 @@ export async function POST(req: Request) {
     if (err) return NextResponse.json({ response_action: 'errors', errors: { [EDIT_BLOCK_ID]: err } })
   }
 
+  if (it.kind === 'signal_edit_submit') {
+    const errors = signalEditErrors(it.drafts, signalCardOpts().noteLimit)
+    if (errors) return NextResponse.json({ response_action: 'errors', errors })
+  }
+
   after(async () => {
     try {
+      // GTM-14 signal cards (#sales) go to their own handler; lead posts below are unchanged.
+      if (it.kind === 'signal_button' || it.kind === 'signal_edit_submit') {
+        const sd = await import('@/lib/slack/signalDecide')
+        if (it.kind === 'signal_edit_submit') await sd.signalSaveEdit({ team: it.team, user: it.user }, it.person_id, it.drafts)
+        else if (it.decision === 'edit') await sd.signalOpenEdit({ team: it.team, user: it.user, channel: it.channel }, it.message_ts, it.person_id, it.trigger_id)
+        else await sd.signalButton({ team: it.team, user: it.user, channel: it.channel }, it.message_ts, it.person_id, it.decision)
+        return
+      }
       const decide = await import('@/lib/slack/decide')
       if (it.kind === 'edit_submit') {
         await decide.clientSaveEdit({ team: it.team, user: it.user }, it.post_id, it.body)

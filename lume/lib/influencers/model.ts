@@ -33,10 +33,10 @@ export interface InfluencerRow {
 // ---------------------------------------------------------------------------
 // prices and the last full run
 
-/** Unit prices (verified 2026-10-06; same as supabase/functions/_shared/influencer/cost.ts). */
+/** Unit prices (posts verified 2026-10-06, reactions 2026-11-22; same as supabase/functions/_shared/influencer/cost.ts). */
 export const PRICES = {
   posts_per_1k: 2,
-  reactions_per_1k: 1.5,
+  reactions_per_1k: 2,
   perplexity_per_call: 0.006,
   /** Haiku 5.5 is a tenth of Haiku 4.5's price; the old run's ~$3 Haiku over 7,638 reactors is ~$0.0004 each at 4.5 prices. */
   haiku_per_reactor: 0.00004,

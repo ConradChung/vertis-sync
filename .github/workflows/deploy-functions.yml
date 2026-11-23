@@ -34,6 +34,9 @@ jobs:
       - name: Deploy functions that verify their own callers without a JWT
         if: steps.gate.outputs.skip != 'true'
         run: supabase functions deploy telegram-inbox slack-inbox hnwi-pipeline-orchestrator --project-ref "$PROJECT_REF" --no-verify-jwt
+      # company-check is left out ON PURPOSE (2026-11-22, GTM-27): its v2 migration
+      # 20261112195122 is not applied in production. Put it back in this list in the
+      # same change that applies that migration (GTM-27), then remove this comment.
       - name: Deploy the remaining functions
         if: steps.gate.outputs.skip != 'true'
-        run: supabase functions deploy instantly-rotate instantly-push email-validator contact-email-finder hnwi-email-finder operating-city-enricher pipeline-watchdog jobsearch-notify jobsearch-puller jobsearch-sheet-writer leadsfriday-order company-research influencer-reactions influencer-lookup company-check --project-ref "$PROJECT_REF"
+        run: supabase functions deploy instantly-rotate instantly-push email-validator contact-email-finder hnwi-email-finder operating-city-enricher pipeline-watchdog jobsearch-notify jobsearch-puller jobsearch-sheet-writer leadsfriday-order company-research influencer-reactions influencer-lookup signal-comments --project-ref "$PROJECT_REF"

@@ -1,8 +1,9 @@
 // Cost model for the PM influencer reactions pipeline. Pure.
 //
-// Unit prices (verified 2026-10-06, unchanged on the 2026-10-08 full run):
+// Unit prices (posts verified 2026-10-06; reactions re-verified 2026-11-22 on
+// the actor's pricing page, was $1.50/1k until then):
 //   harvestapi~linkedin-profile-posts    $2.00 per 1,000 posts
-//   harvestapi~linkedin-post-reactions   $1.50 per 1,000 reactions
+//   harvestapi~linkedin-post-reactions   $2.00 per 1,000 reactions ($0.002 each)
 //   Perplexity Sonar (low context)       ~$0.006 per call (request fee dominates)
 //   Claude Haiku 5.5                     $0.10 / $0.50 per million input / output tokens
 //
@@ -14,7 +15,7 @@
 export const POSTS_ACTOR = 'harvestapi~linkedin-profile-posts'
 export const REACTIONS_ACTOR = 'harvestapi~linkedin-post-reactions'
 export const PRICE_PER_1K_POSTS = 2
-export const PRICE_PER_1K_REACTIONS = 1.5
+export const PRICE_PER_1K_REACTIONS = 2
 export const PPLX_CALL_USD = 0.006
 export const HAIKU_IN_PER_M = 0.1
 export const HAIKU_OUT_PER_M = 0.5
@@ -26,7 +27,7 @@ const ceilCents = (n: number) => Math.ceil(n * 100 - 1e-9) / 100
 const round4 = (n: number) => Math.round(n * 10_000) / 10_000
 const round6 = (n: number) => Math.round(n * 1_000_000) / 1_000_000
 
-/** Exact reactions bill for a set of top posts: sum(min(likes, cap)) at $1.5/1k (cap 0 = uncapped). */
+/** Exact reactions bill for a set of top posts: sum(min(likes, cap)) at PRICE_PER_1K_REACTIONS ($2/1k) (cap 0 = uncapped). */
 export function estimateReactions(top: { likes?: number | null }[], cap: number): { reactions: number; usd: number } {
   let reactions = 0
   for (const p of top) {
