@@ -98,6 +98,28 @@ describe('request tools file a pending action and only that', () => {
     expect(m.build.mock.calls[0][0].payload).toEqual({ slugs: ['peter-lohmann'] })
   })
 
+  it('lume_run_influencer_scrape takes a single post_url', async () => {
+    const url = 'https://www.linkedin.com/posts/pslohmann_x-share-7524216718781599744-lKM4'
+    await run('lume_run_influencer_scrape', { slugs: ['peter-lohmann'], max_verify_usd: 2, post_url: url })
+    expect(m.build.mock.calls[0][0].payload).toEqual({ slugs: ['peter-lohmann'], max_verify_usd: 2, post_urls: [url] })
+  })
+
+  it('lume_run_influencer_scrape accepts post_urls sent as a string by a client with a stale tool list', async () => {
+    const a = 'https://www.linkedin.com/posts/a_x-activity-7000000000000000001-aa'
+    const b = 'https://www.linkedin.com/posts/b_y-activity-7000000000000000002-bb'
+    for (const sent of [JSON.stringify([a]), `${a}, ${b}`, `${a}\n${b}`]) {
+      m.build.mockClear()
+      await run('lume_run_influencer_scrape', { slugs: ['peter-lohmann'], post_urls: sent })
+      expect(m.build.mock.calls[0][0].payload.post_urls).toEqual(sent.startsWith('[') ? [a] : [a, b])
+    }
+  })
+
+  it('post_url and post_urls merge and dedupe', async () => {
+    const a = 'https://www.linkedin.com/posts/a_x-activity-7000000000000000001-aa'
+    await run('lume_run_influencer_scrape', { slugs: ['peter-lohmann'], post_url: a, post_urls: [a] })
+    expect(m.build.mock.calls[0][0].payload.post_urls).toEqual([a])
+  })
+
   it('lume_run_influencer_scrape refuses more than 10 post_urls before building', async () => {
     const urls = Array.from({ length: 11 }, (_, i) => `https://www.linkedin.com/posts/p_x-activity-${7000000 + i}-a`)
     await expect((async () => run('lume_run_influencer_scrape', { slugs: ['a'], post_urls: urls }))()).rejects.toThrow()

@@ -311,29 +311,59 @@ export const assignLeads = gatedTool({
   toPayload: ({ campaign_id, filter, limit }) => ({ campaign_id, filter, ...(limit ? { limit } : {}) }),
 })
 
+const POST_URL = z.string().trim().min(1).max(500)
+
+/**
+ * post_url / post_urls as one deduped list. Accepts what a client with a stale
+ * tool list sends too: post_urls as a JSON-array string or a comma/space/newline
+ * separated string. URL shape and the 1-10 limit are checked by the builder.
+ */
+export function targetPostUrls(post_url?: string, post_urls?: string[] | string): string[] | undefined {
+  const list: string[] = []
+  if (post_url) list.push(post_url.trim())
+  if (Array.isArray(post_urls)) list.push(...post_urls.map((u) => u.trim()))
+  else if (typeof post_urls === 'string') {
+    const raw = post_urls.trim()
+    let parsed: unknown = null
+    if (raw.startsWith('[')) {
+      try {
+        parsed = JSON.parse(raw)
+      } catch {
+        parsed = null
+      }
+    }
+    if (Array.isArray(parsed)) list.push(...parsed.filter((u): u is string => typeof u === 'string').map((u) => u.trim()))
+    else list.push(...raw.split(/[\s,]+/))
+  }
+  const out = [...new Set(list.filter(Boolean))]
+  return out.length ? out : undefined
+}
+
 export const runInfluencerScrape = gatedTool({
   name: 'lume_run_influencer_scrape',
   title: 'Request an influencer scrape',
   description:
     "Requests scraping tracked influencers' recent posts and reactors (kind influencer_run). Spends Apify credit; the preview shows the estimate and what is left of the monthly cap. " +
-    'Pass post_urls (1-10 LinkedIn post URLs, all by the ONE influencer in slugs) to target those posts only: no posts scrape, and the run goes straight to the reactions bill, priced at the per-post cap.',
+    'To run on specific posts only, pass post_url (one LinkedIn post URL) or post_urls (1-10), all by the ONE influencer in slugs: no posts scrape, and the run goes straight to the reactions bill, priced at the per-post cap.',
   kind: 'influencer_run',
   input: z.object({
     slugs: z.array(z.string().trim().min(1).max(80)).min(1).max(100).describe('Influencer slugs (lume_list_influencers).'),
     max_verify_usd: z.number().min(0).max(1000).optional(),
+    post_url: POST_URL.optional().describe('Optional: one LinkedIn post URL (linkedin.com/posts/... or feed/update/urn:li:activity:...) by the influencer in slugs. Single-post run.'),
     post_urls: z
-      .array(z.string().trim().min(1).max(500))
-      .min(1)
-      .max(10)
+      .union([z.array(POST_URL).min(1).max(10), z.string().trim().min(1).max(5000)])
       .optional()
-      .describe('Optional: specific LinkedIn post URLs (linkedin.com/posts/... or feed/update/urn:li:activity:...) by the one influencer in slugs.'),
+      .describe('Optional: 1-10 LinkedIn post URLs by the one influencer in slugs (an array; a comma-separated string also works).'),
     idempotency_key: idempotencyKey,
   }),
-  toPayload: ({ slugs, max_verify_usd, post_urls }) => ({
-    slugs,
-    ...(max_verify_usd !== undefined ? { max_verify_usd } : {}),
-    ...(post_urls !== undefined ? { post_urls } : {}),
-  }),
+  toPayload: ({ slugs, max_verify_usd, post_url, post_urls }) => {
+    const targets = targetPostUrls(post_url, post_urls)
+    return {
+      slugs,
+      ...(max_verify_usd !== undefined ? { max_verify_usd } : {}),
+      ...(targets ? { post_urls: targets } : {}),
+    }
+  },
 })
 
 export const runInfluencerReactions = gatedTool({
