@@ -166,3 +166,6 @@ returns numeric language sql stable security definer set search_path = public as
    where lane = any(p_lanes) and status <> 'released' and created_at >= p_since;
 $$;
 revoke all on function public.signal_lane_spend(text[], timestamptz) from public, anon, authenticated;
+
+-- Dedupe looks up lead_review_items by linkedin_key alone; the existing index leads with set_id.
+create index if not exists lead_review_items_linkedin_key on public.lead_review_items (linkedin_key) where linkedin_key is not null;
