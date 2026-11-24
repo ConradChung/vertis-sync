@@ -187,7 +187,8 @@ export async function makeFinal(
       }
     })
   )
-  await advanceSource(source.id, plan)
+  // The final sheet is saved; a failed step move on the source must not turn that into an error (a retry would save it twice).
+  await advanceSource(source.id, plan).catch((err) => console.error('[lead-lists/final] source step not moved', err))
   return { list: (await getList(final.id)) ?? final, kept: plan.kept, excluded: plan.excluded, reasons: plan.reasons, append }
 }
 

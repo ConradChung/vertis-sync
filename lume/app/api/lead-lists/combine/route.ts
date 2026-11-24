@@ -12,7 +12,7 @@ import { combineLists, previewCombine, StageRefused } from '@/lib/leads/lists/st
  * Step 2 · Combined (GTM-18). POST `{ list_ids, key, rule, prefer_list_id?, name?, project_id?, preview? }`:
  *  - `preview: true` → `{ stats, columns, sample }` (nothing written);
  *  - otherwise → 201 `{ list, href, stats, append }`: a new combined master list.
- * key: 'auto' (domain, then email) | 'domain' | 'email'. rule: 'fill_blanks'
+ * key: 'auto' (companies on domain then email, people on email then LinkedIn) | 'domain' | 'email'. rule: 'fill_blanks'
  * (a filled cell is never overwritten) | 'prefer' (prefer_list_id's values win).
  * Only Lume's own list rows are written.
  */
