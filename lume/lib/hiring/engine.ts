@@ -254,7 +254,7 @@ export async function runHiringTick(now: Date, manual: ManualRun | null, deps: D
   if (manual) {
     const cap = Math.min(MAX_RUN_CAP_USD, manual.run_cap_usd && manual.run_cap_usd > 0 ? manual.run_cap_usd : cfg.run_cap_usd[manual.lane])
     plan.push({ lane: manual.lane, capUsd: cap, maxItems: manual.max_items, manual: true })
-  } else {
+  } else if (cfg.schedule) {
     for (const lane of LANES) {
       if (!cfg.lanes[lane]) continue
       try {

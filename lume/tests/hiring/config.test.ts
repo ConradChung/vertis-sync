@@ -5,7 +5,12 @@ import { monthStartIso } from '@/lib/hiring/engine'
 describe('parseHiringConfig', () => {
   it('the launch value', () => {
     const c = parseHiringConfig({ dry_run: true, lanes: { hiring: true, new_manager: false, expansion: false }, monthly_cap_usd: 40, run_cap_usd: { hiring: 2, new_manager: 3, expansion: 1 }, regions: ['United States', 'Canada'] })
-    expect(c).toEqual({ dry_run: true, lanes: { hiring: true, new_manager: false, expansion: false }, monthly_cap_usd: 40, run_cap_usd: { hiring: 2, new_manager: 3, expansion: 1 }, regions: ['United States', 'Canada'] })
+    expect(c).toEqual({ dry_run: true, schedule: false, lanes: { hiring: true, new_manager: false, expansion: false }, monthly_cap_usd: 40, run_cap_usd: { hiring: 2, new_manager: 3, expansion: 1 }, regions: ['United States', 'Canada'] })
+  })
+  it('schedule is off unless exactly true', () => {
+    expect(parseHiringConfig({}).schedule).toBe(false)
+    expect(parseHiringConfig({ schedule: 'yes' }).schedule).toBe(false)
+    expect(parseHiringConfig({ schedule: true }).schedule).toBe(true)
   })
   it('malformed → dry run, every lane off, default caps', () => {
     for (const v of [null, 'x', 42, [], { lanes: 'all', dry_run: 'false' }]) {

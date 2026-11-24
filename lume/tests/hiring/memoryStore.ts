@@ -7,7 +7,8 @@ import { GOOD_DRAFT } from './fixtures'
 
 /** An in-memory HiringStore with the same conditional semantics as lib/hiring/store.ts. */
 export function memoryStore(cfgValue: unknown = { dry_run: true, lanes: { hiring: true } }) {
-  let cfg: HiringConfig = parseHiringConfig(cfgValue)
+  // Engine tests exercise scheduled starts unless they say otherwise.
+  let cfg: HiringConfig = parseHiringConfig({ schedule: true, ...(cfgValue as Record<string, unknown>) })
   const runs: (RunRow & { manual: boolean; cost_usd: number | null; items: number | null; inserted: number | null; error: string | null })[] = []
   const rows: (PendingRow & Record<string, unknown>)[] = []
   const spend: { lane: string; kind: string; usd: number; status: string; run_id?: number; row_id?: number; created_at: string }[] = []

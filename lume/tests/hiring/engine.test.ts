@@ -234,3 +234,17 @@ describe('exclusions, PM check and drafts', () => {
     expect(m.rows[0]).toMatchObject({ stage: 'done', skip_reason: 'check_failed', attempts: 3 })
   })
 })
+
+describe('schedule off', () => {
+  it('a plain tick never starts a run; only the manual override does', async () => {
+    const m = memoryStore({ dry_run: true, schedule: false, lanes: { hiring: true } })
+    const apify = fakeApify()
+    const ai = fakeAi()
+    const r = await runHiringTick(NOW, null, deps(m, apify, ai))
+    expect(r.started).toEqual([])
+    expect(apify.startRun).not.toHaveBeenCalled()
+    const r2 = await runHiringTick(NOW, { lane: 'hiring', run_cap_usd: 0.5, max_items: 25, force: true } as never, deps(m, apify, ai))
+    expect(r2.started).toHaveLength(1)
+    expect(apify.startRun).toHaveBeenCalledTimes(1)
+  })
+})

@@ -25,6 +25,12 @@ export const LANE_EVERY_HOURS: Record<Lane, number> = { hiring: 24, new_manager:
 
 export interface HiringConfig {
   dry_run: boolean
+  /**
+   * Scheduled starts. Only an exact `schedule: true` lets a plain tick start
+   * due lanes; until the owner switches the schedule on, ticks only read
+   * runs and process rows, and runs start only from the manual override.
+   */
+  schedule: boolean
   lanes: Record<Lane, boolean>
   monthly_cap_usd: number
   run_cap_usd: Record<Lane, number>
@@ -44,6 +50,7 @@ export function parseHiringConfig(value: unknown): HiringConfig {
     : [...REGIONS]
   return {
     dry_run: raw.dry_run !== false,
+    schedule: raw.schedule === true,
     lanes: { hiring: lanes.hiring === true, new_manager: lanes.new_manager === true, expansion: lanes.expansion === true },
     monthly_cap_usd: usd(raw.monthly_cap_usd, DEFAULT_MONTHLY_CAP_USD, MAX_MONTHLY_CAP_USD),
     run_cap_usd: {
