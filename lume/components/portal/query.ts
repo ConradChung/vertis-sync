@@ -13,8 +13,8 @@ export interface PortalFilters {
 
 const SORTS: readonly PortalSort[] = ['company', 'name', 'region']
 
-/** "Has phone" is on by default on the email tab (Frank is calling), off on LinkedIn. */
-export const defaultHasPhone = (tab: PortalTab) => tab === 'email'
+/** "Has phone" is on by default where Frank is calling (email campaigns, call sheets), off on LinkedIn. */
+export const defaultHasPhone = (tab: PortalTab) => tab !== 'linkedin'
 
 export function defaultFilters(tab: PortalTab = 'email'): PortalFilters {
   return { tab, q: '', region: '', hasPhone: defaultHasPhone(tab), repliedPositive: false, sort: 'company', page: 1 }
@@ -26,7 +26,8 @@ interface ParamsLike {
 
 /** Page URL params → filters. Unknown / malformed values fall back to defaults. */
 export function filtersFromParams(params: ParamsLike): PortalFilters {
-  const tab: PortalTab = params.get('tab') === 'linkedin' ? 'linkedin' : 'email'
+  const raw = params.get('tab')
+  const tab: PortalTab = raw === 'linkedin' || raw === 'sheet' ? raw : 'email'
   const d = defaultFilters(tab)
   const hp = params.get('has_phone')
   const sort = params.get('sort') as PortalSort | null

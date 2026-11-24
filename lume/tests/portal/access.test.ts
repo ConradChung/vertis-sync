@@ -81,11 +81,24 @@ describe('getPortalUser', () => {
 
   it('looks the email up lowercase with the service key and returns the scope', async () => {
     fetchMock.mockResolvedValueOnce(ok([row]))
-    expect(await getPortalUser('  Frank@GetZenport.com ')).toEqual({ email: row.email, client: 'Kaspen', campaign_ids: ['c1'], linkedin_set_ids: ['s1'] })
+    expect(await getPortalUser('  Frank@GetZenport.com ')).toEqual({ email: row.email, client: 'Kaspen', campaign_ids: ['c1'], linkedin_set_ids: ['s1'], sheet_set_ids: [] })
     const [url, init] = fetchMock.mock.calls[0]
     expect(String(url)).toContain('/rest/v1/lume_portal_users?')
     expect(new URL(String(url)).searchParams.get('email')).toBe('eq.frank@getzenport.com')
     expect(init.headers.authorization).toBe('Bearer svc')
+  })
+
+  it('returns the call-sheet lists shared with the user', async () => {
+    fetchMock.mockResolvedValueOnce(ok([{ ...row, sheet_set_ids: ['maps-1', ''] }]))
+    expect((await getPortalUser(row.email))?.sheet_set_ids).toEqual(['maps-1'])
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('select')).toContain('sheet_set_ids')
+  })
+
+  it('before the GTM-18 migration (400 on the unknown column) reads again without call sheets', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('{"message":"column does not exist"}', { status: 400 })).mockResolvedValueOnce(ok([row]))
+    expect(await getPortalUser(row.email)).toEqual({ email: row.email, client: 'Kaspen', campaign_ids: ['c1'], linkedin_set_ids: ['s1'], sheet_set_ids: [] })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(new URL(String(fetchMock.mock.calls[1][0])).searchParams.get('select')).not.toContain('sheet_set_ids')
   })
 
   it('null when missing, disabled, failing, or not an email', async () => {

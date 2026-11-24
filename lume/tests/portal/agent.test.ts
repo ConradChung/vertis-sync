@@ -11,7 +11,7 @@ import {
 import type { PortalLead } from '@/lib/portal/types'
 import type { PortalUser } from '@/lib/portal/access'
 
-const user: PortalUser = { email: 'frank@getzenport.com', client: 'Kaspen', campaign_ids: ['c1'], linkedin_set_ids: [] }
+const user: PortalUser = { email: 'frank@getzenport.com', client: 'Kaspen', campaign_ids: ['c1'], linkedin_set_ids: [], sheet_set_ids: [] }
 const lead = (id: string): PortalLead => ({
   id, kind: 'email', name: `Lead ${id}`, first_name: null, title: null, company: 'Acme', phone: '1', phone_type: 'mobile', email: null,
   website: null, linkedin_url: null, city: null, state: null, country: null, region: 'Texas', timezone: null, campaign: 'K',

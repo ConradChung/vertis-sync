@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { OPERATOR_COOKIE } from '@/lib/operators/cookie'
 import { PageHead } from '@/components/shell/PageHead'
 import { CampaignsScreen } from '@/components/campaigns/CampaignsScreen'
+import { stepEyebrow } from '@/lib/leads/steps'
 
 export const metadata: Metadata = { title: 'Campaigns' }
 
@@ -11,7 +12,7 @@ export default async function CampaignsPage() {
   const canChangeReplyMode = !(await cookies()).get(OPERATOR_COOKIE)?.value
   return (
     <>
-      <PageHead eyebrow="Step 5" title="Campaigns" sub="Every campaign, its pipeline, and its replies — sends only after you confirm." />
+      <PageHead eyebrow={stepEyebrow(5)} title="Campaigns" sub="Every campaign, its pipeline, and its replies — sends only after you confirm." />
       <CampaignsScreen canChangeReplyMode={canChangeReplyMode} />
     </>
   )

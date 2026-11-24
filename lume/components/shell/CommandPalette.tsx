@@ -156,7 +156,7 @@ export function CommandPalette() {
               return (
                 <CommandItem key={t.href} value={`go ${t.label} ${t.step ? `step ${t.step}` : ''} ${TAB_WORDS[t.href] ?? ''}`} onSelect={() => go(t.href === '/agent' ? agentHref : t.href)}>
                   <Icon strokeWidth={1.75} />
-                  {t.step ? <span className="w-3 font-mono text-xs text-muted-foreground">{t.step}</span> : null}
+                  {t.step ? <span className="min-w-3 font-mono text-xs text-muted-foreground">{t.step}</span> : null}
                   {t.label}
                   {t.key && <CommandShortcut>⌥{t.key}</CommandShortcut>}
                 </CommandItem>

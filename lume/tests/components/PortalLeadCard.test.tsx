@@ -57,4 +57,18 @@ describe('portal LeadCard', () => {
     expect(screen.getByText('Dallas, TX')).toBeTruthy()
     expect(screen.getByText('No phone')).toBeTruthy()
   })
+
+  it('GTM-18: a call-sheet business shows its category, read-only status and rating', () => {
+    render(
+      <LeadCard
+        lead={lead({ kind: 'sheet', name: 'Sunset PM', company: 'Sunset PM', title: null, category: 'Property management company', phone_type: 'company', step: '1 · Imported', rating: 4.6, campaign: 'Maps LA', reply_status: null })}
+        now={NOW}
+      />
+    )
+    expect(screen.getByText('Property management company')).toBeTruthy()
+    expect(screen.getByText('1 · Imported').textContent).toBe('Status: 1 · Imported')
+    expect(screen.getByLabelText('Rated 4.6 out of 5')).toBeTruthy()
+    expect(screen.queryByRole('button')).toBeNull()
+  })
 })
+

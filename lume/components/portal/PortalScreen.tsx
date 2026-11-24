@@ -11,7 +11,7 @@ import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useNow, usePortalLeads, usePortalLeadsInfinite } from '@/hooks/usePortal'
 import { cn } from '@/lib/utils'
 import type { PortalSort, PortalTab } from '@/lib/portal/types'
-import { filtersFromParams, portalHref, switchTab, type PortalFilters } from './query'
+import { defaultFilters, filtersFromParams, portalHref, switchTab, type PortalFilters } from './query'
 import { LeadCard } from './LeadCard'
 import { LeadsTable } from './LeadsTable'
 import { AgentPanel } from './AgentPanel'
@@ -19,6 +19,7 @@ import { AgentPanel } from './AgentPanel'
 const TABS: { tab: PortalTab; label: string }[] = [
   { tab: 'email', label: 'Email campaigns' },
   { tab: 'linkedin', label: 'LinkedIn' },
+  { tab: 'sheet', label: 'Call sheets' },
 ]
 
 const SORT_LABEL: Record<PortalSort, string> = {
@@ -77,13 +78,19 @@ export function PortalScreen() {
   }, [q, filters, go])
 
   const active = usePortalLeadsInfinite(filters, as)
-  // The other tab's count, as it would read if switched to now.
-  const otherTab: PortalTab = filters.tab === 'email' ? 'linkedin' : 'email'
-  const other = usePortalLeads(switchTab(filters, otherTab), as)
-  const totals: Record<PortalTab, number | undefined> = {
+  // The other tabs' counts, as they would read if switched to now (always two: a fixed number of hooks).
+  const [otherA, otherB] = TABS.map((t) => t.tab).filter((t) => t !== filters.tab)
+  const a = usePortalLeads(switchTab(filters, otherA), as)
+  const b = usePortalLeads(switchTab(filters, otherB), as)
+  const totals = {
     [filters.tab]: active.data?.total,
-    [otherTab]: other.data?.total,
+    [otherA]: a.data?.total,
+    [otherB]: b.data?.total,
   } as Record<PortalTab, number | undefined>
+  // Call sheets only show once a sheet is shared with this client (or it is the open tab). Counted with no
+  // search, region or phone filter, so a search on another tab never hides the tab.
+  const anySheet = usePortalLeads({ ...defaultFilters('sheet'), hasPhone: false }, as)
+  const tabs = TABS.filter((t) => t.tab !== 'sheet' || filters.tab === 'sheet' || (anySheet.data?.total ?? 0) > 0)
 
   const data = active.data
   const regions = useMemo(() => {
@@ -175,7 +182,7 @@ export function PortalScreen() {
         {!expanded && (
           <div className="flex items-center justify-between gap-3">
             <div role="tablist" aria-label="Lead source" className="glass flex min-w-0 gap-1 rounded-2xl p-1">
-              {TABS.map(({ tab, label }) => {
+              {tabs.map(({ tab, label }) => {
                 const selected = filters.tab === tab
                 const n = totals[tab]
                 return (

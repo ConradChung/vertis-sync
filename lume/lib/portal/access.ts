@@ -12,6 +12,8 @@ export interface PortalUser {
   client: string
   campaign_ids: string[]
   linkedin_set_ids: string[]
+  /** Lead lists shared as call sheets (GTM-18: the Google Maps list first). */
+  sheet_set_ids: string[]
 }
 
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -31,15 +33,14 @@ export async function getPortalUser(email: string | null | undefined): Promise<P
     return null
   }
   try {
-    const qs = new URLSearchParams({
-      select: 'email,client,campaign_ids,linkedin_set_ids,disabled_at',
-      email: `eq.${e}`,
-      limit: '1',
-    })
-    const res = await fetch(`${url.replace(/\/+$/, '')}/rest/v1/lume_portal_users?${qs}`, {
-      headers: { apikey: key, authorization: `Bearer ${key}`, accept: 'application/json' },
-      cache: 'no-store',
-    })
+    const lookup = (select: string) =>
+      fetch(`${url.replace(/\/+$/, '')}/rest/v1/lume_portal_users?${new URLSearchParams({ select, email: `eq.${e}`, limit: '1' })}`, {
+        headers: { apikey: key, authorization: `Bearer ${key}`, accept: 'application/json' },
+        cache: 'no-store',
+      })
+    let res = await lookup('email,client,campaign_ids,linkedin_set_ids,sheet_set_ids,disabled_at')
+    // Before the GTM-18 migration adds sheet_set_ids, PostgREST answers 400 for the unknown column: read without it (no call sheets) rather than lock the client out.
+    if (res.status === 400) res = await lookup('email,client,campaign_ids,linkedin_set_ids,disabled_at')
     if (!res.ok) {
       console.error('[portal/access] lookup failed:', res.status)
       return null
@@ -49,6 +50,7 @@ export async function getPortalUser(email: string | null | undefined): Promise<P
       client: string
       campaign_ids: string[] | null
       linkedin_set_ids: string[] | null
+      sheet_set_ids?: string[] | null
       disabled_at: string | null
     }>
     const row = rows[0]
@@ -58,6 +60,7 @@ export async function getPortalUser(email: string | null | undefined): Promise<P
       client: row.client,
       campaign_ids: (row.campaign_ids ?? []).filter((x) => typeof x === 'string' && x.length > 0),
       linkedin_set_ids: (row.linkedin_set_ids ?? []).filter((x) => typeof x === 'string' && x.length > 0),
+      sheet_set_ids: (row.sheet_set_ids ?? []).filter((x) => typeof x === 'string' && x.length > 0),
     }
   } catch (err) {
     console.error('[portal/access] lookup failed:', err instanceof Error ? err.message : err)
