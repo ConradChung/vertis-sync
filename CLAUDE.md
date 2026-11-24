@@ -33,6 +33,13 @@ driven from Telegram, with two Next.js front ends.
   either cycle cap posts one warning. Nothing is sent to leads (cards hand over
   text to copy). The reactions lane still files its Monday one-tap card. No
   other pipeline may cite this exception.
+- **Exception: scheduled signal lanes.** The Hiring Ops Signal (GTM-19,
+  `lume/lib/hiring/`) starts capped Apify runs, company checks and Haiku
+  drafts on a schedule without a per-run tap, as the owner approved
+  (2026-11-23). It is bounded by `lume_settings.hiring_signal_config`
+  (lanes on/off, per-run caps, $40/month total) and only writes rows to the
+  Hiring Ops Signal sheet; emails are sent by hand. The schedule
+  (`*_lume_hiring_signal_cron.sql`) is applied only after the owner says so.
 - **Lume decides through `telegram-inbox`**, via its `X-Lume-Secret`
   entrypoint (`LUME_ACTION_SECRET`), so Telegram and Lume race for the same
   conditional-PATCH claim. Lume never writes pipeline state directly and
