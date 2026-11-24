@@ -148,7 +148,7 @@ function Launcher({ pathname, warm, pending }: { pathname: string; warm: (href: 
                     active && 'bg-primary text-primary-foreground hover:bg-primary light:ring-1 light:ring-(--lime-edge)'
                   )}
                 >
-                  <span aria-hidden className={cn('grid size-6 place-items-center rounded-lg border border-line font-mono text-[12px] text-fg-70', active && 'border-black/20 text-primary-foreground')}>{t.step}</span>
+                  <span aria-hidden className={cn('grid h-6 min-w-6 place-items-center rounded-lg border border-line px-1 font-mono text-[12px] text-fg-70', active && 'border-black/20 text-primary-foreground')}>{t.step}</span>
                   <Icon className="size-4" strokeWidth={1.75} aria-hidden />
                   <span className="flex-1">{t.label}</span>
                   <Kbd aria-hidden className={cn(active && 'bg-black/10 text-primary-foreground')}>⌥{t.key}</Kbd>

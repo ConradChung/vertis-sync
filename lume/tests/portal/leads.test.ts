@@ -5,6 +5,7 @@ import {
   ilikeOrValue,
   mapEmailRow,
   mapLinkedinRow,
+  mapSheetRow,
   parsePortalLeadsQuery,
   portalLeadsResponse,
   portalRegions,
@@ -34,7 +35,7 @@ export function fakeDb(results: Array<{ data: unknown; count?: number | null; er
   return { db: db as unknown as SupabaseClient, calls }
 }
 
-const user: PortalUser = { email: 'frank@getzenport.com', client: 'Kaspen', campaign_ids: ['camp-1', 'camp-2'], linkedin_set_ids: ['set-1'] }
+const user: PortalUser = { email: 'frank@getzenport.com', client: 'Kaspen', campaign_ids: ['camp-1', 'camp-2'], linkedin_set_ids: ['set-1'], sheet_set_ids: ['sheet-1'] }
 
 describe('parsePortalLeadsQuery', () => {
   const p = (qs: string) => parsePortalLeadsQuery(new URLSearchParams(qs))
@@ -110,6 +111,7 @@ describe('row → PortalLead', () => {
       id: '42', kind: 'email', name: 'Jane Doe', first_name: 'Jane', title: 'CEO', company: 'Acme', phone: '+1 555', phone_type: 'mobile',
       email: 'jane@acme.com', website: 'acme.com', linkedin_url: 'https://li/jane', city: 'Austin', state: 'TX', country: 'US',
       region: 'Texas', timezone: 'America/Chicago', campaign: 'Kaspen TX', reply_status: 'Interested', opened: true, replied: false,
+      step: '5 · In campaign',
     })
     expect(lead).not.toHaveProperty('pushed_at')
     expect(lead).not.toHaveProperty('campaign_id')
@@ -122,6 +124,42 @@ describe('row → PortalLead', () => {
     const lead = mapLinkedinRow({ id: 'uuid-1', set_id: 'set-1', list_title: 'LI wave 1', first_name: 'Bo', last_name: 'Li', full_name: 'Bo Li', company_name: 'Z', phone: '1' })
     expect(lead).toMatchObject({ id: 'uuid-1', kind: 'linkedin', name: 'Bo Li', campaign: 'LI wave 1', region: null, timezone: null, reply_status: null, opened: false, replied: false, phone_type: null })
     expect(Object.keys(lead).sort()).toEqual(Object.keys(mapEmailRow({ id: 1 })).sort())
+  })
+})
+
+describe('call-sheet rows (GTM-18)', () => {
+  it('maps a Google Maps business: company as the name, company phone, rating, category, status', () => {
+    const lead = mapSheetRow({
+      id: 'uuid-9', set_id: 'sheet-1', list_title: 'Maps LA property managers', company_name: 'Sunset Property Mgmt', person_name: null, title: null,
+      category: 'Property management company', phone: '+1 310-555-0100', website: 'https://sunsetpm.com', company_domain: 'sunsetpm.com',
+      city: 'Los Angeles', state: 'CA', country: 'US', rating: 4.66, reviews_count: 120, step_label: '1 · Imported',
+    })
+    expect(lead).toMatchObject({
+      id: 'uuid-9', kind: 'sheet', name: 'Sunset Property Mgmt', company: 'Sunset Property Mgmt', title: null, phone: '+1 310-555-0100', phone_type: 'company',
+      website: 'https://sunsetpm.com', city: 'Los Angeles', campaign: 'Maps LA property managers', rating: 4.7, category: 'Property management company', step: '1 · Imported',
+    })
+  })
+  it('a named contact goes under the business; no phone means no phone type; a bad rating is dropped', () => {
+    const lead = mapSheetRow({ id: 1, company_name: 'Acme PM', person_name: 'Ana Ruiz', rating: 'n/a', company_domain: 'acme.com' })
+    expect(lead).toMatchObject({ name: 'Acme PM', title: 'Ana Ruiz', phone: null, phone_type: null, rating: null, website: 'acme.com' })
+  })
+  it('sheet tab: reads the call-sheet view scoped to the user sheet ids, sorted by business', async () => {
+    const { db, calls } = fakeDb([{ data: [{ id: 'r1', company_name: 'B' }], count: 1 }])
+    const res = await searchPortalLeads(db, user, { tab: 'sheet', sort: 'name', has_phone: true })
+    expect(res.rows[0]).toMatchObject({ id: 'r1', kind: 'sheet', name: 'B' })
+    expect(calls[0].table).toBe('lume_portal_sheet_leads')
+    expect(calls[0].ops).toContainEqual(['in', ['set_id', ['sheet-1']]])
+    expect(calls[0].ops).toContainEqual(['not', ['phone', 'is', null]])
+    expect(calls[0].ops.filter(([o]) => o === 'order').map(([, a]) => a[0])[0]).toBe('company_name')
+  })
+  it('no shared sheets → empty without a query', async () => {
+    const { db, calls } = fakeDb([])
+    expect((await searchPortalLeads(db, { ...user, sheet_set_ids: [] }, { tab: 'sheet' })).rows).toEqual([])
+    expect(calls).toHaveLength(0)
+  })
+  it('the search covers the business name and category', () => {
+    expect(searchOrFilter('sheet', 'sunset')).toContain('company_name.ilike')
+    expect(searchOrFilter('sheet', 'sunset')).toContain('category.ilike')
   })
 })
 

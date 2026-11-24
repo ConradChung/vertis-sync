@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils'
 import type { PortalLead } from '@/lib/portal/types'
-import { EngagementMarks, LeadLinks, LocalTimeLabel, PhoneLink, ReplyBadge } from './LeadBits'
+import { EngagementMarks, LeadLinks, LocalTimeLabel, PhoneLink, RatingMark, ReplyBadge, StepBadge } from './LeadBits'
 import { locationLine } from './format'
 
 const th =
@@ -13,6 +13,8 @@ const td = 'px-2 py-2 align-middle'
  * scroller; `stickyTop` is the offset it sticks at.
  */
 export function LeadsTable({ rows, now, stickyTop = 'top-0' }: { rows: PortalLead[]; now: Date; stickyTop?: string }) {
+  // Call sheets list businesses: the second column is their rating (or category) instead of a company.
+  const sheet = rows.length > 0 && rows.every((l) => l.kind === 'sheet')
   return (
     <table className="w-full table-fixed border-separate border-spacing-0 text-[13px]">
       <colgroup>
@@ -21,13 +23,13 @@ export function LeadsTable({ rows, now, stickyTop = 'top-0' }: { rows: PortalLea
         <col className="w-[200px]" />
         <col className="w-[104px]" />
         <col className="w-[20%]" />
-        <col className="w-[12%]" />
+        <col className="w-[14%]" />
         <col className="w-[116px]" />
       </colgroup>
       <thead className={cn('sticky z-10 bg-(--bg) shadow-[0_1px_0_var(--line)]', stickyTop)}>
         <tr>
           <th className={cn(th, 'pl-4')}>Name</th>
-          <th className={th}>Company</th>
+          <th className={th}>{sheet ? 'Rating' : 'Company'}</th>
           <th className={cn(th, 'pl-4')}>Phone</th>
           <th className={th}>Local time</th>
           <th className={th}>Location · campaign</th>
@@ -44,14 +46,14 @@ export function LeadsTable({ rows, now, stickyTop = 'top-0' }: { rows: PortalLea
                 <div className="truncate font-medium text-fg" title={l.name}>
                   {l.name}
                 </div>
-                {l.title && (
-                  <div className="truncate text-[12px] text-fg-46" title={l.title}>
-                    {l.title}
+                {(l.kind === 'sheet' ? l.title ?? l.category : l.title) && (
+                  <div className="truncate text-[12px] text-fg-46" title={(l.kind === 'sheet' ? l.title ?? l.category : l.title) ?? undefined}>
+                    {l.kind === 'sheet' ? l.title ?? l.category : l.title}
                   </div>
                 )}
               </td>
-              <td className={cn(td, 'truncate text-fg-70')} title={l.company ?? undefined}>
-                {l.company ?? '—'}
+              <td className={cn(td, 'truncate text-fg-70')} title={(l.kind === 'sheet' ? l.category : l.company) ?? undefined}>
+                {l.kind === 'sheet' ? (l.rating != null ? <RatingMark rating={l.rating} /> : (l.category ?? '—')) : (l.company ?? '—')}
               </td>
               <td className={td}>
                 <PhoneLink lead={l} size="sm" />
@@ -70,10 +72,11 @@ export function LeadsTable({ rows, now, stickyTop = 'top-0' }: { rows: PortalLea
                 )}
               </td>
               <td className={td}>
-                <div className="flex flex-col items-start gap-1">
+                <div className="flex min-w-0 flex-col items-start gap-1">
                   <ReplyBadge status={l.reply_status} />
+                  <StepBadge step={l.step} />
                   <EngagementMarks lead={l} />
-                  {!l.reply_status && !l.opened && !l.replied && <span className="text-fg-24">—</span>}
+                  {!l.reply_status && !l.opened && !l.replied && !l.step && <span className="text-fg-24">—</span>}
                 </div>
               </td>
               <td className={cn(td, 'pr-4')}>

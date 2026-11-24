@@ -25,7 +25,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   if (url === '/api/lead-lists') return Response.json({ folders })
   if (url.startsWith('/api/influencers/candidates/')) return Response.json({ batch: { id: 'b', name: 'PM Influencers', status: 'done', spent_usd: 0, max_lookup_usd: null }, candidates: [], counts: {}, estimate: { people: 0, usd: 0, default_cap_usd: 0 } })
   if (url.startsWith(`/api/lead-lists/${L1}/items?`)) {
-    return Response.json({ rows: [{ idx: 0, item: { name: 'Acme', email: 'jane@acme.co' }, cells: { title: 'Acme', 'author.name': 'Jane', email: 'jane@acme.co' }, source: 'actor_run' }, { idx: 1, item: { name: 'Beta', email: null }, cells: { title: 'Beta' }, source: 'actor_run' }], total: 2, page: 0, page_size: 50 })
+    return Response.json({ rows: [{ idx: 0, item: { name: 'Acme', email: 'jane@acme.co' }, cells: { title: 'Acme', 'author.name': 'Jane', email: 'jane@acme.co' }, source: 'actor_run' }, { idx: 1, item: { name: 'Beta', email: null }, cells: { title: 'Beta' }, source: 'actor_run', pipeline_step: 3, step_note: 'excluded: vendor', status: 'excluded' }], total: 2, page: 0, page_size: 50 })
   }
   if (url.startsWith(`/api/lead-lists/${L3}/items?`)) {
     const page = Number(new URLSearchParams(url.split('?')[1]).get('page'))
@@ -33,6 +33,14 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   }
   if (url.startsWith(`/api/lead-lists/${L2}/items?`)) return Response.json({ rows: [], total: 0, page: 0, page_size: 50 })
   if (url === `/api/lead-lists/${L1}/items/1` && method === 'PATCH') return Response.json({ row: { idx: 1, item: { name: 'Beta', email: 'b@beta.co' } } })
+  if (url === '/api/lead-lists/combine') {
+    const b = JSON.parse(String(init?.body))
+    return b.preview ? Response.json({ stats: { input_rows: 120, output_rows: 100, merged: 20, no_key: 3, rows_with_conflicts: 7 }, columns: [], sample: [] }) : Response.json({ list: { id: 'new-master' } }, { status: 201 })
+  }
+  if (url === `/api/lead-lists/${L1}/final`) {
+    const b = JSON.parse(String(init?.body))
+    return b.preview ? Response.json({ kept: 90, excluded: 30, reasons: [{ reason: 'no phone', count: 30 }] }) : Response.json({ list: { id: 'new-final' } }, { status: 201 })
+  }
   if (url === `/api/lead-lists/${L1}/send`) return Response.json({ ingest_id: 'i1', rows: 80 }, { status: 201 })
   return Response.json({})
 })
@@ -149,5 +157,48 @@ describe('LeadsScreen', () => {
     expect(within(tree).queryByRole('button', { name: 'New list in Influencers' })).toBeNull()
     await waitFor(() => expect(calls.some((c) => c.url === '/api/influencers/candidates/c3a7b8cc-b009-450f-9bf6-3d129e2a06fc')).toBe(true))
     expect(screen.queryByRole('button', { name: 'Send to validator' })).toBeNull()
+  })
+
+  it('GTM-18: every row shows its status (# · name, with a dropout reason) and the header shows the sheet stage', async () => {
+    nav.params = new URLSearchParams(`list=${L1}`)
+    fresh()
+    const table = await screen.findByRole('table', { name: 'Roofers TX rows' })
+    expect(await within(table).findByText('1 · Imported')).toBeTruthy()
+    expect(within(table).getByText('3 · Filtered — excluded: vendor')).toBeTruthy()
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toContain('Status')
+    expect(screen.getByText('1 · Imported sheet')).toBeTruthy()
+  })
+
+  it('GTM-18: Combine previews the overlay, then saves a master and opens it', async () => {
+    nav.params = new URLSearchParams(`list=${L1}`)
+    fresh()
+    fireEvent.click(await screen.findByRole('button', { name: /Combine/ }))
+    const dialog = await screen.findByRole('dialog')
+    const save = within(dialog).getByRole('button', { name: 'Save master' }) as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /Loose/ }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Preview' }))
+    expect(await within(dialog).findByText(/120 rows in, 100 out: 20 merged as duplicates/)).toBeTruthy()
+    expect(calls.filter((c) => c.url === '/api/lead-lists/combine')[0].body).toEqual({ list_ids: [L1, L2], key: 'auto', rule: 'fill_blanks', preview: true })
+    fireEvent.click(save)
+    await waitFor(() => expect(nav.replace).toHaveBeenCalledWith('/import/leads?list=new-master', { scroll: false }))
+    expect(calls.filter((c) => c.url === '/api/lead-lists/combine')[1].body).toEqual({ list_ids: [L1, L2], key: 'auto', rule: 'fill_blanks', name: 'Roofers TX (master)', project_id: P })
+  })
+
+  it('GTM-18: Filter → Final needs a rule, previews kept / excluded and why, then saves the final sheet', async () => {
+    nav.params = new URLSearchParams(`list=${L1}`)
+    fresh()
+    fireEvent.click(await screen.findByRole('button', { name: /Filter → Final/ }))
+    const dialog = await screen.findByRole('dialog')
+    const preview = within(dialog).getByRole('button', { name: 'Preview' }) as HTMLButtonElement
+    expect(preview.disabled).toBe(true)
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Phone' }))
+    fireEvent.click(preview)
+    expect(await within(dialog).findByText('90 kept, 30 excluded.')).toBeTruthy()
+    expect(within(dialog).getByText('no phone: 30')).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save final sheet' }))
+    await waitFor(() => expect(nav.replace).toHaveBeenCalledWith('/import/leads?list=new-final', { scroll: false }))
+    const save = calls.filter((c) => c.url === `/api/lead-lists/${L1}/final`)[1].body
+    expect(save).toEqual({ name: 'Roofers TX (final)', filter: { rules: [{ criteria: { missing: ['phone'] }, action: 'exclude', reason: 'no phone' }] } })
   })
 })

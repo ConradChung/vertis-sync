@@ -1,7 +1,10 @@
 // Shared contract for the read-only client portal (/portal).
 // Server: app/api/portal/** (scoped by lume_portal_users). Client: components/portal/**.
 
-export type PortalTab = 'email' | 'linkedin'
+/** email: campaign leads; linkedin: LinkedIn lists; sheet: call sheets (Google Maps and other company lists, GTM-18). */
+export type PortalTab = 'email' | 'linkedin' | 'sheet'
+
+export const PORTAL_TABS: readonly PortalTab[] = ['email', 'linkedin', 'sheet']
 
 export type PortalReplyStatus = 'Interested' | 'Meeting booked' | 'Meeting completed' | 'Won'
 
@@ -26,6 +29,11 @@ export interface PortalLead {
   reply_status: PortalReplyStatus | null
   opened: boolean
   replied: boolean
+  /** GTM-18: where the lead is, as "# · name" ("2 · Combined"); null when unknown. */
+  step?: string | null
+  /** Call sheets: the business's star rating and category (Google Maps). */
+  rating?: number | null
+  category?: string | null
 }
 
 export interface PortalMe {

@@ -3,10 +3,11 @@ import { z } from 'zod'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { PortalUser } from '@/lib/portal/access'
 import type { PortalLead, PortalLeadsResponse, PortalReplyStatus, PortalSort, PortalTab } from '@/lib/portal/types'
+import { stepLabel } from '@/lib/leads/steps'
 
 /**
  * Scoped, read-only lead search for the client portal. Every query is bound
- * to the portal user's own `campaign_ids` / `linkedin_set_ids` (from
+ * to the portal user's own `campaign_ids` / `linkedin_set_ids` / `sheet_set_ids` (from
  * `lume_portal_users`, never from the request) and selects only the columns
  * a `PortalLead` needs. Used by GET /api/portal/leads and the portal agent's
  * `search_leads` tool.
@@ -16,18 +17,21 @@ export const PORTAL_PAGE_SIZE = 50
 
 const EMAIL_VIEW = 'lume_portal_leads'
 const LINKEDIN_VIEW = 'lume_portal_linkedin_leads'
+const SHEET_VIEW = 'lume_portal_sheet_leads'
 
 const EMAIL_COLUMNS =
   'id,campaign_name,region,timezone,first_name,last_name,email,company_name,website,company_domain,title,phone,phone_type,linkedin_url,city,state,country,email_open_count,email_reply_count,reply_status'
 const LINKEDIN_COLUMNS =
-  'id,list_title,first_name,last_name,full_name,title,company_name,website,company_domain,linkedin_url,email,phone,city,state,country'
+  'id,list_title,first_name,last_name,full_name,title,company_name,website,company_domain,linkedin_url,email,phone,city,state,country,step_label'
+const SHEET_COLUMNS =
+  'id,list_title,company_name,person_name,title,category,phone,website,company_domain,email,linkedin_url,city,state,country,rating,step_label'
 
 const boolParam = z
   .enum(['true', 'false', '1', '0'])
   .transform((v) => v === 'true' || v === '1')
 
 export const PortalLeadsQuerySchema = z.object({
-  tab: z.enum(['email', 'linkedin']).default('email'),
+  tab: z.enum(['email', 'linkedin', 'sheet']).default('email'),
   q: z.string().trim().max(200).optional().transform((v) => (v ? v : undefined)),
   region: z.string().trim().max(100).optional().transform((v) => (v ? v : undefined)),
   has_phone: boolParam.optional(),
@@ -70,6 +74,7 @@ export function ilikeOrValue(term: string): string {
 
 const EMAIL_SEARCH_COLUMNS = ['first_name', 'last_name', 'company_name', 'email', 'title', 'phone', 'city']
 const LINKEDIN_SEARCH_COLUMNS = ['full_name', 'first_name', 'last_name', 'company_name', 'email', 'title', 'phone', 'city']
+const SHEET_SEARCH_COLUMNS = ['company_name', 'person_name', 'category', 'email', 'phone', 'city']
 
 /**
  * The PostgREST `or` filter for a free-text query, or null when there is
@@ -80,7 +85,7 @@ export function searchOrFilter(tab: PortalTab, q: string | undefined): string | 
   const term = q?.replace(/\s+/g, ' ').trim().slice(0, 100)
   if (!term) return null
   const v = ilikeOrValue(term)
-  const cols = tab === 'email' ? EMAIL_SEARCH_COLUMNS : LINKEDIN_SEARCH_COLUMNS
+  const cols = tab === 'email' ? EMAIL_SEARCH_COLUMNS : tab === 'sheet' ? SHEET_SEARCH_COLUMNS : LINKEDIN_SEARCH_COLUMNS
   const parts = cols.map((c) => `${c}.ilike.${v}`)
   if (tab === 'email') {
     const words = term.split(' ')
@@ -125,6 +130,8 @@ export function mapEmailRow(r: Row): PortalLead {
     reply_status: reply,
     opened: num(r.email_open_count) > 0,
     replied: num(r.email_reply_count) > 0,
+    // Every lead on this tab was pushed to its campaign (the view keeps pushed leads only).
+    step: stepLabel(5),
   }
 }
 
@@ -153,7 +160,50 @@ export function mapLinkedinRow(r: Row): PortalLead {
     reply_status: null,
     opened: false,
     replied: false,
+    step: str(r.step_label),
   }
+}
+
+const rating = (v: unknown): number | null => {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : NaN
+  return Number.isFinite(n) && n >= 0 && n <= 5 ? Math.round(n * 10) / 10 : null
+}
+
+/** `lume_portal_sheet_leads` row → PortalLead: one business per row (its name in `name`, a contact person, if any, as the title). */
+export function mapSheetRow(r: Row): PortalLead {
+  const company = str(r.company_name)
+  const person = str(r.person_name)
+  return {
+    id: String(r.id),
+    kind: 'sheet',
+    name: company ?? person ?? str(r.email) ?? '',
+    first_name: null,
+    title: company && person ? person : str(r.title),
+    company,
+    phone: str(r.phone),
+    phone_type: str(r.phone) ? 'company' : null,
+    email: str(r.email),
+    website: str(r.website) ?? str(r.company_domain),
+    linkedin_url: str(r.linkedin_url),
+    city: str(r.city),
+    state: str(r.state),
+    country: str(r.country),
+    region: null,
+    timezone: null,
+    campaign: str(r.list_title),
+    reply_status: null,
+    opened: false,
+    replied: false,
+    step: str(r.step_label),
+    rating: rating(r.rating),
+    category: str(r.category),
+  }
+}
+
+const VIEWS: Record<PortalTab, { view: string; columns: string; scope: string; map: (r: Row) => PortalLead }> = {
+  email: { view: EMAIL_VIEW, columns: EMAIL_COLUMNS, scope: 'campaign_id', map: mapEmailRow },
+  linkedin: { view: LINKEDIN_VIEW, columns: LINKEDIN_COLUMNS, scope: 'set_id', map: mapLinkedinRow },
+  sheet: { view: SHEET_VIEW, columns: SHEET_COLUMNS, scope: 'set_id', map: mapSheetRow },
 }
 
 export interface PortalSearchOptions {
@@ -171,7 +221,7 @@ export class PortalQueryError extends Error {}
 
 /** The ids this user may read on a tab. Always from the portal user row. */
 export function scopeIds(user: PortalUser, tab: PortalTab): string[] {
-  return tab === 'email' ? user.campaign_ids : user.linkedin_set_ids
+  return tab === 'email' ? user.campaign_ids : tab === 'sheet' ? (user.sheet_set_ids ?? []) : user.linkedin_set_ids
 }
 
 /**
@@ -193,12 +243,8 @@ export async function searchPortalLeads(
   const email = opts.tab === 'email'
   if (!email && (opts.status === 'replied_positive' || opts.region)) return empty
 
-  const view: string = email ? EMAIL_VIEW : LINKEDIN_VIEW
-  const columns: string = email ? EMAIL_COLUMNS : LINKEDIN_COLUMNS
-  let query = db
-    .from(view)
-    .select(columns, { count: 'exact' })
-    .in(email ? 'campaign_id' : 'set_id', ids)
+  const v = VIEWS[opts.tab]
+  let query = db.from(v.view).select(v.columns, { count: 'exact' }).in(v.scope, ids)
 
   const or = searchOrFilter(opts.tab, opts.q)
   if (or) query = query.or(or)
@@ -211,7 +257,9 @@ export async function searchPortalLeads(
     sort === 'name'
       ? email
         ? ['first_name', 'last_name']
-        : ['full_name']
+        : opts.tab === 'sheet'
+          ? ['company_name']
+          : ['full_name']
       : sort === 'region' && email
         ? ['region', 'company_name']
         : ['company_name']
@@ -221,7 +269,7 @@ export async function searchPortalLeads(
   const from = (page - 1) * pageSize
   const { data, count, error } = await query.range(from, from + pageSize - 1)
   if (error) throw new PortalQueryError(error.message)
-  const rows = ((data ?? []) as unknown as Row[]).map(email ? mapEmailRow : mapLinkedinRow)
+  const rows = ((data ?? []) as unknown as Row[]).map(v.map)
   return { rows, total: count ?? rows.length, page, pageSize }
 }
 
