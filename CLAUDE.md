@@ -82,9 +82,9 @@ A Stop hook (`.claude/hooks/require-checks.sh`, registered in
    with next instructions to `review/verdict.txt`. It never edits code.
 3. On FAIL, do what its instructions say, delete the verdict, and run it again.
    The hook blocks the stop until the checks pass and the verdict is PASS for
-   the exact change the reviewer saw (any edit after the review voids it);
-   after 3 failed rounds it lets you stop, and you must tell Conrad plainly
-   what isn't verified.
+   the exact change the reviewer saw (any edit after the review voids it).
+   It lets you stop after 3 failed rounds on the same change or 8 in a row
+   overall, and then you must tell Conrad plainly what isn't verified.
 4. To ask Conrad something mid-task, don't just stop: the hook will block you.
    Run verify-app; if it agrees only Conrad can decide, it writes ASK and the
    hook lets you stop to ask.

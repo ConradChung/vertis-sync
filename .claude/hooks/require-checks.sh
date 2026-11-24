@@ -8,8 +8,9 @@
 #                                                 also records which change was reviewed)
 #
 # Exit codes as a Stop hook: 0 = let Claude stop, 2 = block the stop and hand
-# stderr back to Claude as the reason. After MAX_ATTEMPTS blocked rounds on the
-# same change it gives up (exit 0 + a message to the user) so it can't loop forever.
+# stderr back to Claude as the reason. It gives up (exit 0 + a message to the
+# user) after MAX_ATTEMPTS (3) blocked rounds on the same change, or MAX_TOTAL
+# (8) blocked rounds in a row across changes, so it can't loop forever.
 #
 # Scope: only what changed since the merge base with main (committed + working
 # tree + untracked). A session that changed nothing stops freely, and a change
@@ -31,7 +32,9 @@ ATTEMPTS_FILE="$REVIEW/.stop-attempts"
 PASSED_FILE="$REVIEW/.last-pass"
 GAVE_UP_FILE="$REVIEW/.gave-up"
 LOG="$REVIEW/checks.log"
-MAX_ATTEMPTS="${VERIFY_MAX_ATTEMPTS:-3}"
+MAX_ATTEMPTS="${VERIFY_MAX_ATTEMPTS:-3}"     # blocked rounds on the same change
+MAX_TOTAL="${VERIFY_MAX_TOTAL:-8}"           # blocked rounds in a row, across changes
+TOTAL_FILE="$REVIEW/.stop-total"
 MODE="hook"
 [ "${1:-}" = "--checks-only" ] && MODE="checks"
 
@@ -66,7 +69,7 @@ CHANGED="$( { gdiff --name-only "$BASE" 2>/dev/null; git -c core.quotePath=false
 
 if [ -z "$CHANGED" ]; then
   [ "$MODE" = "checks" ] && { echo "Nothing changed since $BASE; no checks to run."; printf '%s\n' "${NOTES[@]+"${NOTES[@]}"}"; }
-  rm -f "$ATTEMPTS_FILE"
+  rm -f "$ATTEMPTS_FILE" "$TOTAL_FILE"
   exit 0
 fi
 
@@ -90,12 +93,12 @@ matches_fp() { [ -n "$FP" ] && [ -s "$1" ] && [ "$(cat "$1")" = "$FP" ]; }
 
 if [ "$MODE" = "hook" ]; then
   # Already verified this exact change: stop freely.
-  matches_fp "$PASSED_FILE" && { rm -f "$ATTEMPTS_FILE"; exit 0; }
+  matches_fp "$PASSED_FILE" && { rm -f "$ATTEMPTS_FILE" "$TOTAL_FILE"; exit 0; }
   # The reviewer says only Conrad can unblock this change (verdict ASK): let the
   # builder stop and ask, without re-running the suites.
   if [ -f "$VERDICT" ] && head -n1 "$VERDICT" | grep -q '^ASK' \
      && matches_fp "$REVIEWED_FP_FILE" && [ ! "$VERDICT" -ot "$REVIEWED_FP_FILE" ]; then
-    rm -f "$ATTEMPTS_FILE"
+    rm -f "$ATTEMPTS_FILE" "$TOTAL_FILE"
     json_message "Not verified yet: the reviewer needs Conrad's decision. $(sed -n '2,8p' "$VERDICT" | tr '\n' ' ')"
     exit 0
   fi
@@ -206,9 +209,17 @@ fi
 
 # Edge functions (Deno). The whole suite takes ~10 s. A failure that also fails
 # on main (the merge base) is reported, not counted against this change.
-deno_failures() { # deno_failures <functions dir>: the names of failing tests, one per line
+deno_failures() { # deno_failures <functions dir>: "test name | error line" for each failing test
+  # Name plus its error text, so a test that already fails on main but now fails
+  # for an extra reason (e.g. a second offender in invoke_test.ts) counts as new.
   (cd "$1" && NO_COLOR=1 deno test --allow-env --allow-read 2>&1) \
-    | awk '/^ *FAILURES *$/ {on=1; next} on && / => / {sub(/ => .*/, ""); print}' | sort -u
+    | awk '/^ *ERRORS *$/ {on=1; next} /^ *FAILURES *$/ {on=0}
+           on && / => \.\// {name=$0; sub(/ => .*/, "", name); next}
+           on && name != "" {
+             line=$0; sub(/^[ \t]+/, "", line)
+             if (line == "" || line ~ /^at / || line ~ /file:\/\// || line ~ /^\^/) next
+             print name " | " line
+           }' | sort -u
 }
 EDGE="$(changed_under '^supabase/functions/')"
 if [ -n "$EDGE" ]; then
@@ -228,12 +239,12 @@ if [ -n "$EDGE" ]; then
       NEW_FAILING="$(comm -23 <(printf '%s\n' "$NOW_FAILING") <(printf '%s\n' "$BASE_FAILING") | sed '/^$/d')"
       if [ -z "$NOW_FAILING" ] || [ -n "$NEW_FAILING" ]; then
         echo "   FAIL" >>"$LOG"
-        FAILURES+=("Edge function tests (deno) failed. New failures (not failing on main):
+        FAILURES+=("Edge function tests (deno) failed. New failures (test | error, not failing this way on main):
 $(as_list "${NEW_FAILING:-(could not read test names; see review/checks.log)}")
 Run \`cd supabase/functions && deno test --allow-env --allow-read\`.")
       else
         echo "   PASS (only failures that main has too)" >>"$LOG"
-        NOTES+=("Edge tests that already fail on main (not caused by this change):
+        NOTES+=("Edge tests that already fail on main, in the same way (not caused by this change):
 $(as_list "$NOW_FAILING")")
       fi
     fi
@@ -293,7 +304,7 @@ fi
 # ---------------------------------------------------------------- decide
 if [ ${#FAILURES[@]} -eq 0 ]; then
   printf '%s\n' "$FP" >"$PASSED_FILE"
-  rm -f "$ATTEMPTS_FILE" "$GAVE_UP_FILE"
+  rm -f "$ATTEMPTS_FILE" "$TOTAL_FILE" "$GAVE_UP_FILE"
   exit 0
 fi
 
@@ -301,18 +312,20 @@ fi
 LAST_FP=""; LAST_N=0
 [ -f "$ATTEMPTS_FILE" ] && read -r LAST_FP LAST_N <"$ATTEMPTS_FILE"
 if [ "${LAST_FP:-}" = "$FP" ]; then ATTEMPTS=$(( ${LAST_N:-0} + 1 )); else ATTEMPTS=1; fi
-if [ "$ATTEMPTS" -gt "$MAX_ATTEMPTS" ]; then
-  rm -f "$ATTEMPTS_FILE"
+TOTAL=$(( $(cat "$TOTAL_FILE" 2>/dev/null || echo 0) + 1 ))
+if [ "$ATTEMPTS" -gt "$MAX_ATTEMPTS" ] || [ "$TOTAL" -gt "$MAX_TOTAL" ]; then
+  rm -f "$ATTEMPTS_FILE" "$TOTAL_FILE"
   [ -n "$FP" ] && printf '%s\n' "$FP" >"$GAVE_UP_FILE"
-  json_message "Verification still failing after $MAX_ATTEMPTS rounds; letting Claude stop. Not verified: see review/checks.log and review/verdict.txt."
+  json_message "Verification still failing after $((TOTAL - 1)) blocked rounds; letting Claude stop. Not verified: see review/checks.log and review/verdict.txt."
   exit 0
 fi
 printf '%s %s\n' "$FP" "$ATTEMPTS" >"$ATTEMPTS_FILE"
+printf '%s\n' "$TOTAL" >"$TOTAL_FILE"
 
 {
-  echo "Not done yet: verification failed (round $ATTEMPTS of $MAX_ATTEMPTS). Fix these, delete review/verdict.txt, run the verify-app subagent again, then stop."
+  echo "Not done yet: verification failed (round $ATTEMPTS of $MAX_ATTEMPTS on this change, $TOTAL of $MAX_TOTAL in total). Fix these, delete review/verdict.txt, run the verify-app subagent again, then stop."
   printf -- '- %s\n' "${FAILURES[@]}"
   if [ ${#NOTES[@]} -gt 0 ]; then printf -- '- %s\n' "${NOTES[@]}"; fi
-  [ "$ATTEMPTS" -eq "$MAX_ATTEMPTS" ] && echo "This is the last round: if it still fails, you'll be let go and must tell Conrad plainly what isn't verified."
+  { [ "$ATTEMPTS" -eq "$MAX_ATTEMPTS" ] || [ "$TOTAL" -eq "$MAX_TOTAL" ]; } && echo "This is the last round: if it still fails, you'll be let go and must tell Conrad plainly what isn't verified."
 } >&2
 exit 2
