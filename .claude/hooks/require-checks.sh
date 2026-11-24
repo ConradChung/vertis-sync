@@ -298,7 +298,8 @@ if [ ${#FAILURES[@]} -eq 0 ]; then
 fi
 
 # Rounds are counted per change: a different change starts again at round 1.
-read -r LAST_FP LAST_N <"$ATTEMPTS_FILE" 2>/dev/null || true
+LAST_FP=""; LAST_N=0
+[ -f "$ATTEMPTS_FILE" ] && read -r LAST_FP LAST_N <"$ATTEMPTS_FILE"
 if [ "${LAST_FP:-}" = "$FP" ]; then ATTEMPTS=$(( ${LAST_N:-0} + 1 )); else ATTEMPTS=1; fi
 if [ "$ATTEMPTS" -gt "$MAX_ATTEMPTS" ]; then
   rm -f "$ATTEMPTS_FILE"

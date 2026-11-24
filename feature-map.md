@@ -13,10 +13,13 @@ The full suites per area are run by `.claude/hooks/require-checks.sh
 --checks-only`; the "How to test" lines below are the targeted extras.
 
 Baseline on main when this file was written: Lume lint, typecheck, 3,745
-vitest tests and build all pass; root typecheck passes; root lint has ~50
-older errors (so only changed files are linted); the Deno suite has 1 known
-failure, `_shared/invoke_test.ts` flagging `instantly-push/index.ts:857`
-(fixed by PR #2 / GTM-26).
+vitest tests and build pass (the reviewer saw one unnamed vitest failure in 4
+runs, so the hook retries vitest once and names any flaky test it finds);
+root typecheck passes; root lint has ~50 older errors (so only changed files
+are linted); the Deno suite has 1 known failure, `_shared/invoke_test.ts`
+flagging `instantly-push/index.ts:857` (fixed by PR #2 / GTM-26). The hook
+reports edge failures that main also has as notes, not failures, so this one
+stops blocking by itself once #2 merges.
 
 ---
 
