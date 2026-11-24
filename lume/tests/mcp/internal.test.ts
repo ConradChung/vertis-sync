@@ -18,6 +18,7 @@ const m = vi.hoisted(() => ({
   createProject: vi.fn(),
   addNote: vi.fn(),
   findProject: vi.fn(),
+  buildMapsSheet: vi.fn(),
 }))
 vi.mock('@/lib/alertsStore', () => ({ ackAlerts: m.ackAlerts }))
 vi.mock('@/lib/crm/service', () => ({ getDeal: m.getDeal, getStages: m.getStages, setStage: m.setStage, addActivity: m.addActivity }))
@@ -26,6 +27,7 @@ vi.mock('@/lib/tasks/sync', () => ({ pushTask: m.pushTask }))
 vi.mock('next/server', async (orig) => ({ ...(await orig<object>()), after: m.after }))
 vi.mock('@/lib/influencers/store', () => ({ exportCandidates: m.exportCandidates }))
 vi.mock('@/lib/leads/lists/store', () => ({ createList: m.createList, appendItems: m.appendItems }))
+vi.mock('@/lib/maps/sheet', () => ({ buildMapsSheet: m.buildMapsSheet }))
 vi.mock('@/lib/agent/projects', () => {
   class ProjectConflictError extends Error {}
   return { createProject: m.createProject, addNote: m.addNote, ProjectConflictError }
@@ -37,6 +39,7 @@ vi.mock('@/lib/mcp/db', async (orig) => ({
 
 import { internalTools } from '@/lib/mcp/tools/internal'
 import { McpUserError } from '@/lib/mcp/sanitize'
+import { MapsError } from '@/lib/maps/errors'
 
 const tool = (n: string) => internalTools.find((t) => t.name === n)!
 const run = (n: string, args: Record<string, unknown>) => tool(n).run(tool(n).input.parse(args) as never)
@@ -50,7 +53,7 @@ beforeEach(() => {
 describe('group B tools', () => {
   it('every tool is a write, not read-only, never destructive, and takes idempotency_key', () => {
     expect(internalTools.map((t) => t.name).sort()).toEqual([
-      'lume_ack_alert', 'lume_add_deal_note', 'lume_create_review_set', 'lume_create_task', 'lume_draft_icp_brief', 'lume_draft_outbound_plan', 'lume_move_deal_stage',
+      'lume_ack_alert', 'lume_add_deal_note', 'lume_build_maps_sheet', 'lume_create_review_set', 'lume_create_task', 'lume_draft_icp_brief', 'lume_draft_outbound_plan', 'lume_move_deal_stage',
     ])
     for (const t of internalTools) {
       expect(t.cls).toBe('write')
@@ -134,6 +137,21 @@ describe('group B tools', () => {
       m.exportCandidates.mockResolvedValue([])
       await expect(run('lume_create_review_set', { name: 'x' })).rejects.toThrow(/nothing was created/)
       expect(m.createList).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('lume_build_maps_sheet', () => {
+    it('builds the sheet from a finished run, marked mcp', async () => {
+      m.buildMapsSheet.mockResolvedValue({ list_id: 'L9', list_name: 'LA PM', run_status: 'SUCCEEDED', truncated: false, summary: '2 kept', clean: { kept: 2 }, append: { added: 2, duplicates: 0, skipped: 0, over_cap: 0, item_count: 2 } })
+      const out: any = await run('lume_build_maps_sheet', { run_id: 'AbCdEfGh1234' })
+      expect(m.buildMapsSheet).toHaveBeenCalledWith({ run_id: 'AbCdEfGh1234', dataset_id: undefined }, { name: undefined, notes: undefined, by: 'mcp' })
+      expect(out.data).toMatchObject({ list_id: 'L9', added: 2, summary: '2 kept' })
+    })
+    it('needs exactly one of run_id / dataset_id, and says nothing was created on a refusal', async () => {
+      expect(() => tool('lume_build_maps_sheet').input.parse({})).toThrow()
+      expect(() => tool('lume_build_maps_sheet').input.parse({ run_id: 'AbCdEfGh1234', dataset_id: 'AbCdEfGh1234' })).toThrow()
+      m.buildMapsSheet.mockRejectedValue(new MapsError(409, 'run_not_finished: RUNNING'))
+      await expect(run('lume_build_maps_sheet', { run_id: 'AbCdEfGh1234' })).rejects.toThrow(/run_not_finished: RUNNING\). Nothing was created/)
     })
   })
 

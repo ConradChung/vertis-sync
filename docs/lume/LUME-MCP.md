@@ -127,7 +127,7 @@ not appear in `tools/list`.
 | Value | Tools |
 |---|---|
 | unset | 22 read tools |
-| `internal` | + 7 group B tools |
+| `internal` | + 8 group B tools |
 | `gated` | + group B + group C (phase 3) |
 
 Group B needs the phase 2 migration applied first (attribution columns, the
@@ -146,6 +146,7 @@ same key with other arguments is refused). Rate limit: 20 per minute.
 | `lume_add_deal_note` | `crm_activities` note | `source = 'mcp'` | `delete from crm_activities where source = 'mcp' and id = …` |
 | `lume_create_task` (never carries an action) | `lume_tasks` (+ Linear sync, as today) | `created_by = 'mcp'`, Calendar shows "by Claude (MCP)" | Cancel/delete in Calendar |
 | `lume_create_review_set` | new lead list from verified reactors (does not mark reactors exported) | list `created_by = 'mcp'`, rows `source = 'mcp'` | Delete the list in Leads → Lists |
+| `lume_build_maps_sheet` (GTM-12; `run_id` or `dataset_id` of a finished Google Maps run) | new lead list of the cleaned Maps places (reads the Apify dataset, free; cannot start a scrape) | list `created_by = 'mcp'`, rows `source = 'mcp'` | Delete the list in Leads → Lists |
 | `lume_draft_icp_brief`, `lume_draft_outbound_plan` | note in the "MCP drafts" Agent project | the project itself | Delete the note in the Agent tab |
 
 Every call also writes one `mcp.tool_call` event whose `payload.refs` names the
