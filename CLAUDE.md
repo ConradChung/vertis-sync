@@ -68,3 +68,26 @@ driven from Telegram, with two Next.js front ends.
 - Lume: `cd lume && npm run lint && npx tsc --noEmit && npx vitest run && npm run build`.
 - Edge: `cd supabase/functions && deno test _shared/ email-validator/`; send-body tests (env read at import): `deno test --allow-env slack-inbox/ telegram-inbox/ leadsfriday-order/`; `deno check telegram-inbox/index.ts`.
 - DB: `supabase test db` (pgTAP in `supabase/tests/`).
+
+## Verification (before you say "done")
+
+A Stop hook (`.claude/hooks/require-checks.sh`, registered in
+`.claude/settings.json`) won't let a session end with unverified changes.
+
+1. Before starting a change, delete `review/verdict.txt`.
+2. When the change is finished, write `review/summary.md` (what you changed
+   and what you'll tell Conrad), then run the `verify-app` subagent and pass it
+   that summary. It runs on Fable, reads the diff and `feature-map.md`, runs
+   `.claude/hooks/require-checks.sh --checks-only`, and writes PASS or FAIL
+   with next instructions to `review/verdict.txt`. It never edits code.
+3. On FAIL, do what its instructions say, delete the verdict, and run it again.
+   The hook blocks the stop until the checks pass and the verdict is PASS and
+   newer than your last edit; after 3 failed rounds it lets you stop, and you
+   must tell Conrad plainly what isn't verified.
+4. Anything Conrad has had to say twice becomes a hard check in the
+   "hard checks" block of `require-checks.sh`, not a note here.
+5. When a feature is added or its tests move, update `feature-map.md`.
+
+The hook only checks what changed since the merge base with main, so a
+session that changed nothing stops freely. Headless `claude --bare -p` runs
+skip project hooks; a headless loop must run the review step itself.
