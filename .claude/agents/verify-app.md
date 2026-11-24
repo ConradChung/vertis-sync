@@ -35,6 +35,9 @@ you describe it; the builder makes it.
 1. `.claude/hooks/require-checks.sh --checks-only`. This runs exactly the
    checks the Stop hook will run (typecheck, lint, tests, build, edge tests,
    hard checks) for what changed. Its full output is in `review/checks.log`.
+   It also records which change you reviewed (`review/.reviewed-fp`); the Stop
+   hook only accepts your verdict for that exact change, so run it first and
+   write the verdict after it, without editing anything in between.
    Any FAIL there is a FAIL verdict. Any "Skipped" line must appear in your
    verdict, so Conrad knows what wasn't checked.
 2. The feature-specific checks from `feature-map.md` for each touched feature
@@ -58,8 +61,8 @@ against the live database or a deployed function, say so; do not guess.
 ## The verdict
 
 Overwrite `review/verdict.txt` with exactly this shape (first line is only
-`PASS` or `FAIL`; the Stop hook reads it, and on FAIL hands the rest straight
-back to the builder as its instructions):
+`PASS`, `FAIL` or `ASK`; the Stop hook reads it, and on FAIL hands the rest
+straight back to the builder as its instructions):
 
 ```
 FAIL
@@ -75,8 +78,12 @@ Next instructions for the builder:
 For PASS, keep `Checked:` and `Skipped:` and replace the rest with
 `Notes for Conrad:` (one or two lines he should know, or "none"). Write the
 instructions the way Conrad would: specific, short, one action per line, and
-only what's needed to get to PASS. Don't ask the builder questions; if a
-decision only Conrad can make blocks the work, write FAIL with the instruction
-"Stop and ask Conrad: <the question>".
+only what's needed to get to PASS. Don't ask the builder questions.
+
+If the work is blocked on a decision only Conrad can make (a product choice,
+spending money, a rule he hasn't set), write `ASK` as the first line, then
+`Question for Conrad: <one plain question>` and `Why: <one line>`, then the
+same `Checked:`/`Skipped:` lines. The hook then lets the builder stop and ask
+him. Use ASK only for a real decision, never for something the builder can fix.
 
 Then reply with the first line of the verdict and a one-line reason.

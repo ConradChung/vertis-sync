@@ -81,13 +81,18 @@ A Stop hook (`.claude/hooks/require-checks.sh`, registered in
    `.claude/hooks/require-checks.sh --checks-only`, and writes PASS or FAIL
    with next instructions to `review/verdict.txt`. It never edits code.
 3. On FAIL, do what its instructions say, delete the verdict, and run it again.
-   The hook blocks the stop until the checks pass and the verdict is PASS and
-   newer than your last edit; after 3 failed rounds it lets you stop, and you
-   must tell Conrad plainly what isn't verified.
-4. Anything Conrad has had to say twice becomes a hard check in the
+   The hook blocks the stop until the checks pass and the verdict is PASS for
+   the exact change the reviewer saw (any edit after the review voids it);
+   after 3 failed rounds it lets you stop, and you must tell Conrad plainly
+   what isn't verified.
+4. To ask Conrad something mid-task, don't just stop: the hook will block you.
+   Run verify-app; if it agrees only Conrad can decide, it writes ASK and the
+   hook lets you stop to ask.
+5. Anything Conrad has had to say twice becomes a hard check in the
    "hard checks" block of `require-checks.sh`, not a note here.
-5. When a feature is added or its tests move, update `feature-map.md`.
+6. When a feature is added or its tests move, update `feature-map.md`.
 
 The hook only checks what changed since the merge base with main, so a
-session that changed nothing stops freely. Headless `claude --bare -p` runs
+session that changed nothing stops freely. With no `origin/main` or `main`
+it can only see uncommitted changes, and says so. Headless `claude --bare -p` runs
 skip project hooks; a headless loop must run the review step itself.
