@@ -31,15 +31,15 @@ describe('write switch (LUME_MCP_WRITES)', () => {
     expect(tools.every((t) => t.annotations.readOnlyHint === true)).toBe(true)
   })
 
-  it('internal: read tools plus the 7 group B tools', async () => {
+  it('internal: read tools plus the 8 group B tools', async () => {
     const tools = await listTools('internal')
-    expect(tools).toHaveLength(29)
-    expect(tools.filter((t) => t.annotations.readOnlyHint === false).map((t) => t.name).sort()).toHaveLength(7)
+    expect(tools).toHaveLength(30)
+    expect(tools.filter((t) => t.annotations.readOnlyHint === false).map((t) => t.name).sort()).toHaveLength(8)
   })
 
   it('gated: + the 15 group C tools; read helpers stay read-only', async () => {
     const tools = await listTools('gated')
-    expect(tools).toHaveLength(44)
+    expect(tools).toHaveLength(45)
     const c = tools.filter((t) => t.name.startsWith('lume_') && !allTools('internal').some((x) => x.name === t.name))
     expect(c).toHaveLength(15)
     expect(c.filter((t) => t.annotations.readOnlyHint).map((t) => t.name).sort()).toEqual(['lume_get_campaign_sequence', 'lume_suggest_campaign_setup'])

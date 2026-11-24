@@ -82,6 +82,11 @@ stops blocking by itself once #2 merges.
 - **How to test:** `cd lume && npx vitest run tests/import tests/csv tests/api/importRoutes.test.ts tests/api/importXlsx.test.ts`.
 - **Good:** an import lands as an ingest that waits for approval; it never creates `validation_jobs` directly.
 
+### Google Maps lane (GTM-12)
+- **Where:** `lume/lib/maps/`, `lume/app/api/maps/{scrape,sheet}`, `lume/components/import/MapsCard.tsx` (Import screen), MCP `lume_build_maps_sheet` in `lume/lib/mcp/tools/internal.ts`.
+- **How to test:** `cd lume && npx vitest run tests/maps tests/components/MapsCard.test.tsx tests/mcp`.
+- **Good:** the scrape is only ever a `run_actor` pending action (Apify-capped at `ACTOR_RUN_CAP_USD`, paid add-ons off); nothing starts a run before Confirm, and MCP cannot file one (`run_actor` stays off `MCP_CREATABLE_KINDS`). Building the sheet reads a finished dataset (free) and creates one new lead list (step 1 · Imported), or nothing on a refusal.
+
 ### Lead lists: pipeline steps, Combine, Filter → Final (GTM-18)
 - **Where:** `lume/lib/leads/steps.ts`, `lume/lib/leads/combine.ts`, `lume/lib/leads/finalFilter.ts`,
   `lume/lib/leads/lists/{store,stages}.ts`, `lume/app/api/lead-lists/combine`, `lume/app/api/lead-lists/[id]/final`,

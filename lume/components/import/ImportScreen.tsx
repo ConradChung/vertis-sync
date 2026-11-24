@@ -5,12 +5,13 @@ import { useReducedMotion } from '@/lib/motion'
 import { OrderRail } from '@/components/import/OrderRail'
 import { OrdersTable } from '@/components/import/OrdersTable'
 import { SourceCards } from '@/components/import/SourceCards'
+import { MapsCard } from '@/components/import/MapsCard'
 import { useOrders } from '@/hooks/useOrders'
 import type { OrderKind } from '@/lib/db/types'
 
 type Selection = { kind: OrderKind; id: string }
 
-/** `/import`: the three intakes, the orders table (SWR + Realtime), the order rail. */
+/** `/import`: the three intakes, the Google Maps lane (GTM-12), the orders table (SWR + Realtime), the order rail. */
 export function ImportScreen() {
   const q = useOrders()
   const [selected, setSelected] = useState<Selection | null>(null)
@@ -40,6 +41,7 @@ export function ImportScreen() {
           select(o)
         }}
       />
+      <MapsCard />
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         <OrdersTable orders={q.data} error={q.error} selected={selected} onSelect={select} onRetry={() => void q.mutate()} />
         <div ref={railRef} className="min-w-0 scroll-mt-24 lg:sticky lg:top-[96px]">

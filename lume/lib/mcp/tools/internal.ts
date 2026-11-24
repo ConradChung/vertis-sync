@@ -8,6 +8,8 @@ import { planStageMove, requiresApproval } from '@/lib/crm/stages'
 import { exportCandidates } from '@/lib/influencers/store'
 import { reactorRow } from '@/lib/leads/lists/sources'
 import { appendItems, createList } from '@/lib/leads/lists/store'
+import { MapsError } from '@/lib/maps/errors'
+import { buildMapsSheet } from '@/lib/maps/sheet'
 import { parseDue } from '@/lib/tasks/model'
 import { insertTask } from '@/lib/tasks/store'
 import { pushTask } from '@/lib/tasks/sync'
@@ -164,6 +166,38 @@ export const createReviewSet = defineTool({
   },
 })
 
+export const buildMapsSheetTool = defineTool({
+  name: 'lume_build_maps_sheet',
+  title: 'Build the Google Maps sheet from a finished scrape',
+  description:
+    'Turns a finished GTM-12 Google Maps run (the scrape the owner requests and confirms on the Lume Import screen; MCP cannot start one) into a new lead list (Leads → Lists, marked created by MCP): one row per company with Company, Phone, City, State, Zip, Website, Rating, Reviews, Maps Category, Maps PM, Branches, Address and the Google Maps link. ' +
+    'Drops permanently closed places, places without a website of their own (none, or only a social / directory page) and duplicate listings of the same domain, and reports each count. ' +
+    'Reads the Apify dataset only (free). Sends nothing, pushes nothing to Frank\'s portal, runs no paid step; LinkedIn and the PM-vs-vendor verdict come later from the crawl worker. Each call creates a new list.',
+  cls: 'write',
+  input: z
+    .object({
+      run_id: z.string().regex(/^[A-Za-z0-9]{8,40}$/).optional().describe('Apify run id (the run_actor action result, or lume_get_action).'),
+      dataset_id: z.string().regex(/^[A-Za-z0-9]{8,40}$/).optional(),
+      name: z.string().trim().min(1).max(200).optional().describe('List name (default "LA PM · Google Maps · <date>").'),
+      notes: z.string().trim().max(4000).optional(),
+      idempotency_key: idempotencyKey,
+    })
+    .refine((v) => !!v.run_id !== !!v.dataset_id, 'Pass run_id or dataset_id.'),
+  annotations: INTERNAL_APPEND,
+  run: async ({ run_id, dataset_id, name, notes }) => {
+    try {
+      const out = await buildMapsSheet({ run_id, dataset_id }, { name, notes, by: 'mcp' })
+      return {
+        data: { list_id: out.list_id, name: out.list_name, run_status: out.run_status, truncated: out.truncated, summary: out.summary, clean: out.clean, added: out.append.added, duplicates: out.append.duplicates, item_count: out.append.item_count },
+        refs: { list_id: out.list_id },
+      }
+    } catch (err) {
+      if (err instanceof MapsError) throw new McpUserError(`Lume could not build the sheet (${err.code}). Nothing was created.`)
+      throw err
+    }
+  },
+})
+
 /** The live "MCP drafts" Agent project, created on first use. */
 export async function draftsProjectId(): Promise<string> {
   const find = async () => {
@@ -219,6 +253,7 @@ export const internalTools: ToolDef[] = [
   addDealNote,
   createTask,
   createReviewSet,
+  buildMapsSheetTool,
   draftIcpBrief,
   draftOutboundPlan,
 ] as unknown as ToolDef[]
