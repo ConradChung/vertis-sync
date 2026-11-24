@@ -3,8 +3,20 @@ import { slackApi } from '@/lib/slack/api'
 import { resolveChannel } from '@/lib/signal/alerts'
 import { getSignalConfig } from '@/lib/signal/store'
 import { buildRedditCard } from '@/lib/reddit/card'
-import { authorFromContext, clip, extractRedditLinks, findKeyword, isHot, parseRedditJson, type RedditLink, type RedditThing } from '@/lib/reddit/parse'
-import { claimMention, existingKeys, saveEmail, insertMention, listUnalerted, markMentionPosted, releaseMention } from '@/lib/reddit/store'
+import { authorFromContext, clip, extractF5Excerpts, extractRedditLinks, findKeyword, isHot, parseRedditJson, type RedditLink, type RedditThing } from '@/lib/reddit/parse'
+import { summarizeExcerpt, type Summarize } from '@/lib/reddit/summary'
+import {
+  claimMention,
+  existingKeys,
+  fillMentionText,
+  insertMention,
+  listEmails,
+  listUnalerted,
+  markMentionPosted,
+  mentionsMissingSnippet,
+  releaseMention,
+  saveEmail,
+} from '@/lib/reddit/store'
 
 /**
  * GTM-15: one F5Bot alert email (forwarded by the Apps Script in the inbox
@@ -21,6 +33,9 @@ import { claimMention, existingKeys, saveEmail, insertMention, listUnalerted, ma
  *    reaches Slack. Live: claim before chat.postMessage, release on failure,
  *    so nothing posts twice. Rows a failed send left unalerted are retried by
  *    the next email.
+ *  - The comment itself comes from F5Bot's HTML part (`f5-excerpt` per hit),
+ *    with a one-line Haiku summary of it. No HTML / no excerpt → title-only
+ *    card, as before. Reddit's JSON is only tried when there is no excerpt.
  *  - Nothing is sent to anyone on Reddit; the card's DM link is for a person.
  */
 
@@ -61,7 +76,12 @@ export const fetchRedditThing: RedditFetch = async (link) => {
   return parseRedditJson(await res.json(), link)
 }
 
-export async function ingestF5bot(email: F5botEmail, fetchThing: RedditFetch = fetchRedditThing, now: Date = new Date()): Promise<IngestSummary> {
+export async function ingestF5bot(
+  email: F5botEmail,
+  fetchThing: RedditFetch = fetchRedditThing,
+  now: Date = new Date(),
+  summarize: Summarize = summarizeExcerpt
+): Promise<IngestSummary> {
   const cfg = await getSignalConfig()
   const live = cfg.raw.reddit_live === true
   const out: IngestSummary = { ok: true, live, links: 0, inserted: 0, duplicate: 0, unreadable: 0, posted: 0, dry_run: 0, failed: 0, errors: [] }
@@ -72,6 +92,7 @@ export async function ingestF5bot(email: F5botEmail, fetchThing: RedditFetch = f
   }
 
   const links = extractRedditLinks(email.body ?? '', email.html ?? '')
+  const excerpts = extractF5Excerpts(email.html)
   out.links = links.length
   const known = await existingKeys(links.map((l) => l.key))
 
@@ -80,18 +101,22 @@ export async function ingestF5bot(email: F5botEmail, fetchThing: RedditFetch = f
       out.duplicate++
       continue
     }
+    const excerpt = excerpts.get(link.key) ?? null
     let thing: RedditThing | null = null
     let fetchError: string | null = null
-    try {
-      thing = await fetchThing(link)
-      if (!thing) fetchError = 'not_found'
-    } catch (err) {
-      fetchError = msg(err)
+    if (!excerpt) {
+      try {
+        thing = await fetchThing(link)
+        if (!thing) fetchError = 'not_found'
+      } catch (err) {
+        fetchError = msg(err)
+      }
+      if (fetchError) out.unreadable++
     }
-    if (fetchError) out.unreadable++
-    // F5Bot's plain email has no excerpt: without Reddit's text the card shows the title only.
     const title = clip(thing?.title ?? link.f5Title, 300)
-    const snippet = clip(thing?.text)
+    const text = thing?.text ?? excerpt
+    const keyword = findKeyword(title, text) ?? findKeyword(link.context, email.subject)
+    const summary = text ? await summarize({ title, excerpt: text, keyword }) : null
     const inserted = await insertMention({
       permalink: link.key,
       url: link.url,
@@ -99,9 +124,10 @@ export async function ingestF5bot(email: F5botEmail, fetchThing: RedditFetch = f
       subreddit: thing?.subreddit ?? link.subreddit,
       author: thing?.author ?? link.f5Author ?? authorFromContext(link.context),
       title,
-      snippet,
-      keyword: findKeyword(title, thing?.text) ?? findKeyword(link.context, email.subject),
-      hot: isHot(title, thing?.text),
+      snippet: clip(text),
+      summary,
+      keyword,
+      hot: isHot(title, text),
       reddit_created_at: thing?.createdAt ?? null,
       fetch_error: fetchError,
       email_message_id: email.message_id ?? null,
@@ -145,5 +171,56 @@ export async function ingestF5bot(email: F5botEmail, fetchThing: RedditFetch = f
     }
   }
   if (out.failed) out.ok = false
+  return out
+}
+
+export interface BackfillSummary {
+  ok: boolean
+  emails: number
+  filled: number
+  updated: number
+  errors: string[]
+}
+
+/**
+ * Re-read the kept emails' HTML and fill the excerpt + summary of mentions
+ * stored before excerpts were parsed. Cards already in Slack are edited in
+ * place (chat.update, same message), never posted again. Safe to re-run:
+ * only rows whose snippet is still empty are touched.
+ */
+export async function backfillExcerpts(summarize: Summarize = summarizeExcerpt, now: Date = new Date()): Promise<BackfillSummary> {
+  const out: BackfillSummary = { ok: true, emails: 0, filled: 0, updated: 0, errors: [] }
+  const emails = await listEmails()
+  out.emails = emails.length
+  const excerpts = new Map<string, string>()
+  for (const e of emails) for (const [k, v] of extractF5Excerpts(e.html)) if (!excerpts.has(k)) excerpts.set(k, v)
+  const rows = await mentionsMissingSnippet([...excerpts.keys()])
+  if (!rows.length) return out
+
+  let token: string | null = null
+  if (rows.some((r) => r.slack_ts)) {
+    const r = await resolveChannel(await getSignalConfig())
+    if ('error' in r) out.errors.push(r.error)
+    else token = r.token
+  }
+
+  for (const row of rows) {
+    const excerpt = excerpts.get(row.permalink)
+    if (!excerpt) continue
+    try {
+      const summary = await summarize({ title: row.title, excerpt, keyword: row.keyword })
+      const updated = await fillMentionText(row.id, { snippet: clip(excerpt) ?? excerpt, summary, hot: row.hot || isHot(row.title, excerpt) })
+      if (!updated) continue
+      out.filled++
+      if (token && updated.slack_ts && updated.slack_channel_id) {
+        const card = buildRedditCard(updated, now)
+        await slackApi('chat.update', token, { channel: updated.slack_channel_id, ts: updated.slack_ts, text: card.text, blocks: card.blocks })
+        out.updated++
+      }
+    } catch (err) {
+      out.errors.push(`mention ${row.id}: ${msg(err)}`)
+    }
+  }
+  if (out.errors.length) out.ok = false
   return out
 }

@@ -25,11 +25,21 @@ vi.mock('@/lib/reddit/store', () => ({
     const r = db.rows.find((x) => x.id === id && x.alert_status === 'posted')
     if (r) Object.assign(r, { slack_ts: p.ts, slack_team_id: p.team, slack_channel_id: p.channel })
   },
+  listEmails: async () => saved.emails,
+  mentionsMissingSnippet: async (keys: string[]) => db.rows.filter((r) => keys.includes(r.permalink) && r.snippet == null),
+  fillMentionText: async (id: number, p: Record<string, unknown>) => {
+    const r = db.rows.find((x) => x.id === id && x.snippet == null)
+    if (!r) return null
+    Object.assign(r, p)
+    return { ...r }
+  },
   releaseMention: async (id: number) => {
     const r = db.rows.find((x) => x.id === id && x.alert_status === 'posted' && !x.slack_ts)
     if (r) r.alert_status = null
   },
 }))
+const sum = vi.hoisted(() => ({ summarizeExcerpt: vi.fn() }))
+vi.mock('@/lib/reddit/summary', () => sum)
 const signalStore = vi.hoisted(() => ({ getSignalConfig: vi.fn() }))
 vi.mock('@/lib/signal/store', () => signalStore)
 const alerts = vi.hoisted(() => ({ resolveChannel: vi.fn() }))
@@ -38,9 +48,9 @@ const api = vi.hoisted(() => ({ slackApi: vi.fn() }))
 vi.mock('@/lib/slack/api', () => api)
 
 import { parseSignalConfig } from '@/lib/signal/config'
-import { ingestF5bot, type RedditFetch } from '@/lib/reddit/ingest'
+import { backfillExcerpts, ingestF5bot, type RedditFetch } from '@/lib/reddit/ingest'
 import { parseRedditJson } from '@/lib/reddit/parse'
-import { COMMENT_JSON, PLAIN, POST_JSON } from './fixtures'
+import { COMMENT_JSON, PLAIN, POST_JSON, REAL_HTML, REAL_HTML_PLAIN } from './fixtures'
 
 const fetchOk: RedditFetch = async (l) => parseRedditJson(l.commentId ? COMMENT_JSON : POST_JSON, l)
 const cfg = (over: Record<string, unknown> = {}) => parseSignalConfig({ dry_run: false, slack: { team_id: 'T0AAA', channel_id: 'C0SALES', channel_name: 'sales' }, ...over })
@@ -53,6 +63,8 @@ beforeEach(() => {
   alerts.resolveChannel.mockResolvedValue({ team: 'T0AAA', channel: 'C0SALES', token: 'xoxb' })
   let n = 0
   api.slackApi.mockImplementation(async () => ({ ok: true, ts: `1700.000${++n}` }))
+  sum.summarizeExcerpt.mockImplementation(async ({ excerpt }: { excerpt: string }) => `SUM: ${excerpt.slice(0, 20)}`)
+  saved.emails = []
 })
 
 describe('ingestF5bot', () => {
@@ -145,5 +157,58 @@ describe("ingestF5bot on F5Bot's real layout", () => {
       ['CoolWax', 'Maintenance Management System Recommendations', null, 'appfolio', false],
       ['TransportationOld902', "Don't love Buildium, switching from it?", null, 'buildium', true],
     ])
+  })
+})
+
+describe('comment text from the HTML part', () => {
+  const reddit403 = vi.fn(async () => {
+    throw new Error('reddit 403')
+  })
+  const POST_KEY = 'https://www.reddit.com/r/propertymanagement/comments/1y1f63z/_/'
+  const C1 = 'https://www.reddit.com/r/propertymanagement/comments/1y1f63z/_/19sxucq3repr9/'
+
+  it('each hit gets its own excerpt and summary; Reddit is not asked when there is one', async () => {
+    reddit403.mockClear()
+    const r = await ingestF5bot({ message_id: 'm4', body: REAL_HTML_PLAIN, html: REAL_HTML }, reddit403)
+    expect(r.ok).toBe(true)
+    const byKey = new Map(db.rows.map((x) => [x.permalink, x]))
+    expect(byKey.get(C1)).toMatchObject({ snippet: expect.stringContaining('nickel and dime'), summary: 'SUM: Appfolios native wor', fetch_error: null })
+    expect(byKey.get(POST_KEY)).toMatchObject({ snippet: expect.stringContaining('college coding project'), hot: true })
+    expect(String(byKey.get(POST_KEY)!.snippet)).not.toContain('Do you have comments')
+    expect(reddit403).not.toHaveBeenCalledWith(expect.objectContaining({ key: C1 }))
+    const blocks = JSON.stringify(posts().map((c) => c[2].blocks))
+    expect(blocks).toContain('💬 SUM: Appfolios native wor')
+    expect(blocks).toContain('nickel and dime')
+  })
+
+  it('a failed summary still stores the excerpt (no 💬 line)', async () => {
+    sum.summarizeExcerpt.mockResolvedValue(null)
+    await ingestF5bot({ body: REAL_HTML_PLAIN, html: REAL_HTML }, reddit403)
+    expect(db.rows.find((x) => x.permalink === C1)).toMatchObject({ summary: null, snippet: expect.stringContaining('pretty weak') })
+    expect(JSON.stringify(posts()[0][2].blocks)).not.toContain('💬')
+  })
+
+  it('no HTML part → title-only, as before', async () => {
+    await ingestF5bot({ body: REAL_HTML_PLAIN }, reddit403)
+    expect(db.rows.every((x) => x.snippet === null && x.summary === null)).toBe(true)
+    expect(sum.summarizeExcerpt).not.toHaveBeenCalled()
+  })
+
+  it('backfill fills posted title-only cards and edits them in place, once', async () => {
+    await ingestF5bot({ body: REAL_HTML_PLAIN }, reddit403) // posted title-only
+    const postedTs = db.rows.map((x) => x.slack_ts)
+    api.slackApi.mockClear()
+    saved.emails = [{ message_id: 'm4', subject: 's', html: REAL_HTML }]
+    const r = await backfillExcerpts()
+    expect(r).toMatchObject({ ok: true, emails: 1 })
+    expect(r.filled).toBeGreaterThan(0)
+    expect(r.updated).toBe(r.filled)
+    const calls = api.slackApi.mock.calls
+    expect(calls.every((c) => c[0] === 'chat.update')).toBe(true)
+    expect(calls.map((c) => c[2].ts).every((ts) => postedTs.includes(ts))).toBe(true)
+    expect(JSON.stringify(calls.map((c) => c[2].blocks))).toContain('💬 SUM:')
+    api.slackApi.mockClear()
+    expect(await backfillExcerpts()).toMatchObject({ filled: 0, updated: 0 })
+    expect(api.slackApi).not.toHaveBeenCalled()
   })
 })

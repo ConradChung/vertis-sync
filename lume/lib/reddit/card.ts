@@ -21,6 +21,7 @@ export interface RedditMentionRow {
   author: string | null
   title: string | null
   snippet: string | null
+  summary?: string | null
   keyword: string | null
   hot: boolean
   reddit_created_at: string | null
@@ -51,6 +52,8 @@ export function buildRedditCard(r: RedditMentionRow, now: Date = new Date()): { 
   const blocks: Block[] = [{ type: 'section', text: { type: 'mrkdwn', text: head } }]
   const title = clip(r.title, 200)
   if (title) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${esc(title)}*` } })
+  const summary = clip(r.summary, 200)
+  if (summary) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `💬 ${esc(summary)}` } })
   const snip = clip(r.snippet, 600)
   if (snip && snip !== title) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `>${esc(snip)}` } })
 

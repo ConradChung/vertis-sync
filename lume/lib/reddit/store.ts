@@ -11,7 +11,7 @@ import type { RedditMentionRow } from '@/lib/reddit/card'
  * so a retry, a concurrent call or a double click finds nothing to do.
  */
 
-export const MENTION_COLS = 'id, url, kind, subreddit, author, title, snippet, keyword, hot, reddit_created_at, alert_status, decided_by, slack_team_id, slack_channel_id, slack_ts'
+export const MENTION_COLS = 'id, url, kind, subreddit, author, title, snippet, summary, keyword, hot, reddit_created_at, alert_status, decided_by, slack_team_id, slack_channel_id, slack_ts'
 export type RedditMention = RedditMentionRow & { slack_team_id: string | null; slack_channel_id: string | null; slack_ts: string | null }
 
 export interface NewMention {
@@ -22,6 +22,7 @@ export interface NewMention {
   author: string | null
   title: string | null
   snippet: string | null
+  summary: string | null
   keyword: string | null
   hot: boolean
   reddit_created_at: string | null
@@ -97,5 +98,38 @@ export async function decideMention(id: number, status: 'contacted' | 'skipped',
     .eq('alert_status', 'posted')
     .select(MENTION_COLS)
   if (res.error) throw new DbError('decideMention', res.error)
+  return ((res.data ?? []) as RedditMention[])[0] ?? null
+}
+
+export interface StoredEmail {
+  message_id: string
+  subject: string | null
+  html: string | null
+}
+
+/** Every kept F5Bot email (newest first), for re-reading the HTML excerpts. */
+export async function listEmails(limit = 200): Promise<StoredEmail[]> {
+  const res = await sb().from('signal_f5bot_emails').select('message_id, subject, html').order('id', { ascending: false }).limit(limit)
+  if (res.error) throw new DbError('listEmails', res.error)
+  return (res.data ?? []) as StoredEmail[]
+}
+
+/** Mentions still without an excerpt, by canonical key. */
+export async function mentionsMissingSnippet(keys: string[]): Promise<(RedditMention & { permalink: string })[]> {
+  if (!keys.length) return []
+  const res = await sb().from('signal_reddit_mentions').select(`permalink, ${MENTION_COLS}`).in('permalink', keys).is('snippet', null)
+  if (res.error) throw new DbError('mentionsMissingSnippet', res.error)
+  return (res.data ?? []) as (RedditMention & { permalink: string })[]
+}
+
+/** Fill the excerpt once (only while it is still empty); returns the row, or null if another run got there first. */
+export async function fillMentionText(id: number, p: { snippet: string; summary: string | null; hot: boolean }): Promise<RedditMention | null> {
+  const res = await sb()
+    .from('signal_reddit_mentions')
+    .update({ ...p, updated_at: nowIso() })
+    .eq('id', id)
+    .is('snippet', null)
+    .select(MENTION_COLS)
+  if (res.error) throw new DbError('fillMentionText', res.error)
   return ((res.data ?? []) as RedditMention[])[0] ?? null
 }

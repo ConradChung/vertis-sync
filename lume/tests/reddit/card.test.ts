@@ -67,3 +67,14 @@ describe('buildRedditCard', () => {
     expect(json(c)).toContain('Contacted · <@U0SALES>')
   })
 })
+
+describe('summary line', () => {
+  it('shows the escaped summary above the excerpt; none when empty', () => {
+    const c = buildRedditCard(row({ summary: 'Hates <Buildium> & wants out' }), NOW)
+    const texts = (c.blocks as { text?: { text: string } }[]).map((b) => b.text?.text ?? '')
+    const si = texts.findIndex((t) => t.startsWith('💬'))
+    expect(texts[si]).toBe('💬 Hates &lt;Buildium&gt; &amp; wants out')
+    expect(si).toBeLessThan(texts.findIndex((t) => t.startsWith('>')))
+    expect(json(buildRedditCard(row({ summary: null }), NOW))).not.toContain('💬')
+  })
+})

@@ -108,3 +108,50 @@ describe("F5Bot's real layout", () => {
     expect(links[0].url).toBe('https://www.reddit.com/r/PropertyManagement/comments/1y1f63z/c/19sxv5w0vh7t9/')
   })
 })
+
+describe("extractF5Excerpts (F5Bot's real HTML)", () => {
+  it('one clean excerpt per hit, keyed like the links, footer left out', async () => {
+    const { REAL_HTML } = await import('./fixtures')
+    const { extractF5Excerpts } = await import('@/lib/reddit/parse')
+    const ex = extractF5Excerpts(REAL_HTML)
+    expect([...ex.keys()]).toEqual([
+      'https://www.reddit.com/r/propertymanagement/comments/1y1f63z/_/',
+      'https://www.reddit.com/r/propertymanagement/comments/1y1f63z/_/19sxucq3repr9/',
+      'https://www.reddit.com/r/propertymanagement/comments/1y1f63z/_/19sxv5w0vh7tu/',
+    ])
+    const post = ex.get('https://www.reddit.com/r/propertymanagement/comments/1y1f63z/_/')!
+    // the second-keyword excerpt is contained in the first: kept once
+    expect(post).toBe("it would take me hours to write it all, but it's built like someone's college coding project from 2015. We've been exploring switching from a Buildium/Meld combo to AppFolio, or keeping Buildium & moving maintenance.")
+    expect(ex.get('https://www.reddit.com/r/propertymanagement/comments/1y1f63z/_/19sxucq3repr9/')).toBe(
+      'Appfolios native work order management system is pretty weak. Appfolio will try to nickel and dime you every time you turn around.'
+    )
+    for (const v of ex.values()) {
+      expect(v).not.toMatch(/<|&#|&amp;|suggestions about F5Bot|Copyright/)
+    }
+  })
+
+  it('keys match extractRedditLinks on the same email', async () => {
+    const { REAL_HTML } = await import('./fixtures')
+    const { extractF5Excerpts } = await import('@/lib/reddit/parse')
+    const keys = extractRedditLinks('', REAL_HTML).map((l) => l.key)
+    expect([...extractF5Excerpts(REAL_HTML).keys()].every((k) => keys.includes(k))).toBe(true)
+  })
+
+  it('distinct excerpts for two keywords are both kept', async () => {
+    const { extractF5Excerpts } = await import('@/lib/reddit/parse')
+    const html = `<p class="f5-hit"><a href="https://www.reddit.com/r/Landlord/comments/abc123/x/">t</a> by bob<br><span class="f5-excerpt">we left <strong>AppFolio</strong><br>and <strong>Buildium</strong> was worse</span></p>`
+    expect(extractF5Excerpts(html).get('https://www.reddit.com/r/landlord/comments/abc123/_/')).toBe('we left AppFolio … and Buildium was worse')
+  })
+
+  it('no HTML, no hit paragraphs, or a hit without an excerpt → empty', async () => {
+    const { extractF5Excerpts } = await import('@/lib/reddit/parse')
+    const { HTML } = await import('./fixtures')
+    expect(extractF5Excerpts(null).size).toBe(0)
+    expect(extractF5Excerpts(HTML).size).toBe(0)
+    expect(extractF5Excerpts('<p class="f5-hit"><a href="https://www.reddit.com/r/Landlord/comments/abc123/x/">t</a></p>').size).toBe(0)
+  })
+
+  it('decodes numeric entities in plain htmlToText too', () => {
+    expect(htmlToText('it&#039;s &#x27;ok&#x27; &amp;lt;b&amp;gt;')).toBe("it's 'ok' &lt;b&gt;")
+  })
+})

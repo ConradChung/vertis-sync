@@ -7,11 +7,12 @@ const rd = vi.hoisted(() => ({ redditButton: vi.fn() }))
 vi.mock('@/lib/slack/redditDecide', () => rd)
 const sd = vi.hoisted(() => ({ signalButton: vi.fn(), signalOpenEdit: vi.fn(), signalSaveEdit: vi.fn() }))
 vi.mock('@/lib/slack/signalDecide', () => sd)
-const ingest = vi.hoisted(() => ({ ingestF5bot: vi.fn() }))
+const ingest = vi.hoisted(() => ({ ingestF5bot: vi.fn(), backfillExcerpts: vi.fn() }))
 vi.mock('@/lib/reddit/ingest', () => ingest)
 
 import { POST as interactions } from '@/app/api/slack/interactions/route'
 import { POST as f5bot } from '@/app/api/webhooks/f5bot/route'
+import { POST as f5backfill } from '@/app/api/webhooks/f5bot/backfill/route'
 import { parseInteraction } from '@/lib/slack/payloads'
 
 const SECRET = 'sign-secret'
@@ -82,5 +83,23 @@ describe('POST /api/webhooks/f5bot', () => {
     expect(ingest.ingestF5bot).toHaveBeenCalledWith({ message_id: 'm1', subject: 'F5Bot found something!', body: 'b', html: '<p>h</p>' })
     ingest.ingestF5bot.mockResolvedValue({ ok: false, failed: 1 })
     expect((await f5bot(hook({ body: 'b' }))).status).toBe(500)
+  })
+})
+
+describe('POST /api/webhooks/f5bot/backfill', () => {
+  it('needs the F5Bot secret', async () => {
+    expect((await f5backfill(hook({}, null))).status).toBe(401)
+    expect((await f5backfill(hook({}, 'nope'))).status).toBe(401)
+    expect(ingest.backfillExcerpts).not.toHaveBeenCalled()
+  })
+  it('runs the backfill: 200 ok, 500 on errors or a throw', async () => {
+    ingest.backfillExcerpts.mockResolvedValueOnce({ ok: true, emails: 11, filled: 16, updated: 16, errors: [] })
+    const res = await f5backfill(hook({}))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ filled: 16, updated: 16 })
+    ingest.backfillExcerpts.mockResolvedValueOnce({ ok: false, emails: 1, filled: 0, updated: 0, errors: ['x'] })
+    expect((await f5backfill(hook({}))).status).toBe(500)
+    ingest.backfillExcerpts.mockRejectedValueOnce(new Error('db down'))
+    expect((await f5backfill(hook({}))).status).toBe(500)
   })
 })

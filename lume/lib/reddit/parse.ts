@@ -38,8 +38,21 @@ export function parseF5Hit(before: string): { title: string | null; author: stri
 
 const LINK = /https?:\/\/(?:[a-z0-9-]+\.)?reddit\.com\/r\/([A-Za-z0-9_]{2,21})\/comments\/([a-z0-9]{3,20})(?:\/([^/\s?#"'<>)&]*))?(?:\/([a-z0-9]{3,20}))?\/?/gi
 
+/** Canonical, lowercase dedupe key for a post or comment. */
+export const redditKey = (sub: string, post: string, comment: string | null) =>
+  `https://www.reddit.com/r/${sub.toLowerCase()}/comments/${post.toLowerCase()}/_/${comment ? `${comment.toLowerCase()}/` : ''}`
+
 const decodeEntities = (s: string) =>
-  s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/&nbsp;/g, ' ')
+  s
+    .replace(/&#(\d{1,7});/g, (_, d) => codePoint(Number(d)))
+    .replace(/&#x([0-9a-f]{1,6});/gi, (_, h) => codePoint(parseInt(h, 16)))
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+const codePoint = (n: number) => (n > 0 && n <= 0x10ffff && !(n >= 0xd800 && n <= 0xdfff) ? String.fromCodePoint(n) : '')
 
 /** Percent-decode each encoded run on its own, so one stray % can't hide every link. */
 function tryDecode(s: string): string {
@@ -88,7 +101,7 @@ export function extractRedditLinks(text: string, html = ''): RedditLink[] {
       const subreddit = sub
       const postId = post.toLowerCase()
       const commentId = comment ? comment.toLowerCase() : null
-      const key = `https://www.reddit.com/r/${subreddit.toLowerCase()}/comments/${postId}/_/${commentId ? `${commentId}/` : ''}`
+      const key = redditKey(subreddit, postId, commentId)
       // F5Bot's own text for this hit: what sits between the previous link and the next one.
       const prev = mi > 0 ? (matches[mi - 1].index ?? 0) + matches[mi - 1][0].length : 0
       const next = mi + 1 < matches.length ? (matches[mi + 1].index ?? src.length) : src.length
@@ -102,6 +115,42 @@ export function extractRedditLinks(text: string, html = ''): RedditLink[] {
       out.push({ key, url, kind: commentId ? 'comment' : 'post', subreddit, postId, commentId, context: context.slice(-SNIPPET_MAX), f5Title: hit.title, f5Author: hit.author })
       if (out.length >= MAX_LINKS) return out
     }
+  }
+  return out
+}
+
+/**
+ * F5Bot's HTML part (layout seen in real alerts, Nov 2026): each hit is a
+ * `<p class="f5-hit">` holding the redirect link to the thread, `by author`,
+ * then `<span class="f5-excerpt">` with the matched text (keyword in
+ * <strong>, one `<br>`-separated excerpt per keyword match). The footer and
+ * ads sit outside those paragraphs, so they are never picked up.
+ *
+ * Returns canonical key → clean excerpt text. Excerpts repeated for a
+ * second keyword (one contained in another) are kept once. No HTML or no
+ * excerpt → an empty map, and the caller keeps the title-only card.
+ */
+const F5_HIT_P = /<p\b[^>]*class="[^"]*\bf5-hit\b[^"]*"[^>]*>([\s\S]*?)<\/p>/gi
+const F5_EXCERPT = /<span\b[^>]*class="[^"]*\bf5-excerpt\b[^"]*"[^>]*>([\s\S]*?)<\/span>/i
+const HREF = /<a\b[^>]*href="([^"]+)"/i
+export function extractF5Excerpts(html: string | null | undefined): Map<string, string> {
+  const out = new Map<string, string>()
+  if (!html) return out
+  for (const m of html.matchAll(F5_HIT_P)) {
+    const inner = m[1]
+    const href = HREF.exec(inner)?.[1]
+    const ex = F5_EXCERPT.exec(inner)?.[1]
+    if (!href || !ex) continue
+    const link = new RegExp(LINK.source, 'i').exec(tryDecode(decodeEntities(href)))
+    if (!link) continue
+    const key = redditKey(link[1], link[2], link[4] ?? null)
+    const parts = ex
+      .split(/<br\s*\/?>/i)
+      .map((x) => clean(htmlToText(x.replace(/<\/?(?:strong|b|em|i|u|span|a)\b[^>]*>/gi, ''))))
+      .filter(Boolean)
+    const kept = parts.filter((x, i) => !parts.some((y, j) => j !== i && y.length >= x.length && y.includes(x) && (y.length > x.length || j < i)))
+    const text = kept.join(' … ')
+    if (text && !out.has(key)) out.set(key, text)
   }
   return out
 }
