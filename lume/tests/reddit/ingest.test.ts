@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // An in-memory signal_reddit_mentions with the real store's conditional semantics.
 type Row = Record<string, unknown> & { id: number; permalink: string; alert_status: string | null; slack_ts: string | null; hot: boolean }
 const db = vi.hoisted(() => ({ rows: [] as Row[] }))
+const saved = vi.hoisted(() => ({ emails: [] as Record<string, unknown>[] }))
 vi.mock('@/lib/reddit/store', () => ({
+  saveEmail: async (e: Record<string, unknown>) => {
+    saved.emails.push(e)
+  },
   existingKeys: async (keys: string[]) => new Set(db.rows.filter((r) => keys.includes(r.permalink)).map((r) => r.permalink)),
   insertMention: async (m: Record<string, unknown>) => {
     if (db.rows.some((r) => r.permalink === m.permalink)) return false
@@ -114,6 +118,13 @@ describe('ingestF5bot', () => {
     const r = await ingestF5bot({ body: PLAIN }, fetchOk)
     expect(r).toMatchObject({ ok: false, errors: ['bot_not_in_channel:#sales'] })
     expect(db.rows.every((x) => x.alert_status === null)).toBe(true)
+  })
+
+  it('keeps the email as received when it has a message id', async () => {
+    saved.emails = []
+    await ingestF5bot({ message_id: 'gm1', subject: 'F5Bot found something!', body: PLAIN, html: '<p>x</p>' }, fetchOk)
+    await ingestF5bot({ body: PLAIN }, fetchOk)
+    expect(saved.emails).toEqual([{ message_id: 'gm1', subject: 'F5Bot found something!', body: PLAIN, html: '<p>x</p>' }])
   })
 
   it('no links → nothing stored, nothing sent', async () => {

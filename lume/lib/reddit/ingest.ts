@@ -4,7 +4,7 @@ import { resolveChannel } from '@/lib/signal/alerts'
 import { getSignalConfig } from '@/lib/signal/store'
 import { buildRedditCard } from '@/lib/reddit/card'
 import { authorFromContext, clip, extractRedditLinks, findKeyword, isHot, parseRedditJson, type RedditLink, type RedditThing } from '@/lib/reddit/parse'
-import { claimMention, existingKeys, insertMention, listUnalerted, markMentionPosted, releaseMention } from '@/lib/reddit/store'
+import { claimMention, existingKeys, saveEmail, insertMention, listUnalerted, markMentionPosted, releaseMention } from '@/lib/reddit/store'
 
 /**
  * GTM-15: one F5Bot alert email (forwarded by the Apps Script in the inbox
@@ -65,6 +65,11 @@ export async function ingestF5bot(email: F5botEmail, fetchThing: RedditFetch = f
   const cfg = await getSignalConfig()
   const live = cfg.raw.reddit_live === true
   const out: IngestSummary = { ok: true, live, links: 0, inserted: 0, duplicate: 0, unreadable: 0, posted: 0, dry_run: 0, failed: 0, errors: [] }
+
+  if (email.message_id) {
+    // Never blocks the alert: a failed save is only reported.
+    await saveEmail({ message_id: email.message_id, subject: email.subject ?? null, body: email.body ?? null, html: email.html ?? null }).catch((e) => out.errors.push(`save email: ${msg(e)}`))
+  }
 
   const links = extractRedditLinks(email.body ?? '', email.html ?? '')
   out.links = links.length

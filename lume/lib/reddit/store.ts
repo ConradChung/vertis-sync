@@ -32,6 +32,12 @@ export interface NewMention {
 const sb = () => createServiceClient()
 const nowIso = () => new Date().toISOString()
 
+/** Keep the email as received (by Gmail message id, once), for parsing the HTML comment blocks later. */
+export async function saveEmail(e: { message_id: string; subject: string | null; body: string | null; html: string | null }): Promise<void> {
+  const res = await sb().from('signal_f5bot_emails').upsert(e, { onConflict: 'message_id', ignoreDuplicates: true })
+  if (res.error) throw new DbError('saveEmail', res.error)
+}
+
 /** Which of these canonical keys are already stored. */
 export async function existingKeys(keys: string[]): Promise<Set<string>> {
   if (!keys.length) return new Set()
