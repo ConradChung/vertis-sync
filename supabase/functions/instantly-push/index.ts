@@ -853,8 +853,11 @@ async function patchRows(ids: string[], patch: Record<string, unknown>): Promise
   }
 }
 
-function reinvoke(jobId: string): Promise<void> {
-  return fetch(`${SUPABASE_URL}/functions/v1/instantly-push`, {
+// Awaited, not returned: the caller awaits this before returning, and the
+// fetch itself is awaited here so the hand-off can't be dropped when the
+// response goes out (see _shared/invoke.ts).
+async function reinvoke(jobId: string): Promise<void> {
+  await fetch(`${SUPABASE_URL}/functions/v1/instantly-push`, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_SERVICE_ROLE_KEY,
