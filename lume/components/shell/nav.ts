@@ -6,7 +6,7 @@ import { TABS } from '@/components/shell/tabs'
  * utilities around it. Tabs not named here fall into the tools.
  */
 const FLOW_ORDER = ['/import', '/import/leads', '/progress', '/rotate', '/campaigns'] as const
-const TOOL_ORDER = ['/overview', '/actions', '/agent', '/crm', '/calendar', '/playground', '/operator', '/settings']
+const TOOL_ORDER = ['/overview', '/actions', '/agent', '/crm', '/signals/hiring', '/calendar', '/playground', '/operator', '/settings']
 
 export type NavTab = (typeof TABS)[number] & { step?: number; key?: string }
 

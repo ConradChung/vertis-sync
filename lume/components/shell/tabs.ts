@@ -1,4 +1,4 @@
-import { Bot, Inbox, CalendarDays, ClipboardCheck, FlaskConical, LayoutDashboard, Megaphone, Repeat2, Settings, ShieldCheck, Sheet, Upload, Users, type LucideIcon } from 'lucide-react'
+import { Bot, BriefcaseBusiness, Inbox, CalendarDays, ClipboardCheck, FlaskConical, LayoutDashboard, Megaphone, Repeat2, Settings, ShieldCheck, Sheet, Upload, Users, type LucideIcon } from 'lucide-react'
 
 /** The tab that carries the pending-approvals badge. */
 export const APPROVALS_HREF = '/actions'
@@ -13,6 +13,7 @@ export const TABS: readonly { href: string; label: string; icon: LucideIcon; pri
   { href: '/rotate', label: 'Rotate', icon: Repeat2 },
   { href: '/campaigns', label: 'Campaigns', icon: Megaphone, primary: true },
   { href: '/crm', label: 'CRM', icon: Users, primary: true },
+  { href: '/signals/hiring', label: 'Hiring Ops Signal', icon: BriefcaseBusiness },
   { href: '/agent', label: 'Agent', icon: Bot, primary: true },
   { href: '/playground', label: 'Playground', icon: FlaskConical },
   { href: '/actions', label: 'Approvals', icon: Inbox },
