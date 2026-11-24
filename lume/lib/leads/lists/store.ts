@@ -13,6 +13,7 @@ import {
   type ItemSource,
   type ListItem,
 } from '@/lib/leads/lists/model'
+import { toSheetStage, toStep, type PipelineStep, type SheetStage } from '@/lib/leads/steps'
 import { cellsCsvHeader, cellsCsvLine, chooseColumns, editCell, labelCells, MAX_CELL_KEYS, mergeColumns, pickCells, sendHeader, type Cells } from '@/lib/leads/columns'
 
 /**
@@ -47,6 +48,10 @@ export interface LeadList {
   updated_at: string
   /** The list's tag (lib/tags): its project's vertical unless the owner retagged it. */
   vertical_id?: string | null
+  /** GTM-18: which step the whole sheet sits at (imported 1, combined master 2, final sheet 3). */
+  sheet_stage: SheetStage
+  /** The lists a combined master or final sheet was built from. */
+  source_list_ids: string[]
 }
 
 export interface ListRow {
@@ -55,6 +60,10 @@ export interface ListRow {
   /** The row's values by column (blank where it lacks one). */
   cells: Cells
   source: ItemSource | null
+  /** GTM-18: the furthest step this lead reached (1–5) and its note ("excluded: vendor"). */
+  pipeline_step: PipelineStep
+  step_note: string | null
+  status: 'kept' | 'excluded'
 }
 
 export interface IncomingRow {
@@ -62,6 +71,10 @@ export interface IncomingRow {
   item: ListItem
   source: ItemSource
   cells: Cells
+  /** Defaults: step 1 (imported), no note, kept. */
+  step?: PipelineStep
+  step_note?: string | null
+  status?: 'kept' | 'excluded'
 }
 
 export interface AppendResult {
@@ -73,13 +86,13 @@ export interface AppendResult {
 }
 
 const db = () => createServiceClient()
-const COLS = 'id,title,notes,created_by,project_id,project_default,item_count,email_count,sent_ingest_id,sent_at,sent_rows,columns,all_columns,content_changed_at,sheet_kind,influencer_batch_id,created_at,updated_at,vertical_id'
+const COLS = 'id,title,notes,created_by,project_id,project_default,item_count,email_count,sent_ingest_id,sent_at,sent_rows,columns,all_columns,content_changed_at,sheet_kind,influencer_batch_id,created_at,updated_at,vertical_id,sheet_stage,source_list_ids'
 const CHUNK = 500
 
 type SetRow = Omit<LeadList, 'name'> & { title: string }
 const toList = (r: SetRow): LeadList => {
   const { title, ...rest } = r
-  return { ...rest, name: title, project_default: !!rest.project_default, item_count: rest.item_count ?? 0, email_count: rest.email_count ?? 0, columns: Array.isArray(rest.columns) ? rest.columns : [], all_columns: Array.isArray(rest.all_columns) ? rest.all_columns : [], sheet_kind: rest.sheet_kind === 'influencer_candidates' ? 'influencer_candidates' : 'leads', influencer_batch_id: rest.influencer_batch_id ?? null }
+  return { ...rest, name: title, project_default: !!rest.project_default, item_count: rest.item_count ?? 0, email_count: rest.email_count ?? 0, columns: Array.isArray(rest.columns) ? rest.columns : [], all_columns: Array.isArray(rest.all_columns) ? rest.all_columns : [], sheet_kind: rest.sheet_kind === 'influencer_candidates' ? 'influencer_candidates' : 'leads', influencer_batch_id: rest.influencer_batch_id ?? null, sheet_stage: toSheetStage(rest.sheet_stage), source_list_ids: Array.isArray(rest.source_list_ids) ? rest.source_list_ids : [] }
 }
 const lists = () => db().from('lead_review_sets')
 const items = () => db().from('lead_review_items')
@@ -95,6 +108,10 @@ export async function createList(input: {
   influencer_batch_id?: string | null
   item_count?: number
   conversation_id?: string | null
+  sheet_stage?: SheetStage
+  source_list_ids?: string[]
+  /** How a combined master or final sheet was made (key + overlay rule, or the filter), kept for the audit. */
+  stage_spec?: Json | null
 }): Promise<LeadList> {
   const { data, error } = await lists()
     .insert({
@@ -108,6 +125,7 @@ export async function createList(input: {
       project_default: !!input.project_default,
       sheet_kind: input.sheet_kind ?? 'leads',
       influencer_batch_id: input.influencer_batch_id ?? null,
+      ...(input.sheet_stage && input.sheet_stage !== 'imported' ? { sheet_stage: input.sheet_stage, source_list_ids: input.source_list_ids ?? [], stage_spec: input.stage_spec ?? null } : {}),
       source_conversation_id: input.conversation_id ?? null,
       item_count: input.item_count ?? 0,
       email_count: 0,
@@ -189,9 +207,11 @@ export async function projectDefaultList(projectId: string, projectName: string)
  * sent again.
  */
 export async function recount(listId: string, changed = false): Promise<{ item_count: number; email_count: number }> {
+  // item_count is every row (the Leads table pages over it and the cap counts it). A final sheet's dropouts
+  // (marked excluded, GTM-18) stay visible there but never count as sendable, and are never exported or sent.
   const all = await items().select('id', { count: 'exact', head: true }).eq('set_id', listId)
   if (all.error) throw all.error
-  const withEmail = await items().select('id', { count: 'exact', head: true }).eq('set_id', listId).not('email_key', 'is', null)
+  const withEmail = await items().select('id', { count: 'exact', head: true }).eq('set_id', listId).neq('status', 'excluded').not('email_key', 'is', null)
   if (withEmail.error) throw withEmail.error
   const counts = { item_count: all.count ?? 0, email_count: withEmail.count ?? 0 }
   const stamp = now()
@@ -322,7 +342,11 @@ async function appendLocked(listId: string, rows: readonly IncomingRow[], max: n
       if (k.email_key) added.emails.add(k.email_key)
       if (k.linkedin_key) added.linkedins.add(k.linkedin_key)
       if (k.name_key) added.names.add(k.name_key)
-      return { set_id: listId, idx: idx++, item: chunk[j].item as unknown as Json, raw: (chunk[j].raw ?? null) as Json, cells: pickCells(chunk[j].cells, allColumns) as Json, status: 'kept', source: chunk[j].source, ...k }
+      const r = chunk[j]
+      // GTM-18 status: written only when the caller sets it; other appends take the column default (step 1). The reads above need the GTM-18 migration, so it is applied before this ships.
+      const step = r.step !== undefined || r.step_note || r.status === 'excluded' ? { pipeline_step: r.step ?? 1, step_note: r.step_note ?? null } : {}
+      const excluded = r.status === 'excluded' ? { excluded_reason: r.step_note?.replace(/^excluded:\s*/i, '') || null } : {}
+      return { set_id: listId, idx: idx++, item: r.item as unknown as Json, raw: (r.raw ?? null) as Json, cells: pickCells(r.cells, allColumns) as Json, status: r.status ?? 'kept', source: r.source, ...step, ...excluded, ...k }
     })
     const put = await insertBatch(batch)
     out.added += put.inserted
@@ -344,7 +368,16 @@ const SORTABLE = /^[A-Za-z0-9_]{1,80}$/
 export const isSortable = (column: string) => SORTABLE.test(column)
 
 /** The generated, trigram-indexed search_text (lume_lead_items_search): name, first / last name, company, email, title, city, domain. */
-const asRow = (r: { idx: number; item: ListItem; cells: Cells | null; source: ItemSource | null }): ListRow => ({ ...r, cells: r.cells ?? labelCells(r.item) })
+type StoredRow = { idx: number; item: ListItem; cells: Cells | null; source: ItemSource | null; pipeline_step?: number | null; step_note?: string | null; status?: string | null }
+const asRow = (r: StoredRow): ListRow => ({
+  ...r,
+  cells: r.cells ?? labelCells(r.item),
+  pipeline_step: toStep(r.pipeline_step),
+  step_note: r.step_note ?? null,
+  status: r.status === 'excluded' ? 'excluded' : 'kept',
+})
+/** The columns a row read selects. */
+const ROW_COLS = 'idx,item,cells,source,pipeline_step,step_note,status'
 
 /**
  * One page of rows (a range on the (set_id, idx) index); `q` searches the
@@ -359,7 +392,7 @@ export async function pageItems(
   const size = Math.min(500, Math.max(1, opts.pageSize ?? 50))
   const searching = !!opts.q?.trim()
   const useKnown = !searching && opts.knownTotal !== undefined
-  let q = items().select('idx,item,cells,source', useKnown ? undefined : { count: 'exact' }).eq('set_id', listId)
+  let q = items().select(ROW_COLS, useKnown ? undefined : { count: 'exact' }).eq('set_id', listId)
   const term = opts.q?.trim().replace(/[%,()*\\]/g, ' ').trim()
   if (term) q = q.ilike('search_text', `%${term.toLowerCase()}%`)
   const sort = opts.sort && opts.sort !== 'idx' && isSortable(opts.sort) ? `cells->>${opts.sort}` : 'idx'
@@ -367,15 +400,15 @@ export async function pageItems(
   if (sort !== 'idx') q = q.order('idx', { ascending: true })
   const { data, error, count } = await q.range(page * size, page * size + size - 1)
   if (error) throw error
-  return { rows: ((data ?? []) as unknown as Parameters<typeof asRow>[0][]).map(asRow), total: useKnown ? opts.knownTotal! : (count ?? 0) }
+  return { rows: ((data ?? []) as unknown as StoredRow[]).map(asRow), total: useKnown ? opts.knownTotal! : (count ?? 0) }
 }
 
 /** Edit one cell; a helper field that showed the old value follows it, and so do the dedupe keys and the email count. null when the row is not there. */
 export async function updateCell(listId: string, idx: number, column: string, value: string): Promise<ListRow | null> {
-  const { data, error } = await items().select('idx,item,cells,source').eq('set_id', listId).eq('idx', idx).maybeSingle()
+  const { data, error } = await items().select(ROW_COLS).eq('set_id', listId).eq('idx', idx).maybeSingle()
   if (error) throw error
   if (!data) return null
-  const row = asRow(data as unknown as Parameters<typeof asRow>[0])
+  const row = asRow(data as unknown as StoredRow)
   const next = editCell(row.cells, row.item, column, value)
   const up = await items().update({ item: next.item as unknown as Json, cells: next.cells as Json, ...dedupeKeys(next.item) }).eq('set_id', listId).eq('idx', idx)
   if (up.error) throw up.error
@@ -387,10 +420,10 @@ export async function updateCell(listId: string, idx: number, column: string, va
 
 /** Edit helper fields of one row (the agent never does this; kept for the model's field edits). */
 export async function updateItem(listId: string, idx: number, patch: Partial<Record<EditableField, string | null>>): Promise<ListRow | null> {
-  const { data, error } = await items().select('idx,item,cells,source').eq('set_id', listId).eq('idx', idx).maybeSingle()
+  const { data, error } = await items().select(ROW_COLS).eq('set_id', listId).eq('idx', idx).maybeSingle()
   if (error) throw error
   if (!data) return null
-  const row = asRow(data as unknown as Parameters<typeof asRow>[0])
+  const row = asRow(data as unknown as StoredRow)
   const item = applyItemEdit(row.item, patch)
   const up = await items().update({ item: item as unknown as Json, ...dedupeKeys(item) }).eq('set_id', listId).eq('idx', idx)
   if (up.error) throw up.error
@@ -466,9 +499,9 @@ export async function* csvChunks(listId: string, pageSize = 1000): AsyncGenerato
   const columns = await visibleColumns(listId)
   yield cellsCsvHeader(columns) + '\n'
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await items().select('idx,item,cells,source').eq('set_id', listId).order('idx', { ascending: true }).range(from, from + pageSize - 1)
+    const { data, error } = await items().select(ROW_COLS).eq('set_id', listId).neq('status', 'excluded').order('idx', { ascending: true }).range(from, from + pageSize - 1)
     if (error) throw error
-    const page = ((data ?? []) as unknown as Parameters<typeof asRow>[0][]).map(asRow)
+    const page = ((data ?? []) as unknown as StoredRow[]).map(asRow)
     if (page.length) yield page.map((r) => cellsCsvLine(r.cells, columns)).join('\n') + '\n'
     if (page.length < pageSize) return
   }
@@ -498,9 +531,9 @@ export async function emailCsv(listId: string, pageSize = 1000, maxBytes = SEND_
   let bytes = headerLine.length + 1
   let rows = 0
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await items().select('idx,item,cells,source').eq('set_id', listId).not('email_key', 'is', null).order('idx', { ascending: true }).range(from, from + pageSize - 1)
+    const { data, error } = await items().select(ROW_COLS).eq('set_id', listId).neq('status', 'excluded').not('email_key', 'is', null).order('idx', { ascending: true }).range(from, from + pageSize - 1)
     if (error) throw error
-    const page = ((data ?? []) as unknown as Parameters<typeof asRow>[0][]).map(asRow)
+    const page = ((data ?? []) as unknown as StoredRow[]).map(asRow)
     for (const r of page) {
       const cells: Cells = {}
       header.forEach((h, i) => {

@@ -79,6 +79,27 @@ export function ReplyBadge({ status }: { status: PortalReplyStatus | null }) {
   )
 }
 
+/** GTM-18: where the lead is, as "# · name" ("2 · Combined"). Read-only, quiet: the reply badge stays the loud one. */
+export function StepBadge({ step }: { step?: string | null }) {
+  if (!step) return null
+  return (
+    <span className="inline-flex h-5 max-w-full shrink-0 items-center truncate rounded-full bg-secondary px-2 text-[11px] whitespace-nowrap text-fg-70 tabular-nums" title={step}>
+      <span className="sr-only">Status: </span>
+      {step}
+    </span>
+  )
+}
+
+/** A call-sheet business's star rating ("★ 4.6"), when known. */
+export function RatingMark({ rating }: { rating?: number | null }) {
+  if (rating == null) return null
+  return (
+    <span className="inline-flex items-center gap-0.5 text-[11.5px] text-fg-70 tabular-nums" aria-label={`Rated ${rating} out of 5`}>
+      <span aria-hidden>★</span> {rating.toFixed(1)}
+    </span>
+  )
+}
+
 /** Small muted "Opened" / "Replied" markers. */
 export function EngagementMarks({ lead }: { lead: Pick<PortalLead, 'opened' | 'replied'> }) {
   if (!lead.opened && !lead.replied) return null

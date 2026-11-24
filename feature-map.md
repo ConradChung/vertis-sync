@@ -87,6 +87,16 @@ stops blocking by itself once #2 merges.
 - **How to test:** `cd lume && npx vitest run tests/maps tests/components/MapsCard.test.tsx tests/mcp`.
 - **Good:** the scrape is only ever a `run_actor` pending action (Apify-capped at `ACTOR_RUN_CAP_USD`, paid add-ons off); nothing starts a run before Confirm, and MCP cannot file one (`run_actor` stays off `MCP_CREATABLE_KINDS`). Building the sheet reads a finished dataset (free) and creates one new lead list (step 1 · Imported), or nothing on a refusal.
 
+### Lead lists: pipeline steps, Combine, Filter → Final (GTM-18)
+- **Where:** `lume/lib/leads/steps.ts`, `lume/lib/leads/combine.ts`, `lume/lib/leads/finalFilter.ts`,
+  `lume/lib/leads/lists/{store,stages}.ts`, `lume/app/api/lead-lists/combine`, `lume/app/api/lead-lists/[id]/final`,
+  `lume/components/leads/{LeadsScreen,StageDialogs}.tsx`, `lume/components/shell/nav.ts`; migration `*_lume_pipeline_steps.sql`.
+- **How to test:** `cd lume && npx vitest run tests/leads/sheetSteps.test.ts tests/api/leadListStages.test.ts tests/api/leadListStagesSafety.test.ts tests/shell/navSteps.test.ts tests/components/LeadsScreen.test.tsx`.
+- **Good:** every row shows `# · Name` (1 Imported … 5 In campaign); Combine and Final save new
+  lists and never edit or delete the sources (sources only move their step forward); a final
+  sheet's excluded rows are never exported, sent to validation or counted in `email_count`;
+  nothing is sent, pushed or paid. Sharing a list with a portal user (`sheet_set_ids`) waits for Conrad's yes.
+
 ### Influencer reactions and signals (GTM-10/14)
 - **Where:** `lume/lib/influencers/`, `lume/lib/signal/`, `lume/app/api/influencers/*`,
   `lume/app/api/cron/signal-reactions`, `lume/app/api/cron/signal-alerts`, `lume/app/(app)/influencers/`;
@@ -128,7 +138,8 @@ stops blocking by itself once #2 merges.
 - **Where:** `lume/lib/operators/`, `lume/lib/portal/`, `lume/lib/slack/`,
   `lume/app/api/operators`, `lume/app/api/portal/*`, `lume/app/api/slack/*`,
   `lume/app/(app)/operator/`, `lume/app/(portal)/portal/`.
-- **How to test:** `cd lume && npx vitest run tests/operators tests/portal tests/slack`.
+- **How to test:** `cd lume && npx vitest run tests/operators tests/portal tests/slack tests/components/PortalLeadCard.test.tsx tests/components/PortalScreen.test.tsx`.
+- **Call sheets (GTM-18):** the portal `sheet` tab reads `lume_portal_sheet_leads` scoped to the user's `sheet_set_ids` (empty = no tab, no rows).
 - **Good:** an operator or portal user only sees their own zone/leads (masking holds);
   Slack events verify signatures _(guess: check `lume/lib/slack/` before relying on it)_.
 

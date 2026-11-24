@@ -25,7 +25,7 @@ export const SEARCH_LEADS_TOOL: Anthropic.Messages.Tool = {
   name: 'search_leads',
   description:
     "Search this team's call list (read-only). Returns matching leads with name, title, company, phone, email, location, region and campaign. " +
-    'q matches name, company, email, title, phone or city. tab "email" (default) is the email-campaign list; "linkedin" is the LinkedIn outreach list. limit is 1-20 (default 10).',
+    'q matches name, company, email, title, phone or city. tab "email" (default) is the email-campaign list; "linkedin" is the LinkedIn outreach list; "sheet" is the call sheets (businesses from Google Maps, with phone, rating and status). limit is 1-20 (default 10).',
   strict: true,
   input_schema: {
     type: 'object',
@@ -33,7 +33,7 @@ export const SEARCH_LEADS_TOOL: Anthropic.Messages.Tool = {
       q: { type: 'string', description: 'Free text: a name, company, title, email, phone or city.' },
       region: { type: 'string', description: 'Exact region name (email tab only).' },
       has_phone: { type: 'boolean', description: 'Only leads with a phone number.' },
-      tab: { type: 'string', enum: ['email', 'linkedin'] },
+      tab: { type: 'string', enum: ['email', 'linkedin', 'sheet'] },
       limit: { type: 'integer', description: 'How many leads to return, 1-20.' },
     },
     additionalProperties: false,
@@ -46,7 +46,7 @@ export const SearchLeadsInput = z
     q: z.string().max(200).optional(),
     region: z.string().max(100).optional(),
     has_phone: z.boolean().optional(),
-    tab: z.enum(['email', 'linkedin']).optional(),
+    tab: z.enum(['email', 'linkedin', 'sheet']).optional(),
     limit: z.number().int().optional(),
   })
   .strict()
@@ -108,6 +108,9 @@ function toolLead(l: PortalLead) {
     timezone: l.timezone,
     campaign: l.campaign,
     reply_status: l.reply_status,
+    ...(l.step ? { status: l.step } : {}),
+    ...(l.rating != null ? { rating: l.rating } : {}),
+    ...(l.category ? { category: l.category } : {}),
   }
 }
 

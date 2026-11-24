@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import useSWR, { preload } from 'swr'
 import { toast } from 'sonner'
-import { ArrowDown, ArrowUp, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, ClipboardPaste, Download, FolderPlus, ListPlus, Pencil, Plus, Send, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, ClipboardPaste, Combine, Download, Filter, FolderPlus, ListPlus, Pencil, Plus, Send, Trash2 } from 'lucide-react'
 import { fetchJson } from '@/hooks/fetcher'
 import { relTime } from '@/components/campaigns/CampaignTable'
 import { GlassCard } from '@/components/ui/glass-card'
@@ -20,6 +20,8 @@ import { LIST_COLUMNS, type EditableField, type ListItem } from '@/lib/leads/lis
 import { InfluencerSheet } from '@/components/leads/InfluencerSheet'
 import { TagChip } from '@/components/tags/TagChip'
 import { ExpandButton, SheetOverlay, scrollBoxClass, useSheetExpand } from '@/components/leads/SheetFrame'
+import { CombineDialog, FinalDialog } from '@/components/leads/StageDialogs'
+import { sheetStageLabel, stepLabel } from '@/lib/leads/steps'
 import { cn } from '@/lib/utils'
 
 /**
@@ -28,7 +30,9 @@ import { cn } from '@/lib/utils'
  * last change; right, the selected list (`?list=<id>`) as a paged, sortable,
  * searchable table with inline cell edits, row delete, add / paste rows,
  * Export CSV and Send to validator (an owner click with a confirm; it stops
- * at the usual ingest gate).
+ * at the usual ingest gate). GTM-18: each row shows its pipeline status
+ * ("3 · Filtered — excluded: vendor"), the header shows the sheet's stage,
+ * and Combine / Filter → Final save a new master or final sheet.
  */
 
 interface LeadListRow {
@@ -50,6 +54,8 @@ interface LeadListRow {
   influencer_batch_id?: string | null
   updated_at: string
   vertical_id?: string | null
+  /** GTM-18: imported sheet, combined master or final sheet. */
+  sheet_stage?: 'imported' | 'combined' | 'final'
 }
 interface Folder {
   id: string | null
@@ -58,7 +64,7 @@ interface Folder {
   lists: LeadListRow[]
 }
 interface Page {
-  rows: { idx: number; item: Partial<ListItem>; cells?: Record<string, string> | null; source: string | null }[]
+  rows: { idx: number; item: Partial<ListItem>; cells?: Record<string, string> | null; source: string | null; pipeline_step?: number | null; step_note?: string | null; status?: 'kept' | 'excluded' }[]
   total: number
 }
 
@@ -136,6 +142,10 @@ export function LeadsScreen() {
           page={Math.max(0, (Number(params.get('page')) || 1) - 1)}
           onPage={(p) => router.replace(`${pathname}?list=${selected.id}${p > 0 ? `&page=${p + 1}` : '&page=1'}`, { scroll: false })}
           onChanged={refresh}
+          onOpen={(id) => {
+            refresh()
+            select(id)
+          }}
           onDeleted={() => {
             refresh()
             router.replace(pathname, { scroll: false })
@@ -263,6 +273,7 @@ function ListPanel({
   page,
   onPage,
   onChanged,
+  onOpen,
   onDeleted,
 }: {
   list: LeadListRow
@@ -271,6 +282,8 @@ function ListPanel({
   page: number
   onPage: (page: number) => void
   onChanged: () => void
+  /** Open another list (a master or final sheet just saved). */
+  onOpen: (listId: string) => void
   onDeleted: () => void
 }) {
   const setPage = (p: number) => onPage(Math.max(0, p))
@@ -281,7 +294,7 @@ function ListPanel({
   const columns = list.columns?.length ? list.columns : LIST_COLUMNS.map((c) => c.label)
   const cellOf = (r: Page['rows'][number], c: string) => r.cells?.[c] ?? (list.columns?.length ? '' : ((r.item[LIST_COLUMNS.find((x) => x.label === c)?.key ?? 'name'] as string | null | undefined) ?? ''))
   const [picked, setPicked] = useState<Set<number>>(new Set())
-  const [dialog, setDialog] = useState<null | 'send' | 'delete' | 'rows' | 'paste' | 'add' | 'rename'>(null)
+  const [dialog, setDialog] = useState<null | 'send' | 'delete' | 'rows' | 'paste' | 'add' | 'rename' | 'combine' | 'final'>(null)
   const { expanded, toggle: toggleExpanded } = useSheetExpand()
   useEffect(() => {
     const t = setTimeout(() => {
@@ -309,6 +322,7 @@ function ListPanel({
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const toggleSort = (field: string) => setSort((s) => (s.field === field ? { field, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { field, dir: 'asc' }))
   const folderOptions = folders.map((f) => ({ value: f.id ?? '', label: f.name }))
+  const otherLists = folders.flatMap((f) => f.lists).filter((l) => l.id !== list.id && l.sheet_kind !== 'influencer_candidates')
 
   const saveCell = async (idx: number, column: string, value: string) => {
     try {
@@ -329,6 +343,7 @@ function ListPanel({
           </h2>
           <p className="flex flex-wrap items-center gap-x-1 text-[11.5px] text-fg-46">
             <TagChip table="lead_review_sets" id={list.id} verticalId={list.vertical_id} onChanged={onChanged} className="mr-1.5 text-[11.5px]" />
+            <span className="mr-1.5 rounded-full border border-line px-1.5 py-px text-[11px] text-fg-70">{sheetStageLabel(list.sheet_stage)}</span>
             {fmt.format(list.item_count)} rows · {fmt.format(list.email_count)} with an email
             {list.sent_at && ` · sent ${relTime(list.sent_at)} (${fmt.format(list.sent_rows ?? 0)} rows)`}
             {list.sent_job_id && (
@@ -356,6 +371,12 @@ function ListPanel({
             }
           }}
         />
+        <Button variant="outline" size="sm" onClick={() => setDialog('combine')} disabled={list.item_count < 1}>
+          <Combine className="size-3.5" /> Combine
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => setDialog('final')} disabled={list.item_count < 1}>
+          <Filter className="size-3.5" /> Filter → Final
+        </Button>
         <a href={`/api/lead-lists/${list.id}/export`} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}>
           <Download className="size-3.5" /> Export CSV
         </a>
@@ -417,12 +438,13 @@ function ListPanel({
                   )}
                 </TableHead>
               ))}
+              <TableHead className="whitespace-nowrap text-fg-46">Status</TableHead>
               <TableHead className="pr-4 text-fg-46">Source</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {(rows.data?.rows ?? []).map((r) => (
-              <TableRow key={r.idx}>
+              <TableRow key={r.idx} className={cn(r.status === 'excluded' && 'text-fg-46')}>
                 <TableCell className="pl-4">
                   <input
                     type="checkbox"
@@ -444,6 +466,9 @@ function ListPanel({
                     <EditableCell label={`${c}, row ${r.idx + 1}`} value={cellOf(r, c)} onSave={(v) => saveCell(r.idx, c, v)} />
                   </TableCell>
                 ))}
+                <TableCell className={cn('max-w-[260px] truncate whitespace-nowrap', r.status === 'excluded' ? 'text-amber' : 'text-fg-70')} title={stepLabel(r.pipeline_step, r.step_note)}>
+                  {stepLabel(r.pipeline_step, r.step_note)}
+                </TableCell>
                 <TableCell className="pr-4 text-fg-46">{r.source ?? '—'}</TableCell>
               </TableRow>
             ))}
@@ -502,6 +527,8 @@ function ListPanel({
           onChanged()
         }}
       />
+      <CombineDialog open={dialog === 'combine'} list={list} others={otherLists} projectId={list.project_id} onClose={() => setDialog(null)} onSaved={onOpen} />
+      <FinalDialog open={dialog === 'final'} list={list} onClose={() => setDialog(null)} onSaved={onOpen} />
       <PasteDialog open={dialog === 'paste'} onClose={() => setDialog(null)} onAppend={async (text) => appendReport(await api(`/api/lead-lists/${list.id}/items`, 'POST', { source: { kind: 'paste', text } }), reload)} />
       <AddRowDialog open={dialog === 'add'} onClose={() => setDialog(null)} onAdd={async (row) => appendReport(await api(`/api/lead-lists/${list.id}/items`, 'POST', { source: { kind: 'inline', rows: [row] } }), reload)} />
     </GlassCard>
