@@ -100,6 +100,23 @@ describe('combine (step 2)', () => {
     expect(sunset.cells.title).toBe('Sunset PM')
   })
 
+  it('auto keeps two people at one company as two rows (email, then LinkedIn); domain folds them into one', () => {
+    const people: CombineSheet = {
+      id: 'p',
+      name: 'People',
+      rows: [
+        { idx: 0, item: lead({ first_name: 'Ann', last_name: 'Lee', email: 'ann@sunsetpm.com' }), cells: { 'First Name': 'Ann', email: 'ann@sunsetpm.com' } },
+        { idx: 1, item: lead({ first_name: 'Ben', last_name: 'Ng', email: 'ben@sunsetpm.com' }), cells: { 'First Name': 'Ben', email: 'ben@sunsetpm.com' } },
+        { idx: 2, item: lead({ first_name: 'Cy', linkedin_url: 'https://www.linkedin.com/in/cy-r/' }), cells: { 'First Name': 'Cy' } },
+        { idx: 3, item: lead({ first_name: 'Cy', last_name: 'R', linkedin_url: 'linkedin.com/in/cy-r', phone: '7' }), cells: { 'First Name': 'Cy', phone: '7' } },
+      ],
+    }
+    const auto = combineSheets([people])
+    expect(auto.rows.map((r) => r.key)).toEqual(['email:ann@sunsetpm.com', 'email:ben@sunsetpm.com', 'linkedin:in/cy-r'])
+    expect(auto.rows[2].cells.phone).toBe('7')
+    expect(combineSheets([people], { key: 'domain' }).rows.map((r) => r.key)).toEqual(['domain:sunsetpm.com', null, null])
+  })
+
   it('duplicates inside one sheet merge too', () => {
     const one: CombineSheet = {
       id: 's',

@@ -36,6 +36,17 @@ const STAGE_ERRORS: Record<string, string> = {
   duplicate_list: 'A list was picked twice.',
   prefer_not_in_lists: 'The preferred list has to be one of the lists being combined.',
   folder_not_found: 'That folder no longer exists.',
+  over_list_cap: 'That master would have more than 20,000 rows, more than one list can hold. Combine fewer lists.',
+}
+
+type Appended = { added: number; duplicates: number; skipped: number; over_cap: number }
+
+/** "Saved "LA master" as the combined master: 1,204 rows (3 duplicates left out)." */
+export function savedText(name: string, what: string, a?: Appended): string {
+  const fmt = (n: number) => n.toLocaleString('en-US')
+  if (!a) return `Saved "${name}" as the ${what}.`
+  const left = [a.duplicates && `${fmt(a.duplicates)} duplicate${a.duplicates === 1 ? '' : 's'}`, a.skipped && `${fmt(a.skipped)} with no name, email or LinkedIn`, a.over_cap && `${fmt(a.over_cap)} over the list cap`].filter(Boolean)
+  return `Saved "${name}" as the ${what}: ${fmt(a.added)} row${a.added === 1 ? '' : 's'}${left.length ? ` (left out: ${left.join(', ')})` : ''}.`
 }
 
 export function stageErrorText(err: unknown): string {
@@ -108,8 +119,8 @@ export function CombineDialog({
         setStats((await post<{ stats: CombineStats }>('/api/lead-lists/combine', { ...body, preview: true })).stats)
         return
       }
-      const out = await post<{ list: { id: string } }>('/api/lead-lists/combine', { ...body, name: name.trim(), project_id: projectId })
-      toast.success(`Saved "${name.trim()}" as the combined master.`)
+      const out = await post<{ list: { id: string }; append?: Appended }>('/api/lead-lists/combine', { ...body, name: name.trim(), project_id: projectId })
+      toast.success(savedText(name.trim(), 'combined master', out.append))
       onSaved(out.list.id)
       onClose()
     } catch (err) {
@@ -156,9 +167,9 @@ export function CombineDialog({
               value={key}
               onValueChange={(v) => change(() => setKey(v as typeof key))}
               options={[
-                { value: 'auto', label: 'Domain, then email' },
-                { value: 'domain', label: 'Domain only' },
-                { value: 'email', label: 'Email only' },
+                { value: 'auto', label: 'Auto: companies by domain, people by email' },
+                { value: 'domain', label: 'Domain (one row per company)' },
+                { value: 'email', label: 'Email (one row per address)' },
               ]}
             />
           </label>
@@ -255,8 +266,8 @@ export function FinalDialog({ open, list, onClose, onSaved }: { open: boolean; l
         setPreview(await post<FinalPreview>(`/api/lead-lists/${list.id}/final`, { filter, preview: true }))
         return
       }
-      const out = await post<{ list: { id: string } }>(`/api/lead-lists/${list.id}/final`, { filter, name: name.trim() })
-      toast.success(`Saved "${name.trim()}" as the final sheet.`)
+      const out = await post<{ list: { id: string }; append?: Appended }>(`/api/lead-lists/${list.id}/final`, { filter, name: name.trim() })
+      toast.success(savedText(name.trim(), 'final sheet', out.append))
       onSaved(out.list.id)
       onClose()
     } catch (err) {

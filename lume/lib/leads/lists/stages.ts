@@ -3,7 +3,8 @@ import type { Json } from '@/lib/db/types'
 import { createServiceClient } from '@/lib/supabase/service'
 import { combineSheets, COMBINE_MAX_INPUT_ROWS, type CombineKey, type CombineResult, type OverlayRule } from '@/lib/leads/combine'
 import { planFinal, type FinalFilter, type FinalPlan } from '@/lib/leads/finalFilter'
-import { appendItems, createList, getList, type AppendResult, type LeadList, type ListRow } from '@/lib/leads/lists/store'
+import { appendItems, createList, deleteList, getList, type AppendResult, type LeadList, type ListRow } from '@/lib/leads/lists/store'
+import { LIST_MAX_ITEMS } from '@/lib/leads/lists/model'
 import type { Cells } from '@/lib/leads/columns'
 
 /**
@@ -83,7 +84,20 @@ async function planCombine(input: CombineInput): Promise<{ lists: LeadList[]; re
     budget -= rows.length
     sheets.push({ id: l.id, name: l.name, rows: rows.map((r) => ({ idx: r.idx, item: r.item, cells: r.cells ?? {} })) })
   }
-  return { lists, result: combineSheets(sheets, { key: input.key, rule: input.rule }) }
+  const result = combineSheets(sheets, { key: input.key, rule: input.rule })
+  // A list holds at most LIST_MAX_ITEMS rows; a bigger master would be cut short, so it is refused (preview too).
+  if (result.rows.length > LIST_MAX_ITEMS) throw new StageRefused('over_list_cap', 413)
+  return { lists, result }
+}
+
+/** Fill a just-made list; if that fails, the half-filled list is deleted so no stray master or final sheet is left behind. */
+async function fillOrDelete(listId: string, rows: Parameters<typeof appendItems>[1]): Promise<AppendResult> {
+  try {
+    return await appendItems(listId, rows)
+  } catch (e) {
+    await deleteList(listId).catch(() => false)
+    throw e
+  }
 }
 
 export async function previewCombine(input: CombineInput, sampleSize = 20): Promise<CombinePreview> {
@@ -103,13 +117,13 @@ export async function combineLists(
     name: input.name,
     created_by: input.created_by,
     project_id: input.project_id ?? null,
-    notes: `Combined from ${lists.map((l) => l.name).join(' + ')} on ${input.key === 'auto' ? 'domain, then email' : input.key}.`,
+    notes: `Combined from ${lists.map((l) => l.name).join(' + ')} on ${input.key === 'auto' ? 'domain for companies, email for people' : input.key}.`,
     sheet_stage: 'combined',
     source_list_ids: lists.map((l) => l.id),
     stage_spec: { key: input.key, rule: input.rule, stats: result.stats } as unknown as Json,
   })
   const names = new Map(lists.map((l) => [l.id, l.name]))
-  const append = await appendItems(
+  const append = await fillOrDelete(
     list.id,
     result.rows.map((r) => ({
       // The audit: which sheet rows this master row came from, and the columns that disagreed.
@@ -158,7 +172,7 @@ export async function makeFinal(
   const outcome = new Map(plan.rows.map((o) => [o.idx, o]))
   // Kept rows first, so the final sheet reads top-down as the campaign list; the excluded follow with their reasons.
   const ordered = [...rows].sort((a, b) => Number(!outcome.get(a.idx)!.kept) - Number(!outcome.get(b.idx)!.kept) || a.idx - b.idx)
-  const append = await appendItems(
+  const append = await fillOrDelete(
     final.id,
     ordered.map((r) => {
       const o = outcome.get(r.idx)!
@@ -177,22 +191,20 @@ export async function makeFinal(
   return { list: (await getList(final.id)) ?? final, kept: plan.kept, excluded: plan.excluded, reasons: plan.reasons, append }
 }
 
-/** The source rows reached step 3 too: move their status forward (never back), with the exclusion reason on the dropped ones. */
+/**
+ * The source rows reached step 3 too: move their step forward (never back).
+ * Only the step: the reason a row dropped lives on the final sheet, since
+ * another filter run over the same master may drop it for another reason.
+ */
 async function advanceSource(listId: string, plan: FinalPlan): Promise<void> {
-  const groups = new Map<string, number[]>()
-  for (const o of plan.rows) {
-    const k = o.note ?? ''
-    groups.set(k, [...(groups.get(k) ?? []), o.idx])
-  }
-  for (const [note, idxs] of groups) {
-    for (let i = 0; i < idxs.length; i += 500) {
-      const { error } = await db()
-        .from('lead_review_items')
-        .update({ pipeline_step: 3, step_note: note || null })
-        .eq('set_id', listId)
-        .in('idx', idxs.slice(i, i + 500))
-        .lt('pipeline_step', 3)
-      if (error) throw error
-    }
+  const idxs = plan.rows.map((o) => o.idx)
+  for (let i = 0; i < idxs.length; i += 500) {
+    const { error } = await db()
+      .from('lead_review_items')
+      .update({ pipeline_step: 3 })
+      .eq('set_id', listId)
+      .in('idx', idxs.slice(i, i + 500))
+      .lt('pipeline_step', 3)
+    if (error) throw error
   }
 }

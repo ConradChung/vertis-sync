@@ -11,7 +11,7 @@ import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useNow, usePortalLeads, usePortalLeadsInfinite } from '@/hooks/usePortal'
 import { cn } from '@/lib/utils'
 import type { PortalSort, PortalTab } from '@/lib/portal/types'
-import { filtersFromParams, portalHref, switchTab, type PortalFilters } from './query'
+import { defaultFilters, filtersFromParams, portalHref, switchTab, type PortalFilters } from './query'
 import { LeadCard } from './LeadCard'
 import { LeadsTable } from './LeadsTable'
 import { AgentPanel } from './AgentPanel'
@@ -87,8 +87,10 @@ export function PortalScreen() {
     [otherA]: a.data?.total,
     [otherB]: b.data?.total,
   } as Record<PortalTab, number | undefined>
-  // Call sheets only show once a sheet is shared with this client (or it is the open tab).
-  const tabs = TABS.filter((t) => t.tab !== 'sheet' || filters.tab === 'sheet' || (totals.sheet ?? 0) > 0)
+  // Call sheets only show once a sheet is shared with this client (or it is the open tab). Counted with no
+  // search, region or phone filter, so a search on another tab never hides the tab.
+  const anySheet = usePortalLeads({ ...defaultFilters('sheet'), hasPhone: false }, as)
+  const tabs = TABS.filter((t) => t.tab !== 'sheet' || filters.tab === 'sheet' || (anySheet.data?.total ?? 0) > 0)
 
   const data = active.data
   const regions = useMemo(() => {

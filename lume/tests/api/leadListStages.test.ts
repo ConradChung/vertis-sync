@@ -12,7 +12,8 @@ vi.mock('@/lib/agent/projects', () => ({ getProject: h.getProject, listProjects:
 
 import * as combineRoute from '@/app/api/lead-lists/combine/route'
 import * as finalRoute from '@/app/api/lead-lists/[id]/final/route'
-import { appendItems, createList, getList, pageItems } from '@/lib/leads/lists/store'
+import { appendItems, createList, csvChunks, emailCsv, getList, pageItems } from '@/lib/leads/lists/store'
+import { savedText } from '@/components/leads/StageDialogs'
 import { normaliseLead } from '@/lib/review/model'
 import { stepLabel } from '@/lib/leads/steps'
 import type { ListItem } from '@/lib/leads/lists/model'
@@ -110,12 +111,53 @@ describe('final route (step 3)', () => {
       ['Quiet PM', 'excluded', '3 · Filtered — excluded: no phone'],
     ])
     expect(rows[1].excluded_reason).toBe('vendor')
-    // The master shows how far each of its rows got.
-    expect(itemsOf(src).map((r) => stepLabel(r.pipeline_step, r.step_note as string | null))).toEqual(['3 · Filtered — excluded: vendor', '3 · Filtered', '3 · Filtered — excluded: no phone'])
+    // The master shows how far each of its rows got; why a row dropped lives on the final sheet only.
+    expect(itemsOf(src).map((r) => stepLabel(r.pipeline_step, r.step_note as string | null))).toEqual(['3 · Filtered', '3 · Filtered', '3 · Filtered'])
     // And a page read carries the status to the Leads table.
     const page = await pageItems(j.list.id, { page: 0, pageSize: 10 })
     expect(page.rows.map((r) => [r.pipeline_step, r.status])).toEqual([[3, 'kept'], [3, 'excluded'], [3, 'excluded']])
     expect((await getList(src))?.sheet_stage).toBe('imported')
+  })
+
+  it('the dropouts are never counted as sendable, exported or sent', async () => {
+    const src = await list('LA master', [
+      { name: 'Ace Supply', category: 'Hardware store', phone: '1', email: 'sales@ace.com' },
+      { name: 'Sunset PM', category: 'Property management company', phone: '2', email: 'hi@sunsetpm.com' },
+      { name: 'Quiet PM', category: 'Property management company', email: 'hi@quiet.com' },
+    ])
+    const j = await (await finalRoute.POST(req({ filter, name: 'LA final' }), ctx(src))).json()
+    const final = (await getList(j.list.id))!
+    // The table still shows all three rows; only one counts as sendable.
+    expect(final).toMatchObject({ item_count: 3, email_count: 1 })
+    let csv = ''
+    for await (const c of csvChunks(final.id)) csv += c
+    expect(csv).toContain('Sunset PM')
+    expect(csv).not.toContain('Ace Supply')
+    expect(csv).not.toContain('Quiet PM')
+    const send = await emailCsv(final.id)
+    expect(send.rows).toBe(1)
+    expect(send.csv).toContain('hi@sunsetpm.com')
+    expect(send.csv).not.toContain('sales@ace.com')
+  })
+
+  it('a second filter run over the same master leaves its rows at step 3 with no stale reason', async () => {
+    const src = await list('LA master', [
+      { name: 'Ace Supply', category: 'Hardware store', phone: '1' },
+      { name: 'Sunset PM', category: 'Property management company', phone: '2' },
+    ])
+    await finalRoute.POST(req({ filter, name: 'F1' }), ctx(src))
+    const j2 = await (await finalRoute.POST(req({ filter: { rules: [{ criteria: { categories_in: ['Property management company'] }, reason: 'not this time' }] }, name: 'F2' }), ctx(src))).json()
+    expect(itemsOf(src).map((r) => [r.pipeline_step, r.step_note ?? null])).toEqual([[3, null], [3, null]])
+    expect(itemsOf(j2.list.id).map((r) => [(r.item as ListItem).name, r.step_note])).toEqual([
+      ['Ace Supply', null],
+      ['Sunset PM', 'excluded: not this time'],
+    ])
+  })
+
+  it('the save toast says how many rows went in and what was left out', () => {
+    expect(savedText('LA final', 'final sheet', { added: 1204, duplicates: 3, skipped: 0, over_cap: 0 })).toBe('Saved "LA final" as the final sheet: 1,204 rows (left out: 3 duplicates).')
+    expect(savedText('M', 'combined master', { added: 1, duplicates: 0, skipped: 0, over_cap: 0 })).toBe('Saved "M" as the combined master: 1 row.')
+    expect(savedText('M', 'combined master')).toBe('Saved "M" as the combined master.')
   })
 
   it('never moves a row back, and refuses a filter that keeps nothing', async () => {

@@ -207,9 +207,11 @@ export async function projectDefaultList(projectId: string, projectName: string)
  * sent again.
  */
 export async function recount(listId: string, changed = false): Promise<{ item_count: number; email_count: number }> {
+  // item_count is every row (the Leads table pages over it and the cap counts it). A final sheet's dropouts
+  // (marked excluded, GTM-18) stay visible there but never count as sendable, and are never exported or sent.
   const all = await items().select('id', { count: 'exact', head: true }).eq('set_id', listId)
   if (all.error) throw all.error
-  const withEmail = await items().select('id', { count: 'exact', head: true }).eq('set_id', listId).not('email_key', 'is', null)
+  const withEmail = await items().select('id', { count: 'exact', head: true }).eq('set_id', listId).neq('status', 'excluded').not('email_key', 'is', null)
   if (withEmail.error) throw withEmail.error
   const counts = { item_count: all.count ?? 0, email_count: withEmail.count ?? 0 }
   const stamp = now()
@@ -341,7 +343,7 @@ async function appendLocked(listId: string, rows: readonly IncomingRow[], max: n
       if (k.linkedin_key) added.linkedins.add(k.linkedin_key)
       if (k.name_key) added.names.add(k.name_key)
       const r = chunk[j]
-      // GTM-18 status: only written when the caller sets it, so plain appends keep working before the migration (the column defaults to 1).
+      // GTM-18 status: written only when the caller sets it; other appends take the column default (step 1). The reads above need the GTM-18 migration, so it is applied before this ships.
       const step = r.step !== undefined || r.step_note || r.status === 'excluded' ? { pipeline_step: r.step ?? 1, step_note: r.step_note ?? null } : {}
       const excluded = r.status === 'excluded' ? { excluded_reason: r.step_note?.replace(/^excluded:\s*/i, '') || null } : {}
       return { set_id: listId, idx: idx++, item: r.item as unknown as Json, raw: (r.raw ?? null) as Json, cells: pickCells(r.cells, allColumns) as Json, status: r.status ?? 'kept', source: r.source, ...step, ...excluded, ...k }
@@ -497,7 +499,7 @@ export async function* csvChunks(listId: string, pageSize = 1000): AsyncGenerato
   const columns = await visibleColumns(listId)
   yield cellsCsvHeader(columns) + '\n'
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await items().select(ROW_COLS).eq('set_id', listId).order('idx', { ascending: true }).range(from, from + pageSize - 1)
+    const { data, error } = await items().select(ROW_COLS).eq('set_id', listId).neq('status', 'excluded').order('idx', { ascending: true }).range(from, from + pageSize - 1)
     if (error) throw error
     const page = ((data ?? []) as unknown as StoredRow[]).map(asRow)
     if (page.length) yield page.map((r) => cellsCsvLine(r.cells, columns)).join('\n') + '\n'
@@ -529,7 +531,7 @@ export async function emailCsv(listId: string, pageSize = 1000, maxBytes = SEND_
   let bytes = headerLine.length + 1
   let rows = 0
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await items().select(ROW_COLS).eq('set_id', listId).not('email_key', 'is', null).order('idx', { ascending: true }).range(from, from + pageSize - 1)
+    const { data, error } = await items().select(ROW_COLS).eq('set_id', listId).neq('status', 'excluded').not('email_key', 'is', null).order('idx', { ascending: true }).range(from, from + pageSize - 1)
     if (error) throw error
     const page = ((data ?? []) as unknown as StoredRow[]).map(asRow)
     for (const r of page) {

@@ -1,14 +1,17 @@
 import { domainOf } from '@/lib/apollo/records'
 import type { Cells } from '@/lib/leads/columns'
-import type { ListItem } from '@/lib/leads/lists/model'
+import { linkedinKey, type ListItem } from '@/lib/leads/lists/model'
 
 /**
  * Step 2 · Combined (pure): several sheets (lead lists) merged into one master
  * on a key, their columns overlaid.
  *
- *  - Key: `domain` (the row's domain, else its website's, else its email's),
- *    `email`, or `auto` = domain, falling back to email when a row has no
- *    domain. Rows with no key are kept as they are (never merged).
+ *  - Key: `domain` (the row's domain, else its website's, else its email's:
+ *    one row per company), `email` (one row per address), or `auto`: a
+ *    person row (first or last name, or a LinkedIn profile) keys on its
+ *    email, then its LinkedIn, so two people at one company stay two rows;
+ *    a business row keys on its domain, then its email. Rows with no key are
+ *    kept as they are (never merged).
  *  - Overlay: a blank cell is filled from a later row; a filled cell is never
  *    overwritten (`fill_blanks`, the default) unless the owner chose a sheet
  *    to prefer, whose non-blank values win over the others'.
@@ -76,8 +79,20 @@ export function rowDomain(item: ListItem): string | null {
 
 const FREE_MAIL = new Set(['gmail.com', 'googlemail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'live.com', 'icloud.com', 'me.com', 'aol.com', 'proton.me', 'protonmail.com', 'msn.com', 'comcast.net'])
 
+/** A person, not a business: it has a first or last name, or a LinkedIn profile (/in/). */
+export function isPersonRow(item: ListItem): boolean {
+  if (item.first_name?.trim() || item.last_name?.trim()) return true
+  return /linkedin\.com\/(in|pub)\//i.test(item.linkedin_url ?? '')
+}
+
 export function combineKey(item: ListItem, key: CombineKey): string | null {
   if (key === 'email') return emailOf(item) ? `email:${emailOf(item)}` : null
+  if (key === 'auto' && isPersonRow(item)) {
+    const e = emailOf(item)
+    if (e) return `email:${e}`
+    const li = linkedinKey(item.linkedin_url)
+    return li ? `linkedin:${li}` : null
+  }
   const d = rowDomain(item)
   if (d) return `domain:${d}`
   if (key === 'auto') {
