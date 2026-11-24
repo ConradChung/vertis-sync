@@ -64,7 +64,7 @@ const num = (v: unknown): number | null => {
 const bool = (v: unknown) => v === true || v === 'true'
 
 /** Hosts where many unrelated companies live on subdomains: key on the full host. */
-const PLATFORM_HOSTS = /(^|\.)(appfolio\.com|managebuilding\.com|buildium\.com|rentmanager\.com|propertyware\.com|rentcafe\.com|wixsite\.com|squarespace\.com|godaddysites\.com|weebly\.com|square\.site|wordpress\.com|business\.site|myshopify\.com|webflow\.io|carrd\.co|netlify\.app|vercel\.app)$/
+const PLATFORM_HOSTS = /(^|\.)(appfolio\.com|managebuilding\.com|buildium\.com|rentmanager\.com|propertyware\.com|rentcafe\.com|wixsite\.com|squarespace\.com|godaddysites\.com|weebly\.com|square\.site|wordpress\.com|myshopify\.com|webflow\.io|carrd\.co|netlify\.app|vercel\.app)$/
 
 /** A website that is not the company's own: social pages, directories, link pages, listing portals. */
 const NOT_OWN_SITE =

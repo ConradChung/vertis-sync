@@ -54,7 +54,17 @@ export async function fileMapsScrape(opts: MapsScrapeOptions, requestedBy: Pendi
   const plan = await planMapsScrape(opts)
   const built = await buildActionRequest({ kind: 'run_actor', payload: plan.request })
   if (!built.ok) throw new MapsError(built.status, built.error)
-  const payload = { ...built.payload, lane: 'gtm-12-google-maps', areas_count: plan.areas.length } as Record<string, Json> & { summary: string }
+  // An add-on opt-out the actor no longer defines falls back to the actor's default: say so where the owner confirms.
+  const dropped = plan.dropped_fields.length
+    ? `\nThe actor no longer has ${plan.dropped_fields.join(', ')}, so its defaults apply to them (the $${plan.request.max_charge_usd} cap still holds).`
+    : ''
+  const payload = {
+    ...built.payload,
+    summary: `${built.payload.summary}${dropped}`,
+    lane: 'gtm-12-google-maps',
+    areas_count: plan.areas.length,
+    dropped_fields: plan.dropped_fields,
+  } as Record<string, Json> & { summary: string }
   const action = await createAction(built.kind, payload, requestedBy)
   return { action, summary: payload.summary, plan }
 }

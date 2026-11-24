@@ -41,7 +41,8 @@ describe('fileMapsScrape', () => {
     const [kind, payload, by] = m.createAction.mock.calls[0]
     expect(kind).toBe('run_actor')
     expect(by).toBe('user')
-    expect(payload).toMatchObject({ lane: 'gtm-12-google-maps', areas_count: LA_COUNTY_AREAS.length })
+    expect(payload).toMatchObject({ lane: 'gtm-12-google-maps', areas_count: LA_COUNTY_AREAS.length, dropped_fields: ['maxQuestions'] })
+    expect(payload.summary).toContain('no longer has maxQuestions, so its defaults apply')
     expect(out.action.id).toBe('A1')
   })
   it('a run_actor refusal comes back as MapsError and files nothing', async () => {

@@ -1,7 +1,7 @@
 import 'server-only'
 import { ApifyError, datasetItems, getRun } from '@/lib/adapters/apify'
 import { DATASET_ID_RE } from '@/lib/apollo/source'
-import { appendItems, createList, type AppendResult } from '@/lib/leads/lists/store'
+import { appendItems, createList, deleteList, type AppendResult } from '@/lib/leads/lists/store'
 import type { ItemSource } from '@/lib/leads/lists/model'
 import { MapsError } from '@/lib/maps/errors'
 import { cleanPlaces, cleanSummary, isPmCategory, sheetRow, type CleanResult } from '@/lib/maps/places'
@@ -59,6 +59,8 @@ async function loadMapsItems(src: MapsSheetSource): Promise<{ items: Record<stri
     if (err instanceof ApifyError) {
       if (err.code === 'not_configured') throw new MapsError(503, 'apify_not_configured')
       if (err.code === 'not_found') throw new MapsError(404, 'not_found')
+      if (err.code === 'too_large') throw new MapsError(422, 'dataset_too_large')
+      if (err.code === 'upstream' || err.code === 'timeout') throw new MapsError(502, 'apify_unavailable')
     }
     throw err
   }
@@ -91,7 +93,14 @@ export async function buildMapsSheet(
     .filter(Boolean)
     .join('\n')
   const list = await createList({ name, notes, created_by: opts.by })
-  const append = await appendItems(list.id, clean.kept.map((p) => sheetRow(p, source)))
+  let append: AppendResult
+  try {
+    append = await appendItems(list.id, clean.kept.map((p) => sheetRow(p, source)))
+  } catch (err) {
+    // The list was created by this call: take it back so a retry starts clean.
+    await deleteList(list.id).catch(() => undefined)
+    throw err
+  }
   return {
     list_id: list.id,
     list_name: list.name,

@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/supabase/service', () => ({ createServiceClient: () => { throw new Error('no db in tests') } }))
-const m = vi.hoisted(() => ({ getRun: vi.fn(), datasetItems: vi.fn(), createList: vi.fn(), appendItems: vi.fn() }))
+const m = vi.hoisted(() => ({ getRun: vi.fn(), datasetItems: vi.fn(), createList: vi.fn(), appendItems: vi.fn(), deleteList: vi.fn() }))
 vi.mock('@/lib/adapters/apify', async (orig) => ({ ...(await orig<object>()), getRun: m.getRun, datasetItems: m.datasetItems }))
-vi.mock('@/lib/leads/lists/store', () => ({ createList: m.createList, appendItems: m.appendItems }))
+vi.mock('@/lib/leads/lists/store', () => ({ createList: m.createList, appendItems: m.appendItems, deleteList: m.deleteList }))
 
 import { ApifyError } from '@/lib/adapters/apify'
 import { MapsError } from '@/lib/maps/errors'
@@ -77,6 +77,22 @@ describe('buildMapsSheet', () => {
     expect(await code(buildMapsSheet({}, { by: 'owner' }))).toBe('400 pass run_id or dataset_id')
     expect(m.createList).not.toHaveBeenCalled()
     expect(m.appendItems).not.toHaveBeenCalled()
+  })
+})
+
+describe('buildMapsSheet failures after the list exists', () => {
+  it('a failed append takes the new list back and rethrows', async () => {
+    m.datasetItems.mockResolvedValue({ items: [place()], truncated: false })
+    m.appendItems.mockRejectedValue(new Error('db down'))
+    m.deleteList.mockResolvedValue(true)
+    await expect(buildMapsSheet({ run_id: RUN }, { by: 'owner' })).rejects.toThrow('db down')
+    expect(m.deleteList).toHaveBeenCalledWith('L1')
+  })
+  it('an oversized or unreachable dataset is a clear refusal', async () => {
+    m.datasetItems.mockRejectedValueOnce(new ApifyError('too_large', 413, 'big'))
+    expect(await code(buildMapsSheet({ run_id: RUN }, { by: 'owner' }))).toBe('422 dataset_too_large')
+    m.datasetItems.mockRejectedValueOnce(new ApifyError('upstream', 502, 'x'))
+    expect(await code(buildMapsSheet({ run_id: RUN }, { by: 'owner' }))).toBe('502 apify_unavailable')
   })
 })
 

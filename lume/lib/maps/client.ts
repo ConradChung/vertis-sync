@@ -43,6 +43,8 @@ const MESSAGES: Record<string, string> = {
   not_a_maps_dataset: "That run isn't a Google Maps scrape.",
   list_busy: 'The list is busy — try again in a moment.',
   bad_run_id: 'Enter a valid Apify run id.',
+  dataset_too_large: 'That dataset is too big to read in one go.',
+  apify_unavailable: 'Apify did not answer — try again in a minute.',
 }
 
 export function mapsErrorMessage(a: Pick<ApiAnswer, 'status' | 'body' | 'aborted'>): string {
