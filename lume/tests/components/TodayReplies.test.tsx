@@ -173,6 +173,13 @@ describe('Pilot on the deal card and sheet', () => {
     rerender(<PilotLine deal={{ ...base, stage: 'Replied', pilot_start_date: null }} now={NOW} />)
     expect(container.querySelector('[data-testid="pilot-line"]')).toBeNull()
   })
+  it('a deal that left Pilot (Paid) shows its unticked check-ins as not done, never as due', () => {
+    const { container } = render(<PilotLine deal={{ ...base, stage: 'Paid', pilot_start_date: '2026-10-01', pilot_checkin_10_done_at: '2026-10-11T18:00:00Z' }} now={NOW} />)
+    expect(container.querySelector('[data-tone="due"]')).toBeNull()
+    expect(container.textContent).toContain('Day 10 done')
+    expect(container.textContent).toContain('Day 25 · not done')
+    expect(container.innerHTML).not.toContain('bg-primary')
+  })
   it('the sheet ticks a check-in and the referral flag through the deal patch', () => {
     const onSave = vi.fn()
     render(<PilotPanel deal={base} busy={false} onSave={onSave} />)

@@ -11,7 +11,13 @@ import { cn } from '@/lib/utils'
 export const hasPilot = (d: PilotFields) => d.stage === 'Pilot' || isDate(d.pilot_start_date)
 
 const checkinText = (c: Checkin) =>
-  c.state === 'done' ? `Day ${c.day} done` : c.state === 'due' ? `Day ${c.day} due${c.days_late > 0 ? ` · ${c.days_late} d late` : ' today'}` : `Day ${c.day} · ${shortDate(c.due_date)}`
+  c.state === 'done'
+    ? `Day ${c.day} done`
+    : c.state === 'due'
+      ? `Day ${c.day} due${c.days_late > 0 ? ` · ${c.days_late} d late` : ' today'}`
+      : c.state === 'not_done'
+        ? `Day ${c.day} · not done`
+        : `Day ${c.day} · ${shortDate(c.due_date)}`
 
 function Chip({ tone, children, title }: { tone: 'done' | 'due' | 'quiet'; children: React.ReactNode; title?: string }) {
   return (

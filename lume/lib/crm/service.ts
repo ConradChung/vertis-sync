@@ -198,7 +198,8 @@ export async function setStage(
   // A deal entering Pilot starts its pilot today unless a start date is already set (the owner can change it).
   if (from !== null && stage === 'Pilot') {
     const stamp = await sb.from('crm_deals').update({ pilot_start_date: ownerDate(new Date()) }).eq('id', dealId).is('pilot_start_date', null)
-    if (stamp.error) fail('setStage.pilotStart', stamp.error)
+    // The move itself is done and logged; a failed stamp must not turn it into an error (the owner can set the date in the sheet).
+    if (stamp.error) console.error('[crm] pilot start date not stamped:', stamp.error.message)
   }
   return from
 }

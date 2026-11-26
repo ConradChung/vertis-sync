@@ -37,7 +37,8 @@ export function pilotDay(start: string | null, today: string): number | null {
   return isDate(start) ? daysBetween(start, today) : null
 }
 
-export type CheckinState = 'done' | 'due' | 'upcoming'
+/** `not_done`: unticked on a deal that is no longer in Pilot, so nothing is owed. */
+export type CheckinState = 'done' | 'due' | 'upcoming' | 'not_done'
 
 export interface Checkin {
   day: CheckinDay
@@ -50,7 +51,11 @@ export interface Checkin {
 
 const doneAt = (d: PilotFields, day: CheckinDay) => (day === 10 ? d.pilot_checkin_10_done_at : d.pilot_checkin_25_done_at)
 
-/** Both check-ins of a deal with a start date; [] without one. */
+/**
+ * Both check-ins of a deal with a start date; [] without one. A check-in is
+ * only ever `due` while the deal is in Pilot: once it leaves (Paid, Lost,
+ * back to Demo) an unticked one reads `not_done` and is never late.
+ */
 export function pilotCheckins(d: PilotFields, today: string): Checkin[] {
   const start = d.pilot_start_date
   if (!isDate(start)) return []
@@ -58,7 +63,7 @@ export function pilotCheckins(d: PilotFields, today: string): Checkin[] {
     const due = addDays(start, day)
     const done = doneAt(d, day)
     const late = daysBetween(due, today)
-    const state: CheckinState = done ? 'done' : late >= 0 ? 'due' : 'upcoming'
+    const state: CheckinState = done ? 'done' : d.stage !== 'Pilot' ? 'not_done' : late >= 0 ? 'due' : 'upcoming'
     return { day, due_date: due, done_at: done, state, days_late: state === 'due' ? late : 0 }
   })
 }
@@ -73,12 +78,11 @@ export interface CheckinDue<T> {
 /**
  * Check-ins that need doing now: the deal is in Pilot, the check-in's day has
  * come and it is not ticked. A deal that left Pilot (Paid, Lost, back to
- * Demo) owes none. Most overdue first.
+ * Demo) owes none (`pilotCheckins` never reports `due` for it). Most overdue first.
  */
 export function checkinsDue<T extends PilotFields>(deals: readonly T[], today: string): CheckinDue<T>[] {
   const out: CheckinDue<T>[] = []
   for (const deal of deals) {
-    if (deal.stage !== 'Pilot') continue
     for (const c of pilotCheckins(deal, today)) {
       if (c.state === 'due') out.push({ deal, day: c.day, due_date: c.due_date, days_late: c.days_late })
     }

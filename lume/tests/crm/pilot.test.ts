@@ -47,6 +47,16 @@ describe('pilotCheckins', () => {
     expect(c[0]).toMatchObject({ state: 'done', days_late: 0, done_at: '2026-11-12T18:00:00Z' })
     expect(c[1].state).toBe('due')
   })
+  it('a deal that left Pilot never has a check-in due: unticked ones read not_done, ticked ones stay done', () => {
+    for (const stage of ['Paid', 'Lost', 'Demo', 'Conversation', 'Won']) {
+      const c = pilotCheckins(deal({ stage, pilot_start_date: '2026-10-01' }), '2026-11-10') // 40 days in
+      expect(c.map((x) => [x.state, x.days_late]), stage).toEqual([['not_done', 0], ['not_done', 0]])
+    }
+    const paid = pilotCheckins(deal({ stage: 'Paid', pilot_start_date: '2026-10-01', pilot_checkin_10_done_at: '2026-10-11T18:00:00Z' }), '2026-11-10')
+    expect(paid.map((x) => x.state)).toEqual(['done', 'not_done'])
+    // Back in Pilot, the same unticked check-in is due again.
+    expect(pilotCheckins(deal({ stage: 'Pilot', pilot_start_date: '2026-10-01' }), '2026-11-10').map((x) => x.state)).toEqual(['due', 'due'])
+  })
   it('no start date, no check-ins', () => {
     expect(pilotCheckins(deal({ pilot_start_date: null }), '2026-11-28')).toEqual([])
     expect(pilotCheckins(deal({ pilot_start_date: 'soon' }), '2026-11-28')).toEqual([])
