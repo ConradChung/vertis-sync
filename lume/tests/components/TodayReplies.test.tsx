@@ -39,6 +39,10 @@ describe('WaitChip', () => {
     expect(container.querySelector('[data-overdue]')).toBeNull()
     rerender(<WaitChip since="2026-11-26T18:45:00Z" now={NOW} />)
     expect(container.querySelector('[data-overdue]')?.textContent).toContain('1 h 15 min')
+    // Flagged takes the one accent; not flagged stays grey.
+    expect(container.querySelector('[data-overdue]')?.className).toContain('bg-primary')
+    rerender(<WaitChip since="2026-11-26T19:20:00Z" now={NOW} />)
+    expect(container.querySelector('[data-wait]')?.className).not.toContain('bg-primary')
   })
 })
 
@@ -120,6 +124,8 @@ describe('TodayScreen (/today)', () => {
     expect(group('Replies waiting over an hour').querySelector('[data-overdue]')?.textContent).toContain('2 h 30 min')
     expect(within(group('Pilot check-ins due')).getByText('Kaspen — day 10')).toBeTruthy()
     expect(within(group('Pilot check-ins due')).getByText(/2 d late/)).toBeTruthy()
+    expect(group('Pilot check-ins due').querySelectorAll('[data-late]')).toHaveLength(1)
+    expect(group('Tasks').querySelector('[data-late]')).toBeNull()
     expect(within(group('Signal accounts not yet touched')).getByText('Acme PM')).toBeTruthy()
     expect(group('Signal accounts not yet touched').querySelector('[data-count]')?.textContent).toBe('12')
     expect(within(group('Tasks')).getByText('Send Frank the recap')).toBeTruthy()
@@ -136,6 +142,11 @@ describe('TodayScreen (/today)', () => {
     const call = fetch.mock.calls.find(([u]) => u === '/api/crm/deals/d1') as unknown as [string, RequestInit]
     expect(call[1].method).toBe('PATCH')
     expect(JSON.parse(String(call[1].body))).toEqual({ pilot_checkin_10_done: true })
+  })
+  it('an overdue task shows the date it was due in the owner zone, not UTC', () => {
+    const late = { ...payload, queue: { ...payload.queue, tasks: [{ ...payload.queue.tasks[0], due_at: '2026-11-26T01:00:00Z', overdue: true }] } } // 5 pm Pacific on Nov 25
+    wrap(<TodayScreen initial={late} />)
+    expect(within(screen.getByRole('region', { name: 'Tasks' })).getByText('overdue since Nov 25')).toBeTruthy()
   })
   it('an empty queue reads clear, and a failed section is named', () => {
     wrap(<TodayScreen initial={{ today: '2026-11-26', scoreboard: null, errors: ['signals'], queue: { signals: { items: [], total: 0 }, replies: { items: [], open: 0 }, checkins: [], tasks: [] } }} />)

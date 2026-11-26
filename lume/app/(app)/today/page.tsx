@@ -14,7 +14,7 @@ export default async function TodayPage() {
   if (!auth.ok) notFound()
   return (
     <>
-      <PageHead eyebrow="Path to paid" title="Today" sub="This week's score, then what needs you now." />
+      <PageHead title="Today" />
       <TodayScreen initial={await loadToday()} />
     </>
   )

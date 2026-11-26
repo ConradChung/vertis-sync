@@ -22,9 +22,7 @@ export default async function RepliesPage() {
   return (
     <>
       <PageHead
-        eyebrow="Waiting on you"
         title="Replies"
-        sub="Positive replies and pending approvals, longest wait first. Flagged once past an hour."
         actions={
           <Link href="/actions" className="text-[13px] text-fg-70 hover:text-fg">
             Approval history

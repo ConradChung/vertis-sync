@@ -75,7 +75,9 @@ describe('install link and OAuth state', () => {
   })
   it('a forged, altered or other-key link is refused', () => {
     const t = signInstallLink(KEY, { expiresAt: now + 60_000, nonce: 'n1' })
-    expect(verifyInstallLink(t.replace(/.$/, (c) => (c === 'A' ? 'B' : 'A')), KEY, now).ok).toBe(false)
+    // Alter a character before the end: the last base64url character can carry unused bits, so changing it may decode to the same bytes.
+    const i = t.length - 3
+    expect(verifyInstallLink(t.slice(0, i) + (t[i] === 'A' ? 'B' : 'A') + t.slice(i + 1), KEY, now).ok).toBe(false)
     expect(verifyInstallLink(t, randomBytes(32).toString('base64'), now).ok).toBe(false)
     expect(verifyInstallLink('garbage', KEY, now).ok).toBe(false)
     expect(verifyInstallLink('', KEY, now).ok).toBe(false)

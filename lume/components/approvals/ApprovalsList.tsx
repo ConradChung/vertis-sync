@@ -43,8 +43,8 @@ export function ApprovalsList({ initial }: { initial: PendingResponse }) {
   )
 }
 
-/** `wait` (the /replies list): a waiting timer shown in place of the plain age. */
-export function ApprovalRow({ item, now = new Date(), onDecided, wait, className = 'rounded-2xl' }: { item: ApprovalItem; now?: Date; onDecided?: () => void; wait?: ReactNode; className?: string }) {
+/** `wait` (the /replies list): a waiting timer shown in place of the plain age. `className` replaces the row's own card (the /replies surface passes none). */
+export function ApprovalRow({ item, now = new Date(), onDecided, wait, className = 'glass rounded-2xl px-4 py-3' }: { item: ApprovalItem; now?: Date; onDecided?: () => void; wait?: ReactNode; className?: string }) {
   const router = useRouter()
   const [busy, setBusy] = useState<Decision | null>(null)
 
@@ -60,7 +60,7 @@ export function ApprovalRow({ item, now = new Date(), onDecided, wait, className
   }
 
   return (
-    <li className={cn('glass flex flex-col gap-2 px-4 py-3', className)} data-kind={item.kind}>
+    <li className={cn('flex flex-col gap-2', className)} data-kind={item.kind}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <span className="eyebrow">{item.label}</span>
         {wait ? (

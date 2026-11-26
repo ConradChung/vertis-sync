@@ -5,17 +5,19 @@ import type { Scoreboard as Board } from '@/lib/scoreboard/count'
 import { sendJson } from '@/lib/validate/client'
 import { cn } from '@/lib/utils'
 
-const STATS: { key: keyof Board['counts']; label: string; hint: string }[] = [
-  { key: 'conversations', label: 'Conversations', hint: 'Deals that entered Conversation' },
-  { key: 'pilots_started', label: 'Pilots started', hint: 'Pilot start date this week' },
-  { key: 'pilots_paid', label: 'Pilots paid', hint: 'Deals that entered Paid' },
+const STATS: { key: keyof Board['counts']; label: string }[] = [
+  { key: 'conversations', label: 'Conversations' },
+  { key: 'pilots_started', label: 'Pilots started' },
+  { key: 'pilots_paid', label: 'Pilots paid' },
 ]
 
 /**
  * This week's scoreboard: three counts from the CRM and the one line the
  * owner types, "top objection". `editable` (the owner's /today) saves the
  * line on blur or Enter; the client portal shows it read-only.
- * Radii nest: 28px card − 20px padding = 8px field.
+ *
+ * It draws no surface of its own: the page's one surface holds it, and
+ * spacing sets it apart. The numbers are plain (no accent colour).
  */
 export function Scoreboard({ board, editable = false, onSaved, className }: { board: Board; editable?: boolean; onSaved?: (text: string | null) => void; className?: string }) {
   const saved = board.top_objection ?? ''
@@ -39,30 +41,27 @@ export function Scoreboard({ board, editable = false, onSaved, className }: { bo
   }
 
   return (
-    <section aria-label={`Scoreboard, week of ${board.week.label}`} className={cn('glass flex flex-col gap-5 rounded-[28px] p-5', className)}>
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="eyebrow">This week</h2>
-        <span className="font-mono text-[11.5px] text-fg-46">{board.week.label}</span>
+    <section aria-label={`Scoreboard, week of ${board.week.label}`} className={cn('flex flex-col gap-6', className)}>
+      <div className="flex items-baseline justify-between gap-4">
+        <h2 className="text-[15px] font-medium text-fg">This week</h2>
+        <span className="font-mono text-[12px] text-fg-46">{board.week.label}</span>
       </div>
-      <dl className="grid grid-cols-3 gap-3">
-        {STATS.map((s) => {
-          const n = board.counts[s.key]
-          return (
-            <div key={s.key} title={s.hint} className="flex flex-col gap-1">
-              <dd data-stat={s.key} className={cn('font-mono text-[40px] leading-none font-medium tabular-nums max-sm:text-[32px]', n > 0 ? 'text-primary light:text-fg' : 'text-fg-46')}>
-                {n}
-              </dd>
-              <dt className="text-[12.5px] text-fg-70">{s.label}</dt>
-            </div>
-          )
-        })}
+      <dl className="grid grid-cols-3 gap-4">
+        {STATS.map((s) => (
+          <div key={s.key} className="flex flex-col gap-2">
+            <dd data-stat={s.key} className="font-mono text-[40px] leading-none font-medium text-fg tabular-nums max-sm:text-[32px]">
+              {board.counts[s.key]}
+            </dd>
+            <dt className="text-[13px] text-fg-46">{s.label}</dt>
+          </div>
+        ))}
       </dl>
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="top-objection" className="text-[12.5px] text-fg-70">
+      <div className="flex flex-col gap-2">
+        <label htmlFor="top-objection" className="text-[13px] text-fg-46">
           Top objection
         </label>
         {editable ? (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <input
               id="top-objection"
               value={text}
@@ -76,9 +75,9 @@ export function Scoreboard({ board, editable = false, onSaved, className }: { bo
               onKeyDown={(e) => {
                 if (e.key === 'Enter') e.currentTarget.blur()
               }}
-              className="h-9 min-w-0 flex-1 rounded-lg bg-secondary px-3 text-[14px] text-fg outline-none placeholder:text-fg-46 focus-visible:ring-2 focus-visible:ring-ring"
+              className="h-10 min-w-0 flex-1 rounded-lg bg-secondary px-3 text-[14px] text-fg outline-none placeholder:text-fg-46 focus-visible:ring-2 focus-visible:ring-ring"
             />
-            <span aria-live="polite" className="w-12 shrink-0 font-mono text-[11px] text-fg-46">
+            <span aria-live="polite" className="w-16 shrink-0 font-mono text-[11px] text-fg-46">
               {state === 'saving' ? 'Saving' : state === 'saved' ? 'Saved' : state === 'error' ? 'Not saved' : ''}
             </span>
           </div>

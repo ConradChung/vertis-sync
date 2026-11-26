@@ -7,6 +7,7 @@ import { ArrowRight, Check, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { WaitChip } from '@/components/replies/WaitChip'
+import { Surface } from '@/components/shell/Surface'
 import { Scoreboard } from '@/components/today/Scoreboard'
 import { fetchJson } from '@/hooks/fetcher'
 import { useRealtimeInvalidate } from '@/hooks/useRealtimeInvalidate'
@@ -14,7 +15,7 @@ import { patchDeal } from '@/lib/crm/client'
 import { shortDate } from '@/lib/crm/pilot'
 import { createTask, patchTask, taskErrorText } from '@/lib/tasks/client'
 import type { TodayPayload } from '@/lib/today/types'
-import { OWNER_TZ } from '@/lib/time/owner'
+import { OWNER_TZ, ownerDate } from '@/lib/time/owner'
 import { cn } from '@/lib/utils'
 
 export const TODAY_KEY = '/api/today'
@@ -27,6 +28,9 @@ const SECTION_WORDS: Record<string, string> = { scoreboard: 'the scoreboard', si
  * signal accounts not yet touched, positive replies waiting over an hour,
  * pilot check-ins due and the Calendar's tasks for today. Ticking a check-in
  * or a task is a note on Lume's own rows; nothing here sends or spends.
+ *
+ * One surface: the scoreboard and each queue are sections set apart by
+ * space. The accent colour marks only what is late.
  */
 export function TodayScreen({ initial }: { initial: TodayPayload }) {
   const { data = initial, mutate } = useSWR<TodayPayload>(TODAY_KEY, fetchJson, { fallbackData: initial, refreshInterval: 60_000, revalidateOnFocus: true })
@@ -59,33 +63,16 @@ export function TodayScreen({ initial }: { initial: TodayPayload }) {
   }
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)] lg:items-start">
-      <div className="flex flex-col gap-3 lg:sticky lg:top-[calc(var(--topbar-h)+1.25rem)]">
-        {data.scoreboard ? (
-          <Scoreboard board={data.scoreboard} editable onSaved={() => void mutate()} />
-        ) : (
-          <p className="glass rounded-3xl px-4 py-6 text-[13px] text-fg-46">The scoreboard could not load. Refresh to try again.</p>
-        )}
-        <nav aria-label="More" className="flex flex-wrap gap-x-4 gap-y-1 px-1 text-[12.5px] text-fg-46">
-          <Link href="/overview" className="hover:text-fg">
-            Overview
-          </Link>
-          <Link href="/calendar" className="hover:text-fg">
-            Calendar
-          </Link>
-          <Link href="/crm" className="hover:text-fg">
-            Pipeline
-          </Link>
-        </nav>
-      </div>
+    <Surface className="max-w-[880px]">
+      {data.scoreboard ? <Scoreboard board={data.scoreboard} editable onSaved={() => void mutate()} /> : <p className="text-[13px] text-fg-46">The scoreboard could not load. Refresh to try again.</p>}
 
-      <section aria-label="Do now" className="flex flex-col gap-3">
-        <div className="flex items-baseline justify-between gap-3 px-1">
+      <section aria-label="Do now" className="flex flex-col gap-10">
+        <div className="flex items-baseline justify-between gap-4">
           <h2 className="text-[15px] font-medium text-fg">Do now</h2>
           <span className="font-mono text-[12px] text-fg-46">{total === 0 ? 'clear' : `${total} waiting`}</span>
         </div>
         {data.errors.length > 0 && (
-          <p role="status" className="glass rounded-3xl px-4 py-2.5 text-[12.5px] text-fg-70">
+          <p role="status" className="text-[13px] text-fg-70">
             Could not load {data.errors.map((e) => SECTION_WORDS[e] ?? e).join(', ')}. The rest is current.
           </p>
         )}
@@ -93,7 +80,7 @@ export function TodayScreen({ initial }: { initial: TodayPayload }) {
         <Group title="Replies waiting over an hour" count={q.replies.items.length} href="/replies" linkLabel={q.replies.open > 0 ? `All ${q.replies.open} open` : 'Replies'} empty={q.replies.open > 0 ? `${q.replies.open} open, none past the hour.` : 'No positive replies waiting.'}>
           {q.replies.items.map((r) => (
             <Row key={r.reply_to_uuid} title={r.lead_name ?? r.lead_email} detail={[r.company, r.untrusted_excerpt ? `“${r.untrusted_excerpt}”` : null].filter(Boolean).join(' · ')} right={<WaitChip since={r.received_at} now={now} />}>
-              <Link href="/replies" className="text-[12.5px] text-fg-70 hover:text-fg">
+              <Link href="/replies" className="text-[13px] text-fg-70 hover:text-fg">
                 Open
               </Link>
             </Row>
@@ -106,12 +93,12 @@ export function TodayScreen({ initial }: { initial: TodayPayload }) {
               key={`${c.deal_id}:${c.day}`}
               title={`${c.company ?? c.name ?? c.email} — day ${c.day}`}
               detail={`${c.name && c.company ? `${c.name} · ` : ''}due ${shortDate(c.due_date)}${c.days_late > 0 ? ` · ${c.days_late} d late` : ' · today'}`}
-              tone={c.days_late > 0 ? 'late' : undefined}
+              late={c.days_late > 0}
             >
-              <Link href={`/crm?campaign=${encodeURIComponent(c.campaign_id)}&deal=${c.deal_id}`} className="text-[12.5px] text-fg-70 hover:text-fg">
+              <Link href={`/crm?campaign=${encodeURIComponent(c.campaign_id)}&deal=${c.deal_id}`} className="text-[13px] text-fg-70 hover:text-fg">
                 Open deal
               </Link>
-              <Button size="sm" variant="outline" className="rounded-lg" disabled={busy !== null} onClick={() => void tickCheckin(c.deal_id, c.day)}>
+              <Button size="sm" variant="secondary" className="rounded-lg" disabled={busy !== null} onClick={() => void tickCheckin(c.deal_id, c.day)}>
                 <Check /> Done
               </Button>
             </Row>
@@ -120,8 +107,8 @@ export function TodayScreen({ initial }: { initial: TodayPayload }) {
 
         <Group title="Signal accounts not yet touched" count={q.signals.total} href="/signals/hiring" linkLabel={q.signals.total > q.signals.items.length ? `All ${q.signals.total}` : 'Signals'} empty="Every signal account has been touched.">
           {q.signals.items.map((s) => (
-            <Row key={s.key} title={s.company} detail={[s.untrusted_detail, s.at ? shortDate(s.at.slice(0, 10)) : null].filter(Boolean).join(' · ')} right={<span className="text-[11.5px] text-fg-46">{s.sources.join(' · ')}</span>}>
-              <Link href={s.href} aria-label={`Open ${s.company}`} className="grid size-7 place-items-center rounded-lg text-fg-70 hover:bg-secondary hover:text-fg">
+            <Row key={s.key} title={s.company} detail={[s.untrusted_detail, s.at ? shortDate(ownerDate(s.at)) : null].filter(Boolean).join(' · ')} right={<span className="text-[12px] text-fg-46">{s.sources.join(' · ')}</span>}>
+              <Link href={s.href} aria-label={`Open ${s.company}`} className="grid size-8 place-items-center rounded-lg text-fg-70 hover:bg-secondary hover:text-fg">
                 <ArrowRight className="size-4" strokeWidth={1.75} aria-hidden />
               </Link>
             </Row>
@@ -133,15 +120,15 @@ export function TodayScreen({ initial }: { initial: TodayPayload }) {
             <Row
               key={t.id}
               title={t.title}
-              detail={t.overdue ? `overdue since ${shortDate(t.due_at.slice(0, 10))}` : t.all_day ? 'today' : `today ${timeFmt.format(new Date(t.due_at))}`}
-              tone={t.overdue ? 'late' : undefined}
+              detail={t.overdue ? `overdue since ${shortDate(ownerDate(t.due_at))}` : t.all_day ? 'today' : `today ${timeFmt.format(new Date(t.due_at))}`}
+              late={t.overdue}
             >
               {t.action_id ? (
-                <Link href={`/actions/${t.action_id}`} className="text-[12.5px] text-fg hover:underline">
+                <Link href={`/actions/${t.action_id}`} className="text-[13px] text-fg hover:underline">
                   Waiting for Confirm
                 </Link>
               ) : (
-                <Button size="sm" variant="outline" className="rounded-lg" disabled={busy !== null} onClick={() => void finishTask(t.id)}>
+                <Button size="sm" variant="secondary" className="rounded-lg" disabled={busy !== null} onClick={() => void finishTask(t.id)}>
                   <Check /> Done
                 </Button>
               )}
@@ -150,36 +137,41 @@ export function TodayScreen({ initial }: { initial: TodayPayload }) {
           <AddTask today={data.today} onAdded={() => void mutate()} />
         </Group>
       </section>
-    </div>
+    </Surface>
   )
 }
 
-/** One queue: a 24px glass card with 16px padding, so the controls inside take an 8px radius. */
+/** One queue: a heading line and its rows. No card of its own and no rules between rows; space does the separating. */
 function Group({ title, count, href, linkLabel, empty, children }: { title: string; count: number; href: string; linkLabel: string; empty: string; children: ReactNode }) {
   return (
-    <section aria-label={title} className="glass flex flex-col rounded-3xl p-4">
-      <header className="flex items-center gap-2 pb-1">
-        <h3 className="text-[13px] font-medium text-fg-70">{title}</h3>
-        <span data-count className={cn('grid h-5 min-w-5 place-items-center rounded-full px-1.5 font-mono text-[11px] tabular-nums', count > 0 ? 'bg-primary text-primary-foreground' : 'bg-secondary text-fg-46')}>{count}</span>
+    <section aria-label={title} className="flex flex-col gap-3">
+      <header className="flex items-baseline gap-3">
+        <h3 className={cn('text-[13px] font-medium', count > 0 ? 'text-fg' : 'text-fg-46')}>{title}</h3>
+        <span data-count className="font-mono text-[12px] text-fg-46 tabular-nums">
+          {count}
+        </span>
         <Link href={href} className="ml-auto text-[12px] text-fg-46 hover:text-fg">
           {linkLabel}
         </Link>
       </header>
-      {count === 0 && <p className="py-2 text-[13px] text-fg-46">{empty}</p>}
-      <ul className="flex flex-col divide-y divide-line">{children}</ul>
+      {count === 0 && <p className="text-[13px] text-fg-46">{empty}</p>}
+      <ul className="flex flex-col gap-4">{children}</ul>
     </section>
   )
 }
 
-function Row({ title, detail, right, tone, children }: { title: string; detail?: string; right?: ReactNode; tone?: 'late'; children?: ReactNode }) {
+function Row({ title, detail, right, late, children }: { title: string; detail?: string; right?: ReactNode; late?: boolean; children?: ReactNode }) {
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
+    <li className="flex flex-wrap items-center gap-x-4 gap-y-1">
       <div className="min-w-0 flex-1 basis-56">
-        <p className="truncate text-[14px] text-fg">{title}</p>
-        {detail && <p className={cn('line-clamp-1 text-[12.5px]', tone === 'late' ? 'text-fg' : 'text-fg-46')}>{detail}</p>}
+        <p className="flex items-center gap-2 text-[14px] text-fg">
+          {late && <span aria-hidden data-late className="size-1.5 shrink-0 rounded-full bg-primary" />}
+          <span className="truncate">{title}</span>
+        </p>
+        {detail && <p className="line-clamp-1 text-[13px] text-fg-46">{detail}</p>}
       </div>
       {right}
-      <div className="flex shrink-0 items-center gap-2">{children}</div>
+      <div className="flex shrink-0 items-center gap-3">{children}</div>
     </li>
   )
 }
@@ -189,9 +181,9 @@ function AddTask({ today, onAdded }: { today: string; onAdded: () => void }) {
   const [title, setTitle] = useState('')
   const [busy, setBusy] = useState(false)
   return (
-    <li className="py-2">
+    <li>
       <form
-        className="flex items-center gap-2"
+        className="flex items-center gap-3"
         onSubmit={async (e) => {
           e.preventDefault()
           const t = title.trim()
@@ -211,9 +203,9 @@ function AddTask({ today, onAdded }: { today: string; onAdded: () => void }) {
           maxLength={200}
           placeholder="Add a task for today"
           aria-label="Add a task for today"
-          className="h-8 min-w-0 flex-1 rounded-lg bg-secondary px-2.5 text-[13.5px] text-fg outline-none placeholder:text-fg-46 focus-visible:ring-2 focus-visible:ring-ring"
+          className="h-8 min-w-0 flex-1 rounded-lg bg-secondary px-3 text-[14px] text-fg outline-none placeholder:text-fg-46 focus-visible:ring-2 focus-visible:ring-ring"
         />
-        <Button size="sm" variant="outline" className="rounded-lg" type="submit" disabled={busy || !title.trim()}>
+        <Button size="sm" variant="secondary" className="rounded-lg" type="submit" disabled={busy || !title.trim()}>
           <Plus /> Add
         </Button>
       </form>

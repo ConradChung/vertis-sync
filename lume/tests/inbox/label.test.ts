@@ -141,6 +141,31 @@ describe('applyLabel', () => {
   })
 })
 
+describe('applyLabel: deals on the pilot line', () => {
+  it('a label never moves a deal out of Conversation, Demo, Pilot or Paid', async () => {
+    for (const stage of ['Conversation', 'Demo', 'Pilot', 'Paid']) {
+      for (const category of ['interested', 'not_now'] as const) {
+        h.setStage.mockClear()
+        h.ensureDeal.mockResolvedValue({ ...DEAL, stage })
+        const out = await applyLabel({ reply_to_uuid: 'e1', category }, ALL, 'agent')
+        expect(h.setStage, `${stage}/${category}`).not.toHaveBeenCalled()
+        expect(out.stage).toBeNull()
+      }
+    }
+  })
+  it('a booking on a Pilot deal logs the meeting but leaves the stage', async () => {
+    h.ensureDeal.mockResolvedValue({ ...DEAL, stage: 'Pilot' })
+    await logBooking({ lead_email: 'ada@acme.com', campaign_id: C1, time: '2026-12-01T17:00:00Z', event_id: 'evt-9' }, ALL, 'agent')
+    expect(h.setStage).not.toHaveBeenCalled()
+    expect(h.addActivity).toHaveBeenCalledWith(expect.objectContaining({ kind: 'meeting' }))
+  })
+  it('a deal in Replied labelled interested still moves', async () => {
+    h.ensureDeal.mockResolvedValue({ ...DEAL, stage: 'Replied' })
+    await applyLabel({ reply_to_uuid: 'e1', category: 'interested' }, ALL, 'agent')
+    expect(h.setStage).toHaveBeenCalledWith(DEAL.id, 'Interested', 'agent', null, expect.anything())
+  })
+})
+
 describe('applyLabel: awaiting drafts and lead checks (review fixes)', () => {
   it('a label that blocks / closes / handles denies the awaiting send_reply drafts for that reply and lead', async () => {
     h.listAwaitingReplyActions.mockResolvedValue([{ id: 'draft-1' }, { id: 'draft-2' }])

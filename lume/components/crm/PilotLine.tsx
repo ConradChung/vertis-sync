@@ -20,8 +20,9 @@ function Chip({ tone, children, title }: { tone: 'done' | 'due' | 'quiet'; child
       data-tone={tone}
       className={cn(
         'inline-flex h-5 items-center gap-1 rounded-full px-2 text-[10.5px] whitespace-nowrap',
-        tone === 'done' && 'bg-primary/15 text-foreground dark:text-primary',
-        tone === 'due' && 'bg-amber text-black',
+        // Neutral throughout; the accent marks only a check-in that is due.
+        tone === 'done' && 'bg-secondary text-foreground',
+        tone === 'due' && 'bg-primary font-medium text-primary-foreground',
         tone === 'quiet' && 'bg-secondary text-muted-foreground'
       )}
     >
@@ -51,28 +52,29 @@ export function PilotLine({ deal: d, now }: { deal: PilotFields; now: number | D
         </Chip>
       ))}
       <Chip tone={d.referral_asked_at ? 'done' : 'quiet'}>
-        <HandHeart className="size-3" strokeWidth={1.75} aria-hidden />
+        {d.referral_asked_at ? <Check className="size-3" strokeWidth={1.75} aria-hidden /> : <HandHeart className="size-3" strokeWidth={1.75} aria-hidden />}
         {d.referral_asked_at ? 'Referral asked' : 'Referral not asked'}
       </Chip>
     </div>
   )
 }
 
-const TICK = 'inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50'
+const TICK = 'inline-flex h-8 items-center gap-2 rounded-lg px-3 text-[13px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50'
 
 /**
  * The pilot's controls in the deal sheet: start date, the two check-in ticks
  * and the referral tick. Each is a manual note on the deal (stamped with the
- * time); nothing is sent to the customer. Radii nest: 20px panel − 12px
- * padding = 8px ticks.
+ * time); nothing is sent to the customer. It sits in the sheet header as a
+ * plain row group (no box of its own).
  */
 export function PilotPanel({ deal: d, busy, onSave }: { deal: PilotFields; busy: boolean; onSave: (body: PatchBody, okText?: string) => Promise<boolean> | void }) {
   if (!hasPilot(d)) return null
   const today = ownerDate(new Date())
   const checkins = pilotCheckins(d, today)
-  const tick = (on: boolean) => cn(TICK, on ? 'bg-primary text-primary-foreground' : 'bg-secondary text-foreground hover:bg-foreground/12')
+  // Ticked is the neutral strong fill; the accent is kept for a check-in that is due.
+  const tick = (on: boolean) => cn(TICK, on ? 'bg-foreground text-background' : 'bg-secondary text-foreground hover:bg-foreground/12')
   return (
-    <section aria-label="Pilot" className="flex flex-col gap-2 rounded-[20px] bg-secondary/50 p-3">
+    <section aria-label="Pilot" className="flex flex-col gap-3 pt-2">
       <div className="flex flex-wrap items-center gap-2">
         <span className="eyebrow">Pilot</span>
         <DatePicker
@@ -87,7 +89,7 @@ export function PilotPanel({ deal: d, busy, onSave }: { deal: PilotFields; busy:
         />
         {d.pilot_start_date && <span className="font-mono text-[11.5px] text-muted-foreground">day {Math.max(pilotDay(d.pilot_start_date, today) ?? 0, 0)}</span>}
       </div>
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-2">
         {checkins.map((c) => (
           <button
             key={c.day}
@@ -96,7 +98,7 @@ export function PilotPanel({ deal: d, busy, onSave }: { deal: PilotFields; busy:
             disabled={busy}
             title={`Due ${c.due_date}${c.done_at ? ` · done ${ownerDate(c.done_at)}` : ''}`}
             onClick={() => void onSave(c.day === 10 ? { pilot_checkin_10_done: c.state !== 'done' } : { pilot_checkin_25_done: c.state !== 'done' })}
-            className={cn(tick(c.state === 'done'), c.state === 'due' && 'bg-amber text-black hover:bg-amber')}
+            className={cn(tick(c.state === 'done'), c.state === 'due' && 'bg-primary font-medium text-primary-foreground hover:bg-primary/85')}
           >
             {c.state === 'done' && <Check className="size-3.5" strokeWidth={1.75} aria-hidden />}
             {checkinText(c)}

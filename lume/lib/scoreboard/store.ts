@@ -11,12 +11,22 @@ import { weekOf, type Week } from '@/lib/scoreboard/week'
  * omitted, every deal counts.
  */
 
-const ROW_LIMIT = 2000
+const ROW_LIMIT = 1000
+/** The stage entries the scoreboard counts (`countScoreboard`). */
+export const COUNTED_STAGES = ['Conversation', 'Paid'] as const
 
 async function stageChanges(week: Week, campaignIds?: readonly string[]): Promise<StageChange[]> {
   const sb = createServiceClient()
   const cols = campaignIds ? 'deal_id, payload, occurred_at, crm_deals!inner(campaign_id)' : 'deal_id, payload, occurred_at'
-  let q = sb.from('crm_activities').select(cols).eq('kind', 'stage_changed').gte('occurred_at', week.start_iso).lt('occurred_at', week.end_iso)
+  // Only the two targets the scoreboard counts: automation logs a stage change for every reply and
+  // bounce, and those rows must not crowd these out of the row cap.
+  let q = sb
+    .from('crm_activities')
+    .select(cols)
+    .eq('kind', 'stage_changed')
+    .in('payload->>to', [...COUNTED_STAGES])
+    .gte('occurred_at', week.start_iso)
+    .lt('occurred_at', week.end_iso)
   if (campaignIds) q = q.in('crm_deals.campaign_id', [...campaignIds])
   const res = await q.order('occurred_at', { ascending: false }).limit(ROW_LIMIT)
   if (res.error) throw new DbError('scoreboard.stageChanges', res.error)
