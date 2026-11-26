@@ -105,7 +105,7 @@ export function TodayScreen({ initial }: { initial: TodayPayload }) {
           ))}
         </Group>
 
-        <Group title="Signal accounts not yet touched" count={q.signals.total} href="/signals/hiring" linkLabel={q.signals.total > q.signals.items.length ? `All ${q.signals.total}` : 'Signals'} empty="Every signal account has been touched.">
+        <Group title="Signal accounts not yet touched" count={q.signals.total} href="/signals" linkLabel={q.signals.total > q.signals.items.length ? `All ${q.signals.total}` : 'Signals'} empty="Every signal account has been touched.">
           {q.signals.items.map((s) => (
             <Row key={s.key} title={s.company} detail={[s.untrusted_detail, s.at ? shortDate(ownerDate(s.at)) : null].filter(Boolean).join(' · ')} right={<span className="text-[12px] text-fg-46">{s.sources.join(' · ')}</span>}>
               <Link href={s.href} aria-label={`Open ${s.company}`} className="grid size-8 place-items-center rounded-lg text-fg-70 hover:bg-secondary hover:text-fg">

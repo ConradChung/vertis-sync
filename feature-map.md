@@ -163,6 +163,27 @@ stops blocking by itself once #2 merges.
 - **How to test:** `cd lume && npx vitest run tests/overview tests/alerts tests/health tests/settings tests/tasks tests/schedule tests/progress tests/playground`.
 - **Good:** missing env (Instantly, Linear, Telegram) degrades to a banner or no-op with a warning, never a crash.
 
+### Signals inbox and the portal's signal accounts (90-day plan, phase 3)
+- **Where:** `lume/app/(app)/signals/{page,hiring,influencers}`, `lume/app/api/signals/{inbox,accounts,accounts/deal}`,
+  `lume/app/api/portal/signals`, `lume/lib/signals/{merge,events,store}.ts`, `lume/lib/portal/signals.ts`,
+  `lume/components/signals/{SignalsInbox,SignalsNav,InfluencersList}.tsx`, `lume/components/portal/SignalsSection.tsx`;
+  migration `*_lume_signal_accounts.sql` (one new table).
+- **How to test:** `cd lume && npx vitest run tests/signals tests/portal/signals.test.ts tests/api/signalsRoutes.test.ts tests/components/SignalsInbox.test.tsx tests/today`;
+  pgTAP `supabase/tests/lume_signal_accounts_test.sql`.
+- **Good:** one row per company across `signal_hiring`, `signal_people` (+ `signal_posts`), `signal_reddit_mentions` and verified
+  `influencer_reactors`, deduped by domain, else by normalized name (a name-only row joins the one domain that name belongs to);
+  a Reddit author is its own account. Those four tables are only SELECTed; status and the three touches live in `signal_accounts`.
+  A touch is a manual tick with its time: nothing is emailed, messaged or called. "Start deal" creates one deal under campaign
+  `signals` in Conversation (owner's session only, idempotent) and changes no campaign or Instantly state.
+  `/signals/hiring` still renders (the inbox filtered to hiring, then the Hiring Ops sheet); the influencers list is at `/signals/influencers`,
+  and `/influencers` still lands on the candidate lists in `/import/leads` (the influencer-lookup alert links there).
+  The dedupe is a set of rules, not a registry: known shared hosts, link shorteners and mailbox domains are not a company domain, legal forms
+  are stripped only from the end of a name, known employer placeholders ("Self-employed") are not a company (a person with a placeholder and no
+  site has no row), and saved state is never shared through a name two accounts carry. A host or placeholder the lists do not know can still
+  merge two companies, so check `SHARED_HOSTS` and `NO_COMPANY` in `merge.ts` when a wrong merge shows up. Each account gets its own deal address.
+  In the portal, signal accounts and the scoreboard go only to the signals client (`LUME_SIGNALS_CLIENT`, default Kaspen):
+  any other client gets `{ enabled: false }` and no data.
+
 ### Today, Replies and the pilot stages (90-day plan, phase 2)
 - **Where:** `lume/app/(app)/{today,replies}/`, `lume/app/api/{today,replies,scoreboard}`, `lume/lib/{today,replies,scoreboard}/`,
   `lume/lib/crm/{stages,pilot}.ts`, `lume/components/{today,replies}/`, `lume/components/crm/PilotLine.tsx`;
@@ -181,10 +202,10 @@ stops blocking by itself once #2 merges.
 - **Where:** `lume/components/shell/{tabs,nav}.ts` (groups, step numbers, Alt keys),
   `TopBar.tsx` (desktop launcher), `MobileNav.tsx` (phone bar + More sheet), `CommandPalette.tsx` (⌘K).
 - **How to test:** `cd lume && npx vitest run tests/shell tests/components/MobileNav.test.tsx tests/approvals/components.test.tsx tests/components/AgentChat.test.tsx`.
-- **Good:** primary tabs are Today (`/today`), Signals, Pipeline (`/crm`), Replies (`/replies`), Agent in that order (desktop menu and phone bar);
+- **Good:** primary tabs are Today (`/today`), Signals (`/signals`), Pipeline (`/crm`), Replies (`/replies`), Agent in that order (desktop menu and phone bar);
   Volume holds Import 1, Leads 2–3, Progress 4, Rotate, Campaigns 5 and is collapsed unless you are on one of its pages;
   Admin holds Playground, Operator, Settings. No page is removed: every earlier URL still renders and has a ⌘K entry
-  (`/calendar`, `/influencers`, `/overview`, `/actions`, `/actions/<id>`, `/runs/...`).
+  (`/calendar`, `/overview`, `/actions`, `/actions/<id>`, `/runs/...`; `/influencers` still redirects to `/import/leads`, and ⌘K has "Signals — Influencers").
 
 ### UI components and `/design`
 - **Where:** `lume/components/`, `lume/app/design/`.

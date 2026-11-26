@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
-import { Bot, Megaphone, Package, Repeat, Settings, User } from 'lucide-react'
+import { Bot, Megaphone, Package, Radar, Repeat, Settings, User } from 'lucide-react'
 import {
   Command,
   CommandDialog,
@@ -56,7 +56,7 @@ const TAB_WORDS: Record<string, string> = {
   '/agent': 'chat ai assistant',
   '/crm': 'crm deals board pilots all campaigns',
   '/actions': 'pending actions confirm history decided',
-  '/signals/hiring': 'hiring ops signal jobs accounts',
+  '/signals': 'inbox accounts companies hiring comments reddit influencer reactions touches start deal',
   '/calendar': 'tasks schedule linear sprint',
   '/playground': 'admin pipelines diagrams flows showcase',
   '/operator': 'admin grok bot operator',
@@ -64,7 +64,10 @@ const TAB_WORDS: Record<string, string> = {
 }
 
 /** Pages that are not tabs but keep their own ⌘K entry. */
-const EXTRA_PAGES = [{ href: '/influencers', label: 'Influencers', words: 'signals linkedin reactions reactors posts', icon: Megaphone }]
+const EXTRA_PAGES = [
+  { href: '/signals/hiring', label: 'Signals — Hiring', words: 'hiring ops signal jobs drafts emails', icon: Radar },
+  { href: '/signals/influencers', label: 'Signals — Influencers', words: 'linkedin reactions reactors posts', icon: Radar },
+]
 
 const SETTINGS_PAGES = [
   { href: '/settings/budget', label: 'Budget', words: 'apify cap spend lead bank threshold' },

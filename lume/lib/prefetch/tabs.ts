@@ -21,8 +21,8 @@ export const TAB_KEYS: Record<string, readonly string[]> = {
   '/rotate': [`/api/lead-bank${leadBankSearchParams({ filter: {}, page: 1, pageSize: 100 })}`, '/api/rules', '/api/campaigns'],
   '/campaigns': ['/api/campaigns?with=analytics'],
   '/crm': ['/api/crm/board?campaign=all'],
-  // HiringSheet's default filters (components/signals/HiringSheet.tsx).
-  '/signals/hiring': ['/api/signals/hiring?signal=all&tier=all&status=new'],
+  // SignalsInbox's default key (components/signals/SignalsInbox.tsx inboxKey).
+  '/signals': ['/api/signals/inbox'],
   '/playground': ['/api/playground/diagrams', '/api/agent/skills', '/api/campaigns?with=analytics'],
   // Server-rendered for the Grok Bots: nothing to warm.
   '/operator': [],

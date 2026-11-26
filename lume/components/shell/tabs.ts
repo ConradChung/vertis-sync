@@ -15,9 +15,8 @@ export type Tab = { href: string; label: string; icon: LucideIcon; group: TabGro
 
 /** Navigation, in menu order within each group. `primary` tabs sit in the phone bottom bar; the rest live under More. */
 export const TABS: readonly Tab[] = [
-  // Signals points at the hiring sheet until the one Signals inbox exists.
   { href: '/today', label: 'Today', icon: Sun, group: 'primary', primary: true },
-  { href: '/signals/hiring', label: 'Signals', icon: Radar, group: 'primary', primary: true },
+  { href: '/signals', label: 'Signals', icon: Radar, group: 'primary', primary: true },
   { href: '/crm', label: 'Pipeline', icon: Users, group: 'primary', primary: true },
   { href: '/replies', label: 'Replies', icon: Inbox, group: 'primary', primary: true },
   { href: '/agent', label: 'Agent', icon: Bot, group: 'primary', primary: true },
