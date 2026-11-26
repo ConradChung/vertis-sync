@@ -17,11 +17,11 @@ describe('MobileNav (phones)', () => {
     expect(screen.queryByText('Operator:')).toBeNull()
   })
 
-  it('shows the four primary tabs plus More in the bottom bar, marking the current page', () => {
+  it('shows the five primary tabs plus More in the bottom bar, marking the current page', () => {
     render(<MobileNav pathname="/agent/projects/p1" warm={vi.fn()} />)
     const bar = screen.getByRole('navigation', { name: 'Primary' })
     const links = within(bar).getAllByRole('link').map((a) => a.textContent)
-    expect(links).toEqual(TABS.filter((t) => t.primary).map((t) => t.label))
+    expect(links).toEqual(['Today', 'Signals', 'Pipeline', 'Replies', 'Agent'])
     expect(within(bar).getByRole('link', { name: 'Agent' }).getAttribute('aria-current')).toBe('page')
     expect(within(bar).getByRole('button', { name: 'More' })).toBeTruthy()
     // Current page name in the slim header.
@@ -31,7 +31,10 @@ describe('MobileNav (phones)', () => {
   it('opens More with every other tab, and labels the button with a secondary page when on one', () => {
     const { rerender } = render(<MobileNav pathname="/overview" warm={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'More' }))
-    for (const t of TABS.filter((x) => !x.primary)) expect(screen.getByRole('link', { name: t.label })).toBeTruthy()
+    for (const t of TABS.filter((x) => !x.primary)) expect(screen.getByRole('link', { name: new RegExp(`${t.label}$`) })).toBeTruthy()
+    // The sheet holds the Volume group (numbered flow, Rotate in place) and Admin.
+    expect(screen.getByText('Volume')).toBeTruthy()
+    expect(screen.getByText('Admin')).toBeTruthy()
     rerender(<MobileNav pathname="/playground" warm={vi.fn()} />)
     expect(within(screen.getByRole('navigation', { name: 'Primary' })).getByRole('button', { name: 'Playground' })).toBeTruthy()
   })

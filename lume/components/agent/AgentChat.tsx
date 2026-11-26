@@ -30,7 +30,7 @@ import type { Skill, SkillMode } from '@/lib/agent/skillModel'
 import { cn } from '@/lib/utils'
 import Link from 'next/link'
 import { uniqueLinks } from '@/lib/leads/lists/link'
-import { FLOW, TOOLS } from '@/components/shell/nav'
+import { NAV } from '@/components/shell/nav'
 
 /** What "Save this chat as a skill" sends: the agent drafts it and waits for the owner's OK. */
 export const SAVE_SKILL_PROMPT =
@@ -414,7 +414,7 @@ export function AgentChat() {
             // Phones: the app's tabs and this chat's options live here (the chat hides the app header and bottom bar).
             <div className="mb-3 flex shrink-0 flex-col gap-2.5 border-b border-line pb-3">
               <nav aria-label="App" className="grid grid-cols-3 gap-1">
-                {[...FLOW, ...TOOLS].map((t) => {
+                {NAV.map((t) => {
                   const Icon = t.icon
                   return (
                     <Link

@@ -155,6 +155,15 @@ stops blocking by itself once #2 merges.
 - **How to test:** `cd lume && npx vitest run tests/overview tests/alerts tests/health tests/settings tests/tasks tests/schedule tests/progress tests/playground`.
 - **Good:** missing env (Instantly, Linear, Telegram) degrades to a banner or no-op with a warning, never a crash.
 
+### Navigation: primary tabs, Volume, Admin (90-day regroup)
+- **Where:** `lume/components/shell/{tabs,nav}.ts` (groups, step numbers, Alt keys),
+  `TopBar.tsx` (desktop launcher), `MobileNav.tsx` (phone bar + More sheet), `CommandPalette.tsx` (⌘K).
+- **How to test:** `cd lume && npx vitest run tests/shell tests/components/MobileNav.test.tsx tests/approvals/components.test.tsx tests/components/AgentChat.test.tsx`.
+- **Good:** primary tabs are Today, Signals, Pipeline, Replies, Agent in that order (desktop menu and phone bar);
+  Volume holds Import 1, Leads 2–3, Progress 4, Rotate, Campaigns 5 and is collapsed unless you are on one of its pages;
+  Admin holds Playground, Operator, Settings. No page is removed: every earlier URL still renders and has a ⌘K entry
+  (`/calendar`, `/influencers`, `/overview`, `/actions`, `/actions/<id>`, `/runs/...`).
+
 ### UI components and `/design`
 - **Where:** `lume/components/`, `lume/app/design/`.
 - **How to test:** `cd lume && npx vitest run tests/components` and `npm run build`.
