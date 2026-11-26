@@ -1,6 +1,7 @@
 import { CHECK_USD, DRAFT_USD, EXTRACT_USD, fitsCap, isDue, LANES, MAX_RUN_CAP_USD, type HiringConfig, type Lane } from '@/lib/hiring/config'
 import { finishDraft, type Draft, type DraftViolation } from '@/lib/hiring/draft'
 import type { HiringCheck } from '@/lib/hiring/checkPrompt'
+import { findHiringContact, type ContactBlitz, type ContactSource } from '@/lib/hiring/contact'
 import {
   ACTORS,
   articleCandidate,
@@ -33,8 +34,10 @@ import { companyDomain, normCompany } from '@/lib/hiring/normalize'
  *     reservation to usageTotalUsd; FAILED / ABORTED / TIMED-OUT → failed.
  *  c. process pending rows (bounded per tick): exclusions (lead bank /
  *     Instantly) → duplicate company → per-domain PM check (cached, counted
- *     toward the cap) → draft as Frank, SOP-linted → done. Skipped rows keep
- *     their skip_reason for audit.
+ *     toward the cap) → contact (Blitz: the named person's work email, else
+ *     one decision-maker + email; records-guarded, never blocks the row) →
+ *     draft as Frank, SOP-linted → done. Skipped rows keep their skip_reason
+ *     for audit.
  *
  * A manual override `{ lane, run_cap_usd?, max_items?, force: true }` starts
  * one run of that lane now (any lane that exists, on or off; still within the
@@ -57,6 +60,8 @@ export interface RunRow {
 export interface PendingRow extends Candidate {
   id: number
   attempts: number
+  /** Set once a Blitz lookup ran for this row (a deferred row never pays twice). */
+  contact_source?: ContactSource | 'none' | null
 }
 
 export interface RowPatch {
@@ -74,6 +79,11 @@ export interface RowPatch {
   draft_body?: string | null
   draft_status?: 'ready' | 'needs_edit' | 'failed' | null
   draft_violations?: DraftViolation[] | null
+  contact_name?: string | null
+  contact_title?: string | null
+  contact_linkedin?: string | null
+  contact_email?: string | null
+  contact_source?: ContactSource | 'none' | null
 }
 
 export interface CachedCheck {
@@ -127,6 +137,8 @@ export interface Deps {
   ai: AiPort
   /** ms since epoch; tests pass a fake clock. */
   clock?: () => number
+  /** One Blitz session per tick (key-info read once, records countdown); null/absent = no contact lookup. */
+  blitz?: () => (ContactBlitz & { recordsUsed?: number }) | null
 }
 
 export interface ManualRun {
@@ -143,6 +155,8 @@ export interface TickResult {
   not_started: { lane: Lane; reason: string }[]
   read: { run_id: number; status: string; items: number; inserted: number }[]
   processed: { shown: number; skipped: number; needs_edit: number; deferred: number; errors: number }
+  /** Blitz contact lookups this tick (absent when BLITZ_API_KEY is unset). */
+  contacts?: { found: number; emails: number; miss: number; unavailable: number; records_used: number }
   notices: string[]
   errors: string[]
 }
@@ -327,7 +341,9 @@ export async function runHiringTick(now: Date, manual: ManualRun | null, deps: D
       out.processed.deferred += rows.length
       rows = []
     }
-    const ctx: ProcessCtx = { cfg, now, deps, excl, mtd: () => mtd, spend: (u) => (mtd = round4(mtd + u)), capNotice, out, stop: false, taken: new Set<string>() }
+    const blitz = deps.blitz?.() ?? null
+    if (blitz) out.contacts = { found: 0, emails: 0, miss: 0, unavailable: 0, records_used: 0 }
+    const ctx: ProcessCtx = { cfg, now, deps, excl, mtd: () => mtd, spend: (u) => (mtd = round4(mtd + u)), capNotice, out, stop: false, taken: new Set<string>(), blitz }
     const queue = [...rows]
     const worker = async () => {
       for (;;) {
@@ -342,6 +358,7 @@ export async function runHiringTick(now: Date, manual: ManualRun | null, deps: D
       }
     }
     await Promise.all(Array.from({ length: PROCESS_CONCURRENCY }, worker))
+    if (blitz && out.contacts) out.contacts.records_used = blitz.recordsUsed ?? 0
   }
 
   out.month_to_date_usd = round4(mtd)
@@ -400,6 +417,7 @@ interface ProcessCtx {
   stop: boolean
   /** Company keys already handled this tick (two rows of one company never both show). */
   taken: Set<string>
+  blitz: ContactBlitz | null
 }
 
 export const checkKey = (domain: string | null, name: string | null): string | null => domain ?? (name ? `name:${name}` : null)
@@ -466,6 +484,20 @@ async function processRow(r: PendingRow, ctx: ProcessCtx): Promise<void> {
     }
     if (check.icp_fit === 'not_fit') return await skip('not_pm', patch)
     if (check.icp_fit === 'unclear') return await skip('pm_unclear', patch)
+
+    // Contact (Blitz), once per row: only rows about to be shown spend records.
+    if (ctx.blitz && !r.contact_source) {
+      const c = await findHiringContact(ctx.blitz, { ...r, company_domain: domain, company_website: patch.company_website ?? r.company_website })
+      const tally = ctx.out.contacts!
+      if (c.kind === 'found') {
+        Object.assign(patch, c.contact)
+        tally.found++
+        if (c.contact.contact_email) tally.emails++
+      } else if (c.kind === 'miss') {
+        patch.contact_source = 'none'
+        tally.miss++
+      } else tally.unavailable++ // no key / records out / outage: the row ships without a contact, as before
+    }
 
     // Draft as Frank, SOP-linted.
     const row: Candidate = { ...r, company_domain: domain, company_phone: patch.company_phone ?? r.company_phone, company_website: patch.company_website ?? r.company_website }

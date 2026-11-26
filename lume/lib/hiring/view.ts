@@ -20,6 +20,11 @@ export interface HiringRow {
   person_name: string | null
   person_title: string | null
   person_linkedin: string | null
+  /** Blitz contact (lib/hiring/contact.ts): the named person, or one decision-maker found for the company. */
+  contact_name?: string | null
+  contact_title?: string | null
+  contact_linkedin?: string | null
+  contact_email?: string | null
   pm_fit: 'fit' | 'not_fit' | 'unclear' | null
   pm_evidence: string | null
   skip_reason: string | null
