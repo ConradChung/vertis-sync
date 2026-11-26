@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { autoAdvance, conversions, DEFAULT_STAGES, planStageMove, requiresApproval } from '@/lib/crm/stages'
+import { autoAdvance, conversions, DEFAULT_STAGES, isPilotStage, orderedStages, PILOT_LINE, planStageMove, requiresApproval } from '@/lib/crm/stages'
 
 describe('planStageMove (user moves)', () => {
   it('Won and Lost need approval with a reason', () => {
@@ -71,5 +71,47 @@ describe('conversions', () => {
   })
   it('null when the previous stage is empty', () => {
     expect(conversions(DEFAULT_STAGES, {}).Replied).toBeNull()
+  })
+})
+
+describe('pilot stages (Conversation, Demo, Pilot, Paid)', () => {
+  it('sit after the existing stages, which keep their names, order and positions', () => {
+    expect(orderedStages(DEFAULT_STAGES).map((s) => s.name)).toEqual([
+      'Contacted', 'Replied', 'Interested', 'Meeting booked', 'Won', 'Lost', 'Bounced', 'Not now',
+      'Conversation', 'Demo', 'Pilot', 'Paid',
+    ])
+    expect(DEFAULT_STAGES.slice(0, 8).map((s) => s.position)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+    expect(DEFAULT_STAGES.slice(8).map((s) => [s.name, s.position])).toEqual([['Conversation', 8], ['Demo', 9], ['Pilot', 10], ['Paid', 11]])
+    expect(DEFAULT_STAGES.filter((s) => s.is_terminal).map((s) => s.name)).toEqual(['Won', 'Lost', 'Bounced', 'Paid'])
+    expect(new Set(DEFAULT_STAGES.map((s) => s.name)).size).toBe(DEFAULT_STAGES.length)
+  })
+  it('are known stages, moved by hand without an approval, forwards or backwards', () => {
+    for (const to of PILOT_LINE) {
+      expect(isPilotStage(to)).toBe(true)
+      expect(planStageMove('Meeting booked', to, null)).toEqual({ type: 'direct', to })
+    }
+    expect(planStageMove('Paid', 'Pilot', null)).toEqual({ type: 'direct', to: 'Pilot' })
+    expect(planStageMove('Pilot', 'Pilot', null)).toEqual({ type: 'noop' })
+    expect(isPilotStage('Won')).toBe(false)
+    expect(DEFAULT_STAGES.filter((s) => requiresApproval(s.name)).map((s) => s.name)).toEqual(['Won', 'Lost'])
+  })
+  it('leaving the pilot line for Won or Lost still needs the approval', () => {
+    expect(planStageMove('Pilot', 'Lost', 'churned in week 2')).toEqual({ type: 'approval', to: 'Lost', reason: 'churned in week 2' })
+    expect(planStageMove('Pilot', 'Won', '')).toEqual({ type: 'error', error: 'reason_required' })
+  })
+  it('automation never moves a deal on the pilot line: a reply, interest, meeting or bounce leaves it where the owner put it', () => {
+    for (const stage of PILOT_LINE) {
+      for (const signal of ['sent', 'opened', 'replied', 'interested', 'meeting', 'bounced'] as const) expect(autoAdvance(stage, signal), `${stage}/${signal}`).toBeNull()
+    }
+    // And automation never puts a deal onto the pilot line.
+    for (const from of ['Contacted', 'Replied', 'Interested', 'Meeting booked', 'Not now']) {
+      for (const signal of ['replied', 'interested', 'meeting'] as const) expect(isPilotStage(autoAdvance(from, signal) ?? '')).toBe(false)
+    }
+  })
+  it('conversions ignore the pilot line and existing counts read the same', () => {
+    const c = conversions(DEFAULT_STAGES, { Contacted: 6, Replied: 2, Pilot: 3, Paid: 1 })
+    expect(c.Pilot).toBeNull()
+    expect(c.Paid).toBeNull()
+    expect(c.Conversation).toBeNull()
   })
 })

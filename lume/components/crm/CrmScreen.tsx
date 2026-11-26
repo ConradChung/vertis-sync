@@ -15,7 +15,7 @@ export function CrmScreen() {
       switcher
       initialDealId={deal && /^[0-9a-f-]{36}$/i.test(deal) ? deal : null}
       onCampaignChange={(id) => router.replace(id === 'all' ? '/crm' : `/crm?campaign=${encodeURIComponent(id)}`, { scroll: false })}
-      crumbs={[{ label: 'CRM', href: '/crm' }, { label: campaign === 'all' ? 'All campaigns' : 'Pipeline' }]}
+      crumbs={[{ label: 'Pipeline', href: '/crm' }, { label: campaign === 'all' ? 'All campaigns' : 'Campaign' }]}
     />
   )
 }

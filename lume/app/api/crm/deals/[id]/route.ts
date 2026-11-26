@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireOwner } from '@/lib/auth/guards'
 import { campaignNames } from '@/lib/crm/board'
+import { isDate } from '@/lib/crm/pilot'
 import { moveDeal } from '@/lib/crm/move'
 import { getActivities, getAwaitingCloses, getDeal, getLeadRow, getStages, updateDeal, type DealPatch } from '@/lib/crm/service'
 import type { CrmDealDetail, CrmPatchResult } from '@/lib/crm/types'
@@ -11,7 +12,10 @@ import { parseJsonBody, uuidParam } from '@/lib/http/json'
 /**
  * One CRM deal.
  *  GET   → `CrmDealDetail` (deal, stages, timeline, lead_bank row, campaign name).
- *  PATCH → `{ stage?, reason?, owner?, next_action?, next_action_at?, notes? }`.
+ *  PATCH → `{ stage?, reason?, owner?, next_action?, next_action_at?, notes?,
+ *            pilot_start_date?, pilot_checkin_10_done?, pilot_checkin_25_done?, referral_asked? }`.
+ *          The pilot fields are manual ticks on the owner's own row: a date
+ *          (YYYY-MM-DD or null) and three booleans stamped with the time.
  *          Field edits apply directly. A stage move to Won/Lost (reason
  *          required) is filed as a `crm_close_deal` pending action — 202 with
  *          `pending_action_id`, nothing changes until it is approved; 409
@@ -28,6 +32,10 @@ const Patch = z
     next_action: z.string().trim().max(300).nullable().optional(),
     next_action_at: z.iso.datetime({ offset: true }).nullable().optional(),
     notes: z.string().max(20_000).nullable().optional(),
+    pilot_start_date: z.string().refine(isDate).nullable().optional(),
+    pilot_checkin_10_done: z.boolean().optional(),
+    pilot_checkin_25_done: z.boolean().optional(),
+    referral_asked: z.boolean().optional(),
   })
   .strict()
 
@@ -77,6 +85,12 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (fields.next_action !== undefined) patch.next_action = fields.next_action || null
     if (fields.next_action_at !== undefined) patch.next_action_at = fields.next_action_at
     if (fields.notes !== undefined) patch.notes = fields.notes || null
+    if (fields.pilot_start_date !== undefined) patch.pilot_start_date = fields.pilot_start_date
+    // A tick keeps its first timestamp; unticking clears it.
+    const now = new Date().toISOString()
+    if (fields.pilot_checkin_10_done !== undefined) patch.pilot_checkin_10_done_at = fields.pilot_checkin_10_done ? (deal.pilot_checkin_10_done_at ?? now) : null
+    if (fields.pilot_checkin_25_done !== undefined) patch.pilot_checkin_25_done_at = fields.pilot_checkin_25_done ? (deal.pilot_checkin_25_done_at ?? now) : null
+    if (fields.referral_asked !== undefined) patch.referral_asked_at = fields.referral_asked ? (deal.referral_asked_at ?? now) : null
     if (Object.keys(patch).length) {
       deal = (await updateDeal(id, patch)) ?? deal
     }

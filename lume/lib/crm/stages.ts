@@ -4,7 +4,8 @@ import type { CrmStage } from '@/lib/crm/types'
  * Stage rules (pure, client-safe).
  *
  * Main line: Contacted → Replied → Interested → Meeting booked → Won.
- * Side exits: Lost, Bounced, Not now. Moving to Won or Lost is a decision
+ * Side exits: Lost, Bounced, Not now. Pilot line (2026-11-26, after the
+ * existing stages): Conversation → Demo → Pilot → Paid, moved by hand only. Moving to Won or Lost is a decision
  * the owner confirms through the Approve/Deny gate (`crm_close_deal`); every
  * other move is direct. Automation (webhooks, Gmail/Muse adapters) only ever
  * moves a deal forward on the main line, or to Bounced, and never to Won/Lost.
@@ -19,10 +20,18 @@ export const DEFAULT_STAGES: CrmStage[] = [
   { name: 'Lost', position: 5, is_terminal: true },
   { name: 'Bounced', position: 6, is_terminal: true },
   { name: 'Not now', position: 7, is_terminal: false },
+  { name: 'Conversation', position: 8, is_terminal: false },
+  { name: 'Demo', position: 9, is_terminal: false },
+  { name: 'Pilot', position: 10, is_terminal: false },
+  { name: 'Paid', position: 11, is_terminal: true },
 ]
 
 export const MAIN_LINE = ['Contacted', 'Replied', 'Interested', 'Meeting booked', 'Won'] as const
 export const SIDE_EXITS = ['Lost', 'Bounced', 'Not now'] as const
+/** The path to a paying customer. Automation never moves a deal onto, along or off it (`autoAdvance`). */
+export const PILOT_LINE = ['Conversation', 'Demo', 'Pilot', 'Paid'] as const
+export type PilotStage = (typeof PILOT_LINE)[number]
+export const isPilotStage = (stage: string): stage is PilotStage => (PILOT_LINE as readonly string[]).includes(stage)
 export const CLOSE_STAGES = ['Won', 'Lost'] as const
 export type CloseStage = (typeof CLOSE_STAGES)[number]
 
@@ -45,9 +54,12 @@ const rank = (stage: string) => (MAIN_LINE as readonly string[]).indexOf(stage)
  * never backwards; a closed deal (Won/Lost/Bounced) is left alone, except
  * that a reply to a Bounced deal is ignored too (it is not ours to reopen).
  * A reply or interest on a "Not now" deal brings it back to the main line.
+ * A deal on the pilot line (Conversation, Demo, Pilot, Paid) is the owner's
+ * to move: no signal touches it, a bounce included.
  */
 export function autoAdvance(current: string, signal: CrmSignal): string | null {
   if (current === 'Won' || current === 'Lost' || current === 'Bounced') return null
+  if (isPilotStage(current)) return null
   if (signal === 'bounced') return 'Bounced'
   const target = signal === 'replied' ? 'Replied' : signal === 'interested' ? 'Interested' : signal === 'meeting' ? 'Meeting booked' : null
   if (!target) return null

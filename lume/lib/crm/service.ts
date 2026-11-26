@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { DbError } from '@/lib/db/service'
 import type { Json } from '@/lib/db/types'
 import { DEFAULT_STAGES, orderedStages } from '@/lib/crm/stages'
+import { ownerDate } from '@/lib/time/owner'
 import type { ActivityKind, ActivitySource, CrmActivity, CrmDeal, CrmDealCard, CrmSource, CrmStage } from '@/lib/crm/types'
 
 /**
@@ -193,10 +194,25 @@ export async function setStage(
     p_payload: payload,
   })
   if (res.error) fail('setStage', res.error)
-  return (res.data as string | null) ?? null
+  const from = (res.data as string | null) ?? null
+  // A deal entering Pilot starts its pilot today unless a start date is already set (the owner can change it).
+  if (from !== null && stage === 'Pilot') {
+    const stamp = await sb.from('crm_deals').update({ pilot_start_date: ownerDate(new Date()) }).eq('id', dealId).is('pilot_start_date', null)
+    if (stamp.error) fail('setStage.pilotStart', stamp.error)
+  }
+  return from
 }
 
-export type DealPatch = Partial<Pick<CrmDeal, 'owner' | 'next_action' | 'next_action_at' | 'notes'>>
+export type DealPatch = Partial<
+  Pick<CrmDeal, 'owner' | 'next_action' | 'next_action_at' | 'notes' | 'pilot_start_date' | 'pilot_checkin_10_done_at' | 'pilot_checkin_25_done_at' | 'referral_asked_at'>
+>
+
+/** Deals in Pilot (the check-in queue). */
+export async function getPilotDeals(limit = 500): Promise<CrmDeal[]> {
+  const res = await createServiceClient().from('crm_deals').select('*').eq('stage', 'Pilot').order('pilot_start_date', { ascending: true, nullsFirst: false }).limit(limit)
+  if (res.error) fail('getPilotDeals', res.error)
+  return (res.data ?? []) as CrmDeal[]
+}
 
 export async function updateDeal(id: string, patch: DealPatch): Promise<CrmDeal | null> {
   const sb = createServiceClient()

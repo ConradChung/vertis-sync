@@ -25,6 +25,10 @@ const card = (i: number, stage: string, over: Partial<CrmDealCard> = {}): CrmDea
   won_lost_reason: null,
   notes: null,
   followup_flagged_at: null,
+  pilot_start_date: null,
+  pilot_checkin_10_done_at: null,
+  pilot_checkin_25_done_at: null,
+  referral_asked_at: null,
   created_at: '',
   updated_at: '',
   snippet: i === 2 ? 'Happy to chat next week' : null,
@@ -34,11 +38,27 @@ const card = (i: number, stage: string, over: Partial<CrmDealCard> = {}): CrmDea
 const deals = [card(1, 'Contacted'), card(2, 'Replied'), card(3, 'Replied'), card(4, 'Interested'), card(5, 'Bounced')]
 const names = (id: string) => (id === 'camp-a' ? 'Alpha' : 'Beta')
 
+describe('CrmBoard — pilot deals', () => {
+  it('a Pilot card shows its start date, check-ins and referral flag; other cards show none', () => {
+    const pilot = card(6, 'Pilot', { pilot_start_date: '2020-01-01', pilot_checkin_10_done_at: '2020-01-11T18:00:00Z' })
+    render(<CrmBoard deals={[...deals, pilot]} stages={DEFAULT_STAGES} awaiting={{}} showCampaign={false} campaignName={names} onOpen={vi.fn()} onMove={vi.fn()} />)
+    const lines = screen.getAllByTestId('pilot-line')
+    expect(lines).toHaveLength(1)
+    expect(lines[0].textContent).toContain('Pilot · Jan 1')
+    expect(lines[0].textContent).toContain('Day 10 done')
+    expect(lines[0].textContent).toContain('Day 25 due')
+    expect(lines[0].textContent).toContain('Referral not asked')
+    expect(screen.getByRole('listitem', { name: 'Pilot: 1' })).toBeTruthy()
+  })
+})
+
 describe('CrmBoard', () => {
   it('renders one column per stage with counts and conversion', () => {
     render(<CrmBoard deals={deals} stages={DEFAULT_STAGES} awaiting={{}} showCampaign={false} campaignName={names} onOpen={vi.fn()} onMove={vi.fn()} />)
     const cols = screen.getAllByTestId('crm-column')
-    expect(cols).toHaveLength(8)
+    expect(cols).toHaveLength(12)
+    // The pilot stages come after the existing eight.
+    expect(cols.slice(8).map((c) => c.getAttribute('aria-label'))).toEqual(['Conversation: 0', 'Demo: 0', 'Pilot: 0', 'Paid: 0'])
     const replied = cols.find((c) => c.getAttribute('aria-label') === 'Replied: 2')!
     expect(within(replied).getAllByTestId('crm-card')).toHaveLength(2)
     // 5 reached Contacted, 3 reached Replied+ → 60%

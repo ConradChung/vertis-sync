@@ -31,6 +31,20 @@ export async function listTasks(fromIso: string, toIso: string, limit = 500): Pr
   return rows(res.data)
 }
 
+/** Tasks still to do (scheduled or waiting on a tap) due before `untilIso`, overdue ones included, soonest first. */
+export async function listOpenTasksDue(untilIso: string, limit = 100): Promise<LumeTaskRow[]> {
+  const res = await createServiceClient()
+    .from('lume_tasks')
+    .select(COLS)
+    .in('status', ['scheduled', 'awaiting_tap'])
+    .lt('due_at', untilIso)
+    .order('due_at', { ascending: true })
+    .order('id', { ascending: true })
+    .limit(limit)
+  if (res.error) throw new DbError('listOpenTasksDue', res.error)
+  return rows(res.data)
+}
+
 export async function getTask(id: string): Promise<LumeTaskRow | null> {
   const res = await createServiceClient().from('lume_tasks').select(COLS).eq('id', id).maybeSingle()
   if (res.error) throw new DbError('getTask', res.error)

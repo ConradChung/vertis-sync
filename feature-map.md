@@ -155,11 +155,25 @@ stops blocking by itself once #2 merges.
 - **How to test:** `cd lume && npx vitest run tests/overview tests/alerts tests/health tests/settings tests/tasks tests/schedule tests/progress tests/playground`.
 - **Good:** missing env (Instantly, Linear, Telegram) degrades to a banner or no-op with a warning, never a crash.
 
+### Today, Replies and the pilot stages (90-day plan, phase 2)
+- **Where:** `lume/app/(app)/{today,replies}/`, `lume/app/api/{today,replies,scoreboard}`, `lume/lib/{today,replies,scoreboard}/`,
+  `lume/lib/crm/{stages,pilot}.ts`, `lume/components/{today,replies}/`, `lume/components/crm/PilotLine.tsx`;
+  migration `*_lume_pilot_stages.sql` (four `crm_stages` rows, four `crm_deals` columns, `lume_week_notes`).
+- **How to test:** `cd lume && npx vitest run tests/crm tests/scoreboard tests/replies tests/today tests/api/crmRoutes.test.ts tests/api/scoreboardRoutes.test.ts tests/components/TodayReplies.test.tsx tests/components/CrmViews.test.tsx`;
+  pgTAP `supabase/tests/lume_pilot_stages_test.sql`.
+- **Good:** Conversation, Demo, Pilot, Paid sit after the eight original stages, which keep their names and positions; no existing deal moves.
+  Moves onto the pilot line are by hand and direct; Won/Lost still file `crm_close_deal`; automation (`autoAdvance`) never moves a deal on to,
+  along or off the pilot line. Check-ins fall due 10 and 25 days after `pilot_start_date` and only for deals in Pilot.
+  The scoreboard week is Monday to Monday in America/Los_Angeles and counts a deal once per column.
+  A waiting row is flagged past 60 minutes (exactly 60 is not). `/today` and `/replies` only read; the only writes are the
+  owner's ticks on Lume's own rows (check-in, referral, task done, top objection). Nothing sends or spends.
+  `/actions`, `/actions/<id>`, `/overview` and `/calendar` still render.
+
 ### Navigation: primary tabs, Volume, Admin (90-day regroup)
 - **Where:** `lume/components/shell/{tabs,nav}.ts` (groups, step numbers, Alt keys),
   `TopBar.tsx` (desktop launcher), `MobileNav.tsx` (phone bar + More sheet), `CommandPalette.tsx` (⌘K).
 - **How to test:** `cd lume && npx vitest run tests/shell tests/components/MobileNav.test.tsx tests/approvals/components.test.tsx tests/components/AgentChat.test.tsx`.
-- **Good:** primary tabs are Today, Signals, Pipeline, Replies, Agent in that order (desktop menu and phone bar);
+- **Good:** primary tabs are Today (`/today`), Signals, Pipeline (`/crm`), Replies (`/replies`), Agent in that order (desktop menu and phone bar);
   Volume holds Import 1, Leads 2–3, Progress 4, Rotate, Campaigns 5 and is collapsed unless you are on one of its pages;
   Admin holds Playground, Operator, Settings. No page is removed: every earlier URL still renders and has a ⌘K entry
   (`/calendar`, `/influencers`, `/overview`, `/actions`, `/actions/<id>`, `/runs/...`).

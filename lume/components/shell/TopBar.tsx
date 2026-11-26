@@ -93,6 +93,7 @@ export function TopBar({ operator = null }: { operator?: string | null } = {}) {
  * tabs, the Volume group (collapsed unless you are on one of its pages; the
  * numbered flow 1 Import … 5 Campaigns with Rotate) and Admin. Alt + a step's
  * number or a tab's letter jumps there from anywhere, without opening the panel.
+ * Radii nest: 20px panel − 8px padding = 12px rows; 12px row − 8px inset = 4px step box.
  */
 function Launcher({ pathname, warm, pending }: { pathname: string; warm: (href: string) => void; pending: number }) {
   const router = useRouter()
@@ -135,7 +136,7 @@ function Launcher({ pathname, warm, pending }: { pathname: string; warm: (href: 
         )}
       >
         {t.group === 'volume' && (
-          <span aria-hidden className={cn('grid h-6 min-w-6 place-items-center rounded-lg border border-line px-1 font-mono text-[12px] text-fg-70', !t.step && 'border-transparent', active && 'border-black/20 text-primary-foreground')}>{t.step ?? '·'}</span>
+          <span aria-hidden className={cn('grid h-6 min-w-6 place-items-center rounded-sm border border-line px-1 font-mono text-[12px] text-fg-70', !t.step && 'border-transparent', active && 'border-black/20 text-primary-foreground')}>{t.step ?? '·'}</span>
         )}
         <Icon className="size-4" strokeWidth={1.75} aria-hidden />
         <span className="flex-1">{t.label}</span>
@@ -159,7 +160,7 @@ function Launcher({ pathname, warm, pending }: { pathname: string; warm: (href: 
           <LumeMark className="h-3.5 w-auto" />
           <NavBadge count={pending} className="absolute -top-1.5 -right-1.5" />
         </PopoverTrigger>
-        <PopoverContent align="start" sideOffset={8} className="w-[340px] gap-0 rounded-2xl bg-black/55 p-2 ring-white/10 backdrop-blur-2xl backdrop-saturate-150 light:bg-white/55 light:ring-black/10">
+        <PopoverContent align="start" sideOffset={8} className="w-[340px] gap-0 rounded-[20px] bg-black/55 p-2 ring-white/10 backdrop-blur-2xl backdrop-saturate-150 light:bg-white/55 light:ring-black/10">
           <nav aria-label="Primary" className="flex flex-col">
             {PRIMARY.map(row)}
           </nav>
@@ -173,7 +174,7 @@ function Launcher({ pathname, warm, pending }: { pathname: string; warm: (href: 
           >
             <span className="flex-1 text-left">Volume</span>
             {!volume && <span aria-hidden className="font-mono tracking-normal normal-case">1–5</span>}
-            <ChevronDown aria-hidden className={cn('size-3.5 transition-transform', volume && 'rotate-180')} strokeWidth={1.75} />
+            <ChevronDown aria-hidden className={cn('size-3.5 transition-transform', volume && 'rotate-180')} strokeWidth={2} />
           </button>
           {volume && (
             <nav id="nav-volume" aria-label="Volume" className="flex flex-col">

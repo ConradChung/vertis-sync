@@ -331,7 +331,7 @@ describe('AgentChat on a phone', () => {
     render(<AgentChat />)
     fireEvent.click(await screen.findByRole('button', { name: 'Open menu' }))
     const nav = await screen.findByRole('navigation', { name: 'App' })
-    expect(within(nav).getByRole('link', { name: 'Today' }).getAttribute('href')).toBe('/overview')
+    expect(within(nav).getByRole('link', { name: 'Today' }).getAttribute('href')).toBe('/today')
     expect(within(nav).getByRole('link', { name: 'Leads' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Memory' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Skip permissions' })).toBeTruthy()

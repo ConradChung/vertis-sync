@@ -12,7 +12,7 @@ export type CallbackError = 'missing_code' | 'exchange_failed' | 'expired'
  * Magic-link landing. Supabase redirects here with either a PKCE `code`
  * (default template) or a `token_hash` + `type` pair (templates using
  * {{ .TokenHash }}). Either way: establish the cookie session, then send the
- * user to /overview (owner; the middleware applies the owner check from
+ * user to /today (owner; the middleware applies the owner check from
  * there), or to /portal for an active client-portal user, honouring a
  * relative `next` only when it stays under /portal.
  *
@@ -40,7 +40,7 @@ export async function GET(request: Request) {
     if (email && !isOwner(email, process.env.LUME_ALLOWED_EMAIL) && (await getPortalUser(email))) {
       return NextResponse.redirect(`${origin}${safePortalNext(searchParams.get('next'))}`)
     }
-    return NextResponse.redirect(`${origin}/overview`)
+    return NextResponse.redirect(`${origin}/today`)
   }
 
   console.warn('[auth/callback] failed:', error.code ?? error.status, error.message)

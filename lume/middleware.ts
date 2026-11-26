@@ -60,7 +60,7 @@ export async function middleware(request: NextRequest) {
   if (isAuthPage) {
     // Already signed in as the owner: skip the login form.
     if (pathname === '/login' && user && owner) {
-      return redirectTo('/overview', request, response)
+      return redirectTo('/today', request, response)
     }
     // A signed-in client-portal user on the login form goes to the portal.
     if (pathname === '/login' && user && !owner && (await getPortalUser(user.email))) {

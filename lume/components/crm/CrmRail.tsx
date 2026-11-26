@@ -2,7 +2,7 @@
 
 import { Spark } from '@/components/overview/parts'
 import { GlassCard } from '@/components/ui/glass-card'
-import { MAIN_LINE } from '@/lib/crm/stages'
+import { isPilotStage, MAIN_LINE } from '@/lib/crm/stages'
 import type { CrmBoardResponse } from '@/lib/crm/types'
 import { cn } from '@/lib/utils'
 
@@ -47,10 +47,24 @@ export function CrmRail({ data }: { data: CrmBoardResponse }) {
   const prev7 = data.replies_14d.slice(0, 7).reduce((a, b) => a + b, 0)
   const diff = last7 - prev7
   const main = data.stages.filter((s) => (MAIN_LINE as readonly string[]).includes(s.name))
-  const side = data.stages.filter((s) => !(MAIN_LINE as readonly string[]).includes(s.name))
+  const pilot = data.stages.filter((s) => isPilotStage(s.name))
+  const side = data.stages.filter((s) => !(MAIN_LINE as readonly string[]).includes(s.name) && !isPilotStage(s.name))
 
   return (
     <div className="flex flex-col gap-2.5" aria-label="Pipeline summary">
+      {pilot.length > 0 && (
+        <GlassCard size="sm" className="gap-2 px-3.5" aria-label="Path to paid">
+          <span className="eyebrow">Path to paid</span>
+          <div className="grid grid-cols-4 gap-1">
+            {pilot.map((s) => (
+              <div key={s.name} className="flex min-w-0 flex-col gap-0.5">
+                <span className={cn('font-mono text-lg leading-none tabular-nums', (counts[s.name] ?? 0) > 0 ? 'text-foreground' : 'text-muted-foreground')}>{fmt.format(counts[s.name] ?? 0)}</span>
+                <span className="truncate text-[10.5px] text-muted-foreground">{s.name}</span>
+              </div>
+            ))}
+          </div>
+        </GlassCard>
+      )}
       <div className="grid grid-cols-2 gap-2.5">
         {main.map((s) => (
           <Tile key={s.name} label={s.name} value={fmt.format(counts[s.name] ?? 0)} className={s.name === 'Contacted' ? 'col-span-2' : undefined} />
