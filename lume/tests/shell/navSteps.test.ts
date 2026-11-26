@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ADMIN, FLOW, MORE, NAV, navLabel, PRIMARY, tabForChord, VOLUME } from '@/components/shell/nav'
-import { APPROVALS_HREF, TABS } from '@/components/shell/tabs'
+import { APPROVALS_HREF, isActiveTab, TABS } from '@/components/shell/tabs'
 
 describe('nav groups (90-day regroup)', () => {
   it('primary tabs are Today, Signals, Pipeline, Replies, Agent, in that order', () => {
@@ -22,8 +22,12 @@ describe('nav groups (90-day regroup)', () => {
     expect(new Set(NAV.map((t) => t.key).filter(Boolean)).size).toBe(NAV.filter((t) => t.key).length)
   })
 
-  it('Today opens /today and Replies opens /replies (the approvals badge sits on Replies)', () => {
-    expect(PRIMARY.map((t) => t.href)).toEqual(['/today', '/signals/hiring', '/crm', '/replies', '/agent'])
+  it('Today opens /today, Signals the one inbox and Replies /replies (the approvals badge sits on Replies)', () => {
+    expect(PRIMARY.map((t) => t.href)).toEqual(['/today', '/signals', '/crm', '/replies', '/agent'])
+    // The hiring view and the influencers page sit under Signals, so the tab stays lit on them.
+    expect(isActiveTab('/signals/hiring', '/signals')).toBe(true)
+    expect(isActiveTab('/signals/influencers', '/signals')).toBe(true)
+    expect(isActiveTab('/signalsx', '/signals')).toBe(false)
     expect(APPROVALS_HREF).toBe('/replies')
   })
 

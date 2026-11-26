@@ -110,7 +110,7 @@ describe('TodayScreen (/today)', () => {
     scoreboard: board,
     errors: [],
     queue: {
-      signals: { total: 12, items: [{ key: 'hiring:7', company: 'Acme PM', untrusted_detail: 'Hiring: Regional Property Manager', sources: ['Hiring'], at: '2026-11-25T00:00:00Z', href: '/signals/hiring' }] },
+      signals: { total: 12, items: [{ key: 'hiring:7', company: 'Acme PM', untrusted_detail: 'Hiring: Regional Property Manager', sources: ['Hiring'], at: '2026-11-25T00:00:00Z', href: '/signals' }] },
       replies: { open: 3, items: [{ reply_to_uuid: 'r1', campaign_id: 'c', lead_email: 'ada@acme.com', lead_name: 'Ada Lovelace', company: 'Acme PM', subject: null, untrusted_excerpt: 'Yes please', received_at: '2026-11-26T17:30:00Z', deal_id: null, draft_action_id: null }] },
       checkins: [{ deal_id: 'd1', campaign_id: 'camp', name: 'Frank', company: 'Kaspen', email: 'f@k.co', day: 10, due_date: '2026-11-24', days_late: 2 }],
       tasks: [{ id: 't1', title: 'Send Frank the recap', due_at: '2026-11-26T17:00:00Z', all_day: true, status: 'scheduled', action_id: null, linear_url: null, overdue: false }],

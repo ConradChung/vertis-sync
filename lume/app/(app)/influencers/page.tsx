@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 
-/** The Influencers tab is gone (owner, 2026-11-09): candidate lists are sheets in Leads. Old links land there. */
+/** Influencers live inside Signals (owner, 2026-11-26). Old links land there; candidate lists are still sheets in Leads. */
 export default function InfluencersRedirect() {
-  redirect('/import/leads')
+  redirect('/signals/influencers')
 }

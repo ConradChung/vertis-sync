@@ -1,31 +1,31 @@
 import 'server-only'
 import { checkinsDue } from '@/lib/crm/pilot'
 import { getPilotDeals } from '@/lib/crm/service'
-import { listHiringRows } from '@/lib/hiring/store'
 import { waitingOf } from '@/lib/replies/waiting'
 import { loadWaitingReplies } from '@/lib/replies/store'
 import { getScoreboard } from '@/lib/scoreboard/store'
 import { addDays } from '@/lib/crm/pilot'
+import { isUntouched, SOURCE_LABEL } from '@/lib/signals/merge'
+import { loadAllRows } from '@/lib/signals/store'
 import { listOpenTasksDue } from '@/lib/tasks/store'
 import { ownerDate, ownerDayStart } from '@/lib/time/owner'
 import type { TodayCheckin, TodayPayload, TodaySignal, TodayTask } from '@/lib/today/types'
 
 const SIGNALS_SHOWN = 8
 
-const SIGNAL_WORD: Record<string, string> = { hiring: 'Hiring', new_manager: 'New manager', expansion: 'Expansion' }
-
-/** Signal accounts not yet touched. Until the Signals inbox exists this is the Hiring Ops sheet's new rows. */
+/** Signal accounts not yet touched: still new in the Signals inbox with no email, LinkedIn or call ticked. Newest signal first. */
 async function untouchedSignals(): Promise<{ items: TodaySignal[]; total: number }> {
-  const { rows, total } = await listHiringRows({ status: 'new', signal: 'all', tier: 'all', skipped: false, offset: 0, limit: SIGNALS_SHOWN })
+  const { rows } = await loadAllRows()
+  const open = rows.filter(isUntouched)
   return {
-    total,
-    items: rows.map((r) => ({
-      key: `hiring:${r.id}`,
-      company: r.company_name ?? r.company_domain ?? 'Unknown company',
-      untrusted_detail: [SIGNAL_WORD[r.signal] ?? r.signal, r.role_title ?? r.headline].filter(Boolean).join(': ') || null,
-      sources: ['Hiring'],
-      at: r.posted_at ?? r.created_at,
-      href: '/signals/hiring',
+    total: open.length,
+    items: open.slice(0, SIGNALS_SHOWN).map((r) => ({
+      key: r.key,
+      company: r.name,
+      untrusted_detail: r.newest.label || null,
+      sources: r.sources.map((x) => SOURCE_LABEL[x]),
+      at: r.newest.at,
+      href: '/signals',
     })),
   }
 }

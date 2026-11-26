@@ -47,6 +47,7 @@ export const LUME_ENV_NAMES: readonly EnvName[] = [
   opt('LUME_RESEARCH_APIFY_CAP_USD'),
   opt('LUME_F5BOT_SECRET'),
   opt('PERPLEXITY_API_KEY'),
+  opt('LUME_SIGNALS_CLIENT'),
 ]
 
 /** Root .env.example, edge-function secret block (same list as supabase/functions/config-health/names.ts). */

@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const m = vi.hoisted(() => ({
   getScoreboard: vi.fn(),
-  listHiringRows: vi.fn(),
+  loadAllRows: vi.fn(),
   loadWaitingReplies: vi.fn(),
   getPilotDeals: vi.fn(),
   listOpenTasksDue: vi.fn(),
 }))
 vi.mock('@/lib/scoreboard/store', () => ({ getScoreboard: m.getScoreboard }))
-vi.mock('@/lib/hiring/store', () => ({ listHiringRows: m.listHiringRows }))
+vi.mock('@/lib/signals/store', () => ({ loadAllRows: m.loadAllRows }))
 vi.mock('@/lib/replies/store', () => ({ loadWaitingReplies: m.loadWaitingReplies }))
 vi.mock('@/lib/crm/service', () => ({ getPilotDeals: m.getPilotDeals }))
 vi.mock('@/lib/tasks/store', () => ({ listOpenTasksDue: m.listOpenTasksDue }))
@@ -22,10 +22,23 @@ const pilot = (id: string, start: string | null, over: Record<string, unknown> =
   id, campaign_id: 'c', email: `${id}@x.co`, name: id, company: `${id} PM`, stage: 'Pilot', pilot_start_date: start, pilot_checkin_10_done_at: null, pilot_checkin_25_done_at: null, referral_asked_at: null, ...over,
 })
 
+const signal = (key: string, name: string, o: Record<string, unknown> = {}) => ({
+  key, name, aliases: [], domain: null, sources: ['hiring'], count: 1, newest: { source: 'hiring', label: 'Hiring: Regional PM', at: '2026-11-25T00:00:00Z', url: null },
+  phone: null, contacts: [], events: [], state_key: key, status: 'new', touches: { email: null, linkedin: null, call: null }, deal_id: null, ...o,
+})
+
 beforeEach(() => {
   vi.clearAllMocks()
   m.getScoreboard.mockResolvedValue(board)
-  m.listHiringRows.mockResolvedValue({ rows: [{ id: 7, signal: 'hiring', role_title: 'Regional Property Manager', headline: null, company_name: 'Acme PM', company_domain: 'acme.com', posted_at: '2026-11-25T00:00:00Z', created_at: '2026-11-25T10:00:00Z' }], total: 31 })
+  m.loadAllRows.mockResolvedValue({
+    failed: [],
+    rows: [
+      signal('d:acme.com', 'Acme PM', { sources: ['hiring', 'influencer'] }),
+      signal('n:touched', 'Touched Co', { touches: { email: '2026-11-25T00:00:00Z', linkedin: null, call: null } }),
+      signal('n:working', 'Working Co', { status: 'working' }),
+      signal('r:pm_dave', 'u/pm_dave', { sources: ['reddit'] }),
+    ],
+  })
   m.loadWaitingReplies.mockResolvedValue([reply('fresh', '2026-11-26T19:30:00Z'), reply('late', '2026-11-26T18:00:00Z'), reply('later', '2026-11-26T10:00:00Z')])
   m.getPilotDeals.mockResolvedValue([pilot('a', '2026-11-16'), pilot('b', '2026-11-20'), pilot('c', '2026-11-01', { pilot_checkin_10_done_at: '2026-11-11T00:00:00Z' })])
   m.listOpenTasksDue.mockResolvedValue([
@@ -39,7 +52,12 @@ describe('loadToday (the Today queue)', () => {
     const t = await loadToday(now)
     expect(t.today).toBe('2026-11-26')
     expect(t.scoreboard).toEqual(board)
-    expect(t.queue.signals).toMatchObject({ total: 31, items: [{ key: 'hiring:7', company: 'Acme PM', untrusted_detail: 'Hiring: Regional Property Manager', href: '/signals/hiring' }] })
+    // Only accounts still new with no touch ticked; a touched or working one is not in the queue.
+    expect(t.queue.signals.total).toBe(2)
+    expect(t.queue.signals.items).toEqual([
+      { key: 'd:acme.com', company: 'Acme PM', untrusted_detail: 'Hiring: Regional PM', sources: ['Hiring', 'Influencer reaction'], at: '2026-11-25T00:00:00Z', href: '/signals' },
+      { key: 'r:pm_dave', company: 'u/pm_dave', untrusted_detail: 'Hiring: Regional PM', sources: ['Reddit'], at: '2026-11-25T00:00:00Z', href: '/signals' },
+    ])
     // Only replies past 60 minutes, longest first; `open` still counts all three.
     expect(t.queue.replies.items.map((r) => r.reply_to_uuid)).toEqual(['later', 'late'])
     expect(t.queue.replies.open).toBe(3)
@@ -49,11 +67,10 @@ describe('loadToday (the Today queue)', () => {
     expect(t.errors).toEqual([])
     // Tasks are read up to the end of today in the owner zone (midnight Pacific).
     expect(m.listOpenTasksDue).toHaveBeenCalledWith('2026-11-27T08:00:00.000Z')
-    expect(m.listHiringRows).toHaveBeenCalledWith(expect.objectContaining({ status: 'new', skipped: false }))
   })
 
   it('one failing section is named and the rest still load', async () => {
-    m.listHiringRows.mockRejectedValue(new Error('boom'))
+    m.loadAllRows.mockRejectedValue(new Error('boom'))
     m.getScoreboard.mockRejectedValue(new Error('boom'))
     const t = await loadToday(now)
     expect(t.errors.sort()).toEqual(['scoreboard', 'signals'])

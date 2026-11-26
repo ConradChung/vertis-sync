@@ -15,6 +15,7 @@ import { defaultFilters, filtersFromParams, portalHref, switchTab, type PortalFi
 import { LeadCard } from './LeadCard'
 import { LeadsTable } from './LeadsTable'
 import { AgentPanel } from './AgentPanel'
+import { SignalsSection } from './SignalsSection'
 
 const TABS: { tab: PortalTab; label: string }[] = [
   { tab: 'email', label: 'Email campaigns' },
@@ -178,6 +179,8 @@ export function PortalScreen() {
   return (
     <div className={cn('mx-auto grid w-full max-w-[1600px] gap-6', agentOpen && wide && 'lg:grid-cols-[minmax(0,1fr)_400px]')}>
       <section className="flex min-w-0 flex-col gap-4">
+        {/* Today's signal accounts and the week's scoreboard sit above the campaign lead lists. */}
+        {!expanded && <SignalsSection as={as} />}
         {/* Tabs */}
         {!expanded && (
           <div className="flex items-center justify-between gap-3">
