@@ -119,11 +119,34 @@ describe('buildSignalCard', () => {
     expect(s).not.toContain('javascript:')
     expect(s).toContain('<https://acme.com|Acme Property Mgmt>')
   })
+
+  it('shows the work email Blitz found (and only that); buttons unchanged', () => {
+    const contacts = [{ name: 'Ada Lovelace', title: 'Director of Operations', linkedin_url: 'https://www.linkedin.com/in/ada-pm', email: 'ada@acmepm.com' }]
+    const { blocks } = buildSignalCard(person({ contacts }), opts())
+    const s = all(blocks)
+    expect(s).toContain('*Email:* ada@acmepm.com')
+    const actions = blocks.find((b) => b.type === 'actions') as { elements: { action_id: string }[] }
+    expect(actions.elements.map((e) => e.action_id)).toEqual([SIGNAL_ACTION_IDS.approve, SIGNAL_ACTION_IDS.edit, SIGNAL_ACTION_IDS.skip])
+    expect(renderCardAsText(blocks)).toContain('*Email:* ada@acmepm.com')
+  })
+
+  it('no email found (contacts [] or old Apollo rows without one) → nothing extra; a malformed email is not linked', () => {
+    for (const contacts of [[], null, person().contacts, [{ name: 'X', email: 'bad|<@channel>' }]]) {
+      expect(all(buildSignalCard(person({ contacts }), opts()).blocks)).not.toContain('Email:')
+    }
+  })
 })
 
 describe('buildSignalDigest', () => {
   const post = { post_id: '7400', post_url: 'https://www.linkedin.com/feed/update/urn:li:activity:7400', posted_at: '2026-11-20T12:00:00Z', text_excerpt: 'Rent day is chaos' }
   const reactors = (n: number) => Array.from({ length: n }, (_, i) => person({ id: 100 + i, kind: 'reactor', name: `Reactor ${i}`, comment_text: null }))
+
+  it('a reactor with a found work email shows it; one without shows nothing extra', () => {
+    const rs = [person({ id: 100, kind: 'reactor', name: 'Reactor 0', comment_text: null, contacts: [{ name: 'Reactor 0', email: 'r0@acmepm.com' }] }), person({ id: 101, kind: 'reactor', name: 'Reactor 1', comment_text: null, contacts: [] })]
+    const s = all(buildSignalDigest(post, rs, { ...opts(), reactorOpening: null }).blocks)
+    expect(s).toContain('*Email:* r0@acmepm.com')
+    expect(s.match(/\*Email:\*/g)?.length).toBe(1)
+  })
 
   it('shows the excerpt, link, the opening placeholder while reactor_opening is null, and each PM reactor', () => {
     const d = buildSignalDigest(post, reactors(2), { ...opts(), reactorOpening: null })

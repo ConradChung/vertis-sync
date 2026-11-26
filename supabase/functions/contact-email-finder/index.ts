@@ -1,6 +1,8 @@
 // Supabase Edge Function: contact-email-finder
 // Receives { job_id }, resolves an address for every row that arrived without
-// one via connector-os, then hands the whole list to email-validator so found
+// one — Blitz first for rows that carry a LinkedIn profile URL (4 at a time,
+// paced under the key's rate limit), connector-os for the rest and for every
+// Blitz miss — then hands the whole list to email-validator so found
 // and pre-existing addresses are validated together in a single pass.
 //
 // Runs BEFORE email-validator, not after: MailTester costs ~1.1s per row, so
@@ -13,16 +15,22 @@
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 import { alert, type AlertInput, lumeLink, titleFrom } from '../_shared/alert.ts'
+import { BLITZ_CONCURRENCY, BlitzSession, personLinkedinUrl } from '../_shared/blitz.ts'
+import { runPool } from '../_shared/pool.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const CONNECTOR_OS_API_KEY = Deno.env.get('CONNECTOR_OS_API_KEY') ?? ''
+// Optional: unset means every row goes to connector-os exactly as before.
+// Read per run (not at import) so a newly set secret needs no redeploy-time state.
+const blitzKey = (): string => Deno.env.get('BLITZ_API_KEY') ?? ''
 const TELEGRAM_BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN') ?? ''
 const TELEGRAM_CHAT_ID = Deno.env.get('TELEGRAM_CHAT_ID') ?? ''
 
 const FINDER_URL = 'https://api.connector-os.com/api/email/v2/find'
 // Report every 10%, matching the email-validator milestones.
 const MILESTONE_STEP = 10
+const HANDOFF_PAUSE_MS = Number(Deno.env.get('FINDER_HANDOFF_PAUSE_MS') ?? 3000)
 
 const REST_HEADERS: Record<string, string> = {
   'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -115,12 +123,21 @@ const LAST_EXACT = new Set(['last_name', 'lastname', 'surname', 'family_name'])
 const FULL_EXACT = new Set(['name', 'full_name', 'person_name', 'contact_name'])
 // Company Domain before Website: a bare domain needs no URL parsing.
 const DOMAIN_EXACT = new Set(['company_domain', 'domain', 'website', 'company_website', 'url'])
+// The person's profile, never the company page (Apollo exports carry both:
+// "Person Linkedin Url" and "Company Linkedin Url").
+const LINKEDIN_EXACT = new Set(['person_linkedin_url', 'linkedin_url', 'linkedin', 'linkedin_profile', 'linkedin_profile_url', 'person_linkedin', 'profile_url'])
 
 interface Columns {
   first: string | null
   last: string | null
   full: string | null
   domain: string | null
+  linkedin: string | null
+}
+
+function pickLinkedinColumn(headers: string[]): string | null {
+  const personal = headers.filter(h => !normalizeHeader(h).includes('company') && !normalizeHeader(h).includes('organization'))
+  return pickColumn(personal, LINKEDIN_EXACT, ['linkedin'])
 }
 
 function detectColumns(headers: string[]): Columns {
@@ -129,6 +146,7 @@ function detectColumns(headers: string[]): Columns {
     last: pickColumn(headers, LAST_EXACT, ['last_name', 'last']),
     full: pickColumn(headers, FULL_EXACT, ['full_name', 'person_name', 'contact_name']),
     domain: pickColumn(headers, DOMAIN_EXACT, ['domain', 'website']),
+    linkedin: pickLinkedinColumn(headers),
   }
 }
 
@@ -192,6 +210,7 @@ interface ValidationRow {
   id: string
   row_index: number
   row_data: Record<string, unknown> | null
+  validation_result?: Record<string, unknown> | null
 }
 
 interface ValidationJob {
@@ -214,7 +233,7 @@ async function invokeValidator(jobId: string): Promise<void> {
   }).catch(err => console.error('[contact-email-finder] email-validator invoke error:', err))
 }
 
-async function processJob(jobId: string): Promise<void> {
+export async function processJob(jobId: string): Promise<void> {
   const startTime = Date.now()
   const CHUNK_LIMIT_MS = 110_000
 
@@ -259,6 +278,11 @@ async function processJob(jobId: string): Promise<void> {
     headers = sample?.[0]?.row_data ? Object.keys(sample[0].row_data) : []
   }
   const cols = detectColumns(headers)
+  // One Blitz session per invocation: key-info (free) is read once on the
+  // first lookup and seeds the records countdown; at 0, a 402, a bad key or
+  // an outage it stops calling and every row falls back to connector-os.
+  const blitz = new BlitzSession({ apiKey: blitzKey() })
+  const useBlitz = blitz.configured && cols.linkedin !== null
 
   let found = job.emails_found
   let notFound = job.emails_not_found
@@ -277,6 +301,40 @@ async function processJob(jobId: string): Promise<void> {
     lastMilestone = Math.floor(((found + notFound) / totalMissing) * 100 / MILESTONE_STEP) * MILESTONE_STEP
   }
 
+  // Per-row bookkeeping, unchanged: job counters, 10% milestones.
+  async function afterRow(): Promise<void> {
+    await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
+      emails_found: found,
+      emails_not_found: notFound,
+    })
+
+    const done = found + notFound
+    if (totalMissing > 0) {
+      const milestone = Math.floor((done / totalMissing) * 100 / MILESTONE_STEP) * MILESTONE_STEP
+      if (milestone > lastMilestone && milestone <= 100) {
+        lastMilestone = milestone
+        await notify(`🔍 Email finder ${milestone}% (${done}/${totalMissing}) — ${found} found so far.`,
+          { severity: 'info', link: lumeLink('/validate'), scope: 'validation' })
+      }
+    }
+  }
+
+  // The 110 s chunk hand-off, unchanged: re-invoke and exit.
+  async function handOffIfLate(): Promise<boolean> {
+    if (Date.now() - startTime <= CHUNK_LIMIT_MS) return false
+    await fetch(`${SUPABASE_URL}/functions/v1/contact-email-finder`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_SERVICE_ROLE_KEY,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ job_id: jobId }),
+    }).catch(err => console.error('[contact-email-finder] Self re-invoke error:', err))
+    await new Promise(r => setTimeout(r, HANDOFF_PAUSE_MS))
+    return true
+  }
+
   while (true) {
     // Cancellation is only observable here — there is no signal into a running
     // worker, so a halt is picked up at the top of the next batch.
@@ -287,11 +345,46 @@ async function processJob(jobId: string): Promise<void> {
 
     const rows = (await supabaseRequest(
       'GET',
-      `validation_rows?job_id=eq.${jobId}&status=eq.pending&email=eq.&order=row_index.asc&limit=50&select=id,row_index,row_data`,
+      `validation_rows?job_id=eq.${jobId}&status=eq.pending&email=eq.&order=row_index.asc&limit=50&select=id,row_index,row_data,validation_result`,
     )) as ValidationRow[]
     if (!rows || rows.length === 0) break
 
+    // Blitz first, 4 rows at a time (starts paced inside the session). A found
+    // address is written straight away so a hand-off never loses a paid record;
+    // a miss is noted on the row so a later invocation doesn't ask again.
+    const blitzFound = new Set<string>()
+    const blitzMissed = new Set<string>()
+    if (useBlitz && !blitz.unavailableReason) {
+      const ask = rows.flatMap(row => {
+        const url = personLinkedinUrl(row.row_data?.[cols.linkedin!])
+        return url && !row.validation_result?.blitz ? [{ row, url }] : []
+      })
+      await runPool(ask, BLITZ_CONCURRENCY, async ({ row, url }) => {
+        if (blitz.unavailableReason) return
+        const r = await blitz.findWorkEmail(url)
+        if (r.kind === 'found') {
+          await supabaseRequest('PATCH', `validation_rows?id=eq.${row.id}`, {
+            email: r.email,
+            validation_result: { found_by: 'blitz' },
+          })
+          blitzFound.add(row.id)
+          found++
+        } else if (r.kind === 'miss') {
+          await supabaseRequest('PATCH', `validation_rows?id=eq.${row.id}`, { validation_result: { blitz: 'miss' } })
+          blitzMissed.add(row.id)
+        }
+        // unavailable: nothing written; connector-os takes the row below.
+      }, { shouldStop: () => Date.now() - startTime > CHUNK_LIMIT_MS || blitz.unavailableReason !== null })
+      if (blitz.unavailableReason) {
+        console.warn(`[contact-email-finder] Blitz unavailable (${blitz.unavailableReason}) — connector-os for the rest of this invocation.`)
+      }
+      // Persist the counters now, so a hand-off right after this keeps them.
+      if (blitzFound.size > 0) await afterRow()
+    }
+
     for (const row of rows) {
+      if (blitzFound.has(row.id)) continue
+      const blitzNote = blitzMissed.has(row.id) || row.validation_result?.blitz === 'miss' ? { blitz: 'miss' } : {}
       const data = row.row_data ?? {}
       const get = (col: string | null): string => (col ? String(data[col] ?? '').trim() : '')
 
@@ -308,7 +401,7 @@ async function processJob(jobId: string): Promise<void> {
         // Nothing to search on — don't spend a lookup.
         await supabaseRequest('PATCH', `validation_rows?id=eq.${row.id}`, {
           status: 'no_email',
-          validation_result: { skipped: 'no name or domain to search on' },
+          validation_result: { skipped: 'no name or domain to search on', ...blitzNote },
         })
         notFound++
       } else {
@@ -324,46 +417,20 @@ async function processJob(jobId: string): Promise<void> {
           // the addresses that came in the file.
           await supabaseRequest('PATCH', `validation_rows?id=eq.${row.id}`, {
             email: outcome.email,
-            validation_result: { found_by: 'connector-os', ...outcome.detail },
+            validation_result: { found_by: 'connector-os', ...outcome.detail, ...blitzNote },
           })
           found++
         } else {
           await supabaseRequest('PATCH', `validation_rows?id=eq.${row.id}`, {
             status: 'no_email',
-            validation_result: { not_found: true, ...outcome.detail },
+            validation_result: { not_found: true, ...outcome.detail, ...blitzNote },
           })
           notFound++
         }
       }
 
-      await supabaseRequest('PATCH', `validation_jobs?id=eq.${jobId}`, {
-        emails_found: found,
-        emails_not_found: notFound,
-      })
-
-      const done = found + notFound
-      if (totalMissing > 0) {
-        const milestone = Math.floor((done / totalMissing) * 100 / MILESTONE_STEP) * MILESTONE_STEP
-        if (milestone > lastMilestone && milestone <= 100) {
-          lastMilestone = milestone
-          await notify(`🔍 Email finder ${milestone}% (${done}/${totalMissing}) — ${found} found so far.`,
-            { severity: 'info', link: lumeLink('/validate'), scope: 'validation' })
-        }
-      }
-
-      if (Date.now() - startTime > CHUNK_LIMIT_MS) {
-        await fetch(`${SUPABASE_URL}/functions/v1/contact-email-finder`, {
-          method: 'POST',
-          headers: {
-            'apikey': SUPABASE_SERVICE_ROLE_KEY,
-            'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ job_id: jobId }),
-        }).catch(err => console.error('[contact-email-finder] Self re-invoke error:', err))
-        await new Promise(r => setTimeout(r, 3000))
-        return
-      }
+      await afterRow()
+      if (await handOffIfLate()) return
     }
   }
 
@@ -380,11 +447,28 @@ async function processJob(jobId: string): Promise<void> {
     emails_not_found: notFound,
   })
 
+  // Blitz charges 1 record per found email and nothing for a miss, so the
+  // rows it found are the records this job used (across every invocation).
+  let blitzLine: string[] = []
+  if (blitz.configured) {
+    try {
+      const byBlitz = (await supabaseRequest(
+        'GET',
+        `validation_rows?job_id=eq.${jobId}&validation_result->>found_by=eq.blitz&select=id`,
+      )) as { id: string }[]
+      blitzLine = [`Blitz: ${byBlitz.length} found (${byBlitz.length} records used)` +
+        (blitz.unavailableReason ? ` — stopped: ${blitz.unavailableReason}, connector-os took the rest` : '')]
+    } catch (err) {
+      console.error('[contact-email-finder] Blitz count failed:', err)
+    }
+  }
+
   await notify(
     [
       `🔍 Email finder complete — ${job.filename}`,
       `Found: ${found}`,
       `Not found: ${notFound}`,
+      ...blitzLine,
       ``,
       `Validating ${toValidate.length} addresses now.`,
     ].join('\n'),
@@ -409,7 +493,7 @@ Deno.serve(async (req: Request) => {
     // app's Vercel env — worth being able to check without starting a run.
     if (body.mode === 'check') {
       return new Response(
-        JSON.stringify({ ok: true, connectorOsKeyPresent: CONNECTOR_OS_API_KEY.length > 0 }),
+        JSON.stringify({ ok: true, connectorOsKeyPresent: CONNECTOR_OS_API_KEY.length > 0, blitzKeyPresent: blitzKey().length > 0 }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       )
     }

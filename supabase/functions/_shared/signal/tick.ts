@@ -14,7 +14,7 @@ import { readCaps } from './caps.ts'
 import { commentersToConsider, parseComments } from './comments.ts'
 import { dedupeCommenters } from './dedupe.ts'
 import type { Facts } from './drafts.ts'
-import { type Contact, type Counts, type CrawlResult, type FilterDeps, runCommenterStages, runReactorStages } from './filter.ts'
+import { type Counts, type CrawlResult, type EmailFinder, type FilterDeps, runCommenterStages, runReactorStages } from './filter.ts'
 import { Gate } from './gate.ts'
 import {
   COMMENTS_ACTOR,
@@ -45,7 +45,8 @@ export interface TickDeps {
   haiku(req: JsonRequest): Promise<{ json: unknown; usd: number }>
   perplexity(question: string): Promise<PplxAnswer>
   crawl: ((domains: string[], deadlineS: number) => Promise<CrawlResult[]>) | null
-  apollo(domain: string): Promise<Contact[]>
+  /** Blitz work-email lookup for the contacts stage (one session per tick). */
+  email: EmailFinder & { recordsUsed?: number }
   facts: Facts
   /** wall clock (ms) */
   clock: () => number
@@ -175,7 +176,7 @@ export async function runTick(deps: TickDeps, body: TickBody = {}): Promise<Reco
 
     // 7. Commenter filter stages.
     const fd: FilterDeps = {
-      store, gate, now, timeLeft, haiku: deps.haiku, perplexity: deps.perplexity, crawl: deps.crawl, apollo: deps.apollo,
+      store, gate, now, timeLeft, haiku: deps.haiku, perplexity: deps.perplexity, crawl: deps.crawl, email: deps.email,
       facts: deps.facts, reactorOpening,
     }
     try {
@@ -205,6 +206,7 @@ export async function runTick(deps: TickDeps, body: TickBody = {}): Promise<Reco
       notices: gate.notices,
       stopped: gate.stopped ? gate.reason : null,
       stop_cleared: stopCleared,
+      email_records_used: deps.email.recordsUsed ?? 0,
       cycle: usage?.cycle ?? null,
       errors,
       ms: deps.clock() - startedAt,

@@ -3,7 +3,8 @@
 import type { ApifyClient, RunData } from './apify.ts'
 import type { Cycle } from './caps.ts'
 import type { Facts } from './drafts.ts'
-import type { Contact, CrawlResult } from './filter.ts'
+import type { CrawlResult, EmailFinder } from './filter.ts'
+import type { EmailLookup } from '../blitz.ts'
 import { Gate } from './gate.ts'
 import { readCaps } from './caps.ts'
 import type { KnownReactor, NewPost, NewSpend, Person, PostRow, SignalState, SpendRow, Stage, Store } from './store.ts'
@@ -153,7 +154,7 @@ export function gateFor(store: FakeStore, opts: { usage?: number; cycle?: Cycle 
 
 /** Counts every external call so tests can assert nothing was paid twice. */
 export class Fakes {
-  calls = { haiku: 0, perplexity: 0, crawl: 0, apollo: 0 }
+  calls = { haiku: 0, perplexity: 0, crawl: 0, email: 0 }
   triageLabel: 'likely' | 'possible' | 'no' = 'likely'
   verify = { is_pm_company: true, is_owner_operator: false, is_decision_maker: true, company_website: 'https://whitfieldpm.com', door_count: null as number | null }
   /** Haiku's comment reply (drafts); null → a malformed reply. */
@@ -166,7 +167,11 @@ export class Fakes {
   doorsHint: string | null = null
   failHaiku = 0
   failPerplexity = 0
-  apolloStatus = 200
+  /** Blitz work-email fake: 'found' | 'miss' | an unavailable reason; recordsLeft is the guard's countdown. */
+  emailResult: 'found' | 'miss' | 'exhausted' | 'timeout' = 'found'
+  recordsLeft = 100
+  recordsUsed = 0
+  emailUrls: string[] = []
 
   haiku = async (req: { system: string; messages: { content: string }[] }) => {
     this.calls.haiku++
@@ -207,13 +212,19 @@ export class Fakes {
     this.crawlRules.push(rules)
     return domains.map((domain) => ({ domain, verdict: this.crawlVerdict, reason: 'r', doors_hint: this.doorsHint, confidence: 'high' }))
   }
-  apollo = async (_domain: string): Promise<Contact[]> => {
-    this.calls.apollo++
-    if (this.apolloStatus !== 200) throw new Error(`apollo ${this.apolloStatus}`)
-    return [
-      { name: 'Dana Whitfield', title: 'Owner', linkedin_url: 'https://www.linkedin.com/in/dana-whitfield-3a94a6367' },
-      { name: 'Sam Ortiz', title: 'COO', linkedin_url: 'https://www.linkedin.com/in/samortiz' },
-    ]
+  email: EmailFinder = {
+    canSpend: async (cost = 1) => this.recordsLeft >= cost,
+    findWorkEmail: async (url: string): Promise<EmailLookup> => {
+      this.calls.email++
+      this.emailUrls.push(url)
+      if (this.emailResult === 'found') {
+        this.recordsLeft--
+        this.recordsUsed++
+        return { kind: 'found', email: 'dana@whitfieldpm.com' }
+      }
+      if (this.emailResult === 'miss') return { kind: 'miss' }
+      return { kind: 'unavailable', reason: this.emailResult }
+    },
   }
 }
 

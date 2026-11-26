@@ -4,7 +4,7 @@
 //
 // Polls Frank's LinkedIn posts and their comments, dedupes commenters against
 // Lume, filters them to property-management operators (Haiku headline triage,
-// Perplexity verify, crawl worker PM-vs-vendor, door count, Apollo contacts)
+// Perplexity verify, crawl worker PM-vs-vendor, door count, Blitz work email)
 // and writes template drafts. Rows at stage 'ready' are carded to #sales by
 // Lume (/api/cron/signal-alerts); nothing here sends anything to a lead.
 //
@@ -23,7 +23,8 @@ import { parsePerplexity, perplexityRequest, PPLX_URL, type PplxAnswer, RETRY_BA
 import { deepWellFormed } from '../_shared/text.ts'
 import { apifyClient } from '../_shared/signal/apify.ts'
 import type { Facts } from '../_shared/signal/drafts.ts'
-import { apolloClient, crawlClient } from '../_shared/signal/filter.ts'
+import { crawlClient } from '../_shared/signal/filter.ts'
+import { BlitzSession } from '../_shared/blitz.ts'
 import { ingestReactorRuns } from '../_shared/signal/reactions.ts'
 import { type Rest, restStore } from '../_shared/signal/store.ts'
 import { runTick, type TickBody } from '../_shared/signal/tick.ts'
@@ -102,7 +103,8 @@ export async function handle(req: Request): Promise<Response> {
       haiku,
       perplexity,
       crawl: crawlUrl && crawlSecret ? crawlClient(crawlUrl, crawlSecret) : null,
-      apollo: apolloClient(env('APOLLO_API_KEY')),
+      // Unset BLITZ_API_KEY → cards ship without an email, as before.
+      email: new BlitzSession({ apiKey: env('BLITZ_API_KEY') }),
       facts: factsJson as Facts,
       clock: () => Date.now(),
     }, tickBody)
