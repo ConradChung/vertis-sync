@@ -8,7 +8,7 @@ import { OperatorChip } from '@/components/shell/OperatorChip'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { APPROVALS_HREF, TABS, isActiveTab } from '@/components/shell/tabs'
 import { NavBadge } from '@/components/shell/NavBadge'
-import { FLOW, TOOLS, type NavTab } from '@/components/shell/nav'
+import { ADMIN, MORE, NAV, VOLUME, type NavTab } from '@/components/shell/nav'
 import { cn } from '@/lib/utils'
 import { LumeMark } from './LumeMark'
 
@@ -19,8 +19,8 @@ export const isChatRoute = (pathname: string) => pathname === '/agent'
 
 /**
  * Phone navigation (below `sm`): a slim glass header (logo, current page,
- * search, theme) and a floating bottom tab bar with the four primary tabs plus
- * More, which opens a sheet with the rest. Both respect the safe-area insets.
+ * search, theme) and a floating bottom tab bar with the five primary tabs plus
+ * More, which opens a sheet with the Volume and Admin groups. Both respect the safe-area insets.
  */
 /**
  * Tracks the visual viewport so phone layouts can size to the space above the
@@ -63,7 +63,7 @@ export function MobileNav({
   warm: (href: string) => void
   /** Grok Bot operator chip label (vertical name or "Master"), when one holds the session. */
   operator?: string | null
-  /** Awaiting pending actions: a badge on More (Approvals lives there) and on Approvals in the sheet. */
+  /** Awaiting pending actions: a badge on the Replies tab in the bottom bar. */
   pending?: number
 }) {
   useVisualViewport()
@@ -80,7 +80,7 @@ export function MobileNav({
   }, [chat])
   const [more, setMore] = useState(false)
   useEffect(() => setMore(false), [pathname])
-  const current: NavTab | undefined = [...FLOW, ...TOOLS].find((t) => isActiveTab(pathname, t.href))
+  const current: NavTab | undefined = NAV.find((t) => isActiveTab(pathname, t.href))
   const primary = TABS.filter((t) => t.primary)
   const rest = TABS.filter((t) => !t.primary)
   const restActive = rest.some((t) => isActiveTab(pathname, t.href))
@@ -119,12 +119,13 @@ export function MobileNav({
               aria-current={active ? 'page' : undefined}
               onPointerDown={() => warm(t.href)}
               className={cn(
-                'flex flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl text-[10.5px] font-medium text-fg-46 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+                'relative flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl text-[10.5px] font-medium text-fg-46 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
                 active && 'bg-primary text-primary-foreground dark:shadow-(--primary-glow) light:ring-1 light:ring-(--lime-edge)'
               )}
             >
               <Icon className="size-5" strokeWidth={active ? 2 : 1.75} aria-hidden />
               {t.label}
+              {t.href === APPROVALS_HREF && <NavBadge count={pending} className="absolute top-1 right-[calc(50%-22px)]" />}
             </Link>
           )
         })}
@@ -134,13 +135,12 @@ export function MobileNav({
           aria-haspopup="dialog"
           aria-expanded={more}
           className={cn(
-            'relative flex flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl text-[10.5px] font-medium text-fg-46 outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            'relative flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl text-[10.5px] font-medium text-fg-46 outline-none focus-visible:ring-2 focus-visible:ring-ring',
             restActive && 'bg-primary text-primary-foreground light:ring-1 light:ring-(--lime-edge)'
           )}
         >
           <Ellipsis className="size-5" strokeWidth={1.75} aria-hidden />
           {restActive ? TABS.find((t) => isActiveTab(pathname, t.href))?.label : 'More'}
-          <NavBadge count={pending} className="absolute top-1 right-[calc(50%-22px)]" />
         </button>
       </nav>
       </>
@@ -149,8 +149,8 @@ export function MobileNav({
       <Sheet open={more} onOpenChange={setMore}>
         <SheetContent side="bottom" className="rounded-t-[24px] px-4 pt-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)]">
           <SheetTitle className="sr-only">Navigate</SheetTitle>
-          <NavGroup title="Flow" tabs={FLOW.filter((t) => !t.primary)} pathname={pathname} warm={warm} />
-          <NavGroup title="Tools" tabs={TOOLS.filter((t) => !t.primary)} pathname={pathname} warm={warm} pending={pending} />
+          <NavGroup title="Volume" tabs={VOLUME} pathname={pathname} warm={warm} />
+          <NavGroup title="Admin" tabs={[...ADMIN, ...MORE]} pathname={pathname} warm={warm} />
         </SheetContent>
       </Sheet>
     </>
@@ -158,7 +158,7 @@ export function MobileNav({
 }
 
 /** One labelled group of the More sheet; flow tabs show their step number. */
-function NavGroup({ title, tabs, pathname, warm, pending = 0 }: { title: string; tabs: NavTab[]; pathname: string; warm: (href: string) => void; pending?: number }) {
+function NavGroup({ title, tabs, pathname, warm }: { title: string; tabs: NavTab[]; pathname: string; warm: (href: string) => void }) {
   if (!tabs.length) return null
   return (
     <section className="mb-3 last:mb-0">
@@ -181,7 +181,6 @@ function NavGroup({ title, tabs, pathname, warm, pending = 0 }: { title: string;
                 {t.step ? <span aria-hidden className="font-mono text-[13px] opacity-70">{t.step}</span> : null}
                 <Icon className="size-5" strokeWidth={1.75} aria-hidden />
                 {t.label}
-                {t.href === APPROVALS_HREF && <NavBadge count={pending} className="ml-auto" />}
               </Link>
             </li>
           )

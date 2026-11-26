@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
-import { Search } from 'lucide-react'
+import { ChevronDown, Search } from 'lucide-react'
 import { useSWRConfig } from 'swr'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
 import { CommandPalette } from '@/components/shell/CommandPalette'
@@ -12,7 +12,7 @@ import { OperatorChip } from '@/components/shell/OperatorChip'
 import { cn } from '@/lib/utils'
 import { prefetchTab, TAB_KEYS } from '@/lib/prefetch/tabs'
 import { isActiveTab } from '@/components/shell/tabs'
-import { FLOW, TOOLS, tabForChord } from '@/components/shell/nav'
+import { ADMIN, NAV, PRIMARY, VOLUME, tabForChord, type NavTab } from '@/components/shell/nav'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Kbd } from '@/components/ui/kbd'
 import { LumeMark } from './LumeMark'
@@ -89,14 +89,18 @@ export function TopBar({ operator = null }: { operator?: string | null } = {}) {
 
 /**
  * Desktop navigation: a glass square in the top-left corner (the Lume mark)
- * with the current page beside it. It opens a panel with the numbered flow
- * (1 Import … 5 Campaigns) and the tools as a grid. Alt + a step's number or a
- * tool's letter jumps there from anywhere, without opening the panel.
+ * with the current page beside it. It opens a panel with the five primary
+ * tabs, the Volume group (collapsed unless you are on one of its pages; the
+ * numbered flow 1 Import … 5 Campaigns with Rotate) and Admin. Alt + a step's
+ * number or a tab's letter jumps there from anywhere, without opening the panel.
  */
 function Launcher({ pathname, warm, pending }: { pathname: string; warm: (href: string) => void; pending: number }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   useEffect(() => setOpen(false), [pathname])
+  const inVolume = VOLUME.some((t) => isActiveTab(pathname, t.href))
+  const [volume, setVolume] = useState(inVolume)
+  useEffect(() => setVolume(inVolume), [inVolume])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -114,7 +118,32 @@ function Launcher({ pathname, warm, pending }: { pathname: string; warm: (href: 
     return () => window.removeEventListener('keydown', onKey)
   }, [router])
 
-  const current = [...FLOW, ...TOOLS].find((t) => isActiveTab(pathname, t.href))
+  const current = NAV.find((t) => isActiveTab(pathname, t.href))
+  const row = (t: NavTab) => {
+    const active = isActiveTab(pathname, t.href)
+    const Icon = t.icon
+    return (
+      <Link
+        key={t.href}
+        href={t.href}
+        aria-current={active ? 'page' : undefined}
+        onPointerEnter={() => warm(t.href)}
+        onFocus={() => warm(t.href)}
+        className={cn(
+          'group flex h-10 items-center gap-3 rounded-xl px-2.5 text-[14px] text-fg outline-none hover:bg-secondary focus-visible:bg-secondary',
+          active && 'bg-primary text-primary-foreground hover:bg-primary light:ring-1 light:ring-(--lime-edge)'
+        )}
+      >
+        {t.group === 'volume' && (
+          <span aria-hidden className={cn('grid h-6 min-w-6 place-items-center rounded-lg border border-line px-1 font-mono text-[12px] text-fg-70', !t.step && 'border-transparent', active && 'border-black/20 text-primary-foreground')}>{t.step ?? '·'}</span>
+        )}
+        <Icon className="size-4" strokeWidth={1.75} aria-hidden />
+        <span className="flex-1">{t.label}</span>
+        {t.href === APPROVALS_HREF && <NavBadge count={pending} />}
+        {t.key && <Kbd aria-hidden className={cn(active && 'bg-black/10 text-primary-foreground')}>⌥{t.key}</Kbd>}
+      </Link>
+    )
+  }
 
   return (
     <div className="fixed top-4 left-4 z-30 flex items-center gap-3 max-sm:hidden">
@@ -130,36 +159,31 @@ function Launcher({ pathname, warm, pending }: { pathname: string; warm: (href: 
           <LumeMark className="h-3.5 w-auto" />
           <NavBadge count={pending} className="absolute -top-1.5 -right-1.5" />
         </PopoverTrigger>
-        <PopoverContent align="start" sideOffset={8} className="w-[400px] gap-0 rounded-2xl bg-black/55 p-2 ring-white/10 backdrop-blur-2xl backdrop-saturate-150 light:bg-white/55 light:ring-black/10">
-          <p className="px-2.5 pt-1.5 pb-1 text-[11px] font-medium tracking-[0.12em] text-fg-46 uppercase">Flow</p>
-          <nav aria-label="Flow" className="flex flex-col">
-            {FLOW.map((t) => {
-              const active = isActiveTab(pathname, t.href)
-              const Icon = t.icon
-              return (
-                <Link
-                  key={t.href}
-                  href={t.href}
-                  aria-current={active ? 'page' : undefined}
-                  onPointerEnter={() => warm(t.href)}
-                  onFocus={() => warm(t.href)}
-                  className={cn(
-                    'group flex h-10 items-center gap-3 rounded-xl px-2.5 text-[14px] text-fg outline-none hover:bg-secondary focus-visible:bg-secondary',
-                    active && 'bg-primary text-primary-foreground hover:bg-primary light:ring-1 light:ring-(--lime-edge)'
-                  )}
-                >
-                  <span aria-hidden className={cn('grid h-6 min-w-6 place-items-center rounded-lg border border-line px-1 font-mono text-[12px] text-fg-70', active && 'border-black/20 text-primary-foreground')}>{t.step}</span>
-                  <Icon className="size-4" strokeWidth={1.75} aria-hidden />
-                  <span className="flex-1">{t.label}</span>
-                  <Kbd aria-hidden className={cn(active && 'bg-black/10 text-primary-foreground')}>⌥{t.key}</Kbd>
-                </Link>
-              )
-            })}
+        <PopoverContent align="start" sideOffset={8} className="w-[340px] gap-0 rounded-2xl bg-black/55 p-2 ring-white/10 backdrop-blur-2xl backdrop-saturate-150 light:bg-white/55 light:ring-black/10">
+          <nav aria-label="Primary" className="flex flex-col">
+            {PRIMARY.map(row)}
           </nav>
           <div className="my-2 h-px bg-line" />
-          <p className="px-2.5 pb-1 text-[11px] font-medium tracking-[0.12em] text-fg-46 uppercase">Tools</p>
-          <nav aria-label="Tools" className="grid grid-cols-4 gap-1">
-            {TOOLS.map((t) => {
+          <button
+            type="button"
+            aria-expanded={volume}
+            aria-controls="nav-volume"
+            onClick={() => setVolume((v) => !v)}
+            className="flex h-8 w-full items-center gap-2 rounded-xl px-2.5 text-[11px] font-medium tracking-[0.12em] text-fg-46 uppercase outline-none hover:bg-secondary hover:text-fg-70 focus-visible:bg-secondary"
+          >
+            <span className="flex-1 text-left">Volume</span>
+            {!volume && <span aria-hidden className="font-mono tracking-normal normal-case">1–5</span>}
+            <ChevronDown aria-hidden className={cn('size-3.5 transition-transform', volume && 'rotate-180')} strokeWidth={1.75} />
+          </button>
+          {volume && (
+            <nav id="nav-volume" aria-label="Volume" className="flex flex-col">
+              {VOLUME.map(row)}
+            </nav>
+          )}
+          <div className="my-2 h-px bg-line" />
+          <p className="px-2.5 pb-1 text-[11px] font-medium tracking-[0.12em] text-fg-46 uppercase">Admin</p>
+          <nav aria-label="Admin" className="grid grid-cols-3 gap-1">
+            {ADMIN.map((t) => {
               const active = isActiveTab(pathname, t.href)
               const Icon = t.icon
               return (
@@ -177,7 +201,6 @@ function Launcher({ pathname, warm, pending }: { pathname: string; warm: (href: 
                 >
                   <Icon className="size-5" strokeWidth={1.75} aria-hidden />
                   {t.label}
-                  {t.href === APPROVALS_HREF && <NavBadge count={pending} className="absolute top-1 right-1" />}
                 </Link>
               )
             })}

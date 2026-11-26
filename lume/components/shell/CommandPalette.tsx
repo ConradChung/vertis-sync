@@ -15,7 +15,7 @@ import {
   CommandShortcut,
 } from '@/components/ui/command'
 import { fetchJson } from '@/hooks/fetcher'
-import { FLOW, TOOLS } from '@/components/shell/nav'
+import { NAV } from '@/components/shell/nav'
 import type { InstantlyCampaign } from '@/lib/adapters/instantly.map'
 import type { LumeCampaignRow, OrderRow } from '@/lib/db/types'
 
@@ -45,19 +45,24 @@ type RuleHit = {
  */
 /** Extra words each tab answers to in ⌘K. */
 const TAB_WORDS: Record<string, string> = {
-  '/import': 'upload csv intake orders leadsfriday apollo',
-  '/import/leads': 'lead lists sheets folders',
-  '/progress': 'validate validation enrich gates runs push',
-  '/rotate': 'lead bank rotation rules queue',
-  '/campaigns': 'instantly sequence inbox replies analytics',
-  '/overview': 'home dashboard today',
+  '/import': 'volume upload csv intake orders leadsfriday apollo',
+  '/import/leads': 'volume lead lists sheets folders',
+  '/progress': 'volume validate validation enrich gates runs push',
+  '/rotate': 'volume lead bank rotation rules queue',
+  '/campaigns': 'volume instantly sequence inbox analytics',
+  '/overview': 'home dashboard overview',
   '/agent': 'chat ai assistant',
-  '/crm': 'pipeline deals board all campaigns',
+  '/crm': 'crm deals board pilots all campaigns',
+  '/actions': 'approvals pending actions confirm inbox',
+  '/signals/hiring': 'hiring ops signal jobs accounts',
   '/calendar': 'tasks schedule linear sprint',
-  '/playground': 'pipelines diagrams flows showcase',
-  '/operator': 'grok bot operator',
-  '/settings': 'preferences',
+  '/playground': 'admin pipelines diagrams flows showcase',
+  '/operator': 'admin grok bot operator',
+  '/settings': 'admin preferences',
 }
+
+/** Pages that are not tabs but keep their own ⌘K entry. */
+const EXTRA_PAGES = [{ href: '/influencers', label: 'Influencers', words: 'signals linkedin reactions reactors posts', icon: Megaphone }]
 
 const SETTINGS_PAGES = [
   { href: '/settings/budget', label: 'Budget', words: 'apify cap spend lead bank threshold' },
@@ -149,9 +154,9 @@ export function CommandPalette() {
               ))}
             </CommandGroup>
           )}
-          {/* Every tab, in menu order: the numbered flow, then the tools, then settings pages. */}
+          {/* Every tab, in menu order: primary, Volume (numbered), Admin, then the pages without a tab. */}
           <CommandGroup heading="Go to">
-            {[...FLOW, ...TOOLS].map((t) => {
+            {NAV.map((t) => {
               const Icon = t.icon
               return (
                 <CommandItem key={t.href} value={`go ${t.label} ${t.step ? `step ${t.step}` : ''} ${TAB_WORDS[t.href] ?? ''}`} onSelect={() => go(t.href === '/agent' ? agentHref : t.href)}>
@@ -162,6 +167,11 @@ export function CommandPalette() {
                 </CommandItem>
               )
             })}
+            {EXTRA_PAGES.map((p) => (
+              <CommandItem key={p.href} value={`go ${p.label} ${p.words}`} onSelect={() => go(p.href)}>
+                <p.icon strokeWidth={1.75} /> {p.label}
+              </CommandItem>
+            ))}
             {SETTINGS_PAGES.map((p) => (
               <CommandItem key={p.href} value={`go settings ${p.label} ${p.words}`} onSelect={() => go(p.href)}>
                 <Settings strokeWidth={1.75} /> Settings — {p.label}
@@ -174,7 +184,7 @@ export function CommandPalette() {
                 <CommandItem key={id} value={`campaign ${name} ${id}`} onSelect={() => go(`/crm?campaign=${encodeURIComponent(id)}`)}>
                   <Megaphone strokeWidth={1.75} />
                   <span className="truncate">{name}</span>
-                  <CommandShortcut>CRM</CommandShortcut>
+                  <CommandShortcut>Pipeline</CommandShortcut>
                 </CommandItem>
               ))}
             </CommandGroup>
