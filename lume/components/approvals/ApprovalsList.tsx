@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { decideAction, type Decision } from '@/components/actions/decide'
@@ -43,7 +43,8 @@ export function ApprovalsList({ initial }: { initial: PendingResponse }) {
   )
 }
 
-export function ApprovalRow({ item, now = new Date(), onDecided }: { item: ApprovalItem; now?: Date; onDecided?: () => void }) {
+/** `wait` (the /replies list): a waiting timer shown in place of the plain age. `className` replaces the row's own card (the /replies surface passes none). */
+export function ApprovalRow({ item, now = new Date(), onDecided, wait, className = 'glass rounded-2xl px-4 py-3' }: { item: ApprovalItem; now?: Date; onDecided?: () => void; wait?: ReactNode; className?: string }) {
   const router = useRouter()
   const [busy, setBusy] = useState<Decision | null>(null)
 
@@ -59,12 +60,18 @@ export function ApprovalRow({ item, now = new Date(), onDecided }: { item: Appro
   }
 
   return (
-    <li className="glass flex flex-col gap-2 rounded-2xl px-4 py-3" data-kind={item.kind}>
+    <li className={cn('flex flex-col gap-2', className)} data-kind={item.kind}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <span className="eyebrow">{item.label}</span>
-        <span className="text-[11.5px] text-fg-46">
-          {item.requested_by} · {ageOf(item.created_at, now)}
-        </span>
+        {wait ? (
+          <span className="inline-flex items-center gap-2 text-[11.5px] text-fg-46">
+            {item.requested_by} {wait}
+          </span>
+        ) : (
+          <span className="text-[11.5px] text-fg-46">
+            {item.requested_by} · {ageOf(item.created_at, now)}
+          </span>
+        )}
       </div>
       <p className="line-clamp-3 text-[13.5px] leading-snug text-fg">{item.summary}</p>
       {(item.cap_usd !== null || item.estimate_usd !== null) && (

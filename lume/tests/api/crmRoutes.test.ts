@@ -55,7 +55,8 @@ const patch = (body: unknown) =>
 const deal = (over: Record<string, unknown> = {}) => ({
   id: DEAL, campaign_id: CAMP, lead_id: 12, email: 'ada@example.com', name: 'Ada Lovelace', company: 'Engines', city: 'London',
   source: 'instantly', stage: 'Replied', owner: null, next_action_at: null, next_action: null, last_activity_at: null,
-  won_lost_reason: null, notes: null, followup_flagged_at: null, created_at: '', updated_at: '', ...over,
+  won_lost_reason: null, notes: null, followup_flagged_at: null,
+  pilot_start_date: null, pilot_checkin_10_done_at: null, pilot_checkin_25_done_at: null, referral_asked_at: null, created_at: '', updated_at: '', ...over,
 })
 
 beforeEach(() => {
@@ -127,6 +128,43 @@ describe('PATCH /api/crm/deals/[id] — stage transitions', () => {
   })
 })
 
+describe('PATCH /api/crm/deals/[id] — pilot stages and fields', () => {
+  it('moves to Conversation, Demo, Pilot and Paid apply directly: no approval is filed', async () => {
+    for (const stage of ['Conversation', 'Demo', 'Pilot', 'Paid']) {
+      crm.setStage.mockClear()
+      const res = await dealPATCH(patch({ stage }), ctx(DEAL))
+      expect(res.status, stage).toBe(200)
+      expect(crm.setStage).toHaveBeenCalledWith(DEAL, stage, 'user')
+    }
+    expect(db.insertPendingAction).not.toHaveBeenCalled()
+  })
+
+  it('a start date is saved as given; ticks are stamped with the time', async () => {
+    crm.updateDeal.mockImplementation(async (_id: string, p: Record<string, unknown>) => deal(p))
+    const res = await dealPATCH(patch({ pilot_start_date: '2026-11-20', pilot_checkin_10_done: true, referral_asked: true }), ctx(DEAL))
+    expect(res.status).toBe(200)
+    const sent = crm.updateDeal.mock.calls[0][1]
+    expect(sent.pilot_start_date).toBe('2026-11-20')
+    expect(Date.parse(sent.pilot_checkin_10_done_at)).toBeGreaterThan(0)
+    expect(Date.parse(sent.referral_asked_at)).toBeGreaterThan(0)
+    expect('pilot_checkin_25_done_at' in sent).toBe(false)
+  })
+
+  it('a tick keeps its first timestamp; unticking clears it; clearing the start date is allowed', async () => {
+    crm.getDeal.mockResolvedValue(deal({ pilot_checkin_10_done_at: '2026-11-30T17:00:00.000Z', referral_asked_at: '2026-12-01T17:00:00.000Z' }))
+    crm.updateDeal.mockImplementation(async (_id: string, p: Record<string, unknown>) => deal(p))
+    await dealPATCH(patch({ pilot_checkin_10_done: true, referral_asked: false, pilot_start_date: null }), ctx(DEAL))
+    expect(crm.updateDeal.mock.calls[0][1]).toEqual({ pilot_start_date: null, pilot_checkin_10_done_at: '2026-11-30T17:00:00.000Z', referral_asked_at: null })
+  })
+
+  it('a date that is not a real YYYY-MM-DD, or a non-boolean tick, is a 400', async () => {
+    for (const bad of [{ pilot_start_date: '2026-02-30' }, { pilot_start_date: '11/20/2026' }, { pilot_checkin_25_done: 'yes' }, { referral_asked: 1 }]) {
+      expect((await dealPATCH(patch(bad), ctx(DEAL))).status).toBe(400)
+    }
+    expect(crm.updateDeal).not.toHaveBeenCalled()
+  })
+})
+
 describe('GET routes', () => {
   it('deal detail carries stages, timeline, lead row and campaign name', async () => {
     crm.getActivities.mockResolvedValue([{ id: 'a1', kind: 'replied' }])
@@ -136,7 +174,7 @@ describe('GET routes', () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body).toMatchObject({ campaign_name: 'Kaspen Q4', awaiting_close: 'pa-9', lead: { first_name: 'Ada' } })
-    expect(body.stages).toHaveLength(8)
+    expect(body.stages).toHaveLength(12)
   })
 
   it('board: deals, follow-ups, snippets, campaigns', async () => {

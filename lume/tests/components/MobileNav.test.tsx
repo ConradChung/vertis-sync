@@ -29,7 +29,7 @@ describe('MobileNav (phones)', () => {
   })
 
   it('opens More with every other tab, and labels the button with a secondary page when on one', () => {
-    const { rerender } = render(<MobileNav pathname="/overview" warm={vi.fn()} />)
+    const { rerender } = render(<MobileNav pathname="/today" warm={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'More' }))
     for (const t of TABS.filter((x) => !x.primary)) expect(screen.getByRole('link', { name: new RegExp(`${t.label}$`) })).toBeTruthy()
     // The sheet holds the Volume group (numbered flow, Rotate in place) and Admin.

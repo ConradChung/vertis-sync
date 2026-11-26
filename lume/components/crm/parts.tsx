@@ -23,7 +23,7 @@ export function SourceBadge({ source }: { source: string }) {
   )
 }
 
-const CLOSED_GOOD = new Set(['Won', 'Meeting booked', 'Interested'])
+const CLOSED_GOOD = new Set(['Won', 'Meeting booked', 'Interested', 'Conversation', 'Demo', 'Pilot', 'Paid'])
 const CLOSED_BAD = new Set(['Lost', 'Bounced'])
 
 export function StageBadge({ stage, className }: { stage: string; className?: string }) {

@@ -24,9 +24,9 @@ select ok(exists (select 1 from pg_publication_tables where pubname = 'supabase_
 
 -- default stages ----------------------------------------------------------------
 select is((select string_agg(name, ',' order by position) from crm_stages where campaign_id = '_default'),
-          'Contacted,Replied,Interested,Meeting booked,Won,Lost,Bounced,Not now', 'default stages in order');
+          'Contacted,Replied,Interested,Meeting booked,Won,Lost,Bounced,Not now,Conversation,Demo,Pilot,Paid', 'default stages in order (pilot stages after the original eight)');
 select is((select string_agg(name, ',' order by position) from crm_stages where campaign_id = '_default' and is_terminal),
-          'Won,Lost,Bounced', 'Won, Lost, Bounced are terminal');
+          'Won,Lost,Bounced,Paid', 'Won, Lost, Bounced and Paid are terminal');
 
 -- constraints ---------------------------------------------------------------------
 insert into crm_deals (id, campaign_id, email, name) values

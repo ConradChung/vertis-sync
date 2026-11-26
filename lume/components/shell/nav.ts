@@ -13,10 +13,10 @@ import { TABS, type Tab } from '@/components/shell/tabs'
 const STEPS: Record<string, string> = { '/import': '1', '/import/leads': '2–3', '/progress': '4', '/campaigns': '5' }
 
 /** Alt + key jumps to a tab from anywhere on desktop (flow steps use Alt + their number). Keyed by label so a tab keeps its key when its page moves. */
-const KEYS: Record<string, string> = { Today: 'D', Signals: 'G', Pipeline: 'L', Replies: 'Y', Agent: 'A', Rotate: 'T', Playground: 'P', Operator: 'R', Settings: 'S', Calendar: 'K' }
+const KEYS: Record<string, string> = { Today: 'D', Signals: 'G', Pipeline: 'L', Replies: 'Y', Agent: 'A', Rotate: 'T', Playground: 'P', Operator: 'R', Settings: 'S', Calendar: 'K', Overview: 'O' }
 
-/** Letters from before the regroup still land on the same work: ⌥O (Overview) is Today, ⌥C (CRM) is Pipeline. */
-const KEY_ALIASES: Record<string, string> = { O: 'D', C: 'L' }
+/** A letter from before the regroup still lands on the same work: ⌥C (CRM) is Pipeline. */
+const KEY_ALIASES: Record<string, string> = { C: 'L' }
 
 /** `step` is the step text shown beside a flow tab ("1", "2–3"). */
 export type NavTab = Tab & { step?: string; key?: string }

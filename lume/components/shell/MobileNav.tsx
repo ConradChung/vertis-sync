@@ -90,7 +90,7 @@ export function MobileNav({
       {!chat && (
       <>
       <header className="mobile-top glass fixed inset-x-3 z-30 flex h-12 items-center gap-1 rounded-full bg-(--bar-fill) pr-1.5 pl-4 shadow-(--bar-shadow) backdrop-blur-xl sm:hidden">
-        <Link href="/overview" className="brand shrink-0" aria-label="Lume home">
+        <Link href="/today" className="brand shrink-0" aria-label="Lume home">
           <LumeMark className="h-3.5 w-auto shrink-0 text-fg" />
           <span>lume</span>
         </Link>

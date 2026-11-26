@@ -1,7 +1,7 @@
-import { Bot, CalendarDays, ClipboardCheck, FlaskConical, Inbox, Megaphone, Radar, Repeat2, Settings, ShieldCheck, Sheet, Sun, Upload, Users, type LucideIcon } from 'lucide-react'
+import { Bot, CalendarDays, ClipboardCheck, FlaskConical, Inbox, LayoutDashboard, ListChecks, Megaphone, Radar, Repeat2, Settings, ShieldCheck, Sheet, Sun, Upload, Users, type LucideIcon } from 'lucide-react'
 
 /** The tab that carries the pending-approvals badge. */
-export const APPROVALS_HREF = '/actions'
+export const APPROVALS_HREF = '/replies'
 
 /**
  * Where a tab sits (owner, 2026-11-26: the app opens on the path to a paying
@@ -15,11 +15,11 @@ export type Tab = { href: string; label: string; icon: LucideIcon; group: TabGro
 
 /** Navigation, in menu order within each group. `primary` tabs sit in the phone bottom bar; the rest live under More. */
 export const TABS: readonly Tab[] = [
-  // Until /today, /signals and /replies exist these point at the pages that do the job now.
-  { href: '/overview', label: 'Today', icon: Sun, group: 'primary', primary: true },
+  // Signals points at the hiring sheet until the one Signals inbox exists.
+  { href: '/today', label: 'Today', icon: Sun, group: 'primary', primary: true },
   { href: '/signals/hiring', label: 'Signals', icon: Radar, group: 'primary', primary: true },
   { href: '/crm', label: 'Pipeline', icon: Users, group: 'primary', primary: true },
-  { href: '/actions', label: 'Replies', icon: Inbox, group: 'primary', primary: true },
+  { href: '/replies', label: 'Replies', icon: Inbox, group: 'primary', primary: true },
   { href: '/agent', label: 'Agent', icon: Bot, group: 'primary', primary: true },
   { href: '/import', label: 'Import', icon: Upload, group: 'volume' },
   { href: '/import/leads', label: 'Leads', icon: Sheet, group: 'volume' },
@@ -29,6 +29,9 @@ export const TABS: readonly Tab[] = [
   { href: '/playground', label: 'Playground', icon: FlaskConical, group: 'admin' },
   { href: '/operator', label: 'Operator', icon: ClipboardCheck, group: 'admin' },
   { href: '/settings', label: 'Settings', icon: Settings, group: 'admin' },
+  // Their work moved into Today and Replies; the pages stay (and /actions/<id> links keep working).
+  { href: '/overview', label: 'Overview', icon: LayoutDashboard, group: 'more' },
+  { href: '/actions', label: 'Approvals', icon: ListChecks, group: 'more' },
   { href: '/calendar', label: 'Calendar', icon: CalendarDays, group: 'more' },
 ]
 

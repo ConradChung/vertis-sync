@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { CloseDialog } from '@/components/crm/CloseDialog'
+import { PilotPanel } from '@/components/crm/PilotLine'
 import { LeadAvatar, RelTime, SourceBadge } from '@/components/crm/parts'
 import { useCrmDeal } from '@/hooks/useCrm'
 import { patchDeal, patchErrorText, replyHref, type PatchBody } from '@/lib/crm/client'
@@ -131,6 +132,7 @@ function LeadSheetBody({ dealId, onChanged }: { dealId: string; onChanged: () =>
             {d.stage}: {d.won_lost_reason}
           </p>
         )}
+        <PilotPanel deal={d} busy={busy} onSave={(b, ok) => save(b, ok)} />
       </SheetHeader>
 
       <Tabs defaultValue="timeline" className="flex-1 px-5 pt-4">

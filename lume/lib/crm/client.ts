@@ -9,6 +9,10 @@ export type PatchBody = {
   next_action?: string | null
   next_action_at?: string | null
   notes?: string | null
+  pilot_start_date?: string | null
+  pilot_checkin_10_done?: boolean
+  pilot_checkin_25_done?: boolean
+  referral_asked?: boolean
 }
 
 export type PatchAnswer = { status: number; body: (CrmPatchResult & { error?: undefined }) | { ok?: false; error: string } | null }

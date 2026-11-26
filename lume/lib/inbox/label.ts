@@ -5,6 +5,7 @@ import { addToBlocklist, leadInCampaign, setInterestStatus } from '@/lib/adapter
 import { claimDecision, listAwaitingReplyActions } from '@/lib/actions/store'
 import { slackOnAction } from '@/lib/slack/hooks'
 import { addActivity, ensureDeal, setStage } from '@/lib/crm/service'
+import { isPilotStage } from '@/lib/crm/stages'
 import type { ActivitySource } from '@/lib/crm/types'
 import { logEvent } from '@/lib/db/service'
 import type { Json } from '@/lib/db/types'
@@ -102,7 +103,8 @@ async function apply(
   const deal = await ensureDeal({ campaign_id: campaign, email: lead, source: 'instantly' })
   const label = meta.category ?? (meta.verdict === 'BAD' ? 'bad_fit' : 'label')
   let stage: LabelOutcome['stage'] = null
-  if (plan.stage && deal.stage !== plan.stage && !CLOSED.has(deal.stage)) {
+  // A deal on the pilot line (Conversation, Demo, Pilot, Paid) is the owner's to move: a label never pulls it back.
+  if (plan.stage && deal.stage !== plan.stage && !CLOSED.has(deal.stage) && !isPilotStage(deal.stage)) {
     const from = await setStage(deal.id, plan.stage, source, null, { via: meta.via, category: label, by: meta.actor })
     if (from !== null) stage = { from, to: plan.stage }
   }

@@ -8,6 +8,8 @@ import { ownerToday, tasksKeyForMonth } from '@/lib/tasks/calendar'
  * Detail views (a job's rows, one campaign's flow) are not warmed.
  */
 export const TAB_KEYS: Record<string, readonly string[]> = {
+  '/today': ['/api/today'],
+  '/replies': ['/api/replies'],
   '/overview': ['/api/overview', '/api/overview/instantly', '/api/overview/verticals'],
   '/import': ['/api/orders?limit=100'],
   '/import/leads': ['/api/lead-lists'],

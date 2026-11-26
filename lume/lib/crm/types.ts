@@ -30,6 +30,11 @@ export interface CrmDeal {
   won_lost_reason: string | null
   notes: string | null
   followup_flagged_at: string | null
+  /** Owner-zone date (YYYY-MM-DD) the pilot started; check-ins fall due 10 and 25 days later. */
+  pilot_start_date: string | null
+  pilot_checkin_10_done_at: string | null
+  pilot_checkin_25_done_at: string | null
+  referral_asked_at: string | null
   created_at: string
   updated_at: string
 }

@@ -28,9 +28,9 @@ describe('NavBadge', () => {
   })
 
   it('phone: on the Replies tab in the bottom bar; none at 0', () => {
-    const { container, rerender } = render(<MobileNav pathname="/overview" warm={vi.fn()} pending={0} />)
+    const { container, rerender } = render(<MobileNav pathname="/today" warm={vi.fn()} pending={0} />)
     expect(container.querySelector('[data-nav-badge]')).toBeNull()
-    rerender(<MobileNav pathname="/overview" warm={vi.fn()} pending={3} />)
+    rerender(<MobileNav pathname="/today" warm={vi.fn()} pending={3} />)
     const bar = screen.getByRole('navigation', { name: 'Primary' })
     expect(within(bar).getByRole('link', { name: /Replies/ }).textContent).toContain('3 waiting for approval')
     expect(within(bar).getByRole('button', { name: /More/ }).textContent).toBe('More')

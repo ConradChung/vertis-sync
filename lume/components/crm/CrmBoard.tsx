@@ -14,6 +14,7 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core'
 import { Hourglass } from 'lucide-react'
+import { PilotLine } from '@/components/crm/PilotLine'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import { CampaignBadge, LeadAvatar, RelTime, SourceBadge } from '@/components/crm/parts'
@@ -199,6 +200,7 @@ export function DealCard({
         <RelTime iso={d.last_activity_at} now={now} className="shrink-0 text-[10px]" />
       </div>
       {d.snippet && <p className="line-clamp-1 text-[12px] text-muted-foreground">“{d.snippet}”</p>}
+      <PilotLine deal={d} now={now} />
       <div className="flex flex-wrap items-center gap-1">
         <SourceBadge source={d.source} />
         {showCampaign && <CampaignBadge name={campaignName(d.campaign_id)} />}

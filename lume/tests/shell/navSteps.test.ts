@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ADMIN, FLOW, MORE, NAV, navLabel, PRIMARY, tabForChord, VOLUME } from '@/components/shell/nav'
-import { TABS } from '@/components/shell/tabs'
+import { APPROVALS_HREF, TABS } from '@/components/shell/tabs'
 
 describe('nav groups (90-day regroup)', () => {
   it('primary tabs are Today, Signals, Pipeline, Replies, Agent, in that order', () => {
@@ -15,16 +15,21 @@ describe('nav groups (90-day regroup)', () => {
 
   it('no page lost its place: every old tab URL is still a tab or a ⌘K page', () => {
     const hrefs = NAV.map((t) => t.href)
-    for (const href of ['/import', '/import/leads', '/progress', '/calendar', '/rotate', '/campaigns', '/crm', '/agent', '/playground', '/actions', '/operator', '/settings']) {
+    for (const href of ['/overview', '/import', '/import/leads', '/progress', '/calendar', '/rotate', '/campaigns', '/crm', '/agent', '/playground', '/actions', '/operator', '/settings']) {
       expect(hrefs, href).toContain(href)
     }
-    expect(MORE.map((t) => t.href)).toContain('/calendar')
+    expect(MORE.map((t) => t.href)).toEqual(['/overview', '/actions', '/calendar'])
     expect(new Set(NAV.map((t) => t.key).filter(Boolean)).size).toBe(NAV.filter((t) => t.key).length)
   })
 
-  it('primary letters: ⌥D Today, ⌥G Signals, ⌥L Pipeline, ⌥Y Replies, ⌥A Agent; the old ⌥O and ⌥C still work', () => {
+  it('Today opens /today and Replies opens /replies (the approvals badge sits on Replies)', () => {
+    expect(PRIMARY.map((t) => t.href)).toEqual(['/today', '/signals/hiring', '/crm', '/replies', '/agent'])
+    expect(APPROVALS_HREF).toBe('/replies')
+  })
+
+  it('primary letters: ⌥D Today, ⌥G Signals, ⌥L Pipeline, ⌥Y Replies, ⌥A Agent; ⌥O is Overview again and the old ⌥C still works', () => {
     expect(['KeyD', 'KeyG', 'KeyL', 'KeyY', 'KeyA'].map((c) => tabForChord(c)?.label)).toEqual(['Today', 'Signals', 'Pipeline', 'Replies', 'Agent'])
-    expect(tabForChord('KeyO')?.label).toBe('Today')
+    expect(tabForChord('KeyO')?.href).toBe('/overview')
     expect(tabForChord('KeyC')?.label).toBe('Pipeline')
     expect(tabForChord('KeyK')?.href).toBe('/calendar')
     expect(tabForChord('KeyS')?.href).toBe('/settings')
