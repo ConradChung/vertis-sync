@@ -1,6 +1,6 @@
 // Run: deno test _shared/signal/filter_test.ts
 import { assert, assertEquals, assertThrows } from 'jsr:@std/assert@1'
-import { apolloClient, assertReady, type Counts, type FilterDeps, runCommenterStages, runReactorStages, stageCrawl, stageDraft, stageTriage, stageVerify } from './filter.ts'
+import { assertReady, type Counts, type FilterDeps, runCommenterStages, runReactorStages, stageContacts, stageCrawl, stageDraft, stageTriage, stageVerify } from './filter.ts'
 import { parseSignalTriage, signalVerificationQuestion } from './triage.ts'
 import { Fakes, FACTS, FakeStore, gateFor, person } from './testkit.ts'
 
@@ -10,7 +10,7 @@ function setup(rows: Parameters<typeof person>[0][]) {
   const f = new Fakes()
   const deps = (): FilterDeps => ({
     store: s, gate: gateFor(s), now: () => new Date(s.clock()), timeLeft: () => 110_000,
-    haiku: f.haiku, perplexity: f.perplexity, crawl: f.crawl, apollo: f.apollo, facts: FACTS, reactorOpening: null,
+    haiku: f.haiku, perplexity: f.perplexity, crawl: f.crawl, email: f.email, facts: FACTS, reactorOpening: null,
   })
   return { s, f, deps }
 }
@@ -56,7 +56,10 @@ Deno.test('full commenter path → ready; crawl doors_hint sets the count and sk
   assertEquals(p.stage, 'ready')
   assertEquals([p.door_count, p.door_count_source, p.door_count_confidence, p.doors_hint], [5000, 'https://whitfieldpm.com', 'medium', '5,000 units'])
   assertEquals(f.calls.perplexity, 1) // verify only, no doors call
-  assertEquals(p.contacts, [{ name: 'Sam Ortiz', title: 'COO', linkedin_url: 'https://www.linkedin.com/in/samortiz' }])
+  // Blitz found the commenter's own work email by their LinkedIn URL (no USD charge: records, not dollars).
+  assertEquals(p.contacts, [{ name: 'Dana Whitfield', title: 'Owner', linkedin_url: 'https://www.linkedin.com/in/p1', email: 'dana@whitfieldpm.com' }])
+  assertEquals(f.emailUrls, ['https://www.linkedin.com/in/p1'])
+  assertEquals(paid(s).some((x) => x.kind === 'email'), false)
   assertEquals((p.drafts as { opening: string }).opening, 'saw you in our thread earlier.') // no comment text → plain opening
   assertEquals(p.connected, null)
   assertEquals(paid(s, 'crawl').length, 1)
@@ -64,26 +67,39 @@ Deno.test('full commenter path → ready; crawl doors_hint sets the count and sk
   assert(paid(s).every((x) => x.person_id === 1))
 })
 
-Deno.test('no count in the hint → Perplexity doors runs; Apollo 403 ships with contacts []', async () => {
+Deno.test('no count in the hint → Perplexity doors runs; a Blitz miss ships with contacts []', async () => {
   const { s, f, deps } = setup([{ stage: 'triage' }])
   f.doorsHint = '260+ cities across 24 states plus Washington D.C. (unit count not stated)'
-  f.apolloStatus = 403
-  await runCommenterStages(deps(), {})
+  f.emailResult = 'miss'
+  const c: Counts = {}
+  await runCommenterStages(deps(), c)
   assertEquals(f.calls.perplexity, 2)
-  assertEquals(f.calls.apollo, 1)
+  assertEquals(f.calls.email, 1)
   assertEquals([s.get(1).stage, s.get(1).contacts], ['ready', []])
+  assertEquals(c.email_miss, 1)
   assertEquals(paid(s, 'doors').length, 1)
 })
 
-Deno.test('apollo client: 403 throws (caller ships contacts [])', async () => {
-  const fake = (() => Promise.resolve(new Response('forbidden', { status: 403 }))) as unknown as typeof fetch
-  let threw = false
-  try {
-    await apolloClient('k', fake)('acme.com')
-  } catch {
-    threw = true
-  }
-  assert(threw)
+Deno.test('contacts: batch of 10 in id order; records guard at 0 → no lookup, cards still ship', async () => {
+  const rows = Array.from({ length: 12 }, () => ({ stage: 'contacts' as const, crawl_verdict: 'property_manager' }))
+  const { s, f, deps } = setup(rows)
+  f.recordsLeft = 3
+  const c: Counts = {}
+  await stageContacts(deps(), c, 'commenter')
+  assertEquals(f.emailUrls, ['https://www.linkedin.com/in/p1', 'https://www.linkedin.com/in/p2', 'https://www.linkedin.com/in/p3'])
+  assertEquals([c.email_found, c.email_unavailable, c.contacts], [3, 7, 10])
+  assertEquals(s.people.filter((p) => p.stage === 'draft').length, 10)
+  assertEquals(s.get(4).contacts, [])
+  assertEquals(s.get(11).stage, 'contacts') // the next batch waits for the next tick
+})
+
+Deno.test('contacts: Blitz unavailable (timeout) or no LinkedIn profile → contacts [], no retry, no throw', async () => {
+  const { s, f, deps } = setup([{ stage: 'contacts' }, { stage: 'contacts', linkedin_url: 'https://www.linkedin.com/company/acme' }])
+  f.emailResult = 'timeout'
+  const c: Counts = {}
+  await stageContacts(deps(), c, 'commenter')
+  assertEquals([s.get(1).stage, s.get(1).contacts, s.get(2).stage, s.get(2).contacts], ['draft', [], 'draft', []])
+  assertEquals([c.email_unavailable_timeout, c.email_no_profile, f.calls.email], [1, 1, 1])
 })
 
 Deno.test('retry at each stage does not double-charge', async () => {
@@ -145,7 +161,7 @@ Deno.test('stopped lane: no paid stage runs', async () => {
   const { s, f, deps } = setup([{ stage: 'triage' }])
   s.state_ = { ...s.state_, stopped_at: new Date(s.clock()).toISOString(), stopped_reason: 'daily:2026-11-23 x' }
   await runCommenterStages(deps(), {})
-  assertEquals(f.calls, { haiku: 0, perplexity: 0, crawl: 0, apollo: 0 })
+  assertEquals(f.calls, { haiku: 0, perplexity: 0, crawl: 0, email: 0 })
   assertEquals(s.get(1).stage, 'triage')
 })
 

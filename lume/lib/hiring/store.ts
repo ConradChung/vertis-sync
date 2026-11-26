@@ -20,10 +20,10 @@ const nowIso = () => new Date().toISOString()
 const num = (v: unknown) => (v === null || v === undefined ? 0 : Number(v))
 
 const ROW_COLS =
-  'id, dedupe_key, signal, role_tier, role_title, headline, source_url, posted_at, location, country, company_name, company_domain, company_website, company_phone, company_linkedin, person_name, person_title, person_linkedin, attempts'
+  'id, dedupe_key, signal, role_tier, role_title, headline, source_url, posted_at, location, country, company_name, company_domain, company_website, company_phone, company_linkedin, person_name, person_title, person_linkedin, contact_source, attempts'
 
 export const VIEW_COLS =
-  'id, signal, role_tier, role_title, headline, source_url, posted_at, location, country, company_name, company_domain, company_website, company_phone, company_linkedin, person_name, person_title, person_linkedin, pm_fit, pm_evidence, skip_reason, draft_subject, draft_body, draft_status, draft_violations, status, decided_by, decided_at, created_at'
+  'id, signal, role_tier, role_title, headline, source_url, posted_at, location, country, company_name, company_domain, company_website, company_phone, company_linkedin, person_name, person_title, person_linkedin, contact_name, contact_title, contact_linkedin, contact_email, pm_fit, pm_evidence, skip_reason, draft_subject, draft_body, draft_status, draft_violations, status, decided_by, decided_at, created_at'
 
 export async function getHiringConfig(): Promise<HiringConfig> {
   const res = await sb().from('lume_settings').select('value').eq('key', HIRING_CONFIG_KEY).maybeSingle()

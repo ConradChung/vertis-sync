@@ -2,9 +2,11 @@ import 'server-only'
 import { datasetItems, getRun, startRun } from '@/lib/adapters/apify'
 import { haikuUsd, hiringCheckQuestion, parseHiringCheck, parseRequest, perplexityRequest, PPLX_CALL_USD, PPLX_URL } from '@/lib/hiring/checkPrompt'
 import { DRAFT_MAX_TOKENS, DRAFT_MODEL, DRAFT_SCHEMA, draftSystem, draftUser, type Draft } from '@/lib/hiring/draft'
-import type { AiPort, ApifyPort, Deps } from '@/lib/hiring/engine'
+import { PROCESS_LIMIT, type AiPort, type ApifyPort, type Deps } from '@/lib/hiring/engine'
 import { extractRequest, parseExtraction } from '@/lib/hiring/extract'
 import { liveStore } from '@/lib/hiring/store'
+import { BlitzSession } from '@/lib/blitz'
+import { COMPANY_PATH_MAX_RECORDS } from '@/lib/hiring/contact'
 
 /**
  * GTM-19 live ports: Apify (lib/adapters/apify.ts, APIFY_API_TOKEN),
@@ -95,4 +97,13 @@ export const liveApify: ApifyPort = {
   },
 }
 
-export const liveDeps: Deps = { store: liveStore, apify: liveApify, ai: liveAi }
+/** Most Blitz records one tick may use: every processed row on the company path. */
+export const HIRING_BLITZ_MAX_RECORDS_PER_TICK = PROCESS_LIMIT * COMPANY_PATH_MAX_RECORDS
+
+/** A fresh Blitz session per tick (key-info read once). Unset BLITZ_API_KEY = no contact lookup. */
+export function liveBlitz(): BlitzSession | null {
+  const apiKey = process.env.BLITZ_API_KEY?.trim()
+  return apiKey ? new BlitzSession({ apiKey, maxRecords: HIRING_BLITZ_MAX_RECORDS_PER_TICK }) : null
+}
+
+export const liveDeps: Deps = { store: liveStore, apify: liveApify, ai: liveAi, blitz: liveBlitz }

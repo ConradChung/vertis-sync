@@ -11,7 +11,7 @@ import { groundDoorCount, parseVerifyJson, type PplxAnswer, verifyParseRequest, 
 import { crawlPassed, OWNER_OPERATOR_CRAWL_RULES, OWNER_OPERATOR_VERDICT, ownerDoorQuestion, parseOwnerOperator, signalVerifyParseRequest } from './owner.ts'
 import type { JsonRequest } from '../influencer/haiku.ts'
 import { normalizeTarget } from '../research/crawl.ts'
-import { profileSlug } from './comments.ts'
+import { type EmailLookup, personLinkedinUrl } from '../blitz.ts'
 import { parseDoorsHint } from './doors.ts'
 import { buildDrafts, commenterOpening, type Facts, parseReply, REACTOR_PLACEHOLDER, type Reply, REPLY_EST_USD, replyRequest } from './drafts.ts'
 import type { Gate } from './gate.ts'
@@ -35,7 +35,15 @@ export interface CrawlResult {
   property_type?: string | null
 }
 
-export interface Contact { name: string; title: string | null; linkedin_url: string | null }
+/** contacts column: the person themself with the work email Blitz found ([] when none). */
+export interface Contact { name: string; title: string | null; linkedin_url: string | null; email?: string | null }
+
+/** The Blitz work-email lookup (BlitzSession): records-guarded, never throws. */
+export interface EmailFinder {
+  /** false once the records countdown is at 0, the key is missing/invalid, or Blitz is out for this tick */
+  canSpend(cost?: number): Promise<boolean>
+  findWorkEmail(linkedinUrl: string): Promise<EmailLookup>
+}
 
 export interface FilterDeps {
   store: Store
@@ -47,7 +55,7 @@ export interface FilterDeps {
   perplexity(question: string): Promise<PplxAnswer>
   /** null when CRAWL_WORKER_URL / SECRET aren't set. */
   crawl: ((domains: string[], deadlineS: number, rules?: string) => Promise<CrawlResult[]>) | null
-  apollo(domain: string): Promise<Contact[]>
+  email: EmailFinder
   facts: Facts
   reactorOpening: string | null
 }
@@ -264,24 +272,23 @@ export async function stageDoors(d: FilterDeps, c: Counts, kind: 'commenter' | '
   }
 }
 
+// The person's own verified work email, from Blitz by their LinkedIn URL. Blitz
+// costs records, not dollars (1 on a hit, 0 on a miss), so the gate here is the
+// records guard rather than a USD estimate. Best effort: a miss, a missing key,
+// exhausted records or an outage ships the card with contacts [] and no retry.
 export async function stageContacts(d: FilterDeps, c: Counts, kind: 'commenter' | 'reactor'): Promise<void> {
   const rows = await d.store.peopleAt('contacts', kind, 10)
   for (const r of rows) {
     if (d.timeLeft() < 15_000) return
     let contacts: Contact[] = []
-    const domain = domainOf(r.company_website)
-    if (domain) {
-      try {
-        // Best effort (Apollo Free plan may 403): any failure ships with no contacts, no retry.
-        const slug = profileSlug(r.linkedin_url)
-        const self = (r.name ?? '').trim().toLowerCase()
-        contacts = (await d.apollo(domain))
-          .filter((x) => !(slug && profileSlug(x.linkedin_url) === slug) && !(self && x.name.trim().toLowerCase() === self))
-          .slice(0, 3)
-      } catch {
-        contacts = []
-      }
-    }
+    const url = personLinkedinUrl(r.linkedin_url)
+    if (url && (await d.email.canSpend(1))) {
+      const res = await d.email.findWorkEmail(url)
+      if (res.kind === 'found') {
+        contacts = [{ name: (r.name ?? '').trim(), title: r.title ?? null, linkedin_url: r.linkedin_url, email: res.email }]
+        bump(c, 'email_found')
+      } else bump(c, res.kind === 'miss' ? 'email_miss' : `email_unavailable_${res.reason}`)
+    } else bump(c, url ? 'email_unavailable' : 'email_no_profile')
     if (await advance(d, r, 'contacts', { contacts, stage: 'draft' })) bump(c, 'contacts')
   }
 }
@@ -368,31 +375,5 @@ export function crawlClient(url: string, secret: string, f: typeof fetch = fetch
     const body = await res.json() as { results?: unknown }
     if (!Array.isArray(body?.results)) throw new Error('crawl worker: no results')
     return body.results as CrawlResult[]
-  }
-}
-
-export const APOLLO_URL = 'https://api.apollo.io/api/v1/mixed_people/api_search'
-export const APOLLO_TITLES = ['owner', 'president', 'ceo', 'coo', 'founder', 'director of property management', 'vp operations', 'principal']
-
-export function apolloClient(key: string, f: typeof fetch = fetch) {
-  return async (domain: string): Promise<Contact[]> => {
-    if (!key) throw new Error('APOLLO_API_KEY not set')
-    const res = await f(APOLLO_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'Cache-Control': 'no-cache' },
-      body: JSON.stringify({ q_organization_domains_list: [domain], person_titles: APOLLO_TITLES, per_page: 5 }),
-      signal: AbortSignal.timeout(15_000),
-    })
-    if (!res.ok) {
-      await res.body?.cancel()
-      throw new Error(`apollo ${res.status}`)
-    }
-    const body = await res.json() as { people?: unknown }
-    const people = Array.isArray(body?.people) ? body.people as Record<string, unknown>[] : []
-    return people.map((p) => ({
-      name: String(p.name ?? [p.first_name, p.last_name].filter(Boolean).join(' ')).trim(),
-      title: typeof p.title === 'string' ? p.title : null,
-      linkedin_url: typeof p.linkedin_url === 'string' ? p.linkedin_url : null,
-    })).filter((p) => p.name)
   }
 }

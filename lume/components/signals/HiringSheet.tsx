@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import { toast } from 'sonner'
-import { Check, ChevronDown, ChevronUp, Copy, ExternalLink, Phone, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronUp, Copy, ExternalLink, Mail, Phone, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { SimpleSelect } from '@/components/ui/simple-select'
 import { fetchJson } from '@/hooks/fetcher'
@@ -128,10 +128,25 @@ function Row({ row, onDone }: { row: HiringRow; onDone: () => void }) {
               <span className="truncate text-[13px] text-fg">{row.person_name}</span>
             </Ext>
           ) : (
-            <span className="text-fg-24">No contact</span>
+            !row.contact_name && <span className="text-fg-24">No contact</span>
           )}
           {row.person_name && !row.person_linkedin && <span className="truncate text-[13px] text-fg">{row.person_name}</span>}
           {row.person_title && <span className="line-clamp-2 text-[11.5px] text-fg-46">{row.person_title}</span>}
+          {/* A decision-maker Blitz found for the company (when the row named nobody with a profile). */}
+          {row.contact_name && row.contact_linkedin !== row.person_linkedin && (
+            <>
+              <Ext href={row.contact_linkedin ?? null} title="LinkedIn profile">
+                <span className="truncate text-[13px] text-fg">{row.contact_name}</span>
+              </Ext>
+              {row.contact_title && <span className="line-clamp-2 text-[11.5px] text-fg-46">{row.contact_title}</span>}
+            </>
+          )}
+          {row.contact_email && (
+            <a href={`mailto:${row.contact_email}`} className="inline-flex min-w-0 items-center gap-1 font-mono text-fg-70 hover:text-fg" title="Work email (Blitz)">
+              <Mail className="size-3 shrink-0" />
+              <span className="truncate">{row.contact_email}</span>
+            </a>
+          )}
         </span>
         <span className="min-w-0 text-[12px]">
           {hasDraft ? (

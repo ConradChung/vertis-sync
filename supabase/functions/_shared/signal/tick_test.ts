@@ -15,7 +15,7 @@ function deps(s: FakeStore, a: FakeApify, f: Fakes, ingested = { n: 0 }): TickDe
   return {
     store: s, apify: a, rest: () => Promise.reject(new Error('unused')),
     ingestReactorRuns: () => Promise.resolve({ ingested: ingested.n }),
-    haiku: f.haiku, perplexity: f.perplexity, crawl: f.crawl, apollo: f.apollo, facts: FACTS,
+    haiku: f.haiku, perplexity: f.perplexity, crawl: f.crawl, email: f.email, facts: FACTS,
     clock: () => (t += 10), uuid: () => 'tok',
   }
 }

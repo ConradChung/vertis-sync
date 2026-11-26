@@ -106,6 +106,10 @@ stops blocking by itself once #2 merges.
 - **Good:** the comments lane stays inside its caps ($10 Apify + $5 filter per
   cycle, $1 per PT day) and posts one #sales message when a cap hits; nothing is sent to leads.
   The reactions lane still files its Monday one-tap card.
+  The contacts stage looks up the person's own work email with Blitz (`_shared/blitz.ts`, by their
+  LinkedIn URL; records-guarded, no USD) and stores it in `signal_people.contacts`; the Slack card and
+  reactor digest (`lume/lib/slack/signalCard.ts`) show `*Email:*` only when one was found. No key,
+  no records, a miss or an outage → `contacts []`, card ships as before.
 
 ### Hiring Ops Signal (GTM-19)
 - **Where:** `lume/lib/hiring/`, `lume/app/api/signals/hiring`, `lume/app/api/cron/hiring-signal`, `lume/app/(app)/signals/hiring/`.
@@ -113,6 +117,10 @@ stops blocking by itself once #2 merges.
 - **Good:** bounded by `lume_settings.hiring_signal_config` (lanes, per-run
   caps, $40/month); plain ticks start runs only when `schedule` is exactly
   `true`; only writes sheet rows, never emails. The cron migration is not applied without Conrad's say-so.
+  Contacts (`lume/lib/hiring/contact.ts`, `lume/lib/blitz.ts`, `tests/hiring/contact.test.ts`, `tests/blitz/`):
+  only for rows that passed exclusions + dedupe + PM check; named person → work email (1 record),
+  else one decision-maker via Waterfall ICP + email (≤3 records); `signal_hiring.contact_*`
+  (`*_lume_hiring_contact.sql`); ≤36 records per tick; unset `BLITZ_API_KEY` = no lookup.
 
 ### Reddit signals (GTM-15, F5Bot emails)
 - **Where:** `lume/lib/reddit/`, doc `docs/lume/f5bot-apps-script.gs`.
@@ -215,8 +223,11 @@ stops blocking by itself once #2 merges.
   zero rows means someone else won, return silently → strip keyboard → invoke the worker.
 
 ### CSV validation pipeline (finder → validator → enricher → push)
-- **Where:** `contact-email-finder/`, `email-validator/`, `operating-city-enricher/`, `instantly-push/`, `pipeline-watchdog/`, `_shared/{eta,backoff,pool,invoke,pacer}.ts`.
-- **How to test:** `cd supabase/functions && deno test --allow-env --allow-read email-validator/ operating-city-enricher/ instantly-push/ pipeline-watchdog/ _shared/`.
+- **Where:** `contact-email-finder/`, `email-validator/`, `operating-city-enricher/`, `instantly-push/`, `pipeline-watchdog/`, `_shared/{eta,backoff,pool,invoke,pacer,blitz}.ts`.
+- **How to test:** `cd supabase/functions && deno test --allow-env --allow-read contact-email-finder/ email-validator/ operating-city-enricher/ instantly-push/ pipeline-watchdog/ _shared/`.
+- **Finder routing:** rows with a person LinkedIn URL go to Blitz first (4 in flight, starts ≥250 ms
+  apart, 429 retried); a miss, no key, exhausted records or an outage → connector-os, unchanged.
+  `validation_result.found_by` is `blitz` or `connector-os`; found rows stay `pending` for the validator.
 - **Good:** workers self-reinvoke under the 110 s budget and every
   function-to-function fetch is awaited or `keepAlive`d (`_shared/invoke_test.ts`);
   the watchdog only pings, never resumes on its own.

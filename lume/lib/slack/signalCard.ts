@@ -34,6 +34,8 @@ export interface SignalContact {
   name?: string | null
   title?: string | null
   linkedin_url?: string | null
+  /** The person's own verified work email (Blitz, signal contacts stage). Old Apollo rows have none. */
+  email?: string | null
 }
 
 /** The signal_people columns the cards read. */
@@ -145,6 +147,20 @@ function doorsText(r: SignalPersonRow): string {
   return `*Doors:* ~${r.door_count.toLocaleString('en-US')}${bits.length ? ` (${bits.join(' · ')})` : ''}`
 }
 
+const EMAIL = /^[^\s@<>|]+@[^\s@<>|]+\.[^\s@<>|]+$/
+
+/** The work email found for this person, or null. Only an entry carrying an email counts (old Apollo contacts never did). */
+export function signalPersonEmail(r: Pick<SignalPersonRow, 'contacts'>): string | null {
+  if (!Array.isArray(r.contacts)) return null
+  for (const c of r.contacts as SignalContact[]) {
+    const e = typeof c?.email === 'string' ? c.email.trim() : ''
+    if (EMAIL.test(e)) return e
+  }
+  return null
+}
+
+const emailText = (e: string) => `*Email:* ${esc(e)}` // Slack links an address by itself
+
 function headline(r: SignalPersonRow): string {
   const name = text(r.name) ?? 'Unknown name'
   const parts = [`*${link(r.linkedin_url, clip(oneLine(name), 120))}*`]
@@ -236,6 +252,8 @@ export function buildSignalCard(row: SignalPersonRow, opts: SignalCardOpts): { t
   const facts = [doorsText(row)]
   const loc = text(row.location)
   facts.push(`*Location:* ${loc ? esc(clip(oneLine(loc), 150)) : 'unknown'}`)
+  const email = signalPersonEmail(row)
+  if (email) facts.push(emailText(email))
   blocks.push({ type: 'section', fields: facts.map((t) => ({ type: 'mrkdwn', text: t })) })
 
   const comment = text(row.comment_text)
@@ -275,6 +293,8 @@ function reactorBlocks(r: SignalPersonRow, opts: SignalCardOpts): Block[] {
   const info = [headline(r), doorsText(r)]
   const loc = text(r.location)
   if (loc) info.push(`*Location:* ${esc(clip(oneLine(loc), 100))}`)
+  const email = signalPersonEmail(r)
+  if (email) info.push(emailText(email))
   if (isOwnerOperator(r)) info.push(OWNER_OPERATOR_NOTE)
   return packSections([info.join('\n'), ...draftSections(r, opts).map(renderDraft)])
 }
