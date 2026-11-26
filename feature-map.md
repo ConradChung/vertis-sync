@@ -169,8 +169,10 @@ stops blocking by itself once #2 merges.
   `signals` in Conversation (owner's session only, idempotent) and changes no campaign or Instantly state.
   `/signals/hiring` still renders (the inbox filtered to hiring, then the Hiring Ops sheet); the influencers list is at `/signals/influencers`,
   and `/influencers` still lands on the candidate lists in `/import/leads` (the influencer-lookup alert links there).
-  Two different companies never share a row, a status or a deal: shared hosts and mailbox domains are not a company domain, legal forms
-  are stripped only from the end of a name, employer placeholders ("Self-employed") are not a company, and saved state is never shared through a name two accounts carry.
+  The dedupe is a set of rules, not a registry: known shared hosts, link shorteners and mailbox domains are not a company domain, legal forms
+  are stripped only from the end of a name, known employer placeholders ("Self-employed") are not a company (a person with a placeholder and no
+  site has no row), and saved state is never shared through a name two accounts carry. A host or placeholder the lists do not know can still
+  merge two companies, so check `SHARED_HOSTS` and `NO_COMPANY` in `merge.ts` when a wrong merge shows up. Each account gets its own deal address.
   In the portal, signal accounts and the scoreboard go only to the signals client (`LUME_SIGNALS_CLIENT`, default Kaspen):
   any other client gets `{ enabled: false }` and no data.
 
@@ -195,7 +197,7 @@ stops blocking by itself once #2 merges.
 - **Good:** primary tabs are Today (`/today`), Signals (`/signals`), Pipeline (`/crm`), Replies (`/replies`), Agent in that order (desktop menu and phone bar);
   Volume holds Import 1, Leads 2–3, Progress 4, Rotate, Campaigns 5 and is collapsed unless you are on one of its pages;
   Admin holds Playground, Operator, Settings. No page is removed: every earlier URL still renders and has a ⌘K entry
-  (`/calendar`, `/influencers`, `/overview`, `/actions`, `/actions/<id>`, `/runs/...`).
+  (`/calendar`, `/overview`, `/actions`, `/actions/<id>`, `/runs/...`; `/influencers` still redirects to `/import/leads`, and ⌘K has "Signals — Influencers").
 
 ### UI components and `/design`
 - **Where:** `lume/components/`, `lume/app/design/`.

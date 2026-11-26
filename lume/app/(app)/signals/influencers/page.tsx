@@ -5,7 +5,7 @@ import { SignalsNav } from '@/components/signals/SignalsNav'
 
 export const metadata: Metadata = { title: 'Influencers' }
 
-/** `/signals/influencers`: the influencers page's place inside Signals (`/influencers` lands here). */
+/** `/signals/influencers`: the influencers page's place inside Signals. (`/influencers` still lands on the candidate lists in Leads.) */
 export default function SignalsInfluencersPage() {
   return (
     <>

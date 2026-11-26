@@ -46,13 +46,17 @@ export interface SignalEvent {
  * providers. Two companies whose only "site" is one of these must not merge.
  */
 const SHARED_HOSTS = new Set([
-  'linkedin.com', 'lnkd.in', 'facebook.com', 'fb.me', 'instagram.com', 'twitter.com', 'x.com', 't.co', 'youtube.com', 'tiktok.com', 'reddit.com',
+  'linkedin.com', 'lnkd.in', 'facebook.com', 'fb.com', 'fb.me', 'instagram.com', 'twitter.com', 'x.com', 't.co', 'youtube.com', 'youtu.be', 'tiktok.com', 'reddit.com',
   'indeed.com', 'glassdoor.com', 'ziprecruiter.com', 'greenhouse.io', 'lever.co', 'workable.com',
-  'bit.ly', 'goo.gl', 'g.page', 'linktr.ee', 'wa.me', 'calendly.com',
-  'google.com', 'yelp.com', 'apartments.com', 'zillow.com', 'medium.com', 'github.com',
-  'wixsite.com', 'wix.com', 'godaddysites.com', 'squarespace.com', 'weebly.com', 'wordpress.com',
-  'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com', 'aol.com',
+  'bit.ly', 'tinyurl.com', 'rebrand.ly', 'goo.gl', 'g.page', 'linktr.ee', 'about.me', 'wa.me', 'calendly.com',
+  'google.com', 'yelp.com', 'bbb.org', 'apartments.com', 'zillow.com', 'realtor.com', 'trulia.com', 'medium.com', 'github.com',
+  'wixsite.com', 'wix.com', 'godaddysites.com', 'squarespace.com', 'weebly.com', 'wordpress.com', 'webflow.io',
+  'gmail.com', 'googlemail.com', 'yahoo.com', 'ymail.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'icloud.com', 'me.com', 'mac.com', 'aol.com',
+  'protonmail.com', 'proton.me', 'comcast.net', 'att.net', 'verizon.net', 'sbcglobal.net',
 ])
+
+/** A country-code second level ("co.uk", "com.au"): a suffix, never a company's whole domain. */
+const TWO_LEVEL_SUFFIX = /^(?:co|com|net|org|ac|gov|edu)\.[a-z]{2}$/
 
 /** Subdomains that are a section of the company's own site, not a different company. */
 const SITE_SECTIONS = /^(?:www\d*|careers|jobs|apply|join)\./
@@ -75,15 +79,19 @@ export function domainOf(raw: string | null | undefined): string | null {
     s = host.slice(host.lastIndexOf('@') + 1)
   } else s = host
   s = s.replace(/:\d+$/, '').replace(/\.$/, '')
-  while (SITE_SECTIONS.test(s) && s.split('.').length > 2) s = s.replace(SITE_SECTIONS, '')
-  s = s.replace(/^www\d*\./, '')
+  // Fold "careers.acme.com" into "acme.com", but leave "careers.co.uk" alone: what is left must still be a domain.
+  for (;;) {
+    const rest = s.replace(SITE_SECTIONS, '')
+    if (rest === s || rest.split('.').length < 2 || TWO_LEVEL_SUFFIX.test(rest)) break
+    s = rest
+  }
   if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(s) || s.length > 200) return null
-  if (SHARED_HOSTS.has(s) || [...SHARED_HOSTS].some((h) => s.endsWith(`.${h}`))) return null
+  if (TWO_LEVEL_SUFFIX.test(s) || SHARED_HOSTS.has(s) || [...SHARED_HOSTS].some((h) => s.endsWith(`.${h}`))) return null
   return s
 }
 
 /** Legal forms, removed only from the END of a name ("LP Realty" keeps its LP; "Acme LP" loses it). */
-const LEGAL_SUFFIX = /\s(?:incorporated|inc|llc|l l c|llp|lp|ltd|limited|corp|corporation|co|company|plc|pllc|pc|gmbh)$/
+const LEGAL_SUFFIX = /\s(?:incorporated|inc|llc|l l c|llp|l l p|lp|l p|ltd|limited|corp|corporation|co|company|plc|pllc|pc|p c|gmbh)$/
 
 /** Longest name key the table and the routes accept (`n:` + this). */
 const NAME_KEY_MAX = 190
@@ -101,7 +109,8 @@ export function normalizeName(name: string | null | undefined): string {
   s = s.replace(/&/g, ' and ').replace(/['’`]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
   if (!s) return ''
   let out = s.replace(/^the\s+/, '')
-  while (LEGAL_SUFFIX.test(out)) out = out.replace(LEGAL_SUFFIX, '').trim()
+  // "Acme & Co" → "acme and co" → "acme": the joining word goes with the form it joined.
+  while (LEGAL_SUFFIX.test(out)) out = out.replace(LEGAL_SUFFIX, '').replace(/\sand$/, '').trim()
   return (out || s).slice(0, NAME_KEY_MAX).trim()
 }
 
@@ -109,12 +118,19 @@ export function normalizeName(name: string | null | undefined): string {
 const NO_COMPANY = new Set([
   'self employed', 'selfemployed', 'self', 'freelance', 'freelancer', 'independent', 'independent contractor', 'confidential', 'stealth', 'stealth startup',
   'retired', 'unemployed', 'none', 'n a', 'na', 'not applicable', 'private', 'various', 'student', 'looking for work', 'open to work',
+  'myself', 'me', 'freelancing', 'consultant', 'consulting', 'independent consultant', 'contractor', 'career break', 'sabbatical', 'real estate',
+  'real estate agent', 'realtor', 'investor', 'real estate investor', 'landlord', 'property manager', 'entrepreneur', 'owner', 'business owner',
 ])
 
-/** The normalized company name to group by, or '' when the "company" is a placeholder like "Self-employed". */
+/**
+ * The normalized company name to group by, or '' when the "company" is a
+ * placeholder like "Self-employed" (anything starting "self employed" or
+ * "freelance" counts, e.g. "Self-Employed (Freelance)"). The list is a
+ * heuristic: a placeholder it does not know still groups by its text.
+ */
 export function companyName(name: string | null | undefined): string {
   const n = normalizeName(name)
-  return NO_COMPANY.has(n) ? '' : n
+  return NO_COMPANY.has(n) || /^(?:self employed|selfemployed|freelance)\b/.test(n) ? '' : n
 }
 
 const domainKey = (d: string) => `d:${d}`

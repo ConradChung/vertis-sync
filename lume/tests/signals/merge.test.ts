@@ -17,10 +17,20 @@ describe('domainOf', () => {
     // But a bare "careers.com" is its own domain.
     expect(domainOf('careers.com')).toBe('careers.com')
   })
+  it('never folds down to a country suffix, and a bare suffix is no domain', () => {
+    expect(domainOf('careers.co.uk')).toBe('careers.co.uk')
+    expect(domainOf('jobs.co.uk')).toBe('jobs.co.uk')
+    expect(domainOf('careers.co.uk')).not.toBe(domainOf('jobs.co.uk'))
+    expect(domainOf('jobs.ac.uk')).toBe('jobs.ac.uk')
+    expect(domainOf('careers.com.au')).toBe('careers.com.au')
+    expect(domainOf('careers.acme.co.uk')).toBe('acme.co.uk')
+    for (const raw of ['co.uk', 'com.au']) expect(domainOf(raw), raw).toBeNull()
+  })
   it('link shorteners, site builders, scheduling pages and mailbox providers are never a company domain', () => {
     for (const raw of [
       'https://lnkd.in/a', 'https://lnkd.in/b', 'goo.gl/maps/x', 'g.page/acme', 't.co/abc', 'fb.me/acme', 'wa.me/13105550101', 'calendly.com/jane', 'https://jane.wix.com/site',
       'acme.squarespace.com', 'acme.weebly.com', 'acme.wordpress.com', 'medium.com/@acme', 'github.com/acme', 'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com',
+      'tinyurl.com/abc', 'fb.com/acme', 'youtu.be/xyz', 'rebrand.ly/a', 'about.me/jane', 'realtor.com/agent/1', 'bbb.org/acme', 'live.com', 'me.com', 'protonmail.com', 'proton.me',
     ]) {
       expect(domainOf(raw), raw).toBeNull()
     }
@@ -58,6 +68,15 @@ describe('normalizeName', () => {
     expect(normalizeName('Acme LP')).toBe('acme')
     expect(normalizeName('LP Realty')).not.toBe(normalizeName('PC Realty'))
   })
+  it('reads dotted and joined legal forms the same as plain ones', () => {
+    expect(normalizeName('Acme L.P.')).toBe(normalizeName('Acme LP'))
+    expect(normalizeName('Acme L.L.P.')).toBe('acme')
+    expect(normalizeName('Acme P.C.')).toBe('acme')
+    expect(normalizeName('Acme & Co')).toBe('acme')
+    expect(normalizeName('Acme and Company, Inc.')).toBe('acme')
+    expect(normalizeName('Smith & Sons')).toBe('smith and sons')
+    expect(normalizeName('Rock and Roll Rentals')).toBe('rock and roll rentals')
+  })
   it('never reduces a real name to nothing: a bare legal form and a non-Latin name keep a key', () => {
     expect(normalizeName('Company')).toBe('company')
     expect(normalizeName('LLC')).toBe('llc')
@@ -68,6 +87,9 @@ describe('normalizeName', () => {
   })
   it('an employer placeholder is not a company', () => {
     for (const raw of ['Self-employed', 'self employed', 'Freelance', 'Freelancer', 'Independent', 'Confidential', 'Stealth', 'Retired', 'Unemployed', 'None', 'N/A']) expect(companyName(raw), raw).toBe('')
+    for (const raw of ['Independent Consultant', 'Career Break', 'Self-Employed (Freelance)', 'Self employed - real estate', 'Real Estate', 'Myself', 'Freelancing', 'Freelance Writer', 'Realtor', 'Landlord', 'Owner']) expect(companyName(raw), raw).toBe('')
+    expect(companyName('Freelancers Union')).toBe('freelancers union')
+    expect(companyName('Owner Managed Homes')).toBe('owner managed homes')
     expect(companyName('Independent Property Group')).toBe('independent property group')
     expect(companyName('Acme PM, LLC')).toBe('acme pm')
   })
