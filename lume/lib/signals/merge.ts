@@ -40,41 +40,81 @@ export interface SignalEvent {
   handle?: string | null
 }
 
-/** Hosts that are never a company's own domain (profiles, job boards, link shorteners). */
+/**
+ * Hosts that are never a company's own domain: profiles, job boards, link
+ * shorteners, site builders' shared hosts, scheduling pages and mailbox
+ * providers. Two companies whose only "site" is one of these must not merge.
+ */
 const SHARED_HOSTS = new Set([
-  'linkedin.com', 'facebook.com', 'instagram.com', 'twitter.com', 'x.com', 'youtube.com', 'tiktok.com', 'reddit.com',
-  'indeed.com', 'glassdoor.com', 'ziprecruiter.com', 'greenhouse.io', 'lever.co', 'workable.com', 'bit.ly', 'linktr.ee',
-  'google.com', 'yelp.com', 'apartments.com', 'zillow.com', 'wixsite.com', 'godaddysites.com',
+  'linkedin.com', 'lnkd.in', 'facebook.com', 'fb.me', 'instagram.com', 'twitter.com', 'x.com', 't.co', 'youtube.com', 'tiktok.com', 'reddit.com',
+  'indeed.com', 'glassdoor.com', 'ziprecruiter.com', 'greenhouse.io', 'lever.co', 'workable.com',
+  'bit.ly', 'goo.gl', 'g.page', 'linktr.ee', 'wa.me', 'calendly.com',
+  'google.com', 'yelp.com', 'apartments.com', 'zillow.com', 'medium.com', 'github.com',
+  'wixsite.com', 'wix.com', 'godaddysites.com', 'squarespace.com', 'weebly.com', 'wordpress.com',
+  'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com', 'aol.com',
 ])
+
+/** Subdomains that are a section of the company's own site, not a different company. */
+const SITE_SECTIONS = /^(?:www\d*|careers|jobs|apply|join)\./
 
 /**
  * A company's bare domain ("acme.com") from a domain or URL, lowercased, with
- * protocol, `www.`, path, port and credentials removed. Null for nothing
- * usable or for a shared host (a LinkedIn page is not the company's domain).
+ * protocol, `www.` / `careers.` / `jobs.`, path and port removed. Null for
+ * nothing usable, for an email address, or for a shared host (a LinkedIn
+ * page or a link shortener is not the company's domain).
  */
 export function domainOf(raw: string | null | undefined): string | null {
   let s = (raw ?? '').trim().toLowerCase()
   if (!s) return null
-  s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//, '').replace(/^[^/@]*@/, '')
-  s = s.split(/[/?#]/)[0].replace(/:\d+$/, '').replace(/^www\d*\./, '').replace(/\.$/, '')
+  const hadScheme = /^[a-z][a-z0-9+.-]*:\/\//.test(s)
+  s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
+  const host = s.split(/[/?#]/)[0]
+  // "john@gmail.com" is an address, not a site; credentials in a URL are not a site either.
+  if (host.includes('@')) {
+    if (!hadScheme) return null
+    s = host.slice(host.lastIndexOf('@') + 1)
+  } else s = host
+  s = s.replace(/:\d+$/, '').replace(/\.$/, '')
+  while (SITE_SECTIONS.test(s) && s.split('.').length > 2) s = s.replace(SITE_SECTIONS, '')
+  s = s.replace(/^www\d*\./, '')
   if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(s) || s.length > 200) return null
   if (SHARED_HOSTS.has(s) || [...SHARED_HOSTS].some((h) => s.endsWith(`.${h}`))) return null
   return s
 }
 
-const LEGAL_SUFFIX = /\b(incorporated|inc|llc|l l c|llp|lp|ltd|limited|corp|corporation|co|company|plc|pllc|pc|gmbh)\b/g
+/** Legal forms, removed only from the END of a name ("LP Realty" keeps its LP; "Acme LP" loses it). */
+const LEGAL_SUFFIX = /\s(?:incorporated|inc|llc|l l c|llp|lp|ltd|limited|corp|corporation|co|company|plc|pllc|pc|gmbh)$/
+
+/** Longest name key the table and the routes accept (`n:` + this). */
+const NAME_KEY_MAX = 190
 
 /**
  * A company name reduced for matching: lowercase, accents and punctuation
- * dropped, "&" read as "and", legal suffixes (Inc, LLC, Co, …) and a leading
- * "the" removed. "Acme Property Mgmt, LLC." and "ACME PROPERTY MGMT" match.
- * Words that carry meaning ("management", "group", "realty") are kept.
+ * dropped, "&" read as "and", a leading "the" and trailing legal forms
+ * (Inc, LLC, Co, …) removed. "Acme Property Mgmt, LLC." and "ACME PROPERTY
+ * MGMT" match. Words that carry meaning ("management", "group", "realty")
+ * are kept, and so are letters of any script. A name that is nothing but a
+ * legal form ("Company") is kept as it is rather than reduced to nothing.
  */
 export function normalizeName(name: string | null | undefined): string {
   let s = (name ?? '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
-  s = s.replace(/&/g, ' and ').replace(/['’`]/g, '').replace(/[^a-z0-9]+/g, ' ').trim()
-  s = s.replace(LEGAL_SUFFIX, ' ').replace(/^the\s+/, '').replace(/\s+/g, ' ').trim()
-  return s
+  s = s.replace(/&/g, ' and ').replace(/['’`]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  if (!s) return ''
+  let out = s.replace(/^the\s+/, '')
+  while (LEGAL_SUFFIX.test(out)) out = out.replace(LEGAL_SUFFIX, '').trim()
+  return (out || s).slice(0, NAME_KEY_MAX).trim()
+}
+
+/** What people put as an employer when they have none: never a company to group by. */
+const NO_COMPANY = new Set([
+  'self employed', 'selfemployed', 'self', 'freelance', 'freelancer', 'independent', 'independent contractor', 'confidential', 'stealth', 'stealth startup',
+  'retired', 'unemployed', 'none', 'n a', 'na', 'not applicable', 'private', 'various', 'student', 'looking for work', 'open to work',
+])
+
+/** The normalized company name to group by, or '' when the "company" is a placeholder like "Self-employed". */
+export function companyName(name: string | null | undefined): string {
+  const n = normalizeName(name)
+  return NO_COMPANY.has(n) ? '' : n
 }
 
 const domainKey = (d: string) => `d:${d}`
@@ -110,7 +150,7 @@ export function mergeSignals(events: readonly SignalEvent[]): SignalAccount[] {
   const domainsOfName = new Map<string, Set<string>>()
   const parts = events.map((e) => {
     const domain = domainOf(e.site)
-    const name = normalizeName(e.company)
+    const name = companyName(e.company)
     if (domain && name) (domainsOfName.get(name) ?? domainsOfName.set(name, new Set()).get(name)!).add(domain)
     return { e, domain, name }
   })
@@ -139,7 +179,7 @@ export function mergeSignals(events: readonly SignalEvent[]): SignalAccount[] {
   for (const [key, g] of groups) {
     const members = [...g.members].sort((a, b) => time(b.at) - time(a.at) || a.ref.localeCompare(b.ref))
     const top = members[0]
-    const named = members.find((m) => m.company?.trim())
+    const named = members.find((m) => companyName(m.company))
     const handle = members.find((m) => m.handle?.trim())?.handle?.trim().replace(/^u\//, '')
     const contacts: SignalAccount['contacts'] = []
     for (const m of members) {
@@ -188,11 +228,20 @@ export interface SignalRow extends SignalAccount {
   deal_id: string | null
 }
 
-/** Each account with its saved status and touches (new and untouched when nothing is saved). */
+/**
+ * Each account with its saved status and touches (new and untouched when
+ * nothing is saved). State saved under a name key still applies after the
+ * account gained a domain, but only when that name now belongs to exactly
+ * one account: two companies sharing a name never share a status or a deal.
+ */
 export function applyState(accounts: readonly SignalAccount[], states: readonly SignalState[]): SignalRow[] {
   const byKey = new Map(states.map((s) => [s.account_key, s]))
+  const ownKeys = new Set(accounts.map((a) => a.key))
+  const carriers = new Map<string, number>()
+  for (const a of accounts) for (const k of a.aliases) carriers.set(k, (carriers.get(k) ?? 0) + 1)
+  const usable = (k: string) => byKey.has(k) && !ownKeys.has(k) && carriers.get(k) === 1
   return accounts.map((a) => {
-    const stateKey = [a.key, ...a.aliases].find((k) => byKey.has(k)) ?? a.key
+    const stateKey = byKey.has(a.key) ? a.key : (a.aliases.find(usable) ?? a.key)
     const s = byKey.get(stateKey)
     return {
       ...a,
@@ -241,10 +290,26 @@ export interface SignalInbox {
   failed: SignalSource[]
 }
 
-/** A non-routable address for a deal whose account has no known email (`.invalid` never delivers). */
+/** A short, stable hash of a string (FNV-1a, 32 bit, base 36). */
+function shortHash(v: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < v.length; i++) {
+    h ^= v.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(36)
+}
+
+/**
+ * A non-routable address for a deal whose account has no known email
+ * (`.invalid` never delivers). It carries the key's kind and a hash of the
+ * whole key, so two accounts never share one: `d:acme.com`, `n:acme com`
+ * and `r:acme_com` get three different addresses.
+ */
 export function placeholderEmail(key: string): string {
-  const slug = key.replace(/^[a-z]:/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'account'
-  return `${slug}@signal.invalid`
+  const kind = /^[a-z]:/.test(key) ? key[0] : 'x'
+  const slug = key.replace(/^[a-z]:/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)
+  return `${[kind, slug, shortHash(key)].filter(Boolean).join('-')}@signal.invalid`
 }
 
 /** The campaign id every deal started from a signal sits under in the Pipeline. */

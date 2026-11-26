@@ -69,20 +69,28 @@ export function SignalsInbox({ initial, fixedSource, defaultSource }: { initial?
     keepPreviousData: true,
     revalidateOnFocus: true,
   })
-  const [busy, setBusy] = useState<string | null>(null)
+  // Every row with a save in flight stays disabled until its own save returns.
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set())
+  const hold = (key: string, on: boolean) =>
+    setBusy((cur) => {
+      const next = new Set(cur)
+      if (on) next.add(key)
+      else next.delete(key)
+      return next
+    })
 
   async function patch(row: SignalRow, body: Patch) {
-    setBusy(row.key)
+    hold(row.key, true)
     const a = await sendJson('/api/signals/accounts', { key: row.state_key, ...body }, { method: 'PATCH' })
-    setBusy(null)
+    hold(row.key, false)
     if (a.status !== 200) toast.error('Could not save. Try again.')
     void mutate()
   }
 
   async function startDeal(row: SignalRow) {
-    setBusy(row.key)
+    hold(row.key, true)
     const a = await sendJson<{ deal_id: string }>('/api/signals/accounts/deal', { key: row.state_key })
-    setBusy(null)
+    hold(row.key, false)
     if ((a.status === 200 || a.status === 201) && a.body) toast(row.name + ' is in Conversation', { description: 'Open it from the row or the Pipeline.' })
     else toast.error('Could not start the deal. Try again.')
     void mutate()
@@ -146,7 +154,7 @@ export function SignalsInbox({ initial, fixedSource, defaultSource }: { initial?
       {rows.length > 0 && (
         <ul aria-label="Signal accounts" className="flex flex-col gap-8">
           {rows.map((r) => (
-            <Row key={r.key} row={r} busy={busy === r.key} onPatch={patch} onStartDeal={startDeal} />
+            <Row key={r.key} row={r} busy={busy.has(r.key)} onPatch={patch} onStartDeal={startDeal} />
           ))}
         </ul>
       )}

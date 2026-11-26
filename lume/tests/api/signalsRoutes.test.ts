@@ -132,6 +132,16 @@ describe('GET /api/portal/signals', () => {
     })
     expect(body.more).toBe(0)
     expect(body.scoreboard).toEqual(board)
+    // Counted over this client's own campaigns plus the signal deals, never every campaign.
+    expect(score.getScoreboard).toHaveBeenCalledTimes(1)
+    expect(score.getScoreboard.mock.calls[0][1]).toEqual(['c1', 'signals'])
+  })
+
+  it('the scoreboard ids come from the portal user row, not the request', async () => {
+    session.email = 'owner@example.com'
+    portal.getPortalUser.mockResolvedValue({ email: 'frank@kaspen.co', client: 'Kaspen', campaign_ids: ['k1', 'k2'], linkedin_set_ids: [], sheet_set_ids: [] })
+    await portalGET(new Request('http://localhost/api/portal/signals?as=frank%40kaspen.co&campaign_ids=other&campaign=all'))
+    expect(score.getScoreboard.mock.calls[0][1]).toEqual(['k1', 'k2', 'signals'])
   })
 
   it("another client's portal user gets nothing: no accounts, no scoreboard, and nothing is read", async () => {

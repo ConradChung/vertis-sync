@@ -1,6 +1,10 @@
 import { redirect } from 'next/navigation'
 
-/** Influencers live inside Signals (owner, 2026-11-26). Old links land there; candidate lists are still sheets in Leads. */
+/**
+ * The Influencers tab is gone (owner, 2026-11-09): candidate lists are sheets in Leads, and old links
+ * (the influencer-lookup alert's "Review the candidates in Lume") land there. The influencers
+ * themselves have their place inside Signals at /signals/influencers.
+ */
 export default function InfluencersRedirect() {
-  redirect('/signals/influencers')
+  redirect('/import/leads')
 }

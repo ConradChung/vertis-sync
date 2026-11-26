@@ -98,37 +98,47 @@ async function getState(key: string): Promise<SignalState | null> {
   return (res.data as SignalState | null) ?? null
 }
 
+/** Make sure the account has a row (status new, no touches). Never overwrites one that exists. */
+async function ensureRow(row: SignalRow): Promise<void> {
+  const res = await sb()
+    .from('signal_accounts')
+    .upsert({ account_key: row.state_key, company_name: row.name.slice(0, 300), domain: row.domain }, { onConflict: 'account_key', ignoreDuplicates: true })
+  if (res.error) throw new DbError('signals.ensureRow', res.error)
+}
+
 /**
  * Save a status or a touch on an account's own row (created on first use).
  * A tick keeps its first time; unticking clears it. The first touch moves a
- * `new` account to `working`. Returns the saved state, or null when the key
- * is not an account in the inbox (the client never invents one).
+ * `new` account to `working`. Each change writes only its own column, with
+ * the condition it relies on, so two saves at once cannot undo each other.
+ * Returns the saved state, or null when the key is not an account in the
+ * inbox (the client never invents one).
  */
 export async function patchAccount(key: string, patch: AccountPatch, now: Date = new Date()): Promise<SignalState | null> {
   const { rows } = await loadAllRows()
   const row = rows.find((r) => r.state_key === key || r.key === key)
   if (!row) return null
   const stateKey = row.state_key
-  const cur = await getState(stateKey)
-  const next: Record<string, unknown> = {
-    account_key: stateKey,
-    company_name: row.name.slice(0, 300),
-    domain: row.domain,
-    status: patch.status ?? cur?.status ?? 'new',
-    email_touched_at: cur?.email_touched_at ?? null,
-    linkedin_touched_at: cur?.linkedin_touched_at ?? null,
-    call_touched_at: cur?.call_touched_at ?? null,
-    deal_id: cur?.deal_id ?? null,
-    updated_at: now.toISOString(),
+  const at = now.toISOString()
+  await ensureRow(row)
+  const write = async (op: string, q: PromiseLike<{ error: { message: string } | null }>) => {
+    const res = await q
+    if (res.error) throw new DbError(op, res.error as never)
+  }
+  if (patch.status) {
+    await write('signals.patchAccount.status', sb().from('signal_accounts').update({ status: patch.status, updated_at: at }).eq('account_key', stateKey))
   }
   if (patch.touch) {
     const col = TOUCH_COL[patch.touch.channel]
-    next[col] = patch.touch.done ? (cur?.[col] ?? now.toISOString()) : null
-    if (patch.touch.done && !patch.status && next.status === 'new') next.status = 'working'
+    if (patch.touch.done) {
+      // Only where it is not ticked yet: the first time stays.
+      await write('signals.patchAccount.tick', sb().from('signal_accounts').update({ [col]: at, updated_at: at }).eq('account_key', stateKey).is(col, null))
+      if (!patch.status) await write('signals.patchAccount.working', sb().from('signal_accounts').update({ status: 'working', updated_at: at }).eq('account_key', stateKey).eq('status', 'new'))
+    } else {
+      await write('signals.patchAccount.untick', sb().from('signal_accounts').update({ [col]: null, updated_at: at }).eq('account_key', stateKey))
+    }
   }
-  const res = await sb().from('signal_accounts').upsert(next, { onConflict: 'account_key' }).select(STATE_COLS).single()
-  if (res.error) throw new DbError('signals.patchAccount', res.error)
-  return res.data as SignalState
+  return getState(stateKey)
 }
 
 export type StartDealResult = { ok: true; deal_id: string; campaign_id: string; created: boolean } | { ok: false; error: 'not_found' }
@@ -158,23 +168,12 @@ export async function startDeal(key: string, now: Date = new Date()): Promise<St
   // A fresh deal starts at Contacted; move it so the stage change is logged (the scoreboard counts it). One the owner already moved stays where it is.
   const created = deal.stage === 'Contacted'
   if (created) await setStage(deal.id, 'Conversation', 'user', null, { via: 'signals', account_key: row.key })
-  const cur = await getState(row.state_key)
-  const res = await sb()
-    .from('signal_accounts')
-    .upsert(
-      {
-        account_key: row.state_key,
-        company_name: row.name.slice(0, 300),
-        domain: row.domain,
-        status: !cur || cur.status === 'new' ? 'working' : cur.status,
-        email_touched_at: cur?.email_touched_at ?? null,
-        linkedin_touched_at: cur?.linkedin_touched_at ?? null,
-        call_touched_at: cur?.call_touched_at ?? null,
-        deal_id: deal.id,
-        updated_at: now.toISOString(),
-      },
-      { onConflict: 'account_key' }
-    )
-  if (res.error) throw new DbError('signals.startDeal', res.error)
+  // Link the deal and, if the account was still new, mark it working: two narrow writes, nothing else is touched.
+  const at = now.toISOString()
+  await ensureRow(row)
+  const link = await sb().from('signal_accounts').update({ deal_id: deal.id, updated_at: at }).eq('account_key', row.state_key)
+  if (link.error) throw new DbError('signals.startDeal.link', link.error)
+  const working = await sb().from('signal_accounts').update({ status: 'working', updated_at: at }).eq('account_key', row.state_key).eq('status', 'new')
+  if (working.error) throw new DbError('signals.startDeal.status', working.error)
   return { ok: true, deal_id: deal.id, campaign_id: deal.campaign_id, created }
 }

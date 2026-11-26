@@ -67,9 +67,13 @@ export function InfluencersList() {
               {rows.map((r) => (
                 <tr key={r.id} className={r.active ? 'text-fg' : 'text-fg-46'}>
                   <th scope="row" className="pr-4 text-[14px] font-medium">
-                    <a href={r.linkedin_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:underline">
-                      {r.name} <ExternalLink className="size-3 opacity-60" strokeWidth={2} aria-hidden />
-                    </a>
+                    {/^https?:\/\//i.test(r.linkedin_url ?? '') ? (
+                      <a href={r.linkedin_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:underline">
+                        {r.name} <ExternalLink className="size-3 opacity-60" strokeWidth={2} aria-hidden />
+                      </a>
+                    ) : (
+                      r.name
+                    )}
                     {!r.active && <span className="ml-2 text-[12px] font-normal">paused</span>}
                   </th>
                   <td className="pr-4 text-fg-70">{r.last_ran_at ? shortDate(ownerDate(r.last_ran_at)) : 'never'}</td>

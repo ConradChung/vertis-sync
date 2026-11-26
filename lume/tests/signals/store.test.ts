@@ -1,16 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
- * A stand-in for the Supabase client: each table answers from `tables`, and
- * every call is recorded so the tests can assert that the four source tables
- * are only ever read.
+ * A stand-in for the Supabase client. Source tables answer from `tables`;
+ * `signal_accounts` behaves like the real table for the calls the store
+ * makes (insert-if-absent, filtered update, select). Every call is recorded,
+ * so the tests can assert what was written and that sources are only read.
  */
+type Row = Record<string, unknown>
 type Rec = { table: string; calls: [string, ...unknown[]][] }
 const db = vi.hoisted(() => ({
-  tables: {} as Record<string, unknown[]>,
+  tables: {} as Record<string, Record<string, unknown>[]>,
   fail: new Set<string>(),
   made: [] as { table: string; calls: [string, ...unknown[]][] }[],
-  upserts: [] as Record<string, unknown>[],
 }))
 
 vi.mock('@/lib/supabase/service', () => ({
@@ -18,35 +19,41 @@ vi.mock('@/lib/supabase/service', () => ({
     from(table: string) {
       const rec: Rec = { table, calls: [] }
       db.made.push(rec)
-      let single = false
-      let keyFilter: string | null = null
-      const answer = () => {
+      const filters: ((r: Row) => boolean)[] = []
+      let write: { kind: 'upsert' | 'update'; row: Row; ignore?: boolean } | null = null
+      const run = (single: boolean) => {
         if (db.fail.has(table)) return { data: null, error: { message: 'boom' } }
-        const rows = db.tables[table] ?? []
-        if (table === 'signal_accounts' && rec.calls.some(([m]) => m === 'upsert')) {
-          const row = rec.calls.find(([m]) => m === 'upsert')![1] as Record<string, unknown>
-          db.upserts.push(row)
-          const list = (db.tables.signal_accounts ?? []) as Record<string, unknown>[]
-          db.tables.signal_accounts = [...list.filter((r) => r.account_key !== row.account_key), row]
-          return { data: row, error: null }
+        const rows = (db.tables[table] ?? []) as Row[]
+        if (write?.kind === 'upsert') {
+          const exists = rows.some((r) => r.account_key === write!.row.account_key)
+          if (!exists) db.tables[table] = [...rows, { status: 'new', email_touched_at: null, linkedin_touched_at: null, call_touched_at: null, deal_id: null, ...write.row }]
+          else if (!write.ignore) db.tables[table] = rows.map((r) => (r.account_key === write!.row.account_key ? { ...r, ...write!.row } : r))
+          return { data: null, error: null }
         }
-        if (single) return { data: (rows as Record<string, unknown>[]).find((r) => r.account_key === keyFilter) ?? null, error: null }
-        return { data: rows, error: null }
+        if (write?.kind === 'update') {
+          db.tables[table] = rows.map((r) => (filters.every((f) => f(r)) ? { ...r, ...write!.row } : r))
+          return { data: null, error: null }
+        }
+        const hit = rows.filter((r) => filters.every((f) => f(r)))
+        return { data: single ? (hit[0] ?? null) : hit, error: null }
       }
       const b: Record<string, unknown> = {}
-      for (const m of ['select', 'eq', 'is', 'in', 'order', 'limit', 'upsert', 'update', 'insert', 'delete']) {
+      const chain = (m: string, fn?: (...a: unknown[]) => void) => {
         b[m] = (...args: unknown[]) => {
           rec.calls.push([m, ...args])
-          if (m === 'eq' && args[0] === 'account_key') keyFilter = String(args[1])
+          fn?.(...args)
           return b
         }
       }
-      b.maybeSingle = () => {
-        single = true
-        return Promise.resolve(answer())
-      }
-      b.single = () => Promise.resolve(answer())
-      b.then = (ok: (v: unknown) => unknown, bad: (e: unknown) => unknown) => Promise.resolve(answer()).then(ok, bad)
+      for (const m of ['select', 'order', 'limit', 'in', 'insert', 'delete']) chain(m)
+      // Filters only narrow signal_accounts; the fixtures for source tables are already the rows the query would return.
+      chain('eq', (col, val) => table === 'signal_accounts' && filters.push((r) => r[String(col)] === val))
+      chain('is', (col, val) => table === 'signal_accounts' && filters.push((r) => (r[String(col)] ?? null) === val))
+      chain('upsert', (row, opts) => (write = { kind: 'upsert', row: row as Row, ignore: !!(opts as { ignoreDuplicates?: boolean })?.ignoreDuplicates }))
+      chain('update', (row) => (write = { kind: 'update', row: row as Row }))
+      b.maybeSingle = () => Promise.resolve(run(true))
+      b.single = () => Promise.resolve(run(true))
+      b.then = (ok: (v: unknown) => unknown, bad: (e: unknown) => unknown) => Promise.resolve(run(false)).then(ok, bad)
       return b
     },
   }),
@@ -55,15 +62,20 @@ vi.mock('@/lib/supabase/service', () => ({
 const crm = vi.hoisted(() => ({ ensureDeal: vi.fn(), getDeal: vi.fn(), setStage: vi.fn() }))
 vi.mock('@/lib/crm/service', () => crm)
 
+import { placeholderEmail } from '@/lib/signals/merge'
 import { loadEvents, loadInbox, patchAccount, startDeal } from '@/lib/signals/store'
 
 const SOURCES = ['signal_hiring', 'signal_people', 'signal_posts', 'signal_reddit_mentions', 'influencer_reactors']
 const NOW = new Date('2026-11-26T20:00:00Z')
+const account = (key: string) => (db.tables.signal_accounts ?? []).find((r) => r.account_key === key)
+const state = (key: string, o: Row = {}): Row => ({ account_key: key, status: 'new', email_touched_at: null, linkedin_touched_at: null, call_touched_at: null, deal_id: null, ...o })
+const writes = (table: string) => db.made.filter((r) => r.table === table && r.calls.some(([m]) => ['upsert', 'update', 'insert', 'delete'].includes(m)))
+/** The columns each write to signal_accounts carried, in order. */
+const written = () => writes('signal_accounts').map((r) => Object.keys(r.calls.find(([m]) => m === 'upsert' || m === 'update')![1] as Row).sort())
 
 beforeEach(() => {
   vi.clearAllMocks()
   db.made.length = 0
-  db.upserts.length = 0
   db.fail.clear()
   db.tables = {
     signal_hiring: [{ id: 1, signal: 'hiring', role_title: 'Regional PM', headline: null, source_url: null, posted_at: '2026-11-20T00:00:00Z', company_name: 'Acme PM', company_domain: 'acme.com', company_website: null, company_phone: '(310) 555-0101', person_name: null, person_title: null, person_linkedin: null, stage: 'done', skip_reason: null, status: 'new', created_at: '2026-11-20T00:00:00Z' }],
@@ -77,8 +89,6 @@ beforeEach(() => {
   crm.setStage.mockResolvedValue('Contacted')
   crm.getDeal.mockResolvedValue(null)
 })
-
-const writesTo = (table: string) => db.made.filter((r) => r.table === table && r.calls.some(([m]) => ['upsert', 'update', 'insert', 'delete'].includes(m)))
 
 describe('loadInbox', () => {
   it('merges the four sources into one row per company, newest first, with counts', async () => {
@@ -94,12 +104,14 @@ describe('loadInbox', () => {
   })
 
   it('applies saved state and the filter; counts stay over every account', async () => {
-    db.tables.signal_accounts = [{ account_key: 'r:pm_dave', status: 'dropped', email_touched_at: null, linkedin_touched_at: null, call_touched_at: null, deal_id: null }]
+    db.tables.signal_accounts = [state('r:pm_dave', { status: 'dropped' })]
     const inbox = await loadInbox({ status: 'open', source: 'all' })
     expect(inbox.rows.map((r) => r.key)).toEqual(['d:acme.com', 'n:stone rentals'])
     expect(inbox.counts).toEqual({ new: 2, working: 0, replied: 0, dropped: 1 })
     expect((await loadInbox({ source: 'influencer' })).rows.map((r) => r.key)).toEqual(['n:stone rentals'])
-    expect((await loadInbox({}, 1)).rows).toHaveLength(1)
+    const capped = await loadInbox({}, 1)
+    expect(capped.rows).toHaveLength(1)
+    expect(capped.total).toBe(3)
   })
 
   it('a source that fails is named and the others still load', async () => {
@@ -112,8 +124,9 @@ describe('loadInbox', () => {
   it('reads the source tables and never writes to them; only verified reactors and finished hiring rows are asked for', async () => {
     await loadInbox()
     await patchAccount('d:acme.com', { status: 'working' }, NOW)
+    await patchAccount('d:acme.com', { touch: { channel: 'email', done: true } }, NOW)
     await startDeal('d:acme.com', NOW)
-    for (const t of SOURCES) expect(writesTo(t), t).toHaveLength(0)
+    for (const t of SOURCES) expect(writes(t), t).toHaveLength(0)
     expect(db.made.find((r) => r.table === 'influencer_reactors')!.calls).toContainEqual(['eq', 'verdict', 'verified'])
     expect(db.made.find((r) => r.table === 'signal_hiring')!.calls).toContainEqual(['eq', 'stage', 'done'])
   })
@@ -123,11 +136,31 @@ describe('patchAccount (status and touches)', () => {
   it('a touch is stamped with the time and moves a new account to working', async () => {
     const s = await patchAccount('d:acme.com', { touch: { channel: 'call', done: true } }, NOW)
     expect(s).toMatchObject({ account_key: 'd:acme.com', status: 'working', call_touched_at: NOW.toISOString(), email_touched_at: null, linkedin_touched_at: null })
-    expect(db.upserts[0]).toMatchObject({ company_name: 'Acme Property Management', domain: 'acme.com' })
+    expect(account('d:acme.com')).toMatchObject({ company_name: 'Acme Property Management', domain: 'acme.com' })
+  })
+
+  it('writes one column per change, never the whole row, so two saves at once cannot undo each other', async () => {
+    await patchAccount('d:acme.com', { touch: { channel: 'call', done: true } }, NOW)
+    // 1. create the row if absent (identity only), 2. the one touch column, 3. new -> working.
+    expect(written()).toEqual([['account_key', 'company_name', 'domain'], ['call_touched_at', 'updated_at'], ['status', 'updated_at']])
+    const tick = writes('signal_accounts')[1].calls
+    expect(tick).toContainEqual(['is', 'call_touched_at', null])
+    expect(writes('signal_accounts')[2].calls).toContainEqual(['eq', 'status', 'new'])
+    db.made.length = 0
+    await patchAccount('d:acme.com', { status: 'replied' }, NOW)
+    expect(written()).toEqual([['account_key', 'company_name', 'domain'], ['status', 'updated_at']])
+    // The earlier call tick is untouched by the status save.
+    expect(account('d:acme.com')).toMatchObject({ status: 'replied', call_touched_at: NOW.toISOString() })
+  })
+
+  it('a save that lands between another save\'s read and write is not lost', async () => {
+    // A tick arrives while a status change is in flight: each wrote only its own column.
+    await Promise.all([patchAccount('d:acme.com', { status: 'replied' }, NOW), patchAccount('d:acme.com', { touch: { channel: 'email', done: true } }, NOW)])
+    expect(account('d:acme.com')).toMatchObject({ status: 'replied', email_touched_at: NOW.toISOString() })
   })
 
   it('a second tick keeps the first time; unticking clears it and leaves the status alone', async () => {
-    db.tables.signal_accounts = [{ account_key: 'd:acme.com', status: 'replied', email_touched_at: '2026-11-20T10:00:00.000Z', linkedin_touched_at: null, call_touched_at: null, deal_id: null }]
+    db.tables.signal_accounts = [state('d:acme.com', { status: 'replied', email_touched_at: '2026-11-20T10:00:00.000Z' })]
     expect(await patchAccount('d:acme.com', { touch: { channel: 'email', done: true } }, NOW)).toMatchObject({ email_touched_at: '2026-11-20T10:00:00.000Z', status: 'replied' })
     expect(await patchAccount('d:acme.com', { touch: { channel: 'email', done: false } }, NOW)).toMatchObject({ email_touched_at: null, status: 'replied' })
   })
@@ -142,19 +175,19 @@ describe('patchAccount (status and touches)', () => {
   it('a status is saved as given and keeps the touches; an explicit status wins over the first-touch rule', async () => {
     await patchAccount('d:acme.com', { touch: { channel: 'call', done: true } }, NOW)
     expect(await patchAccount('d:acme.com', { status: 'dropped' }, NOW)).toMatchObject({ status: 'dropped', call_touched_at: NOW.toISOString() })
-    expect(await patchAccount('r:pm_dave', { status: 'new', touch: { channel: 'linkedin', done: true } }, NOW)).toMatchObject({ status: 'new' })
+    expect(await patchAccount('r:pm_dave', { status: 'new', touch: { channel: 'linkedin', done: true } }, NOW)).toMatchObject({ status: 'new', linkedin_touched_at: NOW.toISOString() })
   })
 
   it('writes under the key the state already lives under (a name key from before the row had a domain)', async () => {
-    db.tables.signal_accounts = [{ account_key: 'n:acme pm', status: 'working', email_touched_at: null, linkedin_touched_at: null, call_touched_at: null, deal_id: null }]
+    db.tables.signal_accounts = [state('n:acme pm', { status: 'working' })]
     const s = await patchAccount('d:acme.com', { status: 'replied' }, NOW)
-    expect(s?.account_key).toBe('n:acme pm')
-    expect(db.upserts).toHaveLength(1)
+    expect(s).toMatchObject({ account_key: 'n:acme pm', status: 'replied' })
+    expect(account('d:acme.com')).toBeUndefined()
   })
 
   it('a key that is not an account in the inbox saves nothing', async () => {
     expect(await patchAccount('d:not-a-signal.com', { status: 'working' }, NOW)).toBeNull()
-    expect(db.upserts).toHaveLength(0)
+    expect(writes('signal_accounts')).toHaveLength(0)
   })
 })
 
@@ -162,26 +195,43 @@ describe('startDeal', () => {
   it('creates a deal under the signals campaign and moves it to Conversation, then links it and marks the account working', async () => {
     const out = await startDeal('d:acme.com', NOW)
     expect(out).toEqual({ ok: true, deal_id: 'deal-1', campaign_id: 'signals', created: true })
-    expect(crm.ensureDeal).toHaveBeenCalledWith({ campaign_id: 'signals', email: 'acme-com@signal.invalid', source: 'user', name: 'Ada Lovelace', company: 'Acme Property Management' })
+    expect(crm.ensureDeal).toHaveBeenCalledWith({ campaign_id: 'signals', email: placeholderEmail('d:acme.com'), source: 'user', name: 'Ada Lovelace', company: 'Acme Property Management' })
+    expect(crm.ensureDeal.mock.calls[0][0].email).toMatch(/^d-acme-com-[a-z0-9]+@signal\.invalid$/)
     expect(crm.setStage).toHaveBeenCalledWith('deal-1', 'Conversation', 'user', null, { via: 'signals', account_key: 'd:acme.com' })
-    expect(db.upserts[0]).toMatchObject({ account_key: 'd:acme.com', deal_id: 'deal-1', status: 'working' })
+    expect(account('d:acme.com')).toMatchObject({ deal_id: 'deal-1', status: 'working' })
+    // Identity on create, then deal_id alone, then new -> working alone.
+    expect(written()).toEqual([['account_key', 'company_name', 'domain'], ['deal_id', 'updated_at'], ['status', 'updated_at']])
+  })
+
+  it('keeps touches ticked earlier and a status the owner already set', async () => {
+    db.tables.signal_accounts = [state('d:acme.com', { status: 'replied', call_touched_at: '2026-11-25T18:00:00.000Z' })]
+    await startDeal('d:acme.com', NOW)
+    expect(account('d:acme.com')).toMatchObject({ deal_id: 'deal-1', status: 'replied', call_touched_at: '2026-11-25T18:00:00.000Z' })
   })
 
   it('pressing it again returns the same deal without creating or moving anything', async () => {
-    db.tables.signal_accounts = [{ account_key: 'd:acme.com', status: 'replied', email_touched_at: null, linkedin_touched_at: null, call_touched_at: null, deal_id: 'deal-1' }]
+    db.tables.signal_accounts = [state('d:acme.com', { status: 'replied', deal_id: 'deal-1' })]
     crm.getDeal.mockResolvedValue({ id: 'deal-1', campaign_id: 'signals', stage: 'Pilot' })
     expect(await startDeal('d:acme.com', NOW)).toEqual({ ok: true, deal_id: 'deal-1', campaign_id: 'signals', created: false })
     expect(crm.ensureDeal).not.toHaveBeenCalled()
     expect(crm.setStage).not.toHaveBeenCalled()
-    expect(db.upserts).toHaveLength(0)
+    expect(writes('signal_accounts')).toHaveLength(0)
   })
 
-  it('a deal the owner already moved on is linked but not pulled back to Conversation; the status it had is kept', async () => {
-    db.tables.signal_accounts = [{ account_key: 'd:acme.com', status: 'replied', email_touched_at: null, linkedin_touched_at: null, call_touched_at: null, deal_id: null }]
+  it('a deal the owner already moved on is linked but not pulled back to Conversation', async () => {
     crm.ensureDeal.mockResolvedValue({ id: 'deal-7', campaign_id: 'signals', stage: 'Demo', created_at: '2026-11-01T00:00:00Z' })
     expect(await startDeal('d:acme.com', NOW)).toMatchObject({ deal_id: 'deal-7', created: false })
     expect(crm.setStage).not.toHaveBeenCalled()
-    expect(db.upserts[0]).toMatchObject({ deal_id: 'deal-7', status: 'replied' })
+    expect(account('d:acme.com')).toMatchObject({ deal_id: 'deal-7' })
+  })
+
+  it('two different accounts never get the same deal address', async () => {
+    await startDeal('d:acme.com', NOW)
+    await startDeal('n:stone rentals', NOW)
+    await startDeal('r:pm_dave', NOW)
+    const emails = crm.ensureDeal.mock.calls.map(([d]) => d.email)
+    expect(new Set(emails).size).toBe(3)
+    for (const e of emails) expect(e.endsWith('@signal.invalid')).toBe(true)
   })
 
   it('an unknown key starts nothing', async () => {

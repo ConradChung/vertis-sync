@@ -167,7 +167,10 @@ stops blocking by itself once #2 merges.
   a Reddit author is its own account. Those four tables are only SELECTed; status and the three touches live in `signal_accounts`.
   A touch is a manual tick with its time: nothing is emailed, messaged or called. "Start deal" creates one deal under campaign
   `signals` in Conversation (owner's session only, idempotent) and changes no campaign or Instantly state.
-  `/signals/hiring` still renders (the inbox filtered to hiring, then the Hiring Ops sheet); `/influencers` lands on `/signals/influencers`.
+  `/signals/hiring` still renders (the inbox filtered to hiring, then the Hiring Ops sheet); the influencers list is at `/signals/influencers`,
+  and `/influencers` still lands on the candidate lists in `/import/leads` (the influencer-lookup alert links there).
+  Two different companies never share a row, a status or a deal: shared hosts and mailbox domains are not a company domain, legal forms
+  are stripped only from the end of a name, employer placeholders ("Self-employed") are not a company, and saved state is never shared through a name two accounts carry.
   In the portal, signal accounts and the scoreboard go only to the signals client (`LUME_SIGNALS_CLIENT`, default Kaspen):
   any other client gets `{ enabled: false }` and no data.
 

@@ -2,14 +2,16 @@ import { NextResponse } from 'next/server'
 import { requirePortalUser } from '@/lib/auth/guards'
 import { portalSeesSignals, portalSignalAccounts, type PortalSignalsResponse } from '@/lib/portal/signals'
 import { getScoreboard } from '@/lib/scoreboard/store'
+import { SIGNALS_CAMPAIGN_ID } from '@/lib/signals/merge'
 import { loadAllRows } from '@/lib/signals/store'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * GET /api/portal/signals → PortalSignalsResponse: today's signal accounts to
- * call (with phone numbers where known) and the weekly scoreboard, for the
- * client whose lanes produce the signals. Any other client gets
+ * call (with phone numbers where known) and the weekly scoreboard (counted
+ * over this client's campaigns and the signal deals only), for the client
+ * whose lanes produce the signals. Any other client gets
  * `{ enabled: false }` and no data. Read only; owner preview with `?as=`.
  */
 export async function GET(req: Request) {
@@ -20,7 +22,8 @@ export async function GET(req: Request) {
   try {
     const [{ rows }, scoreboard] = await Promise.all([
       loadAllRows(),
-      getScoreboard().catch((err) => {
+      // This client's own campaigns plus the deals started from signals: never another client's.
+      getScoreboard(new Date(), [...auth.user.campaign_ids, SIGNALS_CAMPAIGN_ID]).catch((err) => {
         console.error('[portal/signals] scoreboard failed:', err instanceof Error ? err.message : err)
         return null
       }),
