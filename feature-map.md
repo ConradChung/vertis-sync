@@ -214,7 +214,7 @@ stops blocking by itself once #2 merges.
   pgTAP `supabase/tests/lume_signal_accounts_test.sql`.
 - **Good:** one row per company across `signal_hiring`, `signal_people` (+ `signal_posts`), `signal_reddit_mentions` and verified
   `influencer_reactors`, deduped by domain, else by normalized name (a name-only row joins the one domain that name belongs to);
-  a Reddit author is its own account. Those four tables are only SELECTed; status and the three touches live in `signal_accounts`.
+  a Reddit author is its own account. Those four tables are only SELECTed, except `signal_people` rows at stage `held`, which the owner's typed unit count updates (`lume/lib/signals/held.ts`, conditional on `held`); status and the three touches live in `signal_accounts`.
   A touch is a manual tick with its time: nothing is emailed, messaged or called. "Start deal" creates one deal under campaign
   `signals` in Conversation (owner's session only, idempotent) and changes no campaign or Instantly state.
   `/signals/hiring` still renders (the inbox filtered to hiring, then the Hiring Ops sheet); the influencers list is at `/signals/influencers`,
@@ -233,7 +233,7 @@ stops blocking by itself once #2 merges.
 - **How to test:** `cd lume && npx vitest run tests/crm tests/scoreboard tests/replies tests/today tests/api/crmRoutes.test.ts tests/api/scoreboardRoutes.test.ts tests/components/TodayReplies.test.tsx tests/components/CrmViews.test.tsx`;
   pgTAP `supabase/tests/lume_pilot_stages_test.sql`.
 - **Good:** Conversation, Demo, Pilot, Paid sit after the eight original stages, which keep their names and positions; no existing deal moves.
-  Moves onto the pilot line are by hand and direct; Won/Lost still file `crm_close_deal`; automation (`autoAdvance`) never moves a deal on to,
+  Moves onto the pilot line are by hand and direct; Won/Lost still file `crm_close_deal` from the board, sheet and table (the reply desk's Slack buttons are the one exception: Booked → Demo and Not interested → Lost directly on the owner's tap, `lume/lib/replydesk/engine.ts`); automation (`autoAdvance`) never moves a deal on to,
   along or off the pilot line. Check-ins fall due 10 and 25 days after `pilot_start_date` and only for deals in Pilot.
   The scoreboard week is Monday to Monday in America/Los_Angeles and counts a deal once per column.
   A waiting row is flagged past 60 minutes (exactly 60 is not). `/today` and `/replies` only read; the only writes are the

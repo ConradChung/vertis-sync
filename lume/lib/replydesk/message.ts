@@ -72,3 +72,8 @@ export function decidedMessage(d: DraftView, decision: RdeskDecision, user: stri
     ],
   }
 }
+
+/** A one-line plain-text note in the thread (no buttons), e.g. why no draft was made. */
+export function noteMessage(text: string): { text: string; blocks: unknown[] } {
+  return { text, blocks: [{ type: 'context', elements: [plain(text)] }] }
+}

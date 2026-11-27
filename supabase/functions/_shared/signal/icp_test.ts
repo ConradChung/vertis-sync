@@ -5,6 +5,7 @@ import { type Counts, type FilterDeps, runCommenterStages, runReactorStages, sta
 import { DEFAULT_ICP, type Icp, readIcp, unitGate } from './icp.ts'
 import { runTick, type TickDeps } from './tick.ts'
 import { FACTS, FakeApify, Fakes, FakeStore, gateFor, person } from './testkit.ts'
+import { reactorRow } from './reactions.ts'
 
 function setup(rows: Parameters<typeof person>[0][], icp?: Icp) {
   const s = new FakeStore()
@@ -46,6 +47,16 @@ Deno.test('owner-operator who also manages is kept (owner wins under owner-opera
   assertEquals([s.get(1).stage, s.get(1).segment], ['crawl', 'owner_operator'])
 })
 
+Deno.test('reactors as reactorRow inserts them (influencer-verified = is_pm_company) are skipped pm_company before the crawl', async () => {
+  const row = reactorRow({ linkedin_url: 'https://www.linkedin.com/in/pmreactor', linkedin_id: null, name: 'Pat Lee', headline: 'Owner, Lee PM', title: 'Owner', company_name: 'Lee PM', company_website: 'https://leepm.com', location: 'Austin', door_count: 900, door_count_source: null, door_count_confidence: null } as never, 'post1', 'run1')!
+  const { s, f, deps } = setup([{ ...(row as Record<string, unknown>), kind: 'reactor' }])
+  assertEquals(s.get(1).segment, 'pm') // the column default: reactors never pass the signal verify
+  await runReactorStages(deps(), {})
+  assertEquals([s.get(1).stage, s.get(1).skip_reason], ['skipped', 'pm_company'])
+  assertEquals(f.calls.crawl, 0)
+})
+
+// The segment is set by hand here only to show the rule; production reactors are always 'pm' (see above).
 Deno.test('a PM reactor is skipped before the crawl', async () => {
   const { s, f, deps } = setup([{ stage: 'crawl', kind: 'reactor', segment: 'pm', company_website: 'https://pm.com', door_count: 900 }])
   await runReactorStages(deps(), {})

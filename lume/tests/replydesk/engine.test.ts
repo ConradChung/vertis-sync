@@ -130,6 +130,20 @@ describe('reply desk: deals', () => {
     expect(m.store.deals[0]).toMatchObject({ email: 'dana@whitfield.com', linkedin_url: 'https://www.linkedin.com/in/dana-whitfield-12ab' })
   })
 
+  it('an interested reply with no LinkedIn profile URL makes no deal: the inbound is marked and a note goes in the thread', async () => {
+    const m = memDeps()
+    m.ai.extract = [extraction({ label: 'interested', linkedin_url: null })]
+    const ev = sendpilotEvent()
+    ev.raw.attachments = [{ title: 'Dana Whitfield replied', text: 'Sounds good, tell me more' }] as never
+    const r = await handleMessage(ev, m.deps)
+    expect(r).toMatchObject({ label: 'interested', deal_id: null, draft_id: null, error: 'no_profile_url' })
+    expect(m.store.deals).toHaveLength(0)
+    expect(m.store.inbound[0]).toMatchObject({ status: 'failed', error: 'no_profile_url' })
+    expect(m.slack.posts).toHaveLength(1)
+    expect(m.slack.posts[0].msg.text).toContain('no LinkedIn profile link')
+    expect(JSON.stringify(m.slack.posts[0].msg.blocks)).not.toContain('rdesk_sent')
+  })
+
   it('a deal already at Demo is not pulled back to Conversation', async () => {
     const m = memDeps()
     m.store.deals.push({ id: 'd', stage: 'Demo', name: 'Dana', company: 'W', linkedin_url: 'https://www.linkedin.com/in/dana-whitfield-12ab', email: null, campaign_id: 'linkedin' })

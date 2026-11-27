@@ -21,7 +21,7 @@ import { canSpend, checkinDue, followupDue, inWindow, type CallKind, type ReplyD
 import { checkDraft, draftSystem, draftUser, fallbackDraft, pickMacro, type DraftInput, type DraftKind, DRAFT_SCHEMA } from '@/lib/replydesk/draft'
 import { ACTIONABLE, EXTRACT_SCHEMA, EXTRACT_SYSTEM, extractUser, flatten, parseExtraction, type Extraction, type Label, type RawMessage } from '@/lib/replydesk/extract'
 import type { Fact, MacroId } from '@/lib/replydesk/macros'
-import { decidedMessage, draftMessage, type DraftView, type RdeskDecision } from '@/lib/replydesk/message'
+import { decidedMessage, draftMessage, noteMessage, type DraftView, type RdeskDecision } from '@/lib/replydesk/message'
 
 // ── ports ──────────────────────────────────────────────────────────────────
 
@@ -293,7 +293,19 @@ export async function handleMessage(ev: MessageEvent, deps: Deps): Promise<Handl
   const name = x.person_name ?? match.signal?.name ?? null
   const company = x.company ?? match.signal?.company ?? null
   if (!deal) {
-    deal = await deps.store.createDeal({ linkedin_url: x.linkedin_url, email: match.signal?.email ?? null, name, company })
+    // A deal needs a LinkedIn profile or a real email; never a made-up address.
+    const email = match.signal?.email ?? null
+    if (!x.linkedin_url && !email) {
+      await deps.store.updateInbound(id, { status: 'failed', error: 'no_profile_url' })
+      await deps.slack.postThread(ev.team, ev.channel, ev.ts, noteMessage('Lume found no LinkedIn profile link in this notification, so it made no deal and no draft. Answer this one by hand.'))
+      return { ok: true, inbound_id: id, label: x.label, deal_id: null, draft_id: null, error: 'no_profile_url' }
+    }
+    try {
+      deal = await deps.store.createDeal({ linkedin_url: x.linkedin_url, email, name, company })
+    } catch (err) {
+      await deps.store.updateInbound(id, { status: 'failed', error: `deal_failed: ${msg(err)}`.slice(0, 500) })
+      return { ok: true, inbound_id: id, label: x.label, deal_id: null, draft_id: null, error: 'deal_failed' }
+    }
   } else {
     const patch: { linkedin_url?: string; name?: string; company?: string } = {}
     if (x.linkedin_url) patch.linkedin_url = x.linkedin_url

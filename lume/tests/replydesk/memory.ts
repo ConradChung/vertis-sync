@@ -58,6 +58,8 @@ export class MemStore implements Store {
   }
   async createDeal(row: { linkedin_url: string | null; email: string | null; name: string | null; company: string | null }) {
     this.log.push('createDeal')
+    // Mirrors crm_deals_email_or_linkedin.
+    if (!row.email && !row.linkedin_url) throw new Error('violates check constraint "crm_deals_email_or_linkedin"')
     const d: MemDeal = { id: `deal-${this.deals.length + 1}`, stage: 'Contacted', campaign_id: 'linkedin', ...row }
     this.deals.push(d)
     return { ...d }
