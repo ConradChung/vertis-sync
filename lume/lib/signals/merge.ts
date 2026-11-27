@@ -62,7 +62,7 @@ export interface SignalEvent {
   gate?: 'passed' | 'held' | 'pending'
   /** LinkedIn signal people only: the signal_people id. */
   person_id?: number
-  /** Units the company has, when this signal's source knows (signal_people, influencer_reactors; hiring rows carry none). */
+  /** Units the company has, when this signal's source knows (signal_people, influencer_reactors, signal_hiring). */
   doors?: DoorCount | null
   /** Hiring signals only: the signal_hiring id (a typed count is saved on it). */
   hiring_id?: number
