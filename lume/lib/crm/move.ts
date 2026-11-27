@@ -35,7 +35,7 @@ export async function moveDeal(deal: CrmDeal, to: string, reason: string | null 
             stage: plan.to,
             reason: plan.reason,
             campaign_id: deal.campaign_id,
-            lead_email: deal.email,
+            ...(deal.email ? { lead_email: deal.email } : {}),
             ...(deal.name ? { lead_name: deal.name } : {}),
             summary: '',
           },

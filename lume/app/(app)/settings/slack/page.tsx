@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
 import { PageHead } from '@/components/shell/PageHead'
 import { SettingsNav } from '@/components/settings/SettingsNav'
+import { ReplyDeskSettings } from '@/components/settings/ReplyDeskSettings'
 import { SlackSettings } from '@/components/settings/SlackSettings'
 import { OPERATOR_COOKIE } from '@/lib/operators/cookie'
 
@@ -16,6 +17,7 @@ export default async function SlackSettingsPage() {
       <PageHead eyebrow="Settings" title="Slack" sub="Clients’ own Slack workspaces: the install link, installed workspaces, and which channel sees which campaigns." />
       <SettingsNav current="/settings/slack" />
       <SlackSettings canManage={canManage} />
+      {canManage && <ReplyDeskSettings />}
     </>
   )
 }

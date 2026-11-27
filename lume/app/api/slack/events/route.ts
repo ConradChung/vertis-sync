@@ -10,6 +10,9 @@ import { readSlackRequest } from '@/lib/slack/request'
  *  - url_verification: echo the challenge.
  *  - app_mention: the read-only lead lookup, answered in the thread
  *    (lib/slack/mention.ts).
+ *  - message (message.channels / message.groups): the reply desk, only for
+ *    the one SendPilot channel in reply_desk_config (lib/replydesk/engine.ts);
+ *    every other channel and Lume's own posts are ignored there.
  *  - app_uninstalled / tokens_revoked: the workspace is marked revoked and
  *    its bindings paused; a reinstall leaves them paused until the owner
  *    re-enables them in Settings → Slack.
@@ -17,7 +20,8 @@ import { readSlackRequest } from '@/lib/slack/request'
  * delivery already did the work, and a mention must not be answered twice.
  */
 
-export const maxDuration = 60
+// 300: a reply-desk message runs extraction and a draft (each Claude call capped at 25 s) in after().
+export const maxDuration = 300
 
 export async function POST(req: Request) {
   const r = await readSlackRequest(req)
@@ -28,7 +32,10 @@ export async function POST(req: Request) {
 
   after(async () => {
     try {
-      if (ev.kind === 'app_mention') {
+      if (ev.kind === 'message') {
+        const [{ handleMessage }, { liveDeps }] = await Promise.all([import('@/lib/replydesk/engine'), import('@/lib/replydesk/live')])
+        await handleMessage(ev, liveDeps())
+      } else if (ev.kind === 'app_mention') {
         const { answerMention } = await import('@/lib/slack/mention')
         await answerMention(ev)
       } else if (ev.kind === 'revoke') {

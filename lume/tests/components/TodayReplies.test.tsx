@@ -31,17 +31,17 @@ afterEach(() => {
 })
 
 describe('WaitChip', () => {
-  it('shows the wait and is flagged only past 60 minutes', () => {
-    const { container, rerender } = render(<WaitChip since="2026-11-26T19:20:00Z" now={NOW} />)
-    expect(container.querySelector('[data-wait]')?.textContent).toBe('40 min')
+  it('shows the wait and is flagged only past 5 minutes', () => {
+    const { container, rerender } = render(<WaitChip since="2026-11-26T19:57:00Z" now={NOW} />)
+    expect(container.querySelector('[data-wait]')?.textContent).toBe('3 min')
     expect(container.querySelector('[data-overdue]')).toBeNull()
-    rerender(<WaitChip since="2026-11-26T19:00:00Z" now={NOW} />)
+    rerender(<WaitChip since="2026-11-26T19:55:00Z" now={NOW} />)
     expect(container.querySelector('[data-overdue]')).toBeNull()
     rerender(<WaitChip since="2026-11-26T18:45:00Z" now={NOW} />)
     expect(container.querySelector('[data-overdue]')?.textContent).toContain('1 h 15 min')
     // Flagged takes the one accent; not flagged stays grey.
     expect(container.querySelector('[data-overdue]')?.className).toContain('bg-primary')
-    rerender(<WaitChip since="2026-11-26T19:20:00Z" now={NOW} />)
+    rerender(<WaitChip since="2026-11-26T19:57:00Z" now={NOW} />)
     expect(container.querySelector('[data-wait]')?.className).not.toContain('bg-primary')
   })
 })
@@ -80,7 +80,7 @@ describe('RepliesList (/replies)', () => {
     replies: 1,
     items: [
       { type: 'reply', key: 'reply:r1', since: '2026-11-26T17:00:00Z', reply: { reply_to_uuid: 'r1', campaign_id: 'camp', lead_email: 'ada@acme.com', lead_name: 'Ada Lovelace', company: 'Acme PM', subject: null, untrusted_excerpt: 'Yes, send the video', received_at: '2026-11-26T17:00:00Z', deal_id: '5b7f2d1e-3c4a-4e8b-9f0a-1b2c3d4e5f60', draft_action_id: 'pa-7' } },
-      { type: 'approval', key: 'approval:a1', since: '2026-11-26T19:45:00Z', approval: { id: 'a1', kind: 'company_check', label: 'ICP check', summary: 'Check 500 companies', cap_usd: 3.89, estimate_usd: null, requested_by: 'agent', created_at: '2026-11-26T19:45:00Z', notify_warning: null, open_only: false } },
+      { type: 'approval', key: 'approval:a1', since: '2026-11-26T19:57:00Z', approval: { id: 'a1', kind: 'company_check', label: 'ICP check', summary: 'Check 500 companies', cap_usd: 3.89, estimate_usd: null, requested_by: 'agent', created_at: '2026-11-26T19:57:00Z', notify_warning: null, open_only: false } },
     ],
   }
   it('lists replies and approvals together, each with its wait, flagged past the hour', () => {
@@ -92,11 +92,11 @@ describe('RepliesList (/replies)', () => {
     expect(within(rows[0]).getByRole('link', { name: 'Draft waiting for Confirm' }).getAttribute('href')).toBe('/actions/pa-7')
     expect(within(rows[0]).getByRole('link', { name: 'Open deal' }).getAttribute('href')).toBe('/crm?campaign=camp&deal=5b7f2d1e-3c4a-4e8b-9f0a-1b2c3d4e5f60')
     expect(within(rows[1]).getByText('Check 500 companies')).toBeTruthy()
-    expect(rows[1].querySelector('[data-wait]')?.textContent).toBe('15 min')
+    expect(rows[1].querySelector('[data-wait]')?.textContent).toBe('3 min')
     expect(rows[1].querySelector('[data-overdue]')).toBeNull()
     expect(within(rows[1]).getByRole('button', { name: 'Confirm' })).toBeTruthy()
     expect(within(rows[1]).getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('/actions/a1')
-    expect(screen.getByText(/1 over an hour/)).toBeTruthy()
+    expect(screen.getByText(/1 over 5 minutes/)).toBeTruthy()
   })
   it('says so when nothing waits', () => {
     wrap(<RepliesList initial={{ items: [], approvals: 0, replies: 0 }} />)
@@ -120,8 +120,8 @@ describe('TodayScreen (/today)', () => {
     wrap(<TodayScreen initial={payload} />)
     expect(document.querySelector('[data-stat="conversations"]')?.textContent).toBe('4')
     const group = (name: string) => screen.getByRole('region', { name })
-    expect(within(group('Replies waiting over an hour')).getByText('Ada Lovelace')).toBeTruthy()
-    expect(group('Replies waiting over an hour').querySelector('[data-overdue]')?.textContent).toContain('2 h 30 min')
+    expect(within(group('Replies waiting over 5 minutes')).getByText('Ada Lovelace')).toBeTruthy()
+    expect(group('Replies waiting over 5 minutes').querySelector('[data-overdue]')?.textContent).toContain('2 h 30 min')
     expect(within(group('Pilot check-ins due')).getByText('Kaspen — day 10')).toBeTruthy()
     expect(within(group('Pilot check-ins due')).getByText(/2 d late/)).toBeTruthy()
     expect(group('Pilot check-ins due').querySelectorAll('[data-late]')).toHaveLength(1)

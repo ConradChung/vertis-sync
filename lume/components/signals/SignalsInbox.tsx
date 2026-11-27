@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useState, type ReactNode } from 'react'
-import useSWR from 'swr'
+import useSWR, { useSWRConfig } from 'swr'
 import { ArrowUpRight, Check, ExternalLink, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -312,6 +312,51 @@ function Ext({ href, className, children }: { href: string | null | undefined; c
   )
 }
 
+/**
+ * A LinkedIn person the ICP gate held: no unit count was found, so no Slack
+ * card. Typing the count releases them (500+ goes on to the card, under 500 is skipped).
+ */
+function HeldUnits({ id, name }: { id: number; name: string | null }) {
+  const { mutate } = useSWRConfig()
+  const [value, setValue] = useState('')
+  const [saving, setSaving] = useState(false)
+  const units = /^\d{1,7}$/.test(value.trim()) ? Number(value.trim()) : null
+  async function save() {
+    if (units === null) return
+    setSaving(true)
+    const a = await sendJson<{ outcome: 'continue' | 'skip'; min_units: number }>(`/api/signals/people/${id}/units`, { units })
+    setSaving(false)
+    if (a.status === 200 && a.body) {
+      toast(a.body.outcome === 'continue' ? `${name ?? 'Released'}: on to the Slack card` : `${name ?? 'Skipped'}: under ${a.body.min_units} units, skipped`)
+      void mutate((k) => typeof k === 'string' && k.startsWith('/api/signals/inbox'))
+    } else toast.error(a.status === 409 ? 'Already moved on. Refresh.' : 'Could not save. Try again.')
+  }
+  return (
+    <form
+      className="mt-2 flex flex-wrap items-center gap-2"
+      onSubmit={(e) => {
+        e.preventDefault()
+        void save()
+      }}
+    >
+      <span className="text-[12px] font-medium text-fg-70">Units unknown</span>
+      {name && <span className="truncate text-[12px] text-fg-46">{name}</span>}
+      <input
+        inputMode="numeric"
+        aria-label={'Unit count for ' + (name ?? 'this person')}
+        placeholder="Units"
+        value={value}
+        disabled={saving}
+        onChange={(e) => setValue(e.target.value)}
+        className="h-7 w-20 rounded-md bg-secondary px-2 font-mono text-[12px] text-fg tabular-nums outline-none placeholder:text-fg-46 focus-visible:ring-2 focus-visible:ring-ring"
+      />
+      <Button type="submit" size="sm" variant="secondary" className="h-7 rounded-md px-2.5 text-[12px]" disabled={saving || units === null}>
+        Save
+      </Button>
+    </form>
+  )
+}
+
 const Muted = ({ children }: { children: ReactNode }) => <span className="text-[13px] text-fg-46">{children}</span>
 
 function DateCell({ at }: { at: string | null | undefined }) {
@@ -330,6 +375,7 @@ function CompanyCell({ r }: { r: SignalRow }) {
   return (
     <div className="min-w-0">
       <p className="truncate text-[14px] font-medium text-fg">{r.name}</p>
+      {r.held?.map((h) => <HeldUnits key={h.id} id={h.id} name={h.name} />)}
       {(r.domain || tel) && (
         <p className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[13px] text-fg-46">
           {r.domain && (
@@ -363,6 +409,7 @@ function cellsFor(view: View, r: SignalRow): ReactNode {
             <Ext href={l?.linkedin}>{l?.person ?? r.contacts[0]?.name ?? r.name}</Ext>
           </p>
           <p className="mt-0.5 truncate text-[13px] text-fg-46">{[l?.person_title, r.name !== l?.person ? r.name : null].filter(Boolean).join(' · ')}</p>
+          {r.held?.map((h) => <HeldUnits key={h.id} id={h.id} name={h.name} />)}
         </div>
         <p className="line-clamp-3 text-[13px] leading-snug text-fg-70">
           {d?.reaction ? <Muted>Reacted, no comment</Muted> : d?.comment ? <Ext href={l?.url}>“{d.comment}”</Ext> : <Ext href={l?.url}>{l?.label ?? r.newest.label}</Ext>}

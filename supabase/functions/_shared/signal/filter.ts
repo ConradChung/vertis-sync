@@ -7,12 +7,16 @@
 // comments_filter row with person_id). Two failures at a stage → 'error'.
 // Only a crawl-confirmed PM (crawl_verdict 'property_manager') or a crawl-confirmed
 // owner-operator (segment 'owner_operator', crawl_verdict 'owner_operator') can reach 'ready'.
+// ICP gate (signal_config.icp, see icp.ts): by default only owner-operators continue (a PM
+// company is skipped at verify, or before the crawl for reactors), a known count under
+// min_units is skipped, and an unknown count after the doors step is parked at 'held'.
 import { groundDoorCount, parseVerifyJson, type PplxAnswer, verifyParseRequest, doorQuestion } from '../influencer/verify.ts'
 import { crawlPassed, OWNER_OPERATOR_CRAWL_RULES, OWNER_OPERATOR_VERDICT, ownerDoorQuestion, parseOwnerOperator, signalVerifyParseRequest } from './owner.ts'
 import type { JsonRequest } from '../influencer/haiku.ts'
 import { normalizeTarget } from '../research/crawl.ts'
 import { type EmailLookup, personLinkedinUrl } from '../blitz.ts'
 import { parseDoorsHint } from './doors.ts'
+import { DEFAULT_ICP, type Icp, segmentAllowed, SKIP_PM_COMPANY, SKIP_UNDER_MIN_UNITS, SKIP_UNITS_UNKNOWN, unitGate } from './icp.ts'
 import { buildDrafts, commenterOpening, type Facts, parseReply, REACTOR_PLACEHOLDER, type Reply, REPLY_EST_USD, replyRequest } from './drafts.ts'
 import type { Gate } from './gate.ts'
 import type { Person, Stage, Store } from './store.ts'
@@ -58,6 +62,8 @@ export interface FilterDeps {
   email: EmailFinder
   facts: Facts
   reactorOpening: string | null
+  /** signal_config.icp, parsed (readIcp). Absent → DEFAULT_ICP. */
+  icp?: Icp
 }
 
 export type Counts = Record<string, number>
@@ -90,6 +96,26 @@ async function charge(d: FilterDeps, p: Person, kind: string, usd: number) {
   await d.gate.record(kind, usd, { person_id: p.id })
   p.spend_usd = r4(Number(p.spend_usd ?? 0) + usd)
   await d.store.patchPerson(p.id, { spend_usd: p.spend_usd })
+}
+
+const icpOf = (d: FilterDeps): Icp => d.icp ?? DEFAULT_ICP
+
+/**
+ * Leaving the doors step: the unit gate decides. A count at or above min_units goes on to
+ * contacts; a known count below it is skipped; an unknown count is held (or skipped /
+ * continued, per icp.unknown_units).
+ */
+async function leaveDoors(d: FilterDeps, p: Person, patch: Partial<Person>, c: Counts, counter: string): Promise<void> {
+  const count = patch.door_count !== undefined ? patch.door_count : p.door_count
+  const g = unitGate(count, icpOf(d))
+  if (g === 'continue') {
+    if (await advance(d, p, 'doors', { ...patch, stage: 'contacts' })) bump(c, counter)
+  } else if (g === 'hold') {
+    if (await advance(d, p, 'doors', { ...patch, stage: 'held' })) bump(c, 'held_units_unknown')
+  } else {
+    const reason = typeof count === 'number' ? SKIP_UNDER_MIN_UNITS : SKIP_UNITS_UNKNOWN
+    if (await skip(d, p, 'doors', reason, patch)) bump(c, `skipped_${reason}`)
+  }
 }
 
 export const domainOf = (website: string | null | undefined): string | null => {
@@ -147,8 +173,14 @@ export async function stageVerify(d: FilterDeps, c: Counts): Promise<void> {
       const { json, usd } = await d.haiku(signalVerifyParseRequest(r.name ?? '', r.headline ?? '', a.answer, a.citations))
       await charge(d, r, 'haiku', usd)
       const p = groundDoorCount(parseVerifyJson(json), a.citations)
-      // A PM company wins; otherwise someone who owns and self-manages rentals is kept as an owner-operator.
-      const segment = p.is_pm_company ? 'pm' : parseOwnerOperator(json) ? 'owner_operator' : null
+      // Owner-operator-only (the default ICP): someone who owns and self-manages rentals is the buyer,
+      // even if they also manage; a PM company that is not one is skipped here, before any crawl spend.
+      // With owner_operator_only off, the old rule holds: a PM company wins.
+      const icp = icpOf(d)
+      const owner = parseOwnerOperator(json)
+      const segment = icp.owner_operator_only
+        ? (owner ? 'owner_operator' : p.is_pm_company ? 'pm' : null)
+        : (p.is_pm_company ? 'pm' : owner ? 'owner_operator' : null)
       const facts: Partial<Person> = {
         company_name: p.company_name || r.company_guess || null,
         company_website: p.company_website || null,
@@ -161,6 +193,10 @@ export async function stageVerify(d: FilterDeps, c: Counts): Promise<void> {
       }
       if (!segment) {
         if (await skip(d, r, 'verify', 'not_pm', facts)) bump(c, 'skipped_not_pm')
+      } else if (!segmentAllowed(segment, icp)) {
+        if (await skip(d, r, 'verify', SKIP_PM_COMPANY, { ...facts, segment })) bump(c, 'skipped_pm_company')
+      } else if (p.door_count !== null && unitGate(p.door_count, icp) === 'skip') {
+        if (await skip(d, r, 'verify', SKIP_UNDER_MIN_UNITS, { ...facts, segment })) bump(c, 'skipped_under_min_units')
       } else if (!domainOf(p.company_website)) {
         if (await skip(d, r, 'verify', 'no_website', facts)) bump(c, 'skipped_no_website')
       } else if (await advance(d, r, 'verify', { ...facts, segment, stage: 'crawl' })) bump(c, segment === 'pm' ? 'verified' : 'verified_owner_operator')
@@ -176,7 +212,10 @@ export async function stageCrawl(d: FilterDeps, c: Counts, kind: 'commenter' | '
   const todo: { p: Person; domain: string }[] = []
   for (const p of rows) {
     const domain = domainOf(p.company_website)
-    if (!domain) {
+    // Reactors skip verify: a PM-company reactor is dropped here, before the crawl is paid for.
+    if (!segmentAllowed(p.segment, icpOf(d))) {
+      if (await skip(d, p, 'crawl', SKIP_PM_COMPANY)) bump(c, 'skipped_pm_company')
+    } else if (!domain) {
       if (await skip(d, p, 'crawl', 'no_website')) bump(c, 'skipped_no_website')
     } else todo.push({ p, domain })
   }
@@ -245,7 +284,7 @@ export async function stageDoors(d: FilterDeps, c: Counts, kind: 'commenter' | '
   for (const r of rows) {
     // Already counted (verify's cited count, or a numeric crawl hint), or a reactor (no paid calls): move on.
     if (r.door_count !== null || kind === 'reactor') {
-      if (await advance(d, r, 'doors', { stage: 'contacts' })) bump(c, 'doors_known')
+      await leaveDoors(d, r, {}, c, 'doors_known')
       continue
     }
     if (d.timeLeft() < 45_000) return
@@ -258,15 +297,15 @@ export async function stageDoors(d: FilterDeps, c: Counts, kind: 'commenter' | '
       const { json, usd } = await d.haiku(verifyParseRequest(r.name ?? '', r.headline ?? '', a.answer, a.citations))
       await charge(d, r, 'haiku', usd)
       const p = groundDoorCount(parseVerifyJson(json), a.citations)
-      const patch: Partial<Person> = { stage: 'contacts' }
+      const patch: Partial<Person> = {}
       if (p.door_count !== null) {
         Object.assign(patch, { door_count: p.door_count, door_count_source: p.door_count_source, door_count_confidence: p.door_count_confidence })
       }
-      if (await advance(d, r, 'doors', patch)) bump(c, p.door_count !== null ? 'doors_found' : 'doors_none')
+      await leaveDoors(d, r, patch, c, p.door_count !== null ? 'doors_found' : 'doors_none')
     } catch (err) {
-      // The door count is optional: the second failure moves on without one instead of parking the lead.
+      // The second failure leaves the doors step without a count; the unit gate decides (held by default).
       if ((r.attempts ?? 0) + 1 >= MAX_ATTEMPTS) {
-        if (await advance(d, r, 'doors', { stage: 'contacts', last_error: `doors: ${msg(err)}` })) bump(c, 'doors_failed')
+        await leaveDoors(d, r, { last_error: `doors: ${msg(err)}` }, c, 'doors_failed')
       } else await fail(d, r, 'doors', err, c)
     }
   }

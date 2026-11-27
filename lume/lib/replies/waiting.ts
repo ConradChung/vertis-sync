@@ -1,16 +1,17 @@
 /**
  * How long something has waited for the owner (pure): the timer on every
- * /replies row and the Today queue. Flagged once it passes 60 minutes.
+ * /replies row and the Today queue. Flagged once it passes 5 minutes
+ * (the owner's method: answer a reply within 5 minutes).
  */
 
-export const FLAG_AFTER_MIN = 60
+export const FLAG_AFTER_MIN = 5
 
 export interface Waiting {
   /** Whole minutes waited (0 for a future or unreadable start). */
   minutes: number
   /** "just now", "12 min", "1 h 05 min", "2 d 3 h". */
   label: string
-  /** Past 60 minutes. Exactly 60 is not yet over. */
+  /** Past 5 minutes. Exactly 5 is not yet over. */
   overdue: boolean
 }
 

@@ -24,7 +24,8 @@ export type Rest = (path: string, init?: RequestInit) => Promise<Response>
 
 const LANE = 'reactions_apify'
 /** Stages where a reactor no longer moves (signal_people.stage). */
-const SETTLED = new Set(['ready', 'skipped', 'alerted', 'error'])
+// 'held' (units unknown, waiting on the owner's typed count) does not move on its own either.
+const SETTLED = new Set(['ready', 'skipped', 'alerted', 'error', 'held'])
 const REACHED_READY = new Set(['ready', 'alerted'])
 const BATCH = 100
 

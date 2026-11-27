@@ -24,9 +24,9 @@ describe('mergeWaiting (/replies)', () => {
     expect(mergeWaiting([approval('a', t), approval('bad', 'nope')], [reply('r', t)]).map((i) => i.key)).toEqual(['reply:r', 'approval:a', 'approval:bad'])
     expect(mergeWaiting([], [])).toEqual([])
   })
-  it('counts the items waiting past 60 minutes', () => {
+  it('counts the items waiting past 5 minutes', () => {
     const now = new Date('2026-11-26T20:00:00Z')
-    const items = mergeWaiting([approval('a', '2026-11-26T19:30:00Z'), approval('b', '2026-11-26T18:59:00Z')], [reply('r', '2026-11-26T19:00:00Z'), reply('s', '2026-11-26T12:00:00Z')])
+    const items = mergeWaiting([approval('a', '2026-11-26T19:57:00Z'), approval('b', '2026-11-26T19:54:00Z')], [reply('r', '2026-11-26T19:55:00Z'), reply('s', '2026-11-26T12:00:00Z')])
     expect(overdueCount(items, now)).toBe(2)
   })
 })

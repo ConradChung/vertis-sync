@@ -60,7 +60,7 @@ function LeadSheetBody({ dealId, onChanged }: { dealId: string; onChanged: () =>
   }
 
   const d = data.deal
-  const label = d.name ?? d.email
+  const label = d.name ?? d.email ?? 'LinkedIn lead'
 
   async function save(body: PatchBody, okText?: string) {
     setBusy(true)
@@ -90,7 +90,7 @@ function LeadSheetBody({ dealId, onChanged }: { dealId: string; onChanged: () =>
     <>
       <SheetHeader className="gap-3 border-b border-border p-5">
         <div className="flex items-start gap-3">
-          <LeadAvatar name={d.name} email={d.email} className="size-10 text-sm" />
+          <LeadAvatar name={d.name} email={d.email ?? ''} className="size-10 text-sm" />
           <div className="min-w-0 flex-1">
             <SheetTitle className="truncate text-lg">{label}</SheetTitle>
             <SheetDescription className="truncate">
@@ -98,8 +98,14 @@ function LeadSheetBody({ dealId, onChanged }: { dealId: string; onChanged: () =>
               {data.campaign_name ? ` — ${data.campaign_name}` : ''}
             </SheetDescription>
             <div className="mt-1.5 flex items-center gap-1.5">
-              <span className="truncate font-mono text-xs text-foreground">{d.email}</span>
-              <CopyButton text={d.email} />
+              {d.email ? (
+                <>
+                  <span className="truncate font-mono text-xs text-foreground">{d.email}</span>
+                  <CopyButton text={d.email} />
+                </>
+              ) : (
+                <span className="truncate text-xs text-muted-foreground">No email (LinkedIn)</span>
+              )}
               <SourceBadge source={d.source} />
             </div>
           </div>
@@ -159,9 +165,11 @@ function LeadSheetBody({ dealId, onChanged }: { dealId: string; onChanged: () =>
       <SheetFooter className="gap-3 border-t border-border p-5">
         <NextAction key={`${d.next_action_at}|${d.next_action}`} at={d.next_action_at} text={d.next_action} busy={busy} onSave={(b) => save(b, 'Next action saved')} />
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="outline" render={<a href={replyHref(d.source, d.email)} target="_blank" rel="noreferrer" />} nativeButton={false}>
-            <Reply /> Reply <ExternalLink className="opacity-60" />
-          </Button>
+          {d.email && (
+            <Button size="sm" variant="outline" render={<a href={replyHref(d.source, d.email)} target="_blank" rel="noreferrer" />} nativeButton={false}>
+              <Reply /> Reply <ExternalLink className="opacity-60" />
+            </Button>
+          )}
           <div className="ml-auto flex gap-2">
             <Button size="sm" variant="outline" disabled={busy || d.stage === 'Interested'} onClick={() => moveTo('Interested')}>
               <ThumbsUp /> Mark interested

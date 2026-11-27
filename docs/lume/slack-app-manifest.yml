@@ -19,16 +19,23 @@ oauth_config:
     # Minimal: post and update the lead cards, read @Lume mentions, list channels
     # (public + private the bot was invited to) for binding. No users:read: Lume
     # records Slack user ids and never looks people up.
+    # channels:history / groups:history: the reply desk reads SendPilot's reply
+    # notifications in the one channel set in Settings → Slack (every other
+    # channel is ignored). Slack only delivers messages from channels the bot is in.
     bot:
       - chat:write
       - app_mentions:read
       - channels:read
       - groups:read
+      - channels:history
+      - groups:history
 settings:
   event_subscriptions:
     request_url: https://lume-amber-alpha.vercel.app/api/slack/events
     bot_events:
       - app_mention
+      - message.channels
+      - message.groups
       - app_uninstalled
       - tokens_revoked
   interactivity:

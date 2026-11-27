@@ -16,6 +16,7 @@ import { dedupeCommenters } from './dedupe.ts'
 import type { Facts } from './drafts.ts'
 import { type Counts, type CrawlResult, type EmailFinder, type FilterDeps, runCommenterStages, runReactorStages } from './filter.ts'
 import { Gate } from './gate.ts'
+import { readIcp } from './icp.ts'
 import {
   COMMENTS_ACTOR,
   commentsInput,
@@ -177,7 +178,7 @@ export async function runTick(deps: TickDeps, body: TickBody = {}): Promise<Reco
     // 7. Commenter filter stages.
     const fd: FilterDeps = {
       store, gate, now, timeLeft, haiku: deps.haiku, perplexity: deps.perplexity, crawl: deps.crawl, email: deps.email,
-      facts: deps.facts, reactorOpening,
+      facts: deps.facts, reactorOpening, icp: readIcp(cfg.icp),
     }
     try {
       await runCommenterStages(fd, counts)

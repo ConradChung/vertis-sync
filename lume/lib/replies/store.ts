@@ -3,7 +3,8 @@ import { listAwaitingActions } from '@/lib/approvals/store'
 import { toApprovalItem } from '@/lib/approvals/view'
 import { DbError } from '@/lib/db/service'
 import { listOpenReplies } from '@/lib/inbox/store'
-import { mergeWaiting, type RepliesPayload, type ReplyWaiting } from '@/lib/replies/queue'
+import { mergeWaiting, type LinkedinWaiting, type RepliesPayload, type ReplyWaiting } from '@/lib/replies/queue'
+import { loadLinkedinWaiting } from '@/lib/replydesk/store'
 import { createServiceClient } from '@/lib/supabase/service'
 
 const EXCERPT_CHARS = 300
@@ -44,6 +45,13 @@ export async function loadReplies(): Promise<RepliesPayload> {
     const id = r.payload?.reply_to_uuid
     if (r.kind === 'send_reply' && typeof id === 'string' && id) drafts.set(id, r.id)
   }
-  const replies = await loadWaitingReplies(drafts)
-  return { items: mergeWaiting(rows.map(toApprovalItem), replies), approvals: count, replies: replies.length }
+  const [replies, linkedin] = await Promise.all([
+    loadWaitingReplies(drafts),
+    // The reply desk's tables may be missing on a deployment that has not run its migration yet: show the rest.
+    loadLinkedinWaiting().catch((err): LinkedinWaiting[] => {
+      console.error('[replies] linkedin failed:', err instanceof Error ? err.message : err)
+      return []
+    }),
+  ])
+  return { items: mergeWaiting(rows.map(toApprovalItem), replies, linkedin), approvals: count, replies: replies.length + linkedin.length }
 }

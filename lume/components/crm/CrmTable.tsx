@@ -55,7 +55,7 @@ export function CrmTable({
         accessorFn: (d) => d.name ?? d.email,
         cell: ({ row: { original: d } }) => (
           <div className="flex min-w-0 items-center gap-2.5">
-            <LeadAvatar name={d.name} email={d.email} />
+            <LeadAvatar name={d.name} email={d.email ?? ''} />
             <div className="min-w-0">
               <div className="truncate text-sm text-foreground">{d.name ?? d.email}</div>
               <div className="truncate font-mono text-[11px] text-muted-foreground">{d.email}</div>

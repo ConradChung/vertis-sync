@@ -33,6 +33,9 @@ Deno.test('tick: first run polls posts, pulls comments, dedupes (Frank skipped),
   a.posts = [postItem('7328838056403173380', 5, 3), postItem('999', 24 * 8, 40)]
   a.comments = comments
   const f = new Fakes()
+  // Default ICP (no signal_config.icp): owner-operators with 500+ doors reach ready.
+  f.verify.is_owner_operator = true
+  f.doorsHint = '5,000 units'
   const out = await runTick(deps(s, a, f)) as Record<string, unknown>
   assertEquals(out.ok, true)
   assert(s.state_.first_run_at)

@@ -23,7 +23,7 @@ export interface PostRow {
   digest_status: string | null
 }
 
-export type Stage = 'new' | 'triage' | 'verify' | 'crawl' | 'doors' | 'contacts' | 'draft' | 'ready' | 'alerted' | 'skipped' | 'error'
+export type Stage = 'new' | 'triage' | 'verify' | 'crawl' | 'doors' | 'contacts' | 'draft' | 'ready' | 'alerted' | 'skipped' | 'error' | 'held'
 
 export interface Person {
   id: number
