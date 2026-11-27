@@ -236,7 +236,7 @@ stops blocking by itself once #2 merges.
   Moves onto the pilot line are by hand and direct; Won/Lost still file `crm_close_deal` from the board, sheet and table (the reply desk's Slack buttons are the one exception: Booked → Demo and Not interested → Lost directly on the owner's tap, `lume/lib/replydesk/engine.ts`); automation (`autoAdvance`) never moves a deal on to,
   along or off the pilot line. Check-ins fall due 10 and 25 days after `pilot_start_date` and only for deals in Pilot.
   The scoreboard week is Monday to Monday in America/Los_Angeles and counts a deal once per column.
-  A waiting row is flagged past 60 minutes (exactly 60 is not). `/today` and `/replies` only read; the only writes are the
+  A waiting row is flagged past 5 minutes (exactly 60 is not). `/today` and `/replies` only read; the only writes are the
   owner's ticks on Lume's own rows (check-in, referral, task done, top objection). Nothing sends or spends.
   `/actions`, `/actions/<id>`, `/overview` and `/calendar` still render.
 
