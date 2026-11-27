@@ -91,27 +91,29 @@ beforeEach(() => {
 })
 
 describe('loadInbox', () => {
-  it('merges the four sources into one row per company, newest first, with counts', async () => {
+  it('merges the sources into one row per company, newest first, with counts; All leaves Reddit-only accounts to the Reddit tab', async () => {
     const inbox = await loadInbox()
     expect(inbox.rows.map((r) => [r.key, r.sources, r.status])).toEqual([
       ['d:acme.com', ['hiring', 'comment'], 'new'],
-      ['r:pm_dave', ['reddit'], 'new'],
       ['n:stone rentals', ['influencer'], 'new'],
     ])
-    expect(inbox.counts).toEqual({ new: 3, working: 0, replied: 0, dropped: 0 })
-    expect(inbox.total).toBe(3)
+    expect(inbox.counts).toEqual({ new: 2, working: 0, replied: 0, dropped: 0 })
+    expect(inbox.total).toBe(2)
     expect(inbox.failed).toEqual([])
+    const reddit = await loadInbox({ source: 'reddit' })
+    expect(reddit.rows.map((r) => r.key)).toEqual(['r:pm_dave'])
+    expect(reddit.counts).toEqual({ new: 1, working: 0, replied: 0, dropped: 0 })
   })
 
-  it('applies saved state and the filter; counts stay over every account', async () => {
-    db.tables.signal_accounts = [state('r:pm_dave', { status: 'dropped' })]
+  it('applies saved state and the filter; counts cover the tab, whatever the status', async () => {
+    db.tables.signal_accounts = [state('d:acme.com', { status: 'dropped' })]
     const inbox = await loadInbox({ status: 'open', source: 'all' })
-    expect(inbox.rows.map((r) => r.key)).toEqual(['d:acme.com', 'n:stone rentals'])
-    expect(inbox.counts).toEqual({ new: 2, working: 0, replied: 0, dropped: 1 })
+    expect(inbox.rows.map((r) => r.key)).toEqual(['n:stone rentals'])
+    expect(inbox.counts).toEqual({ new: 1, working: 0, replied: 0, dropped: 1 })
     expect((await loadInbox({ source: 'influencer' })).rows.map((r) => r.key)).toEqual(['n:stone rentals'])
     const capped = await loadInbox({}, 1)
     expect(capped.rows).toHaveLength(1)
-    expect(capped.total).toBe(3)
+    expect(capped.total).toBe(2)
   })
 
   it('a source that fails is named and the others still load', async () => {

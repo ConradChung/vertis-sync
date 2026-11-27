@@ -5,7 +5,7 @@ import { waitingOf } from '@/lib/replies/waiting'
 import { loadWaitingReplies } from '@/lib/replies/store'
 import { getScoreboard } from '@/lib/scoreboard/store'
 import { addDays } from '@/lib/crm/pilot'
-import { isUntouched, SOURCE_LABEL } from '@/lib/signals/merge'
+import { byWarmth, isResearchOnly, isUntouched, SOURCE_LABEL } from '@/lib/signals/merge'
 import { loadAllRows } from '@/lib/signals/store'
 import { listOpenTasksDue } from '@/lib/tasks/store'
 import { ownerDate, ownerDayStart } from '@/lib/time/owner'
@@ -13,10 +13,15 @@ import type { TodayCheckin, TodayPayload, TodaySignal, TodayTask } from '@/lib/t
 
 const SIGNALS_SHOWN = 8
 
-/** Signal accounts not yet touched: still new in the Signals inbox with no email, LinkedIn or call ticked. Newest signal first. */
+/**
+ * Signal accounts not yet touched: still new in the Signals inbox with no
+ * email, LinkedIn or call ticked. Reddit-only accounts are research, not
+ * leads, and stay out (queue and count). Warmest first: commented on Frank's
+ * post, then reacted to it, then hiring, then the rest; newest first inside each.
+ */
 async function untouchedSignals(): Promise<{ items: TodaySignal[]; total: number }> {
   const { rows } = await loadAllRows()
-  const open = rows.filter(isUntouched)
+  const open = rows.filter((r) => isUntouched(r) && !isResearchOnly(r)).sort(byWarmth)
   return {
     total: open.length,
     items: open.slice(0, SIGNALS_SHOWN).map((r) => ({

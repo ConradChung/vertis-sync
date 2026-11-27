@@ -29,6 +29,7 @@ const row = (o: Partial<SignalRow> & { key: string; name: string }): SignalRow =
   contacts: [],
   events: [],
   latest: {},
+  warmth: { tier: 3, at: null },
   state_key: o.key,
   status: 'new',
   touches: { email: null, linkedin: null, call: null },

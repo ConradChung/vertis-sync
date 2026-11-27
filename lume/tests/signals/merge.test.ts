@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyState, companyName, countByStatus, domainOf, filterRows, isUntouched, mergeSignals, normalizeName, placeholderEmail, type SignalEvent, type SignalState } from '@/lib/signals/merge'
+import { applyState, byWarmth, companyName, countByStatus, domainOf, filterRows, isResearchOnly, isUntouched, mergeSignals, warmthOf, normalizeName, placeholderEmail, type SignalEvent, type SignalState } from '@/lib/signals/merge'
 
 const ev = (over: Partial<SignalEvent> & Pick<SignalEvent, 'source' | 'ref'>): SignalEvent => ({
   company: null, site: null, at: null, label: 'signal', url: null, phone: null, person: null, person_title: null, linkedin: null, handle: null, ...over,
@@ -92,6 +92,37 @@ describe('normalizeName', () => {
     expect(companyName('Owner Managed Homes')).toBe('owner managed homes')
     expect(companyName('Independent Property Group')).toBe('independent property group')
     expect(companyName('Acme PM, LLC')).toBe('acme pm')
+  })
+})
+
+describe('warmth and research', () => {
+  const comment = (reaction: boolean) => ({ source: 'comment' as const, reaction, comment: null, post_url: null, post_excerpt: null })
+  it('ranks a comment on his post, then a reaction to it, then hiring, then the rest', () => {
+    expect(warmthOf({ source: 'comment', label: 'Commented: “x”', detail: comment(false) })).toBe(0)
+    expect(warmthOf({ source: 'comment', label: 'Reacted to a watched post', detail: comment(true) })).toBe(1)
+    expect(warmthOf({ source: 'comment', label: 'Reacted to a watched post' })).toBe(1)
+    expect(warmthOf({ source: 'hiring', label: 'Hiring: PM' })).toBe(2)
+    expect(warmthOf({ source: 'influencer', label: 'Reacted to Frank' })).toBe(3)
+    expect(warmthOf({ source: 'reddit', label: 'r/x: y' })).toBe(3)
+  })
+  it('an account takes its warmest signal and that signal\'s time', () => {
+    const [a] = mergeSignals([
+      ev({ source: 'hiring', ref: 'hiring:1', company: 'Acme', site: 'acme.com', at: '2026-11-25T00:00:00Z' }),
+      ev({ source: 'comment', ref: 'comment:1', company: 'Acme', site: 'acme.com', at: '2026-11-20T00:00:00Z', label: 'Commented: “hi”', detail: comment(false) }),
+      ev({ source: 'comment', ref: 'comment:2', company: 'Acme', site: 'acme.com', at: '2026-11-10T00:00:00Z', label: 'Commented: “old”', detail: comment(false) }),
+    ])
+    expect(a.warmth).toEqual({ tier: 0, at: '2026-11-20T00:00:00Z' })
+    const sorted = [
+      { key: 'b', warmth: { tier: 2 as const, at: '2026-11-25T00:00:00Z' } },
+      { key: 'a', warmth: { tier: 0 as const, at: '2026-11-01T00:00:00Z' } },
+      { key: 'c', warmth: { tier: 0 as const, at: '2026-11-02T00:00:00Z' } },
+    ].sort(byWarmth)
+    expect(sorted.map((r) => r.key)).toEqual(['c', 'a', 'b'])
+  })
+  it('only an account whose every signal is Reddit is research', () => {
+    expect(isResearchOnly({ sources: ['reddit'] })).toBe(true)
+    expect(isResearchOnly({ sources: ['reddit', 'hiring'] })).toBe(false)
+    expect(isResearchOnly({ sources: ['comment'] })).toBe(false)
   })
 })
 

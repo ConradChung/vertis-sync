@@ -24,7 +24,7 @@ const pilot = (id: string, start: string | null, over: Record<string, unknown> =
 
 const signal = (key: string, name: string, o: Record<string, unknown> = {}) => ({
   key, name, aliases: [], domain: null, sources: ['hiring'], count: 1, newest: { source: 'hiring', label: 'Hiring: Regional PM', at: '2026-11-25T00:00:00Z', url: null },
-  phone: null, contacts: [], events: [], state_key: key, status: 'new', touches: { email: null, linkedin: null, call: null }, deal_id: null, ...o,
+  phone: null, contacts: [], events: [], latest: {}, warmth: { tier: 2, at: '2026-11-25T00:00:00Z' }, state_key: key, status: 'new', touches: { email: null, linkedin: null, call: null }, deal_id: null, ...o,
 })
 
 beforeEach(() => {
@@ -48,15 +48,34 @@ beforeEach(() => {
 })
 
 describe('loadToday (the Today queue)', () => {
+  it('orders signals warmest first: commented on his post, reacted to it, hiring, the rest; newest first inside each', async () => {
+    const w = (tier: number, at: string) => ({ warmth: { tier, at } })
+    m.loadAllRows.mockResolvedValue({
+      failed: [],
+      rows: [
+        signal('n:inf-new', 'Influencer New', { sources: ['influencer'], ...w(3, '2026-11-26T00:00:00Z') }),
+        signal('n:hire-old', 'Hire Old', w(2, '2026-11-10T00:00:00Z')),
+        signal('r:anon', 'u/anon', { sources: ['reddit'], ...w(3, '2026-11-26T05:00:00Z') }),
+        signal('n:react', 'Reactor', { sources: ['comment'], ...w(1, '2026-11-25T00:00:00Z') }),
+        signal('n:comment-old', 'Commenter Old', { sources: ['comment'], ...w(0, '2026-11-01T00:00:00Z') }),
+        signal('n:hire-new', 'Hire New', w(2, '2026-11-24T00:00:00Z')),
+        signal('n:comment-new', 'Commenter New', { sources: ['comment', 'hiring'], ...w(0, '2026-11-20T00:00:00Z') }),
+      ],
+    })
+    const t = await loadToday(now)
+    expect(t.queue.signals.items.map((s) => s.key)).toEqual(['n:comment-new', 'n:comment-old', 'n:react', 'n:hire-new', 'n:hire-old', 'n:inf-new'])
+    expect(t.queue.signals.total).toBe(6)
+  })
+
   it('queues untouched signals, replies waiting over an hour, check-ins due and tasks due', async () => {
     const t = await loadToday(now)
     expect(t.today).toBe('2026-11-26')
     expect(t.scoreboard).toEqual(board)
-    // Only accounts still new with no touch ticked; a touched or working one is not in the queue.
-    expect(t.queue.signals.total).toBe(2)
+    // Only accounts still new with no touch ticked; a touched or working one is not in the queue,
+    // and a Reddit-only account is research, not a lead: not listed and not counted.
+    expect(t.queue.signals.total).toBe(1)
     expect(t.queue.signals.items).toEqual([
       { key: 'd:acme.com', company: 'Acme PM', untrusted_detail: 'Hiring: Regional PM', sources: ['Hiring', 'Influencer reaction'], at: '2026-11-25T00:00:00Z', href: '/signals' },
-      { key: 'r:pm_dave', company: 'u/pm_dave', untrusted_detail: 'Hiring: Regional PM', sources: ['Reddit'], at: '2026-11-25T00:00:00Z', href: '/signals' },
     ])
     // Only replies past 60 minutes, longest first; `open` still counts all three.
     expect(t.queue.replies.items.map((r) => r.reply_to_uuid)).toEqual(['later', 'late'])
