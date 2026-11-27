@@ -7,7 +7,7 @@ import {
   type HiringSource, type PersonSource, type PostSource, type ReactorSource, type RedditSource,
 } from '@/lib/signals/events'
 import {
-  applyState, countByStatus, filterRows, mergeSignals, placeholderEmail, SIGNALS_CAMPAIGN_ID,
+  applyState, countByStatus, filterRows, isResearchOnly, mergeSignals, placeholderEmail, SIGNALS_CAMPAIGN_ID,
   type SignalEvent, type SignalFilter, type SignalInbox, type SignalRow, type SignalSource, type SignalState, type SignalStatus, type TouchChannel,
 } from '@/lib/signals/merge'
 import { createServiceClient } from '@/lib/supabase/service'
@@ -74,13 +74,17 @@ export async function loadAllRows(): Promise<{ rows: SignalRow[]; failed: Signal
   return { rows: applyState(mergeSignals(events), states), failed }
 }
 
-/** The inbox shows the newest `limit` matching accounts; `total` says how many match. */
+/**
+ * The inbox shows the newest `limit` matching accounts; `total` says how many
+ * match. A source tab covers that source; All covers every lead account and
+ * leaves Reddit-only accounts (research, under the Reddit tab) out. Counts
+ * cover the tab, whatever the status or search.
+ */
 export async function loadInbox(filter: SignalFilter = {}, limit = 100): Promise<SignalInbox> {
   const { rows, failed } = await loadAllRows()
-  const shown = filterRows(rows, filter)
-  // Counts cover the source being looked at (every account on the All tab), whatever the status or search.
-  const counted = filter.source && filter.source !== 'all' ? filterRows(rows, { source: filter.source }) : rows
-  return { rows: shown.slice(0, limit), counts: countByStatus(counted), total: shown.length, failed }
+  const scope = filter.source && filter.source !== 'all' ? filterRows(rows, { source: filter.source }) : rows.filter((r) => !isResearchOnly(r))
+  const shown = filterRows(scope, filter)
+  return { rows: shown.slice(0, limit), counts: countByStatus(scope), total: shown.length, failed }
 }
 
 export interface AccountPatch {

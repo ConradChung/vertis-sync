@@ -4,7 +4,7 @@ import type { SignalRow } from '@/lib/signals/merge'
 
 const row = (key: string, o: Partial<SignalRow> = {}): SignalRow => ({
   key, aliases: [], name: key, domain: key.startsWith('d:') ? key.slice(2) : null, sources: ['influencer'], count: 1,
-  newest: { source: 'influencer', label: 'Reacted to Frank', at: '2026-11-20T00:00:00Z', url: null }, phone: null, contacts: [], events: [], latest: {},
+  newest: { source: 'influencer', label: 'Reacted to Frank', at: '2026-11-20T00:00:00Z', url: null }, phone: null, contacts: [], events: [], latest: {}, warmth: { tier: 3, at: null },
   state_key: key, status: 'new', touches: { email: null, linkedin: null, call: null }, deal_id: null, ...o,
 })
 

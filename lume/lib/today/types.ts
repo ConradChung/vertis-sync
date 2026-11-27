@@ -42,7 +42,7 @@ export interface TodayPayload {
   today: string
   scoreboard: Scoreboard | null
   queue: {
-    /** Signal accounts nobody has touched yet (newest first; `total` may exceed the list). */
+    /** Lead accounts nobody has touched yet, warmest first; Reddit-only accounts are left out (`total` may exceed the list). */
     signals: { items: TodaySignal[]; total: number }
     /** Positive replies waiting over an hour, longest first; `open` counts every unhandled one. */
     replies: { items: ReplyWaiting[]; open: number }

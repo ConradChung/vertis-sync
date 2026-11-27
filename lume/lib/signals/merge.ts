@@ -175,7 +175,35 @@ export interface SignalAccount {
   events: Pick<SignalEvent, 'source' | 'ref' | 'label' | 'at' | 'url'>[]
   /** The newest signal from each source the account has. */
   latest: Partial<Record<SignalSource, LatestSignal>>
+  /** How warm its warmest signal is (`warmthOf`) and when that signal happened. */
+  warmth: { tier: WarmthTier; at: string | null }
 }
+
+/**
+ * How warm a signal is, warmest first: 0 commented on Frank's own post,
+ * 1 reacted to his post, 2 a hiring signal, 3 anything else (influencer
+ * reactions, Reddit).
+ */
+export type WarmthTier = 0 | 1 | 2 | 3
+export function warmthOf(e: Pick<SignalEvent, 'source' | 'label' | 'detail'>): WarmthTier {
+  if (e.source === 'comment') {
+    const reacted = e.detail?.source === 'comment' ? e.detail.reaction : e.label.startsWith('Reacted')
+    return reacted ? 1 : 0
+  }
+  return e.source === 'hiring' ? 2 : 3
+}
+
+/** Warmest first, then newest first inside a tier (by that tier's newest signal). */
+export function byWarmth(a: Pick<SignalAccount, 'warmth' | 'key'>, b: Pick<SignalAccount, 'warmth' | 'key'>): number {
+  return a.warmth.tier - b.warmth.tier || time(b.warmth.at) - time(a.warmth.at) || a.key.localeCompare(b.key)
+}
+
+/**
+ * Reddit mentions are research, not leads: anonymous usernames that cannot be
+ * identified, enriched or counted toward a pilot. An account whose only
+ * signals are Reddit stays under the Reddit tab and out of the work queues.
+ */
+export const isResearchOnly = (r: Pick<SignalAccount, 'sources'>) => r.sources.length > 0 && r.sources.every((s) => s === 'reddit')
 
 const time = (iso: string | null) => {
   const t = iso ? Date.parse(iso) : NaN
@@ -225,6 +253,11 @@ export function mergeSignals(events: readonly SignalEvent[]): SignalAccount[] {
       if (!n || contacts.length >= 3 || contacts.some((c) => c.name.toLowerCase() === n.toLowerCase())) continue
       contacts.push({ name: n, title: m.person_title?.trim() || null, linkedin: m.linkedin?.trim() || null })
     }
+    let warmth: SignalAccount['warmth'] = { tier: 3, at: top.at }
+    for (const m of members) {
+      const tier = warmthOf(m)
+      if (tier < warmth.tier) warmth = { tier, at: m.at }
+    }
     const latest: SignalAccount['latest'] = {}
     for (const m of members) {
       if (latest[m.source]) continue
@@ -242,6 +275,7 @@ export function mergeSignals(events: readonly SignalEvent[]): SignalAccount[] {
       contacts,
       events: members.slice(0, 5).map((m) => ({ source: m.source, ref: m.ref, label: m.label, at: m.at, url: m.url })),
       latest,
+      warmth,
     })
   }
   return out.sort((a, b) => time(b.newest.at) - time(a.newest.at) || a.key.localeCompare(b.key))
@@ -326,7 +360,7 @@ export function countByStatus(rows: readonly Pick<SignalRow, 'status'>[]): Recor
 /** `GET /api/signals/inbox`. */
 export interface SignalInbox {
   rows: SignalRow[]
-  /** Counts over the filter's source (every account when none), whatever the status or search. */
+  /** Counts over the tab being looked at (its source, or every lead account on All), whatever the status or search. */
   counts: Record<SignalStatus, number>
   /** Rows matching the filter (may exceed `rows`). */
   total: number
