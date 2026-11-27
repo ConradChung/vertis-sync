@@ -11,8 +11,10 @@ export const CONTENT_CONFIG_KEY = 'content_config'
 export const DEFAULT_CHANNEL = 'content-gen'
 export const DEFAULT_MONTHLY_CAP_USD = 5
 export const MAX_MONTHLY_CAP_USD = 5
-/** What one Claude call is allowed to cost at most, checked against the cap before each call. */
-export const CALL_ESTIMATE_USD = 0.25
+/** Output ceiling per call (thinking included); live.ts sends it as max_tokens. */
+export const MAX_OUTPUT_TOKENS = 8000
+/** Input ceiling used for the worst case: system prompt + references + facts + a retry's previous draft, all uncached. */
+export const MAX_INPUT_TOKENS = 20000
 export const DEFAULT_MODEL = 'claude-opus-5-5'
 
 const TEAM = /^[TE][A-Z0-9]{2,30}$/
@@ -54,8 +56,8 @@ export function contentModel(env: Record<string, string | undefined> = process.e
 
 export const round4 = (n: number) => Math.round(n * 10_000) / 10_000
 
-/** True when one more call (at its estimate) keeps month-to-date spend within the cap. */
-export function fitsCap(monthToDateUsd: number, capUsd: number, estimateUsd: number = CALL_ESTIMATE_USD): boolean {
+/** True when one more call at its worst-case cost keeps month-to-date spend within the cap. */
+export function fitsCap(monthToDateUsd: number, capUsd: number, estimateUsd: number): boolean {
   return round4(monthToDateUsd + estimateUsd) <= round4(capUsd)
 }
 
@@ -76,10 +78,17 @@ export interface TokenUsage {
 }
 
 export function callUsd(model: string, u: TokenUsage): number {
-  const [inp, out] = PRICES[model] ?? FALLBACK_PRICE
+  // A response may report a dated snapshot id; match it to its family by prefix.
+  const key = Object.keys(PRICES).find((k) => model === k || model.startsWith(`${k}-`))
+  const [inp, out] = key ? PRICES[key] : FALLBACK_PRICE
   const cents =
     u.input_tokens * inp + (u.cache_creation_input_tokens ?? 0) * inp * 1.25 + (u.cache_read_input_tokens ?? 0) * inp * 0.1 + u.output_tokens * out
   return round4(cents / 1e6)
+}
+
+/** The most one call can cost: every input token written to cache, the full output ceiling. */
+export function callEstimateUsd(model: string): number {
+  return callUsd(model, { input_tokens: 0, cache_creation_input_tokens: MAX_INPUT_TOKENS, output_tokens: MAX_OUTPUT_TOKENS })
 }
 
 // ── PT calendar ────────────────────────────────────────────────────────────

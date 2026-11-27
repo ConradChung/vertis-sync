@@ -7,7 +7,7 @@ import { FACTS, goodDraft } from './fixtures'
 
 export function memoryStore(cfgValue: unknown = {}, opts: { spent?: number; posts?: MatchPost[] } = {}) {
   const drafts: (DraftRow & { id: number; created_at: string; slack_ts?: string; posted_post_id?: string | null })[] = []
-  const spend: { id: number; usd: number; draft_id: number | null }[] = opts.spent ? [{ id: 1, usd: opts.spent, draft_id: null }] : []
+  const spend: { id: number; usd: number; draft_id: number | null; model?: string }[] = opts.spent ? [{ id: 1, usd: opts.spent, draft_id: null }] : []
   const store: ContentStore = {
     getConfig: async () => parseContentConfig(cfgValue),
     activeFacts: async () => FACTS.filter((f) => f.active),
@@ -15,7 +15,7 @@ export function memoryStore(cfgValue: unknown = {}, opts: { spent?: number; post
     monthSpend: async () => round4(spend.reduce((s, r) => s + r.usd, 0)),
     addSpend: async (r) => {
       const id = spend.length + 1
-      spend.push({ id, usd: r.usd, draft_id: null })
+      spend.push({ id, usd: r.usd, draft_id: null, model: r.model })
       return id
     },
     linkSpend: async (ids, draftId) => {
@@ -41,7 +41,7 @@ export function memoryStore(cfgValue: unknown = {}, opts: { spent?: number; post
   return { store, drafts, spend }
 }
 
-export const reply = (text: string | null, usd = 0.1, stop = 'end_turn'): AiResult => ({ text, stop, usd, input_tokens: 9000, output_tokens: 2000 })
+export const reply = (text: string | null, usd = 0.1, stop = 'end_turn'): AiResult => ({ model: 'claude-opus-5-5', text, stop, usd, input_tokens: 9000, output_tokens: 2000 })
 export const good = (lead = 7) => JSON.stringify(goodDraft({ fact_ids: [lead, 1] }))
 
 export function deps(store: ContentStore, replies: AiResult[]) {

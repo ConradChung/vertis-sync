@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { callUsd, fitsCap, monthStartIso, parseContentConfig, ptParts } from '@/lib/content/config'
+import { callEstimateUsd, callUsd, fitsCap, MAX_INPUT_TOKENS, MAX_OUTPUT_TOKENS, monthStartIso, parseContentConfig, ptParts } from '@/lib/content/config'
 import { inScheduledWindow, isoWeek, parseManualBody, slotForDay, variantFor } from '@/lib/content/slots'
 
 // 2026-12-01 is a Tuesday. 6:30 AM PST = 14:30 UTC; in July (PDT) = 13:30 UTC.
@@ -58,10 +58,20 @@ describe('config', () => {
   })
 
   it('spend cap: stops before a call that could cross the cap', () => {
-    expect(fitsCap(0, 5)).toBe(true)
-    expect(fitsCap(4.75, 5)).toBe(true)
-    expect(fitsCap(4.76, 5)).toBe(false)
-    expect(fitsCap(5, 5)).toBe(false)
+    const est = callEstimateUsd('claude-opus-5-5')
+    expect(est).toBe(0.26) // 20k input written to cache at $5/M + 8k output at $20/M
+    expect(fitsCap(0, 5, est)).toBe(true)
+    expect(fitsCap(4.74, 5, est)).toBe(true)
+    expect(fitsCap(4.75, 5, est)).toBe(false)
+    expect(fitsCap(5, 5, est)).toBe(false)
+  })
+
+  it('a full-size call never costs more than the estimate the cap checks against', () => {
+    for (const model of ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-2', 'unknown-model']) {
+      const worst = callUsd(model, { input_tokens: 0, cache_creation_input_tokens: MAX_INPUT_TOKENS, output_tokens: MAX_OUTPUT_TOKENS })
+      const allFresh = callUsd(model, { input_tokens: MAX_INPUT_TOKENS, output_tokens: MAX_OUTPUT_TOKENS })
+      expect(Math.max(worst, allFresh)).toBeLessThanOrEqual(callEstimateUsd(model))
+    }
   })
 
   it('prices calls from usage, cache reads at a tenth', () => {
@@ -69,6 +79,7 @@ describe('config', () => {
     expect(callUsd('claude-opus-5-5', { input_tokens: 0, output_tokens: 1_000_000 })).toBe(20)
     expect(callUsd('claude-opus-5-5', { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 1_000_000, cache_creation_input_tokens: 1_000_000 })).toBe(5.4)
     expect(callUsd('some-new-model', { input_tokens: 1_000_000, output_tokens: 0 })).toBe(10)
+    expect(callUsd('claude-opus-5-5-20260401', { input_tokens: 1_000_000, output_tokens: 0 })).toBe(4)
   })
 
   it('PT month start and parts', () => {

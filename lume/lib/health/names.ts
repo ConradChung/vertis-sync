@@ -38,6 +38,7 @@ export const LUME_ENV_NAMES: readonly EnvName[] = [
   req('LUME_SLACK_TOKEN_KEY'),
   opt('ROTATE_CAMPAIGN_ID'),
   opt('LUME_AGENT_MODEL'),
+  opt('LUME_CONTENT_MODEL'),
   opt('LUME_OWNER_KEY'),
   opt('LINEAR_API_KEY'),
   opt('LINEAR_TEAM_KEY'),

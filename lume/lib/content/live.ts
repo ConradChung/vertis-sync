@@ -1,6 +1,6 @@
 import 'server-only'
 import Anthropic from '@anthropic-ai/sdk'
-import { callUsd, contentModel, type ContentConfig } from '@/lib/content/config'
+import { callUsd, contentModel, MAX_OUTPUT_TOKENS, type ContentConfig } from '@/lib/content/config'
 import type { AiPort, Deps, SlackPort } from '@/lib/content/engine'
 import { OUTPUT_SCHEMA } from '@/lib/content/prompt'
 import { loadReferences } from '@/lib/content/references'
@@ -20,11 +20,11 @@ const anthropic = () => (client ??= new Anthropic({ timeout: 150_000, maxRetries
 
 export const liveAi: AiPort = {
   async write({ model, system, user }) {
-    const res = await anthropic().beta.messages.create({
+    // No server-side fallback: a refusal is just a failed try, and spend is
+    // always priced from the model that answered (res.model).
+    const res = await anthropic().messages.create({
       model,
-      max_tokens: 16000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
+      max_tokens: MAX_OUTPUT_TOKENS,
       thinking: { type: 'adaptive' },
       output_config: { effort: 'medium', format: { type: 'json_schema', schema: OUTPUT_SCHEMA as unknown as Record<string, unknown> } },
       system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
@@ -39,9 +39,10 @@ export const liveAi: AiPort = {
       cache_read_input_tokens: u.cache_read_input_tokens,
     }
     return {
+      model: res.model,
       text: text && text.type === 'text' ? text.text : null,
       stop: res.stop_reason ?? 'unknown',
-      usd: callUsd(model, usage),
+      usd: callUsd(res.model, usage),
       input_tokens: u.input_tokens + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
       output_tokens: u.output_tokens,
     }

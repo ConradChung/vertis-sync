@@ -1,4 +1,4 @@
-import { fitsCap, monthStartIso, ptParts, round4, type ContentConfig } from '@/lib/content/config'
+import { callEstimateUsd, fitsCap, monthStartIso, ptParts, round4, type ContentConfig } from '@/lib/content/config'
 import { pickFacts, pickedFacts, REUSE_WINDOW_DAYS, type Fact, type LeadUse } from '@/lib/content/facts'
 import { matchPosts, type MatchDraft, type MatchPost } from '@/lib/content/match'
 import { buildContentMessage } from '@/lib/content/message'
@@ -57,6 +57,8 @@ export interface ContentStore {
 }
 
 export interface AiResult {
+  /** The model that answered (priced from it). */
+  model: string
   text: string | null
   stop: string
   usd: number
@@ -143,7 +145,7 @@ export async function generateDraft(args: GenArgs, deps: Deps): Promise<GenResul
   let stopReason: string | null = null
 
   while (attempts < MAX_TRIES) {
-    if (!fitsCap(mtd, cfg.monthly_cap_usd)) {
+    if (!fitsCap(mtd, cfg.monthly_cap_usd, callEstimateUsd(deps.model))) {
       stopReason = `spend_cap_reached ($${mtd.toFixed(2)} of $${cfg.monthly_cap_usd} this month)`
       break
     }
@@ -157,7 +159,7 @@ export async function generateDraft(args: GenArgs, deps: Deps): Promise<GenResul
     }
     usd = round4(usd + res.usd)
     mtd = round4(mtd + res.usd)
-    spendIds.push(await store.addSpend({ model: deps.model, usd: res.usd, input_tokens: res.input_tokens, output_tokens: res.output_tokens }))
+    spendIds.push(await store.addSpend({ model: res.model, usd: res.usd, input_tokens: res.input_tokens, output_tokens: res.output_tokens }))
     const out = res.text !== null && res.stop !== 'refusal' && res.stop !== 'max_tokens' ? parseOutput(res.text) : null
     if (!out) {
       failures = [`The reply was not usable (stop: ${res.stop}); return JSON matching the schema.`]

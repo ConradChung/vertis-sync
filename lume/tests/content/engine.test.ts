@@ -23,7 +23,7 @@ describe('generateDraft', () => {
     expect(write).toHaveBeenCalledTimes(1)
     expect(post).not.toHaveBeenCalled()
     expect(m.drafts[0]).toMatchObject({ status: 'accepted', dry_run: true, lead_fact_id: 7, fact_ids: [7, 1], formula: 'F4', char_count: goodDraft().body.length })
-    expect(m.spend).toEqual([{ id: 1, usd: 0.1, draft_id: 1 }])
+    expect(m.spend).toEqual([{ id: 1, usd: 0.1, draft_id: 1, model: 'claude-opus-5-5' }])
   })
 
   it('dry_run false: posts to Slack and records the message', async () => {
@@ -82,7 +82,7 @@ describe('generateDraft', () => {
     const m = memoryStore({ monthly_cap_usd: 1 }, { spent: 0.5 })
     const { d, write } = deps(m.store, [reply(bad, 0.3), reply(good())])
     const r = await generateDraft({ now: TUE_630, slot: 'proof', variant: null, trigger: 'manual' }, d)
-    expect(write).toHaveBeenCalledTimes(1) // 0.5 + 0.3 = 0.8; 0.8 + 0.25 estimate > 1
+    expect(write).toHaveBeenCalledTimes(1) // 0.5 + 0.3 = 0.8; 0.8 + 0.26 worst case > 1
     expect(r.reason).toMatch(/spend_cap_reached .*after 1 tries/)
   })
 
