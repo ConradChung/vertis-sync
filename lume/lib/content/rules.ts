@@ -32,6 +32,8 @@ export interface RuleContext {
   variant: Variant | null
   /** Other drafts from the last 14 days: no long shared runs of words with any of them. */
   recent?: { id: number; body: string }[]
+  /** The tagline text (normalised); defaults to the "Tagline:" fact among the provided ones. */
+  tagline?: string
   /** The tagline already appears in a draft this week. */
   taglineTaken?: boolean
   /** A "we built Kaspen" line already appears in a draft this week. */
@@ -77,6 +79,9 @@ export function extractNumbers(text: string): NumberHit[] {
 
 export const numbersIn = (text: string) => new Set(extractNumbers(text).map((h) => h.value))
 
+/** A fact's own words plus the owner-added story behind it, if any. */
+export const factWords = (f: Fact) => (f.detail?.trim() ? `${f.text}\n${f.detail}` : f.text)
+
 const isYear = (v: string) => /^(19|20)\d\d$/.test(v)
 
 /**
@@ -91,7 +96,9 @@ export function countStats(body: string): string[] {
     const before = body.slice(Math.max(0, h.index - 4), h.index)
     const after = body.slice(h.index + h.raw.length)
     if (/^-to-\d/i.test(after) || /\d-to-$/i.test(before)) continue // 9-to-5
-    if (/^\+?\s*(to|→)\s*\$?\d/i.test(after)) continue // start of a before/after pair
+    if (/^\+?\s*(to|→)\s*\$?\d/i.test(after)) continue // start of a before/after pair, e.g. 30+ to 19
+    const wider = body.slice(Math.max(0, h.index - 8), h.index)
+    if (/\bfrom\s+\$?$/i.test(wider) && /^\+?\s*([a-z]+\s+){1,2}to\s+\$?\d/i.test(after)) continue // e.g. from 35 doors to 1,000
     out.add(h.value)
   }
   return [...out]
@@ -139,19 +146,22 @@ export const hasTagline = (body: string, tagline: string) => ` ${normWords(body)
 
 /** The first run of SHARED_RUN+ words the body shares with another draft (closing asks and fact wording excepted). */
 export function sharedRun(body: string, other: string, facts: Fact[]): string | null {
-  const strip = (s: string) => {
+  // Paragraphs without the closing ask; runs never cross a paragraph break.
+  const paras = (s: string) => {
     const p = s.replace(/\r\n/g, '\n').trim().split(/\n\s*\n/)
-    return p.length > 1 ? p.slice(0, -1).join('\n\n') : s
+    return p.length > 1 ? p.slice(0, -1) : p
   }
-  const factText = ` ${facts.map((f) => normWords(f.text).join(' ')).join(' | ')} `
-  const grams = (w: string[]) => {
-    const out = new Map<string, number>()
-    for (let i = 0; i + SHARED_RUN <= w.length; i++) out.set(w.slice(i, i + SHARED_RUN).join(' '), i)
+  const factText = ` ${facts.map((f) => normWords(factWords(f)).join(' ')).join(' | ')} `
+  const grams = (s: string) => {
+    const out: string[] = []
+    for (const p of paras(s)) {
+      const w = normWords(p)
+      for (let i = 0; i + SHARED_RUN <= w.length; i++) out.push(w.slice(i, i + SHARED_RUN).join(' '))
+    }
     return out
   }
-  const mine = normWords(strip(body))
-  const theirs = new Set(grams(normWords(strip(other))).keys())
-  for (const [g] of grams(mine)) if (theirs.has(g) && !factText.includes(` ${g} `)) return g
+  const theirs = new Set(grams(other))
+  for (const g of grams(body)) if (theirs.has(g) && !factText.includes(` ${g} `)) return g
   return null
 }
 
@@ -204,7 +214,7 @@ const lower = (s: string) => s.toLowerCase().replace(/’/g, "'")
 /** Capitalised words that don't start a sentence and aren't in the facts: likely invented names. */
 export function unknownNames(text: string, facts: Fact[]): string[] {
   const known = new Set<string>(ALLOWED_NAMES)
-  for (const f of facts) for (const w of f.text.match(/[A-Za-z'’]+/g) ?? []) known.add(lower(w))
+  for (const f of facts) for (const w of factWords(f).match(/[A-Za-z'’]+/g) ?? []) known.add(lower(w))
   const out = new Set<string>()
   for (const m of text.matchAll(/[A-Z][a-zA-Z'’]+/g)) {
     const i = m.index ?? 0
@@ -297,7 +307,7 @@ export function checkDraft(d: DraftOutput, ctx: RuleContext): RuleResult {
   if (fns.length > 3) f.push(`Don't list the product's functions (${fns.join(', ')}); say what it does in one sentence of your own, three things at most.`)
 
   // Sameness across the week.
-  const tagline = taglineOf(ctx.provided)
+  const tagline = ctx.tagline ?? taglineOf(ctx.provided)
   if (ctx.taglineTaken && hasTagline(body, tagline)) f.push('The tagline is already used in another draft this week; leave it out.')
   if (ctx.builtTaken && BUILT_LINE.test(body)) f.push('A "we built Kaspen" line is already used this week; end differently.')
   for (const r of ctx.recent ?? []) {
@@ -315,7 +325,7 @@ export function checkDraft(d: DraftOutput, ctx: RuleContext): RuleResult {
 
   // Numbers: every number in the draft must come from a fact the draft used.
   const allowed = new Set<string>()
-  for (const x of used) for (const n of numbersIn(x.text)) allowed.add(n)
+  for (const x of used) for (const n of numbersIn(factWords(x))) allowed.add(n)
   const hits = extractNumbers(body)
   const bad = [...new Set(hits.filter((h) => !allowed.has(h.value)).map((h) => h.raw))]
   if (bad.length) f.push(`These numbers are not in the facts you listed: ${bad.join(', ')}. State only numbers from the facts, exactly as written.`)

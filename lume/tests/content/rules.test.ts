@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { checkDraft, countStats, extractNumbers, functionsIn, normalizeNumber, sharedRun, unknownNames, vendorsIn } from '@/lib/content/rules'
 import { ctxFor, fact, goodDraft, GOOD_BODY } from './fixtures'
 
-const fails = (body: string, over = {}, ctx = {}) => checkDraft(goodDraft({ body, ...over }), ctxFor(ctx)).failures
+const fails = (body: string, over = {}, ctx: Record<string, unknown> = {}) => checkDraft(goodDraft({ body, ...over }), ctxFor(ctx)).failures
 const has = (list: string[], re: RegExp) => list.some((x) => re.test(x))
 const swapLast = (last: string) => GOOD_BODY.split('\n\n').slice(0, -1).concat(last).join('\n\n')
 
@@ -101,12 +101,32 @@ describe('checkDraft', () => {
   it('stats: at most two, unit and door counts included; a before/after pair counts once', () => {
     expect(checkDraft(goodDraft(), ctxFor()).stats).toEqual(['1000', '3'])
     expect(countStats('Days on market went from 30+ to 19 and units leased per agent rose 280%.')).toEqual(['19', '280'])
+    expect(countStats('We went from 35 doors to 1,000 doors.')).toEqual(['1000'])
+    expect(countStats('Days on market went from 30 days to 19.')).toEqual(['19'])
     expect(countStats('One call at 9:57 PM led to a 153-property deal. We went from 9-to-5 to 365 days a year in 2026.')).toEqual(['153', '365'])
     // Draft 2 of the first production run: 1,600 units, 1,000 units and 17 hours is three.
     const ctx = { provided: [fact(10), fact(4), fact(1)], leadId: 10, offerId: 1, variant: null }
     const body = GOOD_BODY.replace("I didn't grow my firm from 35 to 1,000 doors by hiring faster.", 'An asset manager who owns 1,600 units in the Sun Belt told me he wants to bring management in-house.').replace('Three years in, we were at 1,000 doors, and', 'One customer runs 1,000 units in Houston and got back 17 hours per manager every week, and')
     const r = checkDraft(goodDraft({ body, fact_ids: [10, 4, 1] }), ctx)
     expect(has(r.failures, /uses 3 statistics \(1600, 1000, 17\)/)).toBe(true)
+  })
+
+  it('an owner-added detail allows its numbers and names; without it they still fail', () => {
+    const withDetail = { ...fact(7), detail: 'We stopped hiring a second leasing agent in Brickell after 6 weeks.' }
+    const body = GOOD_BODY.replace('another salary on the books.', 'another salary on the books. In Brickell we stopped after 6 weeks.')
+    expect(checkDraft(goodDraft({ body }), { ...ctxFor(), provided: [withDetail, fact(1), fact(2), fact(11)] }).failures.filter((x) => /numbers|names/.test(x))).toEqual([])
+    const r = checkDraft(goodDraft({ body }), ctxFor()).failures
+    expect(has(r, /not in the facts you listed: 6/)).toBe(true)
+    expect(has(r, /names are not in the facts: Brickell/)).toBe(true)
+    // Two drafts telling the same owner story aren't a shared-run failure.
+    const story = 'Opening.\n\nWe stopped hiring a second leasing agent in Brickell after 6 weeks.\n\nClose.'
+    expect(sharedRun(story, story, [withDetail])).toBeNull()
+    expect(sharedRun(story, story, [fact(7)])).not.toBeNull()
+  })
+
+  it('a non-default tagline is still limited once a week', () => {
+    const body = swapLast('Fewer hires, more doors. Take a free week on the doors you pick, with setup done for you, and see what changes.')
+    expect(has(fails(body, {}, { taglineTaken: true, tagline: 'fewer hires more doors', provided: [fact(7), fact(1), fact(2)] }), /tagline is already used/)).toBe(true)
   })
 
   it('no price or per-door figure in the body; the first comment may carry it', () => {

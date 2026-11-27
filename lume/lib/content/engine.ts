@@ -170,12 +170,13 @@ export async function generateDraft(args: GenArgs, deps: Deps): Promise<GenResul
   if ('error' in pick) return reject(pick.error)
 
   const since14 = new Date(now.getTime() - SAMENESS_DAYS * 86_400_000).toISOString()
-  const week = weekContext(await store.recentDrafts(since14), runDate, taglineOf(facts))
+  const tagline = taglineOf(facts)
+  const week = weekContext(await store.recentDrafts(since14), runDate, tagline)
   // A tagline already used this week isn't offered again.
   if (week.taglineTaken) pick.background = pick.background.filter((f) => !/^tagline:/i.test(f.text))
   const provided = pickedFacts(pick)
   const system = buildSystem(deps.refs())
-  const ctx = { provided, leadId: pick.lead.id, offerId: pick.offer.id, variant, recent: week.recent, taglineTaken: week.taglineTaken, builtTaken: week.builtTaken }
+  const ctx = { provided, leadId: pick.lead.id, offerId: pick.offer.id, variant, tagline, recent: week.recent, taglineTaken: week.taglineTaken, builtTaken: week.builtTaken }
   let mtd = await store.monthSpend(monthStartIso(now))
   let usd = 0
   let attempts = 0
