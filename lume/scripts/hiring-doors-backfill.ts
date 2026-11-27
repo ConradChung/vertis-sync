@@ -102,10 +102,17 @@ const lookup: DoorLookup = async (company, location) => {
   return { doors: groundDoors(json, citations), usd: (Number.isFinite(pplx) && pplx > 0 ? pplx : PPLX_CALL_USD) + haikuUsd(usage) }
 }
 
-if (process.argv.includes('--run')) {
-  console.log(JSON.stringify(await runDoorBackfill({ store, lookup }), null, 2))
-} else {
-  const rows = await store.listMissing()
-  const companies = new Set(rows.map((r) => (r.company_domain ?? r.company_name ?? '').toLowerCase()))
-  console.log(`shown hiring rows without a count: ${rows.length}; companies: ${companies.size}. Re-run with --run to look them up (stops at $${BACKFILL_BUDGET_USD}).`)
+async function main() {
+  if (process.argv.includes('--run')) {
+    console.log(JSON.stringify(await runDoorBackfill({ store, lookup }), null, 2))
+  } else {
+    const rows = await store.listMissing()
+    const companies = new Set(rows.map((r) => (r.company_domain ?? r.company_name ?? '').toLowerCase()))
+    console.log(`shown hiring rows without a count: ${rows.length}; companies: ${companies.size}. Re-run with --run to look them up (stops at $${BACKFILL_BUDGET_USD}).`)
+  }
 }
+
+main().catch((e) => {
+  console.error(e instanceof Error ? e.message : String(e))
+  process.exit(1)
+})
