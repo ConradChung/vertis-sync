@@ -13,7 +13,8 @@ const nextConfig: NextConfig = {
   // lib/copy/sop.ts reads the SOPs from disk at runtime (agent runs, the
   // update_sequence build/executor, /actions pages): ship them with every
   // server function.
-  outputFileTracingIncludes: { '/**/*': ['./sops/**/*.md'] },
+  // lib/content/references.ts reads the LinkedIn reference files the same way.
+  outputFileTracingIncludes: { '/**/*': ['./sops/**/*.md', './lib/content/references/*.md'] },
 }
 
 export default nextConfig

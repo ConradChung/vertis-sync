@@ -16,7 +16,8 @@ import { signalCardOpts } from '@/lib/signal/config'
  * synchronously so Slack shows it under the field.
  */
 
-export const maxDuration = 60
+// 300: a #content-gen Redo writes a new draft (up to three Claude calls) in after().
+export const maxDuration = 300
 
 export async function POST(req: Request) {
   const r = await readSlackRequest(req)
@@ -36,6 +37,12 @@ export async function POST(req: Request) {
 
   after(async () => {
     try {
+      // LinkedIn draft generator (#content-gen): Redo / Skip.
+      if (it.kind === 'content_button') {
+        const cd = await import('@/lib/content/decide')
+        await cd.contentButton({ team: it.team, user: it.user, channel: it.channel }, it.message_ts, it.draft_id, it.decision)
+        return
+      }
       // GTM-15 Reddit mention cards (#sales).
       if (it.kind === 'reddit_button') {
         const rd = await import('@/lib/slack/redditDecide')

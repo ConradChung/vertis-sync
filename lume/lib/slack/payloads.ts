@@ -1,5 +1,6 @@
 import { ACTION_IDS, EDIT_BLOCK_ID, EDIT_CALLBACK_ID, EDIT_INPUT_ID } from '@/lib/slack/card'
 import { REDDIT_ACTION_IDS } from '@/lib/reddit/card'
+import { CONTENT_ACTION_IDS } from '@/lib/content/message'
 import { SIGNAL_ACTION_IDS, SIGNAL_DRAFT_FIELDS, SIGNAL_EDIT_CALLBACK_ID, SIGNAL_EDIT_INPUT_ID, signalEditBlockId, type SignalDrafts } from '@/lib/slack/signalCard'
 
 /**
@@ -65,6 +66,8 @@ export type SlackInteraction =
   | { kind: 'signal_edit_submit'; team: string; user: string; person_id: number; drafts: SignalDrafts }
   // GTM-15 Reddit mention cards (#sales): value is the signal_reddit_mentions id.
   | { kind: 'reddit_button'; decision: 'contacted' | 'skip'; team: string; user: string; channel: string; message_ts: string; mention_id: number }
+  // LinkedIn draft generator (#content-gen): value is the content_drafts id.
+  | { kind: 'content_button'; decision: 'redo' | 'skip'; team: string; user: string; channel: string; message_ts: string; draft_id: number }
   | null
 
 const SIGNAL_DECISION: Record<string, 'approve' | 'edit' | 'skip'> = {
@@ -95,6 +98,15 @@ export function parseInteraction(rawForm: string): SlackInteraction {
     const a = obj(Array.isArray(p.actions) ? p.actions[0] : null)
     const signal = typeof a.action_id === 'string' && Object.hasOwn(SIGNAL_DECISION, a.action_id) ? SIGNAL_DECISION[a.action_id] : null
     const reddit = a.action_id === REDDIT_ACTION_IDS.contacted ? 'contacted' : a.action_id === REDDIT_ACTION_IDS.skip ? 'skip' : null
+    const content = a.action_id === CONTENT_ACTION_IDS.redo ? 'redo' : a.action_id === CONTENT_ACTION_IDS.skip ? 'skip' : null
+    if (content) {
+      const c = obj(p.container)
+      const channel = match(CHANNEL, c.channel_id) ?? match(CHANNEL, obj(p.channel).id)
+      const message_ts = match(TS, c.message_ts) ?? match(TS, obj(p.message).ts)
+      const draft_id = positiveId(a.value)
+      if (!channel || !message_ts || !draft_id) return null
+      return { kind: 'content_button', decision: content, team, user, channel, message_ts, draft_id }
+    }
     if (reddit) {
       const c = obj(p.container)
       const channel = match(CHANNEL, c.channel_id) ?? match(CHANNEL, obj(p.channel).id)
