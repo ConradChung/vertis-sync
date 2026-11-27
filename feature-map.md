@@ -223,6 +223,15 @@ stops blocking by itself once #2 merges.
   are stripped only from the end of a name, known employer placeholders ("Self-employed") are not a company (a person with a placeholder and no
   site has no row), and saved state is never shared through a name two accounts carry. A host or placeholder the lists do not know can still
   merge two companies, so check `SHARED_HOSTS` and `NO_COMPANY` in `merge.ts` when a wrong merge shows up. Each account gets its own deal address.
+  **Doors column** (All, Post comments, Hiring; not Reddit): an account's unit count is the one from its newest signal that has one
+  (`signal_people.door_count`, `influencer_reactors.door_count`, `signal_hiring.door_count`; source and confidence on hover), else a muted
+  "Unknown". The header sorts highest first (unknowns last either way) and "500+" hides rows under 500 and unknowns; both run server-side
+  (`sort=doors_desc|doors_asc`, `min_doors=500` on `GET /api/signals/inbox`). Held people are released from the same cell; an account with
+  no count and a hiring row takes a typed count (`POST /api/signals/hiring/:id/units`, stored with source `owner`). Hiring counts come
+  from the existing company check (same Perplexity call, grounded like the edge `groundDoorCount`: kept only when the cited page is one of
+  the answer's citations), cached on `signal_company_checks`; migration `*_lume_hiring_door_count.sql`. Backfill:
+  `cd lume && npm run hiring:doors` (dry run) / `-- --run` ($1 cap, lane ledger and monthly cap). Tests: `lume/tests/signals/doors.test.ts`,
+  `tests/hiring/{doorsBackfill,checkPrompt,engine}.test.ts`, `tests/components/SignalsInbox.test.tsx`, `tests/api/signalsRoutes.test.ts`.
   In the portal, signal accounts and the scoreboard go only to the signals client (`LUME_SIGNALS_CLIENT`, default Kaspen):
   any other client gets `{ enabled: false }` and no data.
 

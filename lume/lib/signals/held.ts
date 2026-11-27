@@ -38,3 +38,19 @@ export async function releaseHeld(personId: number, units: number, now: Date = n
   if (!res.data?.length) return { ok: false, error: 'not_held' }
   return { ok: true, outcome, min_units: icp.min_units }
 }
+
+/**
+ * The owner's typed unit count on a hiring row (the Doors column's control on
+ * an account with no count). Stored with source 'owner', confidence 'high'.
+ * Only a row that has no count yet changes; it changes no gate, draft or flag.
+ */
+export async function typeHiringUnits(hiringId: number, units: number, now: Date = new Date()): Promise<{ ok: true } | { ok: false; error: 'not_found' }> {
+  const res = await createServiceClient()
+    .from('signal_hiring')
+    .update({ door_count: units, door_count_source: 'owner', door_count_confidence: 'high', updated_at: now.toISOString() })
+    .eq('id', hiringId)
+    .is('door_count', null)
+    .select('id')
+  if (res.error) throw new DbError('signals.typeHiringUnits', res.error)
+  return res.data?.length ? { ok: true } : { ok: false, error: 'not_found' }
+}

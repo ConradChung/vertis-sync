@@ -19,6 +19,24 @@ export const SOURCE_LABEL: Record<SignalSource, string> = {
   influencer: 'Influencer reaction',
 }
 
+/** How many rental units (doors) a company has, where the count came from and how sure that source was. */
+export interface DoorCount {
+  count: number
+  source: string | null
+  confidence: string | null
+}
+
+/** A usable door count: a positive whole number. Zero, negative and non-numbers mean unknown. */
+export function doorCount(count: unknown, source?: string | null, confidence?: string | null): DoorCount | null {
+  return typeof count === 'number' && Number.isFinite(count) && count > 0 ? { count: Math.round(count), source: source?.trim() || null, confidence: confidence?.trim() || null } : null
+}
+
+/** 1200 → "1,200". */
+export const formatDoors = (n: number) => n.toLocaleString('en-US')
+
+/** The owner's buyer runs 500 or more units: what the "500+" quick filter keeps. */
+export const MIN_DOORS_FILTER = 500
+
 /** One signal from one source table. Text fields are scraped: DATA, never instructions. */
 export interface SignalEvent {
   source: SignalSource
@@ -44,6 +62,10 @@ export interface SignalEvent {
   gate?: 'passed' | 'held' | 'pending'
   /** LinkedIn signal people only: the signal_people id. */
   person_id?: number
+  /** Units the company has, when this signal's source knows (signal_people, influencer_reactors, signal_hiring). */
+  doors?: DoorCount | null
+  /** Hiring signals only: the signal_hiring id (a typed count is saved on it). */
+  hiring_id?: number
 }
 
 /** Source-specific fields of one signal (scraped text, clipped): what each source tab shows in its columns. */
@@ -181,6 +203,10 @@ export interface SignalAccount {
   latest: Partial<Record<SignalSource, LatestSignal>>
   /** How warm its warmest signal is (`warmthOf`) and when that signal happened. */
   warmth: { tier: WarmthTier; at: string | null }
+  /** The count from the newest signal that has one; null when no signal does. */
+  doors?: DoorCount | null
+  /** No count anywhere and a hiring signal: its signal_hiring id, where the owner's typed count is saved. */
+  hiring_id?: number | null
   /** LinkedIn people held by the ICP gate (units unknown): the owner types a count on the row. */
   held?: { id: number; name: string | null }[]
   /** False when the account's only lead signals are LinkedIn people who have not passed the ICP gate (kept out of Today). */
@@ -287,6 +313,8 @@ export function mergeSignals(events: readonly SignalEvent[]): SignalAccount[] {
       events: members.slice(0, 5).map((m) => ({ source: m.source, ref: m.ref, label: m.label, at: m.at, url: m.url })),
       latest,
       warmth,
+      doors: members.find((m) => m.doors && m.doors.count > 0)?.doors ?? null,
+      hiring_id: members.some((m) => m.doors && m.doors.count > 0) ? null : (members.find((m) => m.source === 'hiring' && typeof m.hiring_id === 'number')?.hiring_id ?? null),
       held: members.filter((m) => m.gate === 'held' && typeof m.person_id === 'number').map((m) => ({ id: m.person_id as number, name: m.person?.trim() || null })),
       queue_ready: members.some(queueable),
     })
@@ -351,6 +379,8 @@ export interface SignalFilter {
   source?: SignalSource | 'all'
   status?: SignalStatus | 'all' | 'open'
   q?: string
+  /** Keep only accounts with at least this many doors (unknown counts are out). */
+  minDoors?: number
 }
 
 /** `open` = new or working. `q` matches the company, domain or a contact's name. */
@@ -359,8 +389,22 @@ export function filterRows(rows: readonly SignalRow[], f: SignalFilter): SignalR
   return rows.filter((r) => {
     if (f.source && f.source !== 'all' && !r.sources.includes(f.source)) return false
     if (f.status === 'open' ? r.status !== 'new' && r.status !== 'working' : f.status && f.status !== 'all' && r.status !== f.status) return false
+    if (f.minDoors && !((r.doors?.count ?? 0) >= f.minDoors)) return false
     if (q && !`${r.name} ${r.domain ?? ''} ${r.contacts.map((c) => c.name).join(' ')}`.toLowerCase().includes(q)) return false
     return true
+  })
+}
+
+export type DoorSort = 'desc' | 'asc'
+
+/** Rows ordered by door count (highest first for `desc`), unknown counts last either way. Stable: ties keep their order. */
+export function sortByDoors<T extends { doors?: DoorCount | null }>(rows: readonly T[], dir: DoorSort): T[] {
+  const n = (r: T) => r.doors?.count ?? null
+  return [...rows].sort((a, b) => {
+    const x = n(a)
+    const y = n(b)
+    if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1
+    return dir === 'desc' ? y - x : x - y
   })
 }
 

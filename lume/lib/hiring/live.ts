@@ -61,7 +61,7 @@ export const liveAi: AiPort = {
     const citations = Array.isArray(b.citations) ? b.citations.filter((x): x is string => typeof x === 'string') : []
     const pplxCost = Number(b.usage?.cost?.total_cost)
     const parsed = await haiku(parseRequest(c, answer, citations))
-    return { check: parseHiringCheck(parsed.json), usd: (Number.isFinite(pplxCost) && pplxCost > 0 ? pplxCost : PPLX_CALL_USD) + parsed.usd }
+    return { check: parseHiringCheck(parsed.json, citations), usd: (Number.isFinite(pplxCost) && pplxCost > 0 ? pplxCost : PPLX_CALL_USD) + parsed.usd }
   },
 
   async draft(c) {

@@ -76,7 +76,7 @@ export function memoryStore(cfgValue: unknown = { dry_run: true, lanes: { hiring
     companySeen: async (key, excludeId) =>
       rows.some((r) => r.id !== excludeId && r.stage === 'done' && r.skip_reason === null && ((key.domain && r.company_domain === key.domain) || (!key.domain && key.name && normCompany(r.company_name) === key.name))),
     getCheck: async (k) => checks.get(k) ?? null,
-    saveCheck: async (k, _n, c) => void (checks.has(k) || checks.set(k, { icp_fit: c.icp_fit, property_type: c.property_type, evidence: c.evidence, phone: c.phone, website: c.website })),
+    saveCheck: async (k, _n, c) => void (checks.has(k) || checks.set(k, { icp_fit: c.icp_fit, property_type: c.property_type, evidence: c.evidence, phone: c.phone, website: c.website, door_count: c.door_count, door_count_source: c.door_count_source, door_count_confidence: c.door_count_confidence })),
     saveNotice: async (k, text, dry) => void (notices.has(k) || notices.set(k, { text, status: dry ? 'dry_run' : 'pending' })),
   }
 
@@ -111,7 +111,7 @@ export function fakeApify(datasets: Record<string, Record<string, unknown>[]> = 
 
 export function fakeAi(over: Partial<AiPort> = {}): AiPort & { [K in keyof AiPort]: ReturnType<typeof vi.fn> } {
   return {
-    checkCompany: vi.fn(async () => ({ check: { icp_fit: 'fit' as const, property_type: 'residential', evidence: 'Manages rentals for owners', phone: '(512) 555-0142', website: 'https://sunbeltpm.com' }, usd: 0.007 })),
+    checkCompany: vi.fn(async () => ({ check: { icp_fit: 'fit' as const, property_type: 'residential', evidence: 'Manages rentals for owners', phone: '(512) 555-0142', website: 'https://sunbeltpm.com', door_count: null, door_count_source: null, door_count_confidence: null }, usd: 0.007 })),
     draft: vi.fn(async () => ({ draft: GOOD_DRAFT, usd: 0.001 })),
     extract: vi.fn(async () => ({ extraction: { relevant: true, company_name: 'Evernest', domain: 'evernest.co', event_type: 'acquisition' as const, summary: 'Evernest bought a firm.' }, usd: 0.0005 })),
     ...over,

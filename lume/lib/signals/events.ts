@@ -1,4 +1,4 @@
-import type { SignalEvent } from '@/lib/signals/merge'
+import { doorCount, type SignalEvent } from '@/lib/signals/merge'
 
 /**
  * Source rows → signal events (pure). Each mapper reads only the columns the
@@ -14,7 +14,7 @@ const clip = (v: string | null | undefined, n: number) => {
 // ── signal_hiring ──────────────────────────────────────────────────────────
 
 export const HIRING_COLS =
-  'id, signal, role_title, headline, source_url, posted_at, company_name, company_domain, company_website, company_phone, person_name, person_title, person_linkedin, stage, skip_reason, status, created_at'
+  'id, signal, role_title, headline, source_url, posted_at, company_name, company_domain, company_website, company_phone, person_name, person_title, person_linkedin, stage, skip_reason, status, created_at, door_count, door_count_source, door_count_confidence'
 
 export interface HiringSource {
   id: number
@@ -34,6 +34,9 @@ export interface HiringSource {
   skip_reason: string | null
   status: string
   created_at: string
+  door_count?: number | null
+  door_count_source?: string | null
+  door_count_confidence?: string | null
 }
 
 const HIRING_WORD: Record<string, string> = { hiring: 'Hiring', new_manager: 'New manager', expansion: 'Expansion' }
@@ -54,13 +57,15 @@ export function hiringEvent(r: HiringSource): SignalEvent | null {
     person: r.person_name,
     person_title: r.person_title,
     linkedin: r.person_linkedin,
+    doors: doorCount(r.door_count, r.door_count_source, r.door_count_confidence),
+    hiring_id: r.id,
     detail: { source: 'hiring', signal: HIRING_WORD[r.signal] ?? 'Hiring signal', role: what || null },
   }
 }
 
 // ── signal_people (+ signal_posts) ─────────────────────────────────────────
 
-export const PERSON_COLS = 'id, kind, stage, skip_reason, name, title, linkedin_url, company_name, company_website, post_id, comment_text, comment_url, commented_at, created_at'
+export const PERSON_COLS = 'id, kind, stage, skip_reason, name, title, linkedin_url, company_name, company_website, post_id, comment_text, comment_url, commented_at, created_at, door_count, door_count_source, door_count_confidence'
 export const POST_COLS = 'post_id, post_url, text_excerpt'
 
 export interface PersonSource {
@@ -78,6 +83,9 @@ export interface PersonSource {
   comment_url: string | null
   commented_at: string | null
   created_at: string
+  door_count?: number | null
+  door_count_source?: string | null
+  door_count_confidence?: string | null
 }
 export interface PostSource {
   post_id: string
@@ -107,6 +115,7 @@ export function personEvent(r: PersonSource, posts: ReadonlyMap<string, PostSour
     linkedin: r.linkedin_url,
     gate,
     person_id: r.id,
+    doors: doorCount(r.door_count, r.door_count_source, r.door_count_confidence),
     detail: { source: 'comment', reaction: r.kind === 'reactor', comment: clip(r.comment_text, 280) || null, post_url: post?.post_url ?? null, post_excerpt: clip(post?.text_excerpt, 160) || null },
   }
 }
@@ -194,6 +203,7 @@ export function reactorEvent(r: ReactorSource): SignalEvent | null {
     person: r.name,
     person_title: r.title,
     linkedin: r.linkedin_url,
+    doors: doorCount(r.door_count),
     detail: { source: 'influencer', reacted_to: (r.reacted_to ?? []).filter(Boolean).map(titled), doors: typeof r.door_count === 'number' && r.door_count > 0 ? r.door_count : null },
   }
 }

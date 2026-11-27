@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { runHiringTick } from '@/lib/hiring/engine'
 import { ARTICLE, JOB_COORDINATOR, JOB_LEADERSHIP, JOB_OFF_TARGET } from './fixtures'
 import { deps, fakeAi, fakeApify, memoryStore } from './memoryStore'
@@ -38,6 +38,27 @@ describe('runHiringTick: start → read → process → rows', () => {
     expect(m.spend.filter((s) => s.kind === 'check')).toHaveLength(2)
     expect(m.spend.filter((s) => s.kind === 'draft')).toHaveLength(2)
     expect(t3.month_to_date_usd).toBeCloseTo(0.31 + 2 * 0.007 + 2 * 0.001, 6)
+  })
+
+  it('a grounded door count from the company check rides on the row and in the check cache; a company with none stays null', async () => {
+    const m = memoryStore()
+    const apify = fakeApify({ ds_apr1: [JOB_COORDINATOR, JOB_LEADERSHIP] })
+    let n = 0
+    const ai = fakeAi({
+      checkCompany: vi.fn(async () => ({
+        check: { icp_fit: 'fit' as const, property_type: 'residential', evidence: 'Manages rentals', phone: null, website: null, ...(n++ === 0 ? { door_count: 1200, door_count_source: 'https://x.com/about', door_count_confidence: 'high' as const } : {}) },
+        usd: 0.007,
+      })),
+    })
+    await runHiringTick(NOW, null, deps(m, apify, ai))
+    apify.status.apr1 = { status: 'SUCCEEDED', usageTotalUsd: 0.1 }
+    m.setNow(LATER.toISOString())
+    await runHiringTick(LATER, null, deps(m, apify, ai))
+    const withCount = m.rows.filter((r) => r.door_count === 1200)
+    expect(withCount).toHaveLength(1)
+    expect(withCount[0]).toMatchObject({ door_count_source: 'https://x.com/about', door_count_confidence: 'high', stage: 'done', skip_reason: null })
+    expect(m.rows.filter((r) => !r.door_count)).toHaveLength(1)
+    expect([...m.checks.values()].filter((c) => c.door_count === 1200)).toHaveLength(1)
   })
 
   it('a second ingest of the same job ids inserts nothing (dedupe_key)', async () => {

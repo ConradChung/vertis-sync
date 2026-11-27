@@ -150,7 +150,7 @@ export const liveStore: HiringStore = {
   },
 
   async getCheck(key) {
-    const res = await sb().from('signal_company_checks').select('icp_fit, property_type, evidence, phone, website').eq('domain', key).maybeSingle()
+    const res = await sb().from('signal_company_checks').select('icp_fit, property_type, evidence, phone, website, door_count, door_count_source, door_count_confidence').eq('domain', key).maybeSingle()
     if (res.error) throw new DbError('hiring getCheck', res.error)
     return (res.data as CachedCheck | null) ?? null
   },
@@ -159,7 +159,7 @@ export const liveStore: HiringStore = {
     const res = await sb()
       .from('signal_company_checks')
       .upsert(
-        { domain: key, company_name: companyName, icp_fit: c.icp_fit, property_type: c.property_type, evidence: c.evidence, phone: c.phone, website: c.website, cost_usd: usd, checked_at: nowIso() },
+        { domain: key, company_name: companyName, icp_fit: c.icp_fit, property_type: c.property_type, evidence: c.evidence, phone: c.phone, website: c.website, door_count: c.door_count, door_count_source: c.door_count_source, door_count_confidence: c.door_count_confidence, cost_usd: usd, checked_at: nowIso() },
         { onConflict: 'domain', ignoreDuplicates: true }
       )
     if (res.error) throw new DbError('hiring saveCheck', res.error)

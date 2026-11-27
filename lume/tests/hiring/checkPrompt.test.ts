@@ -10,6 +10,10 @@ import {
   PARSE_SCHEMA,
   PARSE_SYSTEM,
   PPLX_CALL_USD,
+  DOOR_CITE_QUESTION,
+  NO_DOORS,
+  doorQuestion,
+  groundDoors,
 } from '@/lib/hiring/checkPrompt'
 
 interface Edge {
@@ -34,9 +38,10 @@ describe('per-domain check (parity with the job-level edge checker)', () => {
   })
   it('the hiring check only appends the phone / website question and fields', () => {
     const c = { company_name: 'X', website: 'x.com', company_key: 'x.com' }
-    expect(hiringCheckQuestion(c).endsWith(CONTACT_QUESTION)).toBe(true)
+    expect(hiringCheckQuestion(c).includes(CONTACT_QUESTION)).toBe(true)
+    expect(hiringCheckQuestion(c).endsWith(DOOR_CITE_QUESTION)).toBe(true)
     expect(HIRING_PARSE_SYSTEM.startsWith(PARSE_SYSTEM)).toBe(true)
-    expect(HIRING_PARSE_SCHEMA.required).toEqual([...PARSE_SCHEMA.required, 'phone', 'website'])
+    expect(HIRING_PARSE_SCHEMA.required).toEqual([...PARSE_SCHEMA.required, 'doors_source', 'doors_confidence', 'phone', 'website'])
     const req = parseRequest(c, 'answer', ['https://x.com'])
     expect(req.model).toBe('claude-haiku-5-5')
     expect(req.output_config.format.schema).toBe(HIRING_PARSE_SCHEMA)
@@ -48,8 +53,31 @@ describe('per-domain check (parity with the job-level edge checker)', () => {
       evidence: 'Manages 300 rentals',
       phone: '(512) 555-0142',
       website: 'https://sunbeltpm.com',
+      door_count: null,
+      door_count_source: null,
+      door_count_confidence: null,
     })
     expect(parseHiringCheck({ icp_fit: 'not_fit', phone: 'call us', website: 'unknown' })).toMatchObject({ phone: null, website: null })
     expect(() => parseHiringCheck({ icp_fit: 'maybe' })).toThrow()
+  })
+  describe('door count (port of the signal lane\'s groundDoorCount)', () => {
+    const base = { icp_fit: 'fit', property_type: 'residential', evidence: 'x', phone: '', website: '' }
+    const cites = ['https://sunbeltpm.com/about', 'https://example.org/dir']
+    it('keeps a count whose source is one of the cited pages', () => {
+      expect(parseHiringCheck({ ...base, doors: 1200, doors_source: 'https://sunbeltpm.com/about', doors_confidence: 'high' }, cites)).toMatchObject({ door_count: 1200, door_count_source: 'https://sunbeltpm.com/about', door_count_confidence: 'high' })
+    })
+    it('drops an uncited count: no source, a source that is not a citation, or no confidence', () => {
+      for (const d of [{ doors_source: '', doors_confidence: 'high' }, { doors_source: 'https://made-up.com/x', doors_confidence: 'high' }, { doors_source: 'https://sunbeltpm.com/about', doors_confidence: '' }]) {
+        expect(parseHiringCheck({ ...base, doors: 1200, ...d }, cites)).toMatchObject({ door_count: null, door_count_source: null, door_count_confidence: null })
+      }
+      expect(parseHiringCheck({ ...base, doors: 1200, doors_source: 'https://sunbeltpm.com/about', doors_confidence: 'high' })).toMatchObject({ door_count: null })
+    })
+    it('no count (0, missing, junk) is null, never a guess', () => {
+      for (const doors of [0, undefined, -4, '900', null]) expect(groundDoors({ doors, doors_source: cites[0], doors_confidence: 'high' }, cites)).toEqual(NO_DOORS)
+    })
+    it('the hiring parse schema asks for the source and confidence', () => {
+      expect(HIRING_PARSE_SYSTEM).toContain('doors_source')
+      expect(doorQuestion('Acme "PM"', 'Austin, TX')).toBe(`How many doors or units under management does the property management company "Acme 'PM'" (Austin, TX) have? Quote the exact number and cite the page.`)
+    })
   })
 })

@@ -6,6 +6,8 @@ vi.mock('@/lib/supabase/server', () => ({
 }))
 const store = vi.hoisted(() => ({ loadInbox: vi.fn(), patchAccount: vi.fn(), startDeal: vi.fn(), loadAllRows: vi.fn() }))
 vi.mock('@/lib/signals/store', () => store)
+const held = vi.hoisted(() => ({ typeHiringUnits: vi.fn() }))
+vi.mock('@/lib/signals/held', () => held)
 const portal = vi.hoisted(() => ({ getPortalUser: vi.fn() }))
 vi.mock('@/lib/portal/access', async () => ({ ...(await vi.importActual<object>('@/lib/portal/access')), getPortalUser: portal.getPortalUser }))
 const score = vi.hoisted(() => ({ getScoreboard: vi.fn() }))
@@ -14,6 +16,7 @@ vi.mock('@/lib/scoreboard/store', () => score)
 import { GET as inboxGET } from '@/app/api/signals/inbox/route'
 import { PATCH as accountPATCH } from '@/app/api/signals/accounts/route'
 import { POST as dealPOST } from '@/app/api/signals/accounts/deal/route'
+import { POST as hiringUnitsPOST } from '@/app/api/signals/hiring/[id]/units/route'
 import { GET as portalGET } from '@/app/api/portal/signals/route'
 import type { SignalRow } from '@/lib/signals/merge'
 
@@ -172,5 +175,32 @@ describe('GET /api/portal/signals', () => {
     const body = await (await get()).json()
     expect(body.scoreboard).toBeNull()
     expect(body.accounts).toHaveLength(2)
+  })
+})
+
+describe('GET /api/signals/inbox doors params', () => {
+  it('min_doors=500 and sort=doors_desc reach the loader; other values are ignored', async () => {
+    await inboxGET(new Request('http://x/api/signals/inbox?min_doors=500&sort=doors_desc'))
+    expect(store.loadInbox).toHaveBeenLastCalledWith(expect.objectContaining({ minDoors: 500 }), undefined, 'desc')
+    await inboxGET(new Request('http://x/api/signals/inbox?min_doors=7&sort=nope'))
+    expect(store.loadInbox).toHaveBeenLastCalledWith(expect.not.objectContaining({ minDoors: expect.anything() }))
+  })
+})
+
+describe('POST /api/signals/hiring/:id/units', () => {
+  const call = (id: string, body: unknown) => hiringUnitsPOST(json('http://x/api/signals/hiring/' + id + '/units', 'POST', body), { params: Promise.resolve({ id }) })
+  it('saves the typed count on that hiring row', async () => {
+    held.typeHiringUnits.mockResolvedValue({ ok: true })
+    expect((await call('31', { units: 750 })).status).toBe(200)
+    expect(held.typeHiringUnits).toHaveBeenCalledWith(31, 750)
+  })
+  it('404 when the row already has a count or is gone; 400 for a bad id or count; 404 without the owner session', async () => {
+    held.typeHiringUnits.mockResolvedValue({ ok: false, error: 'not_found' })
+    expect((await call('31', { units: 750 })).status).toBe(404)
+    expect((await call('abc', { units: 750 })).status).toBe(400)
+    expect((await call('31', { units: 0 })).status).toBe(400)
+    expect((await call('31', { units: 5, extra: 1 })).status).toBe(400)
+    session.email = null
+    expect((await call('31', { units: 750 })).status).toBeGreaterThanOrEqual(401)
   })
 })
