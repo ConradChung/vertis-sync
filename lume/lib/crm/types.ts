@@ -17,7 +17,7 @@ export interface CrmDeal {
   id: string
   campaign_id: string
   lead_id: number | null
-  email: string
+  email: string | null
   name: string | null
   company: string | null
   city: string | null

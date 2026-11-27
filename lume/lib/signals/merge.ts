@@ -40,6 +40,10 @@ export interface SignalEvent {
   handle?: string | null
   /** The source's own fields, for that source's columns in the inbox. */
   detail?: SignalDetail
+  /** LinkedIn signal people only: where they are against the ICP gate. */
+  gate?: 'passed' | 'held' | 'pending'
+  /** LinkedIn signal people only: the signal_people id. */
+  person_id?: number
 }
 
 /** Source-specific fields of one signal (scraped text, clipped): what each source tab shows in its columns. */
@@ -177,7 +181,14 @@ export interface SignalAccount {
   latest: Partial<Record<SignalSource, LatestSignal>>
   /** How warm its warmest signal is (`warmthOf`) and when that signal happened. */
   warmth: { tier: WarmthTier; at: string | null }
+  /** LinkedIn people held by the ICP gate (units unknown): the owner types a count on the row. */
+  held?: { id: number; name: string | null }[]
+  /** False when the account's only lead signals are LinkedIn people who have not passed the ICP gate (kept out of Today). */
+  queue_ready?: boolean
 }
+
+/** A signal that counts for the Today queue: a LinkedIn person who passed the gate, or any other lead source. */
+const queueable = (m: Pick<SignalEvent, 'source' | 'gate'>) => (m.source === 'comment' ? m.gate === undefined || m.gate === 'passed' : m.source !== 'reddit')
 
 /**
  * How warm a signal is, warmest first: 0 commented on Frank's own post,
@@ -276,6 +287,8 @@ export function mergeSignals(events: readonly SignalEvent[]): SignalAccount[] {
       events: members.slice(0, 5).map((m) => ({ source: m.source, ref: m.ref, label: m.label, at: m.at, url: m.url })),
       latest,
       warmth,
+      held: members.filter((m) => m.gate === 'held' && typeof m.person_id === 'number').map((m) => ({ id: m.person_id as number, name: m.person?.trim() || null })),
+      queue_ready: members.some(queueable),
     })
   }
   return out.sort((a, b) => time(b.newest.at) - time(a.newest.at) || a.key.localeCompare(b.key))

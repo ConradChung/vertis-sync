@@ -35,7 +35,7 @@ const SECTION_WORDS: Record<string, string> = {
 
 /**
  * `/today`: this week's scoreboard, then the queue of what needs doing now —
- * signal accounts not yet touched, positive replies waiting over an hour,
+ * signal accounts not yet touched, positive replies waiting over 5 minutes,
  * pilot check-ins due and the Calendar's tasks for today. Ticking a check-in
  * or a task is a note on Lume's own rows; nothing here sends or spends.
  *
@@ -99,7 +99,7 @@ export function TodayScreen({ initial }: { initial: TodayPayload }) {
         <div className="grid gap-x-16 gap-y-10 lg:grid-cols-2">
           <div className="flex min-w-0 flex-col gap-10">
             <Group
-              title="Replies waiting over an hour"
+              title="Replies waiting over 5 minutes"
               count={q.replies.items.length}
               href="/replies"
               linkLabel={q.replies.open > 0 ? `All ${q.replies.open} open` : 'Replies'}

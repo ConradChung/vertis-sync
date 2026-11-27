@@ -8,13 +8,15 @@ describe('waitingOf (the waiting timer)', () => {
   it('counts whole minutes since the item arrived', () => {
     expect(waitingOf(ago(0, 30), now)).toEqual({ minutes: 0, label: 'just now', overdue: false })
     expect(waitingOf(ago(12, 59), now)).toMatchObject({ minutes: 12, label: '12 min' })
-    expect(waitingOf(ago(59), now)).toMatchObject({ minutes: 59, label: '59 min', overdue: false })
+    expect(waitingOf(ago(4), now)).toMatchObject({ minutes: 4, label: '4 min', overdue: false })
+    expect(waitingOf(ago(59), now)).toMatchObject({ minutes: 59, label: '59 min', overdue: true })
   })
 
-  it('is flagged once past 60 minutes: exactly 60 is not, 61 is', () => {
-    expect(FLAG_AFTER_MIN).toBe(60)
-    expect(waitingOf(ago(60), now)).toMatchObject({ minutes: 60, overdue: false })
-    expect(waitingOf(ago(60, 59), now).overdue).toBe(false)
+  it('is flagged once past 5 minutes: exactly 5 is not, 6 is', () => {
+    expect(FLAG_AFTER_MIN).toBe(5)
+    expect(waitingOf(ago(5), now)).toMatchObject({ minutes: 5, overdue: false })
+    expect(waitingOf(ago(5, 59), now).overdue).toBe(false)
+    expect(waitingOf(ago(6), now)).toMatchObject({ minutes: 6, label: '6 min', overdue: true })
     expect(waitingOf(ago(61), now)).toMatchObject({ minutes: 61, label: '1 h 01 min', overdue: true })
     expect(waitingOf(ago(60 * 26 + 5), now)).toMatchObject({ label: '1 d 2 h', overdue: true })
   })

@@ -1,6 +1,8 @@
 import { ACTION_IDS, EDIT_BLOCK_ID, EDIT_CALLBACK_ID, EDIT_INPUT_ID } from '@/lib/slack/card'
 import { REDDIT_ACTION_IDS } from '@/lib/reddit/card'
 import { CONTENT_ACTION_IDS } from '@/lib/content/message'
+import { rawOf, type RawMessage } from '@/lib/replydesk/extract'
+import { RDESK_ACTION_IDS, RDESK_DECISIONS, type RdeskDecision } from '@/lib/replydesk/message'
 import { SIGNAL_ACTION_IDS, SIGNAL_DRAFT_FIELDS, SIGNAL_EDIT_CALLBACK_ID, SIGNAL_EDIT_INPUT_ID, signalEditBlockId, type SignalDrafts } from '@/lib/slack/signalCard'
 
 /**
@@ -24,7 +26,12 @@ export type SlackEvent =
   | { kind: 'url_verification'; challenge: string }
   | { kind: 'app_mention'; team: string; channel: string; user: string; text: string; ts: string; thread_ts: string | null }
   | { kind: 'revoke'; team: string; reason: 'app_uninstalled' | 'tokens_revoked' }
+  // Reply desk: a message in a channel the bot is in (message.channels / message.groups).
+  | { kind: 'message'; team: string; channel: string; ts: string; thread_ts: string | null; user: string | null; raw: RawMessage }
   | null
+
+/** Message subtypes that are not a new message (edits, deletes, joins, topic changes...). A bot's post has none or bot_message. */
+const MESSAGE_SUBTYPES_KEPT = new Set(['bot_message'])
 
 export function parseEvent(raw: string): SlackEvent {
   let body: Obj
@@ -55,6 +62,15 @@ export function parseEvent(raw: string): SlackEvent {
     if (!channel || !user || !ts || text === null) return null
     return { kind: 'app_mention', team, channel, user, text: text.slice(0, 4000), ts, thread_ts: match(TS, ev.thread_ts) }
   }
+  if (ev.type === 'message') {
+    // SendPilot posts as an app, so bot messages are kept; Lume's own posts (same app) are not.
+    if (typeof ev.subtype === 'string' && !MESSAGE_SUBTYPES_KEPT.has(ev.subtype)) return null
+    if (typeof ev.app_id === 'string' && ev.app_id === body.api_app_id) return null
+    const channel = match(CHANNEL, ev.channel)
+    const ts = match(TS, ev.ts)
+    if (!channel || !ts || channel.startsWith('D')) return null
+    return { kind: 'message', team, channel, ts, thread_ts: match(TS, ev.thread_ts), user: match(USER, ev.user), raw: rawOf(ev) }
+  }
   return null
 }
 
@@ -68,6 +84,8 @@ export type SlackInteraction =
   | { kind: 'reddit_button'; decision: 'contacted' | 'skip'; team: string; user: string; channel: string; message_ts: string; mention_id: number }
   // LinkedIn draft generator (#content-gen): value is the content_drafts id.
   | { kind: 'content_button'; decision: 'redo' | 'skip'; team: string; user: string; channel: string; message_ts: string; draft_id: number }
+  // Reply desk (SendPilot channel threads): value is the reply_desk_drafts id.
+  | { kind: 'rdesk_button'; decision: RdeskDecision; team: string; user: string; channel: string; message_ts: string; draft_id: number }
   | null
 
 const SIGNAL_DECISION: Record<string, 'approve' | 'edit' | 'skip'> = {
@@ -99,6 +117,15 @@ export function parseInteraction(rawForm: string): SlackInteraction {
     const signal = typeof a.action_id === 'string' && Object.hasOwn(SIGNAL_DECISION, a.action_id) ? SIGNAL_DECISION[a.action_id] : null
     const reddit = a.action_id === REDDIT_ACTION_IDS.contacted ? 'contacted' : a.action_id === REDDIT_ACTION_IDS.skip ? 'skip' : null
     const content = a.action_id === CONTENT_ACTION_IDS.redo ? 'redo' : a.action_id === CONTENT_ACTION_IDS.skip ? 'skip' : null
+    const rdesk = RDESK_DECISIONS.find((d) => RDESK_ACTION_IDS[d] === a.action_id) ?? null
+    if (rdesk) {
+      const c = obj(p.container)
+      const channel = match(CHANNEL, c.channel_id) ?? match(CHANNEL, obj(p.channel).id)
+      const message_ts = match(TS, c.message_ts) ?? match(TS, obj(p.message).ts)
+      const draft_id = positiveId(a.value)
+      if (!channel || !message_ts || !draft_id) return null
+      return { kind: 'rdesk_button', decision: rdesk, team, user, channel, message_ts, draft_id }
+    }
     if (content) {
       const c = obj(p.container)
       const channel = match(CHANNEL, c.channel_id) ?? match(CHANNEL, obj(p.channel).id)

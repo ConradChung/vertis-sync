@@ -53,7 +53,7 @@ export function FollowupsTable({
               <TableRow key={d.id} className="hover:bg-accent" data-testid="crm-followup-row">
                 <TableCell className="py-2 pl-5">
                   <button type="button" onClick={() => onOpen(d)} className="flex min-w-0 items-center gap-2.5 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    <LeadAvatar name={d.name} email={d.email} />
+                    <LeadAvatar name={d.name} email={d.email ?? ''} />
                     <span className="min-w-0">
                       <span className="block truncate text-sm text-foreground">{d.name ?? d.email}</span>
                       <span className="block truncate font-mono text-[11px] text-muted-foreground">{d.email}</span>

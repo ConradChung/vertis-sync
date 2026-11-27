@@ -39,7 +39,7 @@ beforeEach(() => {
       signal('r:pm_dave', 'u/pm_dave', { sources: ['reddit'] }),
     ],
   })
-  m.loadWaitingReplies.mockResolvedValue([reply('fresh', '2026-11-26T19:30:00Z'), reply('late', '2026-11-26T18:00:00Z'), reply('later', '2026-11-26T10:00:00Z')])
+  m.loadWaitingReplies.mockResolvedValue([reply('fresh', '2026-11-26T19:58:00Z'), reply('late', '2026-11-26T18:00:00Z'), reply('later', '2026-11-26T10:00:00Z')])
   m.getPilotDeals.mockResolvedValue([pilot('a', '2026-11-16'), pilot('b', '2026-11-20'), pilot('c', '2026-11-01', { pilot_checkin_10_done_at: '2026-11-11T00:00:00Z' })])
   m.listOpenTasksDue.mockResolvedValue([
     { id: 't1', title: 'Send Frank the recap', due_at: '2026-11-25T17:00:00Z', all_day: true, status: 'scheduled', action_id: null, linear_url: null },
@@ -67,7 +67,7 @@ describe('loadToday (the Today queue)', () => {
     expect(t.queue.signals.total).toBe(6)
   })
 
-  it('queues untouched signals, replies waiting over an hour, check-ins due and tasks due', async () => {
+  it('queues untouched signals, replies waiting over 5 minutes, check-ins due and tasks due', async () => {
     const t = await loadToday(now)
     expect(t.today).toBe('2026-11-26')
     expect(t.scoreboard).toEqual(board)

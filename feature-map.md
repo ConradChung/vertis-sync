@@ -110,6 +110,14 @@ stops blocking by itself once #2 merges.
   LinkedIn URL; records-guarded, no USD) and stores it in `signal_people.contacts`; the Slack card and
   reactor digest (`lume/lib/slack/signalCard.ts`) show `*Email:*` only when one was found. No key,
   no records, a miss or an outage → `contacts []`, card ships as before.
+  **ICP gate** (`_shared/signal/icp.ts`, `lume_settings.signal_config.icp`, defaults
+  `{min_units: 500, owner_operator_only: true, unknown_units: 'hold'}`): a PM company is skipped
+  `pm_company` at verify (reactors: before the crawl), a known count under the minimum is skipped
+  `under_min_units`, an unknown count after the doors step parks the row at stage `held` (no card).
+  Lume shows held people in Signals with "Units unknown" and a count input
+  (`POST /api/signals/people/:id/units`, `lume/lib/signals/held.ts`); Today lists only people at
+  `ready`/`alerted` (`queue_ready` in `lume/lib/signals/merge.ts`). Tests: `_shared/signal/icp_test.ts`,
+  `lume/tests/signals/icpGate.test.ts`.
 
 ### Hiring Ops Signal (GTM-19)
 - **Where:** `lume/lib/hiring/`, `lume/app/api/signals/hiring`, `lume/app/api/cron/hiring-signal`, `lume/app/(app)/signals/hiring/`.
@@ -121,6 +129,21 @@ stops blocking by itself once #2 merges.
   only for rows that passed exclusions + dedupe + PM check; named person → work email (1 record),
   else one decision-maker via Waterfall ICP + email (≤3 records); `signal_hiring.contact_*`
   (`*_lume_hiring_contact.sql`); ≤36 records per tick; unset `BLITZ_API_KEY` = no lookup.
+
+### Reply desk (LinkedIn replies via SendPilot → Slack)
+- **Where:** `lume/lib/replydesk/` (config, macros, extract, draft, message, engine, store, live),
+  the `message` event + `rdesk_button` branches in `lume/lib/slack/payloads.ts`,
+  `lume/app/api/slack/events`, `lume/app/api/slack/interactions`, `lume/app/api/cron/reply-desk`,
+  `lume/app/api/settings/reply-desk` + `components/settings/ReplyDeskSettings.tsx` (Settings → Slack),
+  LinkedIn rows on `/replies` (`lib/replies/queue.ts`, `RepliesList.tsx`); migration
+  `*_lume_reply_desk.sql`; doc `docs/lume/REPLY-DESK.md`.
+- **How to test:** `cd lume && npx vitest run tests/replydesk tests/replies tests/components/TodayReplies.test.tsx`.
+- **Good:** reads only `reply_desk_config.slack.channel_id` (nothing until set), never Lume's own
+  posts or thread replies; the raw message is saved before any Claude call; the message is quoted
+  data in every prompt; only interested/question/not_now make a deal (Conversation, LinkedIn URL,
+  no placeholder email); drafts pass `checkBody` (no em dashes, no links unless asked, every number
+  from `content_facts`) or the macro fallback is posted; follow-ups only weekdays 8–6 PT; every
+  Claude call is checked against `monthly_cap_usd` ($10, clamped) first; nothing sends on LinkedIn.
 
 ### LinkedIn draft generator (#content-gen)
 - **Where:** `lume/lib/content/` (engine, rules, facts, slots, prompt, message, match, store, live, decide),
@@ -191,7 +214,7 @@ stops blocking by itself once #2 merges.
   pgTAP `supabase/tests/lume_signal_accounts_test.sql`.
 - **Good:** one row per company across `signal_hiring`, `signal_people` (+ `signal_posts`), `signal_reddit_mentions` and verified
   `influencer_reactors`, deduped by domain, else by normalized name (a name-only row joins the one domain that name belongs to);
-  a Reddit author is its own account. Those four tables are only SELECTed; status and the three touches live in `signal_accounts`.
+  a Reddit author is its own account. Those four tables are only SELECTed, except `signal_people` rows at stage `held`, which the owner's typed unit count updates (`lume/lib/signals/held.ts`, conditional on `held`); status and the three touches live in `signal_accounts`.
   A touch is a manual tick with its time: nothing is emailed, messaged or called. "Start deal" creates one deal under campaign
   `signals` in Conversation (owner's session only, idempotent) and changes no campaign or Instantly state.
   `/signals/hiring` still renders (the inbox filtered to hiring, then the Hiring Ops sheet); the influencers list is at `/signals/influencers`,
@@ -210,10 +233,10 @@ stops blocking by itself once #2 merges.
 - **How to test:** `cd lume && npx vitest run tests/crm tests/scoreboard tests/replies tests/today tests/api/crmRoutes.test.ts tests/api/scoreboardRoutes.test.ts tests/components/TodayReplies.test.tsx tests/components/CrmViews.test.tsx`;
   pgTAP `supabase/tests/lume_pilot_stages_test.sql`.
 - **Good:** Conversation, Demo, Pilot, Paid sit after the eight original stages, which keep their names and positions; no existing deal moves.
-  Moves onto the pilot line are by hand and direct; Won/Lost still file `crm_close_deal`; automation (`autoAdvance`) never moves a deal on to,
+  Moves onto the pilot line are by hand and direct; Won/Lost still file `crm_close_deal` from the board, sheet and table (the reply desk's Slack buttons are the one exception: Booked → Demo and Not interested → Lost directly on the owner's tap, `lume/lib/replydesk/engine.ts`); automation (`autoAdvance`) never moves a deal on to,
   along or off the pilot line. Check-ins fall due 10 and 25 days after `pilot_start_date` and only for deals in Pilot.
   The scoreboard week is Monday to Monday in America/Los_Angeles and counts a deal once per column.
-  A waiting row is flagged past 60 minutes (exactly 60 is not). `/today` and `/replies` only read; the only writes are the
+  A waiting row is flagged past 5 minutes (exactly 5 is not). `/today` and `/replies` only read; the only writes are the
   owner's ticks on Lume's own rows (check-in, referral, task done, top objection). Nothing sends or spends.
   `/actions`, `/actions/<id>`, `/overview` and `/calendar` still render.
 

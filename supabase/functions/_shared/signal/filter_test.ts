@@ -11,6 +11,8 @@ function setup(rows: Parameters<typeof person>[0][]) {
   const deps = (): FilterDeps => ({
     store: s, gate: gateFor(s), now: () => new Date(s.clock()), timeLeft: () => 110_000,
     haiku: f.haiku, perplexity: f.perplexity, crawl: f.crawl, email: f.email, facts: FACTS, reactorOpening: null,
+    // These tests pin the pre-ICP stage machine; icp_test.ts covers the gate with its defaults.
+    icp: { owner_operator_only: false, min_units: 0, unknown_units: 'continue' },
   })
   return { s, f, deps }
 }

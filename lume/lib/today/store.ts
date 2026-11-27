@@ -21,7 +21,8 @@ const SIGNALS_SHOWN = 8
  */
 async function untouchedSignals(): Promise<{ items: TodaySignal[]; total: number }> {
   const { rows } = await loadAllRows()
-  const open = rows.filter((r) => isUntouched(r) && !isResearchOnly(r)).sort(byWarmth)
+  // Only people who passed the ICP gate: held (units unknown) and in-progress LinkedIn people wait in Signals.
+  const open = rows.filter((r) => isUntouched(r) && !isResearchOnly(r) && r.queue_ready !== false).sort(byWarmth)
   return {
     total: open.length,
     items: open.slice(0, SIGNALS_SHOWN).map((r) => ({

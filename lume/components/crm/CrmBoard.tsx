@@ -190,7 +190,7 @@ export function DealCard({
       )}
     >
       <div className="flex items-center gap-2">
-        <LeadAvatar name={d.name} email={d.email} className="size-6" />
+        <LeadAvatar name={d.name} email={d.email ?? ''} className="size-6" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-medium text-foreground">{d.name ?? d.email}</div>
           <div className="truncate text-[11px] text-muted-foreground">

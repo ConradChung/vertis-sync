@@ -37,6 +37,12 @@ export async function POST(req: Request) {
 
   after(async () => {
     try {
+      // Reply desk (SendPilot channel): Sent / Redo / Booked / Not interested.
+      if (it.kind === 'rdesk_button') {
+        const [{ handleButton }, { liveDeps }] = await Promise.all([import('@/lib/replydesk/engine'), import('@/lib/replydesk/live')])
+        await handleButton({ decision: it.decision, draft_id: it.draft_id, user: it.user, team: it.team, channel: it.channel, message_ts: it.message_ts }, liveDeps())
+        return
+      }
       // LinkedIn draft generator (#content-gen): Redo / Skip.
       if (it.kind === 'content_button') {
         const cd = await import('@/lib/content/decide')

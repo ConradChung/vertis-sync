@@ -48,6 +48,15 @@ driven from Telegram, with two Next.js front ends.
   when `content_config.dry_run` is exactly `false` (it ships `true`). Nothing
   ever posts to LinkedIn: Frank copies and posts by hand. Facts bank:
   `content_facts` (`npm run content:facts`).
+- **Exception: LinkedIn reply desk** (`lume/lib/replydesk/`, owner approval
+  2026-11-26). A SendPilot reply notification in the one Slack channel set in
+  `lume_settings.reply_desk_config.slack` triggers, without a per-message tap,
+  one Claude Haiku extraction and one drafted answer; due follow-ups are
+  drafted by pg_cron (`lume-reply-desk-tick`, weekdays 8 AM-6 PM PT only).
+  Claude calls only, capped by `reply_desk_config.monthly_cap_usd` ($10/month,
+  checked before every call). Drafts go only to that Slack thread; nothing is
+  ever sent on LinkedIn (Frank copies by hand and presses Sent). Booked and
+  Not interested on a draft move the deal (Demo / Lost) directly on that tap.
 - **Lume decides through `telegram-inbox`**, via its `X-Lume-Secret`
   entrypoint (`LUME_ACTION_SECRET`), so Telegram and Lume race for the same
   conditional-PATCH claim. Lume never writes pipeline state directly and

@@ -250,7 +250,7 @@ export function CrmWorkspace({
       <LeadSheet dealId={openId} onOpenChange={(o) => !o && setOpenId(null)} onChanged={() => void board.mutate()} />
       <CloseDialog
         key={closing ? `${closing.deal.id}-${closing.stage}` : 'none'}
-        target={closing ? { stage: closing.stage, label: closing.deal.name ?? closing.deal.email } : null}
+        target={closing ? { stage: closing.stage, label: closing.deal.name ?? closing.deal.email ?? 'this deal' } : null}
         busy={busyId !== null}
         onCancel={() => setClosing(null)}
         onConfirm={(reason) => {

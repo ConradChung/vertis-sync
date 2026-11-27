@@ -88,6 +88,8 @@ export interface PostSource {
 /** A commenter or reactor on a watched post that the filter kept (not skipped, not errored). */
 export function personEvent(r: PersonSource, posts: ReadonlyMap<string, PostSource>): SignalEvent | null {
   if (r.skip_reason || r.stage === 'skipped' || r.stage === 'error') return null
+  // The ICP gate: only ready/alerted people passed it; 'held' waits on the owner's typed unit count.
+  const gate: SignalEvent['gate'] = r.stage === 'ready' || r.stage === 'alerted' ? 'passed' : r.stage === 'held' ? 'held' : 'pending'
   const post = r.post_id ? posts.get(r.post_id) : undefined
   const said = clip(r.comment_text, 140)
   const label = r.kind === 'reactor' ? 'Reacted to a watched post' : said ? `Commented: “${said}”` : 'Commented on a watched post'
@@ -103,6 +105,8 @@ export function personEvent(r: PersonSource, posts: ReadonlyMap<string, PostSour
     person: r.name,
     person_title: r.title,
     linkedin: r.linkedin_url,
+    gate,
+    person_id: r.id,
     detail: { source: 'comment', reaction: r.kind === 'reactor', comment: clip(r.comment_text, 280) || null, post_url: post?.post_url ?? null, post_excerpt: clip(post?.text_excerpt, 160) || null },
   }
 }
