@@ -122,6 +122,19 @@ stops blocking by itself once #2 merges.
   else one decision-maker via Waterfall ICP + email (≤3 records); `signal_hiring.contact_*`
   (`*_lume_hiring_contact.sql`); ≤36 records per tick; unset `BLITZ_API_KEY` = no lookup.
 
+### LinkedIn draft generator (#content-gen)
+- **Where:** `lume/lib/content/` (engine, rules, facts, slots, prompt, message, match, store, live, decide),
+  `lume/lib/content/references/` (MIT copies of linkedin-skills references + LICENSE),
+  `lume/app/api/cron/content-gen`, the `content_button` branch in `lume/lib/slack/payloads.ts` and
+  `lume/app/api/slack/interactions/route.ts`, `lume/scripts/content-facts.ts`,
+  `*_lume_content_gen.sql` (content_facts, content_drafts, content_spend, `content_config`), `*_lume_content_gen_cron.sql`.
+- **How to test:** `cd lume && npx vitest run tests/content`.
+- **Good:** Tue Proof / Wed Owner view / Thu Hand-raiser (breakdown and story weeks alternate); every number in a
+  draft is in a fact it used; rule failures rewrite up to twice, then the draft is stored `rejected` and nothing is
+  posted; a lead fact can't lead again within 21 days; every Claude call checked against the $5/month cap first and
+  recorded in `content_spend`; `dry_run` (default true) means nothing reaches Slack; nothing ever posts to LinkedIn.
+  Redo/Skip only touch `content_drafts`. Post matching reads `signal_posts`, never writes it.
+
 ### Reddit signals (GTM-15, F5Bot emails)
 - **Where:** `lume/lib/reddit/`, doc `docs/lume/f5bot-apps-script.gs`.
 - **How to test:** `cd lume && npx vitest run tests/reddit`.

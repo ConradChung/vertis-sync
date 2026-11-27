@@ -40,6 +40,14 @@ driven from Telegram, with two Next.js front ends.
   (lanes on/off, per-run caps, $40/month total) and only writes rows to the
   Hiring Ops Signal sheet; emails are sent by hand. The schedule
   (`*_lume_hiring_signal_cron.sql`) is applied only after the owner says so.
+- **Exception: LinkedIn draft generator** (`lume/lib/content/`, owner
+  approval 2026-11-26). pg_cron writes one draft Tue/Wed/Thu at 6:30 AM PT
+  with Claude, without a per-run tap, capped by
+  `lume_settings.content_config.monthly_cap_usd` ($5/month, checked before
+  every call). Drafts go only to the owner's Slack `#content-gen`, and only
+  when `content_config.dry_run` is exactly `false` (it ships `true`). Nothing
+  ever posts to LinkedIn: Frank copies and posts by hand. Facts bank:
+  `content_facts` (`npm run content:facts`).
 - **Lume decides through `telegram-inbox`**, via its `X-Lume-Secret`
   entrypoint (`LUME_ACTION_SECRET`), so Telegram and Lume race for the same
   conditional-PATCH claim. Lume never writes pipeline state directly and
