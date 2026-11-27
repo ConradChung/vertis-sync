@@ -20,10 +20,15 @@ export const REPLIES_KEY = '/api/replies'
  * longest-waiting first, each with its waiting time (flagged past 60 minutes).
  * Approvals keep their Confirm / Cancel (the same decide route as
  * `/actions/<id>`); a reply opens in Instantly or its deal. Nothing sends from here.
- * One surface; rows are set apart by space alone.
+ * One full-width surface; rows sit in a grid (two columns on desktop, three
+ * on very wide screens, one on a phone), set apart by space alone.
  */
 export function RepliesList({ initial }: { initial: RepliesPayload }) {
-  const { data, mutate } = useSWR<RepliesPayload>(REPLIES_KEY, fetchJson, { fallbackData: initial, refreshInterval: 30_000, revalidateOnFocus: true })
+  const { data, mutate } = useSWR<RepliesPayload>(REPLIES_KEY, fetchJson, {
+    fallbackData: initial,
+    refreshInterval: 30_000,
+    revalidateOnFocus: true,
+  })
   const { mutate: mutateGlobal } = useSWRConfig()
   useRealtimeInvalidate(() => void mutate(), { tables: ['pending_actions'] })
   // Timers tick once a minute.
@@ -39,7 +44,7 @@ export function RepliesList({ initial }: { initial: RepliesPayload }) {
   const late = overdueCount(items, now)
 
   return (
-    <Surface aria-label="Waiting for you" role="region" className="max-w-[880px] gap-8">
+    <Surface aria-label="Waiting for you" role="region" className="gap-8">
       <p className="text-[13px] text-fg-46">
         {items.length === 0 ? (
           'Nothing waiting for you.'
@@ -51,7 +56,7 @@ export function RepliesList({ initial }: { initial: RepliesPayload }) {
         )}
       </p>
       {items.length > 0 && (
-        <ul className="flex flex-col gap-10">
+        <ul className="grid gap-x-16 gap-y-10 lg:grid-cols-2 2xl:grid-cols-3">
           {items.map((it) =>
             it.type === 'approval' ? (
               <ApprovalRow

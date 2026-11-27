@@ -17,9 +17,23 @@ const STATS: { key: keyof Board['counts']; label: string }[] = [
  * line on blur or Enter; the client portal shows it read-only.
  *
  * It draws no surface of its own: the page's one surface holds it, and
- * spacing sets it apart. The numbers are plain (no accent colour).
+ * spacing sets it apart. The numbers are plain (no accent colour). `wide`
+ * (the owner's full-width /today) puts the counts and the line side by side
+ * on desktop.
  */
-export function Scoreboard({ board, editable = false, onSaved, className }: { board: Board; editable?: boolean; onSaved?: (text: string | null) => void; className?: string }) {
+export function Scoreboard({
+  board,
+  editable = false,
+  wide = false,
+  onSaved,
+  className,
+}: {
+  board: Board
+  editable?: boolean
+  wide?: boolean
+  onSaved?: (text: string | null) => void
+  className?: string
+}) {
   const saved = board.top_objection ?? ''
   const [text, setText] = useState(saved)
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
@@ -46,46 +60,48 @@ export function Scoreboard({ board, editable = false, onSaved, className }: { bo
         <h2 className="text-[15px] font-medium text-fg">This week</h2>
         <span className="font-mono text-[12px] text-fg-46">{board.week.label}</span>
       </div>
-      <dl className="grid grid-cols-3 gap-4">
-        {STATS.map((s) => (
-          <div key={s.key} className="flex flex-col gap-2">
-            <dd data-stat={s.key} className="font-mono text-[40px] leading-none font-medium text-fg tabular-nums max-sm:text-[32px]">
-              {board.counts[s.key]}
-            </dd>
-            <dt className="text-[13px] text-fg-46">{s.label}</dt>
-          </div>
-        ))}
-      </dl>
-      <div className="flex flex-col gap-2">
-        <label htmlFor="top-objection" className="text-[13px] text-fg-46">
-          Top objection
-        </label>
-        {editable ? (
-          <div className="flex items-center gap-3">
-            <input
-              id="top-objection"
-              value={text}
-              maxLength={300}
-              placeholder="What did you hear most this week?"
-              onChange={(e) => {
-                setText(e.target.value)
-                setState('idle')
-              }}
-              onBlur={() => void save()}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') e.currentTarget.blur()
-              }}
-              className="h-10 min-w-0 flex-1 rounded-lg bg-secondary px-3 text-[14px] text-fg outline-none placeholder:text-fg-46 focus-visible:ring-2 focus-visible:ring-ring"
-            />
-            <span aria-live="polite" className="w-16 shrink-0 font-mono text-[11px] text-fg-46">
-              {state === 'saving' ? 'Saving' : state === 'saved' ? 'Saved' : state === 'error' ? 'Not saved' : ''}
-            </span>
-          </div>
-        ) : (
-          <p id="top-objection" className={cn('text-[14px]', saved ? 'text-fg' : 'text-fg-46')}>
-            {saved || 'Not written yet.'}
-          </p>
-        )}
+      <div className={wide ? 'grid gap-6 lg:grid-cols-2 lg:items-end lg:gap-x-16' : 'contents'}>
+        <dl className="grid grid-cols-3 gap-4">
+          {STATS.map((s) => (
+            <div key={s.key} className="flex flex-col gap-2">
+              <dd data-stat={s.key} className="font-mono text-[40px] leading-none font-medium text-fg tabular-nums max-sm:text-[32px]">
+                {board.counts[s.key]}
+              </dd>
+              <dt className="text-[13px] text-fg-46">{s.label}</dt>
+            </div>
+          ))}
+        </dl>
+        <div className="flex flex-col gap-2">
+          <label htmlFor="top-objection" className="text-[13px] text-fg-46">
+            Top objection
+          </label>
+          {editable ? (
+            <div className="flex items-center gap-3">
+              <input
+                id="top-objection"
+                value={text}
+                maxLength={300}
+                placeholder="What did you hear most this week?"
+                onChange={(e) => {
+                  setText(e.target.value)
+                  setState('idle')
+                }}
+                onBlur={() => void save()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.currentTarget.blur()
+                }}
+                className="h-10 min-w-0 flex-1 rounded-lg bg-secondary px-3 text-[14px] text-fg outline-none placeholder:text-fg-46 focus-visible:ring-2 focus-visible:ring-ring"
+              />
+              <span aria-live="polite" className="w-16 shrink-0 font-mono text-[11px] text-fg-46">
+                {state === 'saving' ? 'Saving' : state === 'saved' ? 'Saved' : state === 'error' ? 'Not saved' : ''}
+              </span>
+            </div>
+          ) : (
+            <p id="top-objection" className={cn('text-[14px]', saved ? 'text-fg' : 'text-fg-46')}>
+              {saved || 'Not written yet.'}
+            </p>
+          )}
+        </div>
       </div>
     </section>
   )

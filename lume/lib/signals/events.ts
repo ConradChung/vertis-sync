@@ -54,6 +54,7 @@ export function hiringEvent(r: HiringSource): SignalEvent | null {
     person: r.person_name,
     person_title: r.person_title,
     linkedin: r.person_linkedin,
+    detail: { source: 'hiring', signal: HIRING_WORD[r.signal] ?? 'Hiring signal', role: what || null },
   }
 }
 
@@ -102,6 +103,7 @@ export function personEvent(r: PersonSource, posts: ReadonlyMap<string, PostSour
     person: r.name,
     person_title: r.title,
     linkedin: r.linkedin_url,
+    detail: { source: 'comment', reaction: r.kind === 'reactor', comment: clip(r.comment_text, 280) || null, post_url: post?.post_url ?? null, post_excerpt: clip(post?.text_excerpt, 160) || null },
   }
 }
 
@@ -140,6 +142,13 @@ export function redditEvent(r: RedditSource): SignalEvent | null {
     person_title: null,
     linkedin: null,
     handle: r.author,
+    detail: {
+      source: 'reddit',
+      subreddit: r.subreddit ? r.subreddit.replace(/^r\//, '') : null,
+      thread: clip(r.title, 160) || null,
+      excerpt: clip(r.summary ?? r.snippet, 280) || null,
+      author: r.author,
+    },
   }
 }
 
@@ -181,5 +190,6 @@ export function reactorEvent(r: ReactorSource): SignalEvent | null {
     person: r.name,
     person_title: r.title,
     linkedin: r.linkedin_url,
+    detail: { source: 'influencer', reacted_to: (r.reacted_to ?? []).filter(Boolean).map(titled), doors: typeof r.door_count === 'number' && r.door_count > 0 ? r.door_count : null },
   }
 }

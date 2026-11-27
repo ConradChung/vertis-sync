@@ -26,6 +26,7 @@ describe('hiringEvent', () => {
     expect(hiringEvent(hiring())).toEqual({
       source: 'hiring', ref: 'hiring:1', company: 'Acme PM', site: 'acme.com', at: '2026-11-20T00:00:00Z', label: 'Hiring: Regional Property Manager',
       url: 'https://jobs.example/1', phone: '(310) 555-0101', person: null, person_title: null, linkedin: null,
+      detail: { source: 'hiring', signal: 'Hiring', role: 'Regional Property Manager' },
     })
     expect(hiringEvent(hiring({ signal: 'new_manager', role_title: null, headline: 'Jane joins as VP Ops', posted_at: null, company_domain: null }))).toMatchObject({
       label: 'New manager: Jane joins as VP Ops', at: '2026-11-21T00:00:00Z', site: 'https://www.acme.com',
@@ -50,6 +51,10 @@ describe('personEvent', () => {
     expect(personEvent(person({ kind: 'reactor', comment_text: null }), posts)?.label).toBe('Reacted to a watched post')
     expect(personEvent(person({ comment_text: null, post_id: 'gone' }), posts)).toMatchObject({ label: 'Commented on a watched post', url: null })
   })
+  it('carries the comment and its post for the Post comments columns', () => {
+    expect(personEvent(person(), posts)?.detail).toEqual({ source: 'comment', reaction: false, comment: 'We struggle with after-hours calls', post_url: 'https://linkedin.com/posts/frank-1', post_excerpt: 'x' })
+    expect(personEvent(person({ kind: 'reactor', comment_text: null, post_id: 'gone' }), posts)?.detail).toEqual({ source: 'comment', reaction: true, comment: null, post_url: null, post_excerpt: null })
+  })
   it('clips a long comment', () => {
     const label = personEvent(person({ comment_text: 'word '.repeat(80) }), posts)!.label
     expect(label.length).toBeLessThan(160)
@@ -66,6 +71,9 @@ describe('redditEvent', () => {
   it('maps a mention: the author is the account, there is no company', () => {
     expect(redditEvent(reddit())).toMatchObject({ source: 'reddit', ref: 'reddit:4', company: null, site: null, handle: 'pm_dave', label: 'r/PropertyManagement: Answering service?', url: 'https://reddit.com/r/x/1', at: '2026-11-24T00:00:00Z' })
     expect(redditEvent(reddit({ summary: 'Asks who handles after-hours calls', subreddit: 'r/Landlord' }))?.label).toBe('r/Landlord: Asks who handles after-hours calls')
+  })
+  it('carries subreddit, thread title and excerpt for the Reddit columns', () => {
+    expect(redditEvent(reddit({ subreddit: 'r/Landlord', summary: 'Asks who handles after-hours calls' }))?.detail).toMatchObject({ source: 'reddit', subreddit: 'Landlord', author: 'pm_dave', excerpt: 'Asks who handles after-hours calls' })
   })
   it('leaves out skipped mentions and ones with no author', () => {
     expect(redditEvent(reddit({ alert_status: 'skipped' }))).toBeNull()

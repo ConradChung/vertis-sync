@@ -4,11 +4,12 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { SWRConfig } from 'swr'
 import type { ReactNode } from 'react'
 
+vi.mock('next/navigation', () => ({ usePathname: () => '/signals/reddit' }))
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { info: vi.fn(), error: vi.fn(), success: vi.fn() }) }))
 
 import { SignalsSection } from '@/components/portal/SignalsSection'
 import { SignalsInbox, inboxKey } from '@/components/signals/SignalsInbox'
-import { SignalsNav } from '@/components/signals/SignalsNav'
+import { SignalsNav, tabOf } from '@/components/signals/SignalsNav'
 import type { PortalSignalsResponse } from '@/lib/portal/signals'
 import type { SignalInbox, SignalRow } from '@/lib/signals/merge'
 
@@ -19,16 +20,44 @@ afterEach(() => {
 })
 
 const row = (o: Partial<SignalRow> & { key: string; name: string }): SignalRow => ({
-  aliases: [], domain: null, sources: ['hiring'], count: 1, newest: { source: 'hiring', label: 'Hiring: Regional PM', at: '2026-11-25T20:00:00Z', url: 'https://jobs.example/1' }, phone: null, contacts: [], events: [],
-  state_key: o.key, status: 'new', touches: { email: null, linkedin: null, call: null }, deal_id: null, ...o,
+  aliases: [],
+  domain: null,
+  sources: ['hiring'],
+  count: 1,
+  newest: { source: 'hiring', label: 'Hiring: Regional PM', at: '2026-11-25T20:00:00Z', url: 'https://jobs.example/1' },
+  phone: null,
+  contacts: [],
+  events: [],
+  latest: {},
+  state_key: o.key,
+  status: 'new',
+  touches: { email: null, linkedin: null, call: null },
+  deal_id: null,
+  ...o,
 })
 const inbox: SignalInbox = {
   total: 2,
   failed: [],
   counts: { new: 1, working: 1, replied: 0, dropped: 0 },
   rows: [
-    row({ key: 'd:acme.com', name: 'Acme PM', domain: 'acme.com', sources: ['hiring', 'comment', 'influencer'], count: 3, phone: '(310) 555-0101', contacts: [{ name: 'Ada Lovelace', title: 'COO', linkedin: null }] }),
-    row({ key: 'n:blue door', name: 'Blue Door', state_key: 'n:blue door', status: 'working', sources: ['reddit'], touches: { email: '2026-11-24T20:00:00Z', linkedin: null, call: null }, deal_id: '5b7f2d1e-3c4a-4e8b-9f0a-1b2c3d4e5f60' }),
+    row({
+      key: 'd:acme.com',
+      name: 'Acme PM',
+      domain: 'acme.com',
+      sources: ['hiring', 'comment', 'influencer'],
+      count: 3,
+      phone: '(310) 555-0101',
+      contacts: [{ name: 'Ada Lovelace', title: 'COO', linkedin: null }],
+    }),
+    row({
+      key: 'n:blue door',
+      name: 'Blue Door',
+      state_key: 'n:blue door',
+      status: 'working',
+      sources: ['reddit'],
+      touches: { email: '2026-11-24T20:00:00Z', linkedin: null, call: null },
+      deal_id: '5b7f2d1e-3c4a-4e8b-9f0a-1b2c3d4e5f60',
+    }),
   ],
 }
 
@@ -54,27 +83,34 @@ describe('SignalsInbox', () => {
     expect(within(acme).getByText('Ada Lovelace, COO')).toBeTruthy()
     expect(within(acme).getByRole('link', { name: '(310) 555-0101' }).getAttribute('href')).toMatch(/^tel:/)
     const touches = within(within(acme).getByRole('group', { name: 'Touches for Acme PM' })).getAllByRole('button')
-    expect(touches.map((b) => [b.textContent, b.getAttribute('aria-pressed')])).toEqual([['Email', 'false'], ['LinkedIn', 'false'], ['Call', 'false']])
-    expect(within(acme).getByRole('button', { name: 'Start deal' })).toBeTruthy()
+    // A log, not actions: each touch reads as not done (—) until ticked.
+    expect(touches.map((b) => [b.textContent, b.getAttribute('aria-pressed')])).toEqual([
+      ['Email—', 'false'],
+      ['LinkedIn—', 'false'],
+      ['Call—', 'false'],
+    ])
+    expect(within(acme).getByRole('button', { name: 'Add to pipeline' })).toBeTruthy()
   })
 
   it('a ticked touch shows its date; an account with a deal links to it in the Pipeline', () => {
     wrap(<SignalsInbox initial={inbox} />)
     const blue = within(screen.getByRole('list', { name: 'Signal accounts' })).getAllByRole('listitem')[1]
-    const email = within(blue).getByRole('button', { name: 'Email done' })
+    const email = within(blue).getByRole('button', { name: 'Email done Nov 24' })
     expect(email.getAttribute('aria-pressed')).toBe('true')
-    expect(email.textContent).toContain('Nov 24')
-    expect(within(blue).queryByRole('button', { name: 'Start deal' })).toBeNull()
+    expect(email.textContent).toBe('EmailNov 24')
+    expect(within(blue).queryByRole('button', { name: 'Add to pipeline' })).toBeNull()
     expect(within(blue).getByRole('link', { name: 'Open deal' }).getAttribute('href')).toBe('/crm?campaign=signals&deal=5b7f2d1e-3c4a-4e8b-9f0a-1b2c3d4e5f60')
   })
 
-  it('ticking a touch PATCHes that account under its state key; Start deal POSTs it', async () => {
+  it('ticking a touch PATCHes that account under its state key; Add to pipeline POSTs it and then links the deal', async () => {
     const calls: { url: string; method: string; body: unknown }[] = []
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string, init?: RequestInit) => {
         calls.push({ url, method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : null })
-        return new Response(JSON.stringify(url.startsWith('/api/signals/inbox') ? inbox : { ok: true, deal_id: 'deal-1', campaign_id: 'signals', created: true }), { status: 200 })
+        return new Response(JSON.stringify(url.startsWith('/api/signals/inbox') ? inbox : { ok: true, deal_id: 'deal-1', campaign_id: 'signals', created: true }), {
+          status: url.endsWith('/deal') ? 201 : 200,
+        })
       })
     )
     wrap(<SignalsInbox initial={inbox} />)
@@ -82,23 +118,79 @@ describe('SignalsInbox', () => {
     fireEvent.click(within(acme()).getByRole('button', { name: 'Call' }))
     await waitFor(() => expect(calls.some((c) => c.url === '/api/signals/accounts')).toBe(true))
     expect(calls.find((c) => c.url === '/api/signals/accounts')).toEqual({ url: '/api/signals/accounts', method: 'PATCH', body: { key: 'd:acme.com', touch: { channel: 'call', done: true } } })
-    await waitFor(() => expect((within(acme()).getByRole('button', { name: 'Start deal' }) as HTMLButtonElement).disabled).toBe(false))
-    fireEvent.click(within(acme()).getByRole('button', { name: 'Start deal' }))
+    await waitFor(() => expect((within(acme()).getByRole('button', { name: 'Add to pipeline' }) as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(within(acme()).getByRole('button', { name: 'Add to pipeline' }))
     await waitFor(() => expect(calls.some((c) => c.url === '/api/signals/accounts/deal')).toBe(true))
     expect(calls.find((c) => c.url === '/api/signals/accounts/deal')).toEqual({ url: '/api/signals/accounts/deal', method: 'POST', body: { key: 'd:acme.com' } })
+    await waitFor(() => expect(within(acme()).getByRole('link', { name: 'Open deal' }).getAttribute('href')).toBe('/crm?campaign=signals&deal=deal-1'))
     // Nothing else is called: no send, no pipeline route.
     expect(new Set(calls.map((c) => c.url.split('?')[0]))).toEqual(new Set(['/api/signals/accounts', '/api/signals/accounts/deal', '/api/signals/inbox']))
   })
 
-  it('status filters carry the counts; the hiring view pins its source and hides the source picker', () => {
-    const { unmount } = wrap(<SignalsInbox initial={inbox} />)
+  it('status filters carry the counts', () => {
+    wrap(<SignalsInbox initial={inbox} />)
     const status = screen.getByRole('group', { name: 'Status' })
-    expect(within(status).getAllByRole('button').map((b) => b.textContent)).toEqual(['All2', 'New1', 'Working1', 'Replied0', 'Dropped0'])
-    expect(screen.getByRole('combobox', { name: 'Source' })).toBeTruthy()
+    expect(
+      within(status)
+        .getAllByRole('button')
+        .map((b) => b.textContent)
+    ).toEqual(['All2', 'New1', 'Working1', 'Replied0', 'Dropped0'])
+  })
+
+  it('a source tab fetches that source and shows its own columns', async () => {
+    const comment = row({
+      key: 'd:acme.com',
+      name: 'Acme PM',
+      sources: ['comment'],
+      latest: {
+        comment: {
+          label: 'Commented',
+          at: '2026-11-25T20:00:00Z',
+          url: 'https://linkedin.com/c/1',
+          person: 'Ada Lovelace',
+          person_title: 'COO',
+          linkedin: 'https://linkedin.com/in/ada',
+          detail: { source: 'comment', reaction: false, comment: 'We miss after-hours calls', post_url: 'https://linkedin.com/posts/1', post_excerpt: 'Who answers your phones at night?' },
+        },
+      },
+    })
+    const thread = row({
+      key: 'r:pm_dave',
+      name: 'u/pm_dave',
+      sources: ['reddit'],
+      latest: {
+        reddit: {
+          label: 'r/Landlord: x',
+          at: '2026-11-24T20:00:00Z',
+          url: 'https://reddit.com/r/Landlord/1',
+          person: null,
+          person_title: null,
+          linkedin: null,
+          detail: { source: 'reddit', subreddit: 'Landlord', thread: 'Answering service?', excerpt: 'Asks who handles after-hours calls', author: 'pm_dave' },
+        },
+      },
+    })
+    const urls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        urls.push(url)
+        return new Response(JSON.stringify({ ...inbox, rows: url.includes('reddit') ? [thread] : [comment] }), { status: 200 })
+      })
+    )
+    const { unmount } = wrap(<SignalsInbox fixedSource="comment" />)
+    const c = await screen.findByText('“We miss after-hours calls”')
+    expect(c.closest('a')?.getAttribute('href')).toBe('https://linkedin.com/c/1')
+    expect(screen.getByRole('link', { name: 'Who answers your phones at night?' }).getAttribute('href')).toBe('https://linkedin.com/posts/1')
+    expect(screen.getByRole('link', { name: 'Ada Lovelace' })).toBeTruthy()
+    expect(document.querySelector('[data-heads]')?.textContent).toBe('PersonCommentPostDateTouchesStatusPipeline')
     unmount()
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(inbox), { status: 200 })))
-    wrap(<SignalsInbox fixedSource="hiring" />)
-    expect(screen.queryByRole('combobox', { name: 'Source' })).toBeNull()
+    wrap(<SignalsInbox fixedSource="reddit" />)
+    expect(await screen.findByRole('link', { name: 'r/Landlord' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Answering service?' }).getAttribute('href')).toBe('https://reddit.com/r/Landlord/1')
+    expect(screen.getByText('Asks who handles after-hours calls')).toBeTruthy()
+    expect(document.querySelector('[data-heads]')?.textContent).toBe('AuthorSubredditThreadExcerptDateTouchesStatusPipeline')
+    expect(urls).toEqual(['/api/signals/inbox?source=comment', '/api/signals/inbox?source=reddit'])
   })
 
   it('says so when a source could not load, and when there is nothing', () => {
@@ -111,14 +203,23 @@ describe('SignalsInbox', () => {
 })
 
 describe('SignalsNav', () => {
-  it('links the inbox, the hiring view and influencers, marking the current one', () => {
-    render(<SignalsNav current="hiring" />)
-    const nav = screen.getByRole('navigation', { name: 'Signals views' })
-    expect(within(nav).getAllByRole('link').map((a) => [a.textContent, a.getAttribute('href'), a.getAttribute('aria-current')])).toEqual([
-      ['Inbox', '/signals', null],
-      ['Hiring', '/signals/hiring', 'page'],
+  it('has one tab per source and marks the current path', () => {
+    render(<SignalsNav />)
+    const nav = screen.getByRole('navigation', { name: 'Signals sources' })
+    expect(
+      within(nav)
+        .getAllByRole('link')
+        .map((a) => [a.textContent, a.getAttribute('href'), a.getAttribute('aria-current')])
+    ).toEqual([
+      ['All', '/signals', null],
+      ['Post comments', '/signals/comments', null],
+      ['Reddit', '/signals/reddit', 'page'],
+      ['Hiring', '/signals/hiring', null],
       ['Influencers', '/signals/influencers', null],
     ])
+  })
+  it('tabOf: unknown paths under /signals are All', () => {
+    expect([tabOf('/signals'), tabOf('/signals/hiring'), tabOf('/signals/influencers'), tabOf('/signals/comments'), tabOf(null)]).toEqual(['all', 'hiring', 'influencers', 'comments', 'all'])
   })
 })
 
@@ -128,11 +229,37 @@ describe('SignalsSection (client portal)', () => {
     more: 3,
     scoreboard: { week: { start: '2026-11-23', end: '2026-11-30', label: 'Nov 23 – Nov 29' }, counts: { conversations: 2, pilots_started: 1, pilots_paid: 0 }, top_objection: 'No budget until Q1' },
     accounts: [
-      { key: 'd:acme.com', company: 'Acme PM', website: 'acme.com', phone: '+13105550101', sources: ['hiring'], untrusted_signal: 'Hiring: Regional PM', signal_at: '2026-11-25T20:00:00Z', contact: { name: 'Ada', title: 'COO', linkedin: null }, status: 'new', called_at: null },
-      { key: 'n:blue door', company: 'Blue Door', website: null, phone: null, sources: ['influencer'], untrusted_signal: 'Reacted to Frank', signal_at: null, contact: null, status: 'working', called_at: null },
+      {
+        key: 'd:acme.com',
+        company: 'Acme PM',
+        website: 'acme.com',
+        phone: '+13105550101',
+        sources: ['hiring'],
+        untrusted_signal: 'Hiring: Regional PM',
+        signal_at: '2026-11-25T20:00:00Z',
+        contact: { name: 'Ada', title: 'COO', linkedin: null },
+        status: 'new',
+        called_at: null,
+      },
+      {
+        key: 'n:blue door',
+        company: 'Blue Door',
+        website: null,
+        phone: null,
+        sources: ['influencer'],
+        untrusted_signal: 'Reacted to Frank',
+        signal_at: null,
+        contact: null,
+        status: 'working',
+        called_at: null,
+      },
     ],
   }
-  const serve = (b: unknown, status = 200) => vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(b), { status })))
+  const serve = (b: unknown, status = 200) =>
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(b), { status }))
+    )
 
   it('shows the scoreboard (read only) and the accounts with tap-to-call numbers; the owner preview rides along', async () => {
     serve(body)

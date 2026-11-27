@@ -38,6 +38,26 @@ export interface SignalEvent {
   linkedin: string | null
   /** Reddit author (no company): the account when nothing else identifies it. */
   handle?: string | null
+  /** The source's own fields, for that source's columns in the inbox. */
+  detail?: SignalDetail
+}
+
+/** Source-specific fields of one signal (scraped text, clipped): what each source tab shows in its columns. */
+export type SignalDetail =
+  | { source: 'hiring'; signal: string; role: string | null }
+  | { source: 'comment'; reaction: boolean; comment: string | null; post_url: string | null; post_excerpt: string | null }
+  | { source: 'reddit'; subreddit: string | null; thread: string | null; excerpt: string | null; author: string | null }
+  | { source: 'influencer'; reacted_to: string[]; doors: number | null }
+
+/** The newest signal an account has from one source, with that source's fields. */
+export interface LatestSignal {
+  label: string
+  at: string | null
+  url: string | null
+  person: string | null
+  person_title: string | null
+  linkedin: string | null
+  detail: SignalDetail | null
 }
 
 /**
@@ -153,6 +173,8 @@ export interface SignalAccount {
   contacts: { name: string; title: string | null; linkedin: string | null }[]
   /** Up to five signals, newest first. */
   events: Pick<SignalEvent, 'source' | 'ref' | 'label' | 'at' | 'url'>[]
+  /** The newest signal from each source the account has. */
+  latest: Partial<Record<SignalSource, LatestSignal>>
 }
 
 const time = (iso: string | null) => {
@@ -203,6 +225,11 @@ export function mergeSignals(events: readonly SignalEvent[]): SignalAccount[] {
       if (!n || contacts.length >= 3 || contacts.some((c) => c.name.toLowerCase() === n.toLowerCase())) continue
       contacts.push({ name: n, title: m.person_title?.trim() || null, linkedin: m.linkedin?.trim() || null })
     }
+    const latest: SignalAccount['latest'] = {}
+    for (const m of members) {
+      if (latest[m.source]) continue
+      latest[m.source] = { label: m.label, at: m.at, url: m.url, person: m.person?.trim() || null, person_title: m.person_title?.trim() || null, linkedin: m.linkedin?.trim() || null, detail: m.detail ?? null }
+    }
     out.push({
       key,
       aliases: [...g.names].filter((k) => k !== key).sort(),
@@ -214,6 +241,7 @@ export function mergeSignals(events: readonly SignalEvent[]): SignalAccount[] {
       phone: members.find((m) => m.phone?.trim())?.phone?.trim() ?? null,
       contacts,
       events: members.slice(0, 5).map((m) => ({ source: m.source, ref: m.ref, label: m.label, at: m.at, url: m.url })),
+      latest,
     })
   }
   return out.sort((a, b) => time(b.newest.at) - time(a.newest.at) || a.key.localeCompare(b.key))

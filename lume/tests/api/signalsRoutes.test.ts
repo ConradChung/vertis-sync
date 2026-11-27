@@ -20,7 +20,7 @@ import type { SignalRow } from '@/lib/signals/merge'
 const json = (url: string, method: string, body: unknown, headers: Record<string, string> = {}) =>
   new Request(url, { method, body: JSON.stringify(body), headers: { 'content-type': 'application/json', ...headers } })
 const row = (o: Partial<SignalRow> & { key: string; name: string }): SignalRow => ({
-  aliases: [], domain: null, sources: ['hiring'], count: 1, newest: { source: 'hiring', label: 'Hiring: Regional PM', at: '2026-11-25T00:00:00Z', url: null }, phone: null, contacts: [], events: [],
+  aliases: [], domain: null, sources: ['hiring'], count: 1, newest: { source: 'hiring', label: 'Hiring: Regional PM', at: '2026-11-25T00:00:00Z', url: null }, phone: null, contacts: [], events: [], latest: {},
   state_key: o.key, status: 'new', touches: { email: null, linkedin: null, call: null }, deal_id: null, ...o,
 })
 const board = { week: { start: '2026-11-23', end: '2026-11-30', label: 'Nov 23 – Nov 29' }, counts: { conversations: 2, pilots_started: 1, pilots_paid: 0 }, top_objection: 'No budget' }
