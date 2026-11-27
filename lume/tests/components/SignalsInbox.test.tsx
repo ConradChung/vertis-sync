@@ -184,7 +184,7 @@ describe('SignalsInbox', () => {
     expect(c.closest('a')?.getAttribute('href')).toBe('https://linkedin.com/c/1')
     expect(screen.getByRole('link', { name: 'Who answers your phones at night?' }).getAttribute('href')).toBe('https://linkedin.com/posts/1')
     expect(screen.getByRole('link', { name: 'Ada Lovelace' })).toBeTruthy()
-    expect(document.querySelector('[data-heads]')?.textContent).toBe('PersonCommentPostDateTouchesStatusPipeline')
+    expect(document.querySelector('[data-heads]')?.textContent).toBe('PersonDoorsCommentPostDateTouchesStatusPipeline')
     unmount()
     wrap(<SignalsInbox fixedSource="reddit" />)
     expect(await screen.findByRole('link', { name: 'r/Landlord' })).toBeTruthy()
@@ -200,6 +200,77 @@ describe('SignalsInbox', () => {
     unmount()
     wrap(<SignalsInbox initial={{ rows: [], total: 0, failed: [], counts: { new: 0, working: 0, replied: 0, dropped: 0 } }} />)
     expect(screen.getByText('No signal accounts yet.')).toBeTruthy()
+  })
+})
+
+describe('Doors column', () => {
+  const doorRows: SignalInbox = {
+    ...inbox,
+    rows: [
+      row({ key: 'd:big.com', name: 'Big PM', domain: 'big.com', sources: ['influencer'], doors: { count: 1200, source: 'apollo', confidence: 'high' } }),
+      row({ key: 'd:mid.com', name: 'Mid PM', domain: 'mid.com', sources: ['comment'] }),
+      row({ key: 'd:jobs.com', name: 'Jobs PM', domain: 'jobs.com', sources: ['hiring'] }),
+    ],
+  }
+  const items = () => within(screen.getByRole('list', { name: 'Signal accounts' })).getAllByRole('listitem')
+
+  it('shows the count with a thousands separator and its source on hover, Unknown when missing, a dash for hiring-only', () => {
+    wrap(<SignalsInbox initial={doorRows} />)
+    const [big, mid, jobs] = items()
+    expect(within(big).getByText('1,200').getAttribute('title')).toBe('Source: apollo · Confidence: high')
+    expect(within(mid).getByText('Unknown')).toBeTruthy()
+    expect(within(jobs).queryByText('Unknown')).toBeNull()
+    expect(jobs.querySelector('[data-doors]')?.textContent).toContain('—')
+    expect(document.querySelector('[data-heads]')?.textContent).toBe('AccountDoorsLatest signalTouchesStatusPipeline')
+  })
+
+  it('the Doors header sorts highest first, then lowest first, then off (the fetch carries it)', async () => {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => { urls.push(url); return new Response(JSON.stringify(doorRows), { status: 200 }) }))
+    wrap(<SignalsInbox initial={doorRows} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by doors' }))
+    await waitFor(() => expect(urls).toContain('/api/signals/inbox?sort=doors_desc'))
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by doors, highest first' }))
+    await waitFor(() => expect(urls).toContain('/api/signals/inbox?sort=doors_asc'))
+  })
+
+  it('500+ is off by default, sits beside the status filters and is not part of the status group', async () => {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => { urls.push(url); return new Response(JSON.stringify(doorRows), { status: 200 }) }))
+    wrap(<SignalsInbox initial={doorRows} />)
+    const btn = screen.getByRole('button', { name: '500+' })
+    expect(btn.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(btn)
+    await waitFor(() => expect(urls).toContain('/api/signals/inbox?min_doors=500'))
+    expect(btn.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('the Reddit tab has no Doors column and no 500+ filter', async () => {
+    const thread = row({ key: 'r:pm_dave', name: 'u/pm_dave', sources: ['reddit'] })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...inbox, rows: [thread] }), { status: 200 })))
+    wrap(<SignalsInbox fixedSource="reddit" />)
+    await screen.findByRole('list', { name: 'Signal accounts' })
+    expect(document.querySelector('[data-heads]')?.textContent).not.toContain('Doors')
+    expect(screen.queryByRole('button', { name: '500+' })).toBeNull()
+  })
+
+  const held = row({ key: 'd:held.com', name: 'Held Co', sources: ['comment'], held: [{ id: 77, name: 'Hana Held' }] })
+  it('a held person: the count cell says Unknown, and the typed count still releases them', async () => {
+    const calls: { url: string; body: unknown }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null })
+      return new Response(JSON.stringify(url.includes('/units') ? { outcome: 'continue', min_units: 500 } : { ...inbox, rows: [held] }), { status: 200 })
+    }))
+    wrap(<SignalsInbox fixedSource="comment" />)
+    await screen.findByRole('list', { name: 'Signal accounts' })
+    const li = items()[0]
+    expect(within(li).getByText('Unknown')).toBeTruthy()
+    expect(within(li).queryByText('Units unknown')).toBeNull()
+    const input = within(li).getByLabelText('Unit count for Hana Held')
+    fireEvent.change(input, { target: { value: '650' } })
+    fireEvent.click(within(li).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/signals/people/77/units')).toBe(true))
+    expect(calls.find((c) => c.url === '/api/signals/people/77/units')?.body).toEqual({ units: 650 })
   })
 })
 

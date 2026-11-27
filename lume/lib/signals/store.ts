@@ -7,8 +7,8 @@ import {
   type HiringSource, type PersonSource, type PostSource, type ReactorSource, type RedditSource,
 } from '@/lib/signals/events'
 import {
-  applyState, countByStatus, filterRows, isResearchOnly, mergeSignals, placeholderEmail, SIGNALS_CAMPAIGN_ID,
-  type SignalEvent, type SignalFilter, type SignalInbox, type SignalRow, type SignalSource, type SignalState, type SignalStatus, type TouchChannel,
+  applyState, countByStatus, filterRows, isResearchOnly, mergeSignals, placeholderEmail, SIGNALS_CAMPAIGN_ID, sortByDoors,
+  type DoorSort, type SignalEvent, type SignalFilter, type SignalInbox, type SignalRow, type SignalSource, type SignalState, type SignalStatus, type TouchChannel,
 } from '@/lib/signals/merge'
 import { createServiceClient } from '@/lib/supabase/service'
 
@@ -80,10 +80,11 @@ export async function loadAllRows(): Promise<{ rows: SignalRow[]; failed: Signal
  * leaves Reddit-only accounts (research, under the Reddit tab) out. Counts
  * cover the tab, whatever the status or search.
  */
-export async function loadInbox(filter: SignalFilter = {}, limit = 100): Promise<SignalInbox> {
+export async function loadInbox(filter: SignalFilter = {}, limit = 100, doorSort?: DoorSort): Promise<SignalInbox> {
   const { rows, failed } = await loadAllRows()
   const scope = filter.source && filter.source !== 'all' ? filterRows(rows, { source: filter.source }) : rows.filter((r) => !isResearchOnly(r))
-  const shown = filterRows(scope, filter)
+  const filtered = filterRows(scope, filter)
+  const shown = doorSort ? sortByDoors(filtered, doorSort) : filtered
   return { rows: shown.slice(0, limit), counts: countByStatus(scope), total: shown.length, failed }
 }
 

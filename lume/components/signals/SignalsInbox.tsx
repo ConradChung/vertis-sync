@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState, type ReactNode } from 'react'
 import useSWR, { useSWRConfig } from 'swr'
-import { ArrowUpRight, Check, ExternalLink, Search } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpRight, Check, ExternalLink, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { SimpleSelect } from '@/components/ui/simple-select'
@@ -13,8 +13,11 @@ import { fetchJson } from '@/hooks/fetcher'
 import { shortDate } from '@/lib/crm/pilot'
 import {
   SIGNAL_STATUSES,
+  MIN_DOORS_FILTER,
   SOURCE_LABEL,
   TOUCH_CHANNELS,
+  formatDoors,
+  type DoorCount,
   type LatestSignal,
   type SignalDetail,
   type SignalInbox,
@@ -51,11 +54,19 @@ type Patch = {
 /** Which columns the rows use: the All tab's, or one source tab's. */
 type View = 'all' | 'comment' | 'reddit' | 'hiring'
 
-export function inboxKey(source: SignalSource | 'all', status: StatusFilter, q: string): string {
+/** Doors: `min` is the 500+ quick filter, `sort` the door-count order (highest first, or lowest first). */
+export interface DoorOptions {
+  min?: boolean
+  sort?: 'desc' | 'asc' | null
+}
+
+export function inboxKey(source: SignalSource | 'all', status: StatusFilter, q: string, doors: DoorOptions = {}): string {
   const p = new URLSearchParams()
   if (source !== 'all') p.set('source', source)
   if (status !== 'all') p.set('status', status)
   if (q) p.set('q', q)
+  if (doors.min) p.set('min_doors', String(MIN_DOORS_FILTER))
+  if (doors.sort) p.set('sort', 'doors_' + doors.sort)
   const qs = p.toString()
   return qs ? '/api/signals/inbox?' + qs : '/api/signals/inbox'
 }
@@ -70,16 +81,16 @@ const isHttp = (u: string | null | undefined): u is string => !!u && /^https?:\/
  * Pipeline. Whole literal strings, so Tailwind sees them.
  */
 const GRID: Record<View, string> = {
-  all: 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_15rem_7rem_9rem]',
-  comment: 'xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.4fr)_minmax(0,1fr)_4.5rem_15rem_7rem_9rem]',
+  all: 'xl:grid-cols-[minmax(0,1fr)_6rem_minmax(0,1.6fr)_15rem_7rem_9rem]',
+  comment: 'xl:grid-cols-[minmax(0,0.9fr)_6rem_minmax(0,1.4fr)_minmax(0,1fr)_4.5rem_15rem_7rem_9rem]',
   reddit: 'xl:grid-cols-[minmax(0,0.9fr)_10rem_minmax(0,1fr)_minmax(0,1.3fr)_4.5rem_15rem_7rem_9rem]',
-  hiring: 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,0.9fr)_4.5rem_15rem_7rem_9rem]',
+  hiring: 'xl:grid-cols-[minmax(0,1fr)_6rem_minmax(0,1.3fr)_minmax(0,0.9fr)_4.5rem_15rem_7rem_9rem]',
 }
 const HEADS: Record<View, string[]> = {
-  all: ['Account', 'Latest signal'],
-  comment: ['Person', 'Comment', 'Post', 'Date'],
+  all: ['Account', 'Doors', 'Latest signal'],
+  comment: ['Person', 'Doors', 'Comment', 'Post', 'Date'],
   reddit: ['Author', 'Subreddit', 'Thread', 'Excerpt', 'Date'],
-  hiring: ['Company', 'Signal', 'Contact', 'Date'],
+  hiring: ['Company', 'Doors', 'Signal', 'Contact', 'Date'],
 }
 
 /**
@@ -98,13 +109,16 @@ export function SignalsInbox({ initial, fixedSource, defaultSource }: { initial?
   const [source, setSource] = useState<SignalSource | 'all'>(fixedSource ?? defaultSource ?? 'all')
   const view: View = fixedSource === 'comment' || fixedSource === 'reddit' || fixedSource === 'hiring' ? fixedSource : 'all'
   const [status, setStatus] = useState<StatusFilter>('all')
+  const [min500, setMin500] = useState(false)
+  const [doorSort, setDoorSort] = useState<'desc' | 'asc' | null>(null)
   const [typed, setTyped] = useState('')
   const [q, setQ] = useState('')
   useEffect(() => {
     const t = setTimeout(() => setQ(typed.trim()), 250)
     return () => clearTimeout(t)
   }, [typed])
-  const key = inboxKey(source, status, q)
+  const hasDoors = view !== 'reddit'
+  const key = inboxKey(source, status, q, hasDoors ? { min: min500, sort: doorSort } : {})
   // The server's rows are the unfiltered inbox: use them only for that key.
   const { data, error, mutate } = useSWR<SignalInbox>(key, fetchJson, {
     fallbackData: key === '/api/signals/inbox' ? initial : undefined,
@@ -169,6 +183,17 @@ export function SignalsInbox({ initial, fixedSource, defaultSource }: { initial?
             </button>
           ))}
         </div>
+        {hasDoors && (
+          <button
+            type="button"
+            aria-pressed={min500}
+            title="Only accounts with 500 or more doors"
+            onClick={() => setMin500((v) => !v)}
+            className={cn('text-[13px] outline-none hover:text-fg focus-visible:underline', min500 ? 'font-medium text-fg' : 'text-fg-46')}
+          >
+            {MIN_DOORS_FILTER}+
+          </button>
+        )}
         <div className="flex flex-wrap items-center gap-3 max-sm:w-full sm:ml-auto">
           {!fixedSource && source !== 'all' && (
             <button type="button" onClick={() => setSource('all')} className="text-[13px] text-fg-70 hover:text-fg">
@@ -200,12 +225,25 @@ export function SignalsInbox({ initial, fixedSource, defaultSource }: { initial?
 
       {rows.length > 0 && (
         <div className="flex flex-col gap-4">
-          <div aria-hidden data-heads className={cn('hidden gap-x-5 text-[12px] text-fg-46 xl:grid', GRID[view])}>
-            {[...HEADS[view], 'Touches', 'Status', 'Pipeline'].map((h) => (
-              <span key={h} className={h === 'Touches' ? 'pl-2' : undefined}>
-                {h}
-              </span>
-            ))}
+          <div data-heads className={cn('hidden gap-x-5 text-[12px] text-fg-46 xl:grid', GRID[view])}>
+            {[...HEADS[view], 'Touches', 'Status', 'Pipeline'].map((h) =>
+              h === 'Doors' ? (
+                <button
+                  key={h}
+                  type="button"
+                  aria-label={'Sort by doors' + (doorSort ? (doorSort === 'desc' ? ', highest first' : ', lowest first') : '')}
+                  onClick={() => setDoorSort((d) => (d === null ? 'desc' : d === 'desc' ? 'asc' : null))}
+                  className={cn('inline-flex items-center gap-1 text-left outline-none hover:text-fg focus-visible:underline', doorSort && 'text-fg')}
+                >
+                  Doors
+                  {doorSort === 'desc' ? <ArrowDown className="size-3" strokeWidth={1.75} aria-hidden /> : doorSort === 'asc' ? <ArrowUp className="size-3" strokeWidth={1.75} aria-hidden /> : null}
+                </button>
+              ) : (
+                <span key={h} className={h === 'Touches' ? 'pl-2' : undefined}>
+                  {h}
+                </span>
+              )
+            )}
           </div>
           <ul aria-label="Signal accounts" className="flex flex-col gap-7">
             {rows.map((r) => (
@@ -333,14 +371,13 @@ function HeldUnits({ id, name }: { id: number; name: string | null }) {
   }
   return (
     <form
-      className="mt-2 flex flex-wrap items-center gap-2"
+      className="flex flex-wrap items-center gap-2"
       onSubmit={(e) => {
         e.preventDefault()
         void save()
       }}
     >
-      <span className="text-[12px] font-medium text-fg-70">Units unknown</span>
-      {name && <span className="truncate text-[12px] text-fg-46">{name}</span>}
+      {name && <span className="w-full truncate text-[12px] text-fg-46">{name}</span>}
       <input
         inputMode="numeric"
         aria-label={'Unit count for ' + (name ?? 'this person')}
@@ -354,6 +391,44 @@ function HeldUnits({ id, name }: { id: number; name: string | null }) {
         Save
       </Button>
     </form>
+  )
+}
+
+/** "1,200 doors" tooltip: where the number came from and how sure that source was (when it says). */
+const doorsTitle = (d: DoorCount) => {
+  const bits = [d.source ? 'Source: ' + d.source.replace(/_/g, ' ') : null, d.confidence ? 'Confidence: ' + d.confidence : null].filter(Boolean)
+  return bits.length ? bits.join(' · ') : undefined
+}
+
+/**
+ * The Doors column: the account's count from its newest signal that has one,
+ * or a muted Unknown. A LinkedIn person the ICP gate held is released from
+ * here by typing their count. Hiring rows carry no count at all, so an
+ * account with only hiring signals shows a dash.
+ */
+function DoorsCell({ r }: { r: SignalRow }) {
+  const held = r.held ?? []
+  const hiringOnly = r.sources.length > 0 && r.sources.every((s) => s === 'hiring')
+  return (
+    <div data-doors className="min-w-0">
+      <p className="mb-1 text-[12px] text-fg-46 xl:hidden">Doors</p>
+      {r.doors ? (
+        <span title={doorsTitle(r.doors)} className="font-mono text-[13px] text-fg tabular-nums">
+          {formatDoors(r.doors.count)}
+        </span>
+      ) : hiringOnly && held.length === 0 ? (
+        <Muted>—</Muted>
+      ) : (
+        <Muted>Unknown</Muted>
+      )}
+      {held.length > 0 && (
+        <div className="mt-2 flex flex-col gap-2">
+          {held.map((h) => (
+            <HeldUnits key={h.id} id={h.id} name={h.name} />
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -375,7 +450,6 @@ function CompanyCell({ r }: { r: SignalRow }) {
   return (
     <div className="min-w-0">
       <p className="truncate text-[14px] font-medium text-fg">{r.name}</p>
-      {r.held?.map((h) => <HeldUnits key={h.id} id={h.id} name={h.name} />)}
       {(r.domain || tel) && (
         <p className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[13px] text-fg-46">
           {r.domain && (
@@ -409,8 +483,8 @@ function cellsFor(view: View, r: SignalRow): ReactNode {
             <Ext href={l?.linkedin}>{l?.person ?? r.contacts[0]?.name ?? r.name}</Ext>
           </p>
           <p className="mt-0.5 truncate text-[13px] text-fg-46">{[l?.person_title, r.name !== l?.person ? r.name : null].filter(Boolean).join(' · ')}</p>
-          {r.held?.map((h) => <HeldUnits key={h.id} id={h.id} name={h.name} />)}
         </div>
+        <DoorsCell r={r} />
         <p className="line-clamp-3 text-[13px] leading-snug text-fg-70">
           {d?.reaction ? <Muted>Reacted, no comment</Muted> : d?.comment ? <Ext href={l?.url}>“{d.comment}”</Ext> : <Ext href={l?.url}>{l?.label ?? r.newest.label}</Ext>}
         </p>
@@ -446,6 +520,7 @@ function cellsFor(view: View, r: SignalRow): ReactNode {
     return (
       <>
         <CompanyCell r={r} />
+        <DoorsCell r={r} />
         <div className="min-w-0">
           <p className="line-clamp-2 text-[13px] leading-snug text-fg">
             <Ext href={l?.url}>{d?.role ?? l?.label ?? r.newest.label}</Ext>
@@ -475,6 +550,7 @@ function cellsFor(view: View, r: SignalRow): ReactNode {
         <CompanyCell r={r} />
         {contact && <p className="mt-0.5 truncate text-[12px] text-fg-46">{[contact.name, contact.title].filter(Boolean).join(', ')}</p>}
       </div>
+      <DoorsCell r={r} />
       <div className="min-w-0">
         <p data-newest className="line-clamp-2 text-[13px] leading-snug text-fg-70">
           {isHttp(r.newest.url) ? (
