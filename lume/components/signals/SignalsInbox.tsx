@@ -72,7 +72,7 @@ const isHttp = (u: string | null | undefined): u is string => !!u && /^https?:\/
 const GRID: Record<View, string> = {
   all: 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_15rem_7rem_9rem]',
   comment: 'xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.4fr)_minmax(0,1fr)_4.5rem_15rem_7rem_9rem]',
-  reddit: 'xl:grid-cols-[minmax(0,0.7fr)_minmax(0,0.6fr)_minmax(0,1fr)_minmax(0,1.3fr)_4.5rem_15rem_7rem_9rem]',
+  reddit: 'xl:grid-cols-[minmax(0,0.9fr)_10rem_minmax(0,1fr)_minmax(0,1.3fr)_4.5rem_15rem_7rem_9rem]',
   hiring: 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,0.9fr)_4.5rem_15rem_7rem_9rem]',
 }
 const HEADS: Record<View, string[]> = {
@@ -169,13 +169,13 @@ export function SignalsInbox({ initial, fixedSource, defaultSource }: { initial?
             </button>
           ))}
         </div>
-        <div className="flex flex-wrap items-center gap-3 sm:ml-auto">
+        <div className="flex flex-wrap items-center gap-3 max-sm:w-full sm:ml-auto">
           {!fixedSource && source !== 'all' && (
             <button type="button" onClick={() => setSource('all')} className="text-[13px] text-fg-70 hover:text-fg">
               {SOURCE_LABEL[source]}s only · <span className="underline">show all</span>
             </button>
           )}
-          <label className="relative block">
+          <label className="relative block max-sm:w-full">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-fg-46" strokeWidth={1.75} aria-hidden />
             <input
               type="search"
@@ -183,7 +183,7 @@ export function SignalsInbox({ initial, fixedSource, defaultSource }: { initial?
               onChange={(e) => setTyped(e.target.value)}
               placeholder={view === 'reddit' ? 'Search author' : 'Search company or person'}
               aria-label="Search"
-              className="h-8 w-60 max-w-full rounded-lg bg-secondary pr-3 pl-9 text-[13px] text-fg outline-none placeholder:text-fg-46 focus-visible:ring-2 focus-visible:ring-ring"
+              className="h-8 w-full rounded-lg sm:w-60 bg-secondary pr-3 pl-9 text-[13px] text-fg outline-none placeholder:text-fg-46 focus-visible:ring-2 focus-visible:ring-ring"
             />
           </label>
         </div>

@@ -40,7 +40,8 @@ const SECTION_WORDS: Record<string, string> = {
  * or a task is a note on Lume's own rows; nothing here sends or spends.
  *
  * One full-width surface: the scoreboard across the top, then the four
- * queues in two columns on desktop (one on a phone), set apart by space.
+ * queues in two columns on desktop (replies, check-ins and tasks beside the
+ * longer signals list; one column on a phone), set apart by space.
  * The accent colour marks only what is late.
  */
 export function TodayScreen({ initial }: { initial: TodayPayload }) {
@@ -96,87 +97,90 @@ export function TodayScreen({ initial }: { initial: TodayPayload }) {
         )}
 
         <div className="grid gap-x-16 gap-y-10 lg:grid-cols-2">
-          <Group
-            title="Replies waiting over an hour"
-            count={q.replies.items.length}
-            href="/replies"
-            linkLabel={q.replies.open > 0 ? `All ${q.replies.open} open` : 'Replies'}
-            empty={q.replies.open > 0 ? `${q.replies.open} open, none past the hour.` : 'No positive replies waiting.'}
-          >
-            {q.replies.items.map((r) => (
-              <Row
-                key={r.reply_to_uuid}
-                title={r.lead_name ?? r.lead_email}
-                detail={[r.company, r.untrusted_excerpt ? `“${r.untrusted_excerpt}”` : null].filter(Boolean).join(' · ')}
-                right={<WaitChip since={r.received_at} now={now} />}
-              >
-                <Link href="/replies" className="text-[13px] text-fg-70 hover:text-fg">
-                  Open
-                </Link>
-              </Row>
-            ))}
-          </Group>
-
-          <Group title="Pilot check-ins due" count={q.checkins.length} href="/crm" linkLabel="Pipeline" empty="No check-ins due.">
-            {q.checkins.map((c) => (
-              <Row
-                key={`${c.deal_id}:${c.day}`}
-                title={`${c.company ?? c.name ?? c.email} — day ${c.day}`}
-                detail={`${c.name && c.company ? `${c.name} · ` : ''}due ${shortDate(c.due_date)}${c.days_late > 0 ? ` · ${c.days_late} d late` : ' · today'}`}
-                late={c.days_late > 0}
-              >
-                <Link href={`/crm?campaign=${encodeURIComponent(c.campaign_id)}&deal=${c.deal_id}`} className="text-[13px] text-fg-70 hover:text-fg">
-                  Open deal
-                </Link>
-                <Button size="sm" variant="secondary" className="rounded-lg" disabled={busy !== null} onClick={() => void tickCheckin(c.deal_id, c.day)}>
-                  <Check /> Done
-                </Button>
-              </Row>
-            ))}
-          </Group>
-
-          <Group
-            title="Signal accounts not yet touched"
-            count={q.signals.total}
-            href="/signals"
-            linkLabel={q.signals.total > q.signals.items.length ? `All ${q.signals.total}` : 'Signals'}
-            empty="Every signal account has been touched."
-          >
-            {q.signals.items.map((s) => (
-              <Row
-                key={s.key}
-                title={s.company}
-                detail={[s.untrusted_detail, s.at ? shortDate(ownerDate(s.at)) : null].filter(Boolean).join(' · ')}
-                right={<span className="text-[12px] text-fg-46">{s.sources.join(' · ')}</span>}
-              >
-                <Link href={s.href} aria-label={`Open ${s.company}`} className="grid size-8 place-items-center rounded-lg text-fg-70 hover:bg-secondary hover:text-fg">
-                  <ArrowRight className="size-4" strokeWidth={1.75} aria-hidden />
-                </Link>
-              </Row>
-            ))}
-          </Group>
-
-          <Group title="Tasks" count={q.tasks.length} href="/calendar" linkLabel="Calendar" empty="Nothing due today.">
-            {q.tasks.map((t) => (
-              <Row
-                key={t.id}
-                title={t.title}
-                detail={t.overdue ? `overdue since ${shortDate(ownerDate(t.due_at))}` : t.all_day ? 'today' : `today ${timeFmt.format(new Date(t.due_at))}`}
-                late={t.overdue}
-              >
-                {t.action_id ? (
-                  <Link href={`/actions/${t.action_id}`} className="text-[13px] text-fg hover:underline">
-                    Waiting for Confirm
+          <div className="flex min-w-0 flex-col gap-10">
+            <Group
+              title="Replies waiting over an hour"
+              count={q.replies.items.length}
+              href="/replies"
+              linkLabel={q.replies.open > 0 ? `All ${q.replies.open} open` : 'Replies'}
+              empty={q.replies.open > 0 ? `${q.replies.open} open, none past the hour.` : 'No positive replies waiting.'}
+            >
+              {q.replies.items.map((r) => (
+                <Row
+                  key={r.reply_to_uuid}
+                  title={r.lead_name ?? r.lead_email}
+                  detail={[r.company, r.untrusted_excerpt ? `“${r.untrusted_excerpt}”` : null].filter(Boolean).join(' · ')}
+                  right={<WaitChip since={r.received_at} now={now} />}
+                >
+                  <Link href="/replies" className="text-[13px] text-fg-70 hover:text-fg">
+                    Open
                   </Link>
-                ) : (
-                  <Button size="sm" variant="secondary" className="rounded-lg" disabled={busy !== null} onClick={() => void finishTask(t.id)}>
+                </Row>
+              ))}
+            </Group>
+
+            <Group title="Pilot check-ins due" count={q.checkins.length} href="/crm" linkLabel="Pipeline" empty="No check-ins due.">
+              {q.checkins.map((c) => (
+                <Row
+                  key={`${c.deal_id}:${c.day}`}
+                  title={`${c.company ?? c.name ?? c.email} — day ${c.day}`}
+                  detail={`${c.name && c.company ? `${c.name} · ` : ''}due ${shortDate(c.due_date)}${c.days_late > 0 ? ` · ${c.days_late} d late` : ' · today'}`}
+                  late={c.days_late > 0}
+                >
+                  <Link href={`/crm?campaign=${encodeURIComponent(c.campaign_id)}&deal=${c.deal_id}`} className="text-[13px] text-fg-70 hover:text-fg">
+                    Open deal
+                  </Link>
+                  <Button size="sm" variant="secondary" className="rounded-lg" disabled={busy !== null} onClick={() => void tickCheckin(c.deal_id, c.day)}>
                     <Check /> Done
                   </Button>
-                )}
-              </Row>
-            ))}
-            <AddTask today={data.today} onAdded={() => void mutate()} />
-          </Group>
+                </Row>
+              ))}
+            </Group>
+
+            <Group title="Tasks" count={q.tasks.length} href="/calendar" linkLabel="Calendar" empty="Nothing due today.">
+              {q.tasks.map((t) => (
+                <Row
+                  key={t.id}
+                  title={t.title}
+                  detail={t.overdue ? `overdue since ${shortDate(ownerDate(t.due_at))}` : t.all_day ? 'today' : `today ${timeFmt.format(new Date(t.due_at))}`}
+                  late={t.overdue}
+                >
+                  {t.action_id ? (
+                    <Link href={`/actions/${t.action_id}`} className="text-[13px] text-fg hover:underline">
+                      Waiting for Confirm
+                    </Link>
+                  ) : (
+                    <Button size="sm" variant="secondary" className="rounded-lg" disabled={busy !== null} onClick={() => void finishTask(t.id)}>
+                      <Check /> Done
+                    </Button>
+                  )}
+                </Row>
+              ))}
+              <AddTask today={data.today} onAdded={() => void mutate()} />
+            </Group>
+          </div>
+          <div className="flex min-w-0 flex-col gap-10">
+            <Group
+              title="Signal accounts not yet touched"
+              count={q.signals.total}
+              href="/signals"
+              linkLabel={q.signals.total > q.signals.items.length ? `All ${q.signals.total}` : 'Signals'}
+              empty="Every signal account has been touched."
+            >
+              {q.signals.items.map((s) => (
+                <Row
+                  key={s.key}
+                  title={s.company}
+                  detail={[s.untrusted_detail, s.at ? shortDate(ownerDate(s.at)) : null].filter(Boolean).join(' · ')}
+                  right={<span className="text-[12px] text-fg-46">{s.sources.join(' · ')}</span>}
+                >
+                  <Link href={s.href} aria-label={`Open ${s.company}`} className="grid size-8 place-items-center rounded-lg text-fg-70 hover:bg-secondary hover:text-fg">
+                    <ArrowRight className="size-4" strokeWidth={1.75} aria-hidden />
+                  </Link>
+                </Row>
+              ))}
+            </Group>
+          </div>
         </div>
       </section>
     </Surface>

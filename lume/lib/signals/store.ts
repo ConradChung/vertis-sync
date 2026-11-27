@@ -78,7 +78,9 @@ export async function loadAllRows(): Promise<{ rows: SignalRow[]; failed: Signal
 export async function loadInbox(filter: SignalFilter = {}, limit = 100): Promise<SignalInbox> {
   const { rows, failed } = await loadAllRows()
   const shown = filterRows(rows, filter)
-  return { rows: shown.slice(0, limit), counts: countByStatus(rows), total: shown.length, failed }
+  // Counts cover the source being looked at (every account on the All tab), whatever the status or search.
+  const counted = filter.source && filter.source !== 'all' ? filterRows(rows, { source: filter.source }) : rows
+  return { rows: shown.slice(0, limit), counts: countByStatus(counted), total: shown.length, failed }
 }
 
 export interface AccountPatch {

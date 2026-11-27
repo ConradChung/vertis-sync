@@ -326,7 +326,7 @@ export function countByStatus(rows: readonly Pick<SignalRow, 'status'>[]): Recor
 /** `GET /api/signals/inbox`. */
 export interface SignalInbox {
   rows: SignalRow[]
-  /** Counts over every account, whatever the filter. */
+  /** Counts over the filter's source (every account when none), whatever the status or search. */
   counts: Record<SignalStatus, number>
   /** Rows matching the filter (may exceed `rows`). */
   total: number

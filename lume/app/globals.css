@@ -567,14 +567,14 @@ html[data-chat] .glass {
   --bg-bottom: oklch(0.12 0.002 125);
   --bg-field-a: oklch(0.34 0.075 128 / 0.32);
   --bg-field-b: oklch(0.27 0.012 250 / 0.45);
-  --bg-field-c: oklch(0.23 0.008 80 / 0.4);
+  --bg-field-c: oklch(0.22 0.008 250 / 0.4);
 }
 :root.light {
   --bg-top: oklch(0.975 0.005 120);
   --bg-bottom: oklch(0.95 0.008 125);
   --bg-field-a: oklch(0.93 0.075 125 / 0.5);
   --bg-field-b: oklch(0.995 0.003 240 / 0.75);
-  --bg-field-c: oklch(0.925 0.012 220 / 0.45);
+  --bg-field-c: oklch(0.93 0.008 230 / 0.4);
 }
 .app-bg {
   background: linear-gradient(170deg in oklch, var(--bg-top), var(--bg-bottom));

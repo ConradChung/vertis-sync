@@ -146,7 +146,7 @@ export function redditEvent(r: RedditSource): SignalEvent | null {
       source: 'reddit',
       subreddit: r.subreddit ? r.subreddit.replace(/^r\//, '') : null,
       thread: clip(r.title, 160) || null,
-      excerpt: clip(r.summary ?? r.snippet, 280) || null,
+      excerpt: clip(r.snippet ?? r.summary, 280) || null,
       author: r.author,
     },
   }
