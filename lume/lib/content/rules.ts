@@ -30,6 +30,14 @@ export interface RuleContext {
   leadId: number
   offerId: number
   variant: Variant | null
+  /** Other drafts from the last 14 days: no long shared runs of words with any of them. */
+  recent?: { id: number; body: string }[]
+  /** The tagline text (normalised); defaults to the "Tagline:" fact among the provided ones. */
+  tagline?: string
+  /** The tagline already appears in a draft this week. */
+  taglineTaken?: boolean
+  /** A "we built Kaspen" line already appears in a draft this week. */
+  builtTaken?: boolean
 }
 
 // ── numbers ────────────────────────────────────────────────────────────────
@@ -71,8 +79,91 @@ export function extractNumbers(text: string): NumberHit[] {
 
 export const numbersIn = (text: string) => new Set(extractNumbers(text).map((h) => h.value))
 
-const SCALE_AFTER = /^\s*-?\s*(units?|doors?|propert(y|ies)|homes?|apartments?)\b/i
+/** A fact's own words plus the owner-added story behind it, if any. */
+export const factWords = (f: Fact) => (f.detail?.trim() ? `${f.text}\n${f.detail}` : f.text)
+
 const isYear = (v: string) => /^(19|20)\d\d$/.test(v)
+
+/**
+ * Statistics in the body: every distinct number, unit and door counts
+ * included, except clock times, years, the "9-to-5" kind of schedule, and the
+ * starting point of a before/after pair ("from 30+ to 19" is one statistic).
+ */
+export function countStats(body: string): string[] {
+  const out = new Set<string>()
+  for (const h of extractNumbers(body)) {
+    if (h.value.includes(':') || isYear(h.value)) continue
+    const before = body.slice(Math.max(0, h.index - 4), h.index)
+    const after = body.slice(h.index + h.raw.length)
+    if (/^-to-\d/i.test(after) || /\d-to-$/i.test(before)) continue // 9-to-5
+    if (/^\+?\s*(to|→)\s*\$?\d/i.test(after)) continue // start of a before/after pair, e.g. 30+ to 19
+    const wider = body.slice(Math.max(0, h.index - 8), h.index)
+    if (/\bfrom\s+\$?$/i.test(wider) && /^\+?\s*([a-z]+\s+){1,2}to\s+\$?\d/i.test(after)) continue // e.g. from 35 doors to 1,000
+    out.add(h.value)
+  }
+  return [...out]
+}
+
+// ── landing-page copy and sameness ─────────────────────────────────────────
+
+const VENDORS: [RegExp, string][] = [
+  [/\bappfolio\b/i, 'AppFolio'],
+  [/\bbuildium\b/i, 'Buildium'],
+  [/\byardi\b/i, 'Yardi'],
+  [/\brent\s?manager\b/i, 'Rent Manager'],
+  [/\bentrata\b/i, 'Entrata'],
+  [/\brealpage\b/i, 'RealPage'],
+  [/\bresman\b/i, 'ResMan'],
+  [/\bpropertyware\b/i, 'Propertyware'],
+  [/\brentvine\b/i, 'Rentvine'],
+  [/\bdoorloop\b/i, 'DoorLoop'],
+]
+const FUNCTIONS: [RegExp, string][] = [
+  [/\bleasing\b/i, 'leasing'],
+  [/\bmaintenance\b/i, 'maintenance'],
+  [/\bresident (messages|texts|questions|communication)\b/i, 'resident messages'],
+  [/\bmove-?ins?\b/i, 'move-ins'],
+  [/\bdelinquen(cy|t)\b/i, 'delinquency'],
+  [/\baccounting\b/i, 'accounting'],
+  [/\bcompliance\b/i, 'compliance'],
+]
+export const vendorsIn = (body: string) => VENDORS.filter(([re]) => re.test(body)).map(([, n]) => n)
+export const functionsIn = (body: string) => FUNCTIONS.filter(([re]) => re.test(body)).map(([, n]) => n)
+
+const PRICE = /\$\s?\d[\d.,]*\s*(\/|per|a)\s*(door|unit)|\bper (door|unit)\b|\/\s?(door|unit)\b|\bper (door|unit) per month\b/i
+export const BUILT_LINE = /\b(we|i)\s+(built|created|made|started|launched|founded)\s+kaspen\b|\bkaspen exists\b/i
+const DEFAULT_TAGLINE = 'grow doors not payroll'
+
+const normWords = (s: string) => s.toLowerCase().replace(/[’']/g, '').match(/[a-z0-9]+/g) ?? []
+export const SHARED_RUN = 8
+
+/** The tagline text from a "Tagline: ..." quote fact, normalised. */
+export function taglineOf(facts: Fact[]): string {
+  const t = facts.find((f) => /^tagline:/i.test(f.text))
+  return t ? normWords(t.text.replace(/^tagline:\s*/i, '')).join(' ') : DEFAULT_TAGLINE
+}
+export const hasTagline = (body: string, tagline: string) => ` ${normWords(body).join(' ')} `.includes(` ${tagline} `)
+
+/** The first run of SHARED_RUN+ words the body shares with another draft (closing asks and fact wording excepted). */
+export function sharedRun(body: string, other: string, facts: Fact[]): string | null {
+  // Paragraphs without the closing ask; runs never cross a paragraph break.
+  const paras = (s: string) => {
+    const p = s.replace(/\r\n/g, '\n').trim().split(/\n\s*\n/)
+    return p.length > 1 ? p.slice(0, -1) : p
+  }
+  const factText = ` ${facts.map((f) => normWords(factWords(f)).join(' ')).join(' | ')} `
+  const grams = (s: string) => {
+    const out: string[] = []
+    for (const p of paras(s)) {
+      const w = normWords(p)
+      for (let i = 0; i + SHARED_RUN <= w.length; i++) out.push(w.slice(i, i + SHARED_RUN).join(' '))
+    }
+    return out
+  }
+  const theirs = new Set(grams(other))
+  for (const g of grams(body)) if (theirs.has(g) && !factText.includes(` ${g} `)) return g
+  return null
+}
 
 // ── text patterns ──────────────────────────────────────────────────────────
 
@@ -123,7 +214,7 @@ const lower = (s: string) => s.toLowerCase().replace(/’/g, "'")
 /** Capitalised words that don't start a sentence and aren't in the facts: likely invented names. */
 export function unknownNames(text: string, facts: Fact[]): string[] {
   const known = new Set<string>(ALLOWED_NAMES)
-  for (const f of facts) for (const w of f.text.match(/[A-Za-z'’]+/g) ?? []) known.add(lower(w))
+  for (const f of facts) for (const w of factWords(f).match(/[A-Za-z'’]+/g) ?? []) known.add(lower(w))
   const out = new Set<string>()
   for (const m of text.matchAll(/[A-Z][a-zA-Z'’]+/g)) {
     const i = m.index ?? 0
@@ -204,8 +295,27 @@ export function checkDraft(d: DraftOutput, ctx: RuleContext): RuleResult {
     const shared = new Set((last.toLowerCase().match(/[a-z]{4,}/g) ?? []).filter((w) => offerWords.has(w)))
     if (shared.size < 2) f.push('End with one closing ask taken from the offer fact, in the last paragraph.')
     const offerNums = [...numbersIn(offer.text)]
-    const early = paras.slice(0, -1).join('\n\n')
-    if (offerNums.some((n) => numbersIn(early).has(n))) f.push('Keep the offer (and its price) to the closing ask only.')
+    if (offerNums.some((n) => numbersIn(body).has(n)) || PRICE.test(body)) {
+      f.push('No price and no per-door figure in the post. The ask is the free week on the doors they pick; the price may go only in the first comment.')
+    }
+  }
+
+  // Landing-page copy: the product gets one sentence in Frank's words, never the lists.
+  const vendors = vendorsIn(body)
+  if (vendors.length > 1) f.push(`Don't list software names (${vendors.join(', ')}); name one at most, or none.`)
+  const fns = functionsIn(body)
+  if (fns.length > 3) f.push(`Don't list the product's functions (${fns.join(', ')}); say what it does in one sentence of your own, three things at most.`)
+
+  // Sameness across the week.
+  const tagline = ctx.tagline ?? taglineOf(ctx.provided)
+  if (ctx.taglineTaken && hasTagline(body, tagline)) f.push('The tagline is already used in another draft this week; leave it out.')
+  if (ctx.builtTaken && BUILT_LINE.test(body)) f.push('A "we built Kaspen" line is already used this week; end differently.')
+  for (const r of ctx.recent ?? []) {
+    const run = sharedRun(body, r.body, ctx.provided)
+    if (run) {
+      f.push(`The post repeats "${run}" from draft #${r.id} in the last 14 days; write it fresh, with a different opening, structure and phrasing.`)
+      break
+    }
   }
   if (ctx.variant === 'breakdown') {
     if (!/\bcomment\b/i.test(last)) f.push("This week's Hand-raiser must close with: comment and I'll send the breakdown.")
@@ -215,26 +325,15 @@ export function checkDraft(d: DraftOutput, ctx: RuleContext): RuleResult {
 
   // Numbers: every number in the draft must come from a fact the draft used.
   const allowed = new Set<string>()
-  for (const x of used) for (const n of numbersIn(x.text)) allowed.add(n)
+  for (const x of used) for (const n of numbersIn(factWords(x))) allowed.add(n)
   const hits = extractNumbers(body)
   const bad = [...new Set(hits.filter((h) => !allowed.has(h.value)).map((h) => h.raw))]
   if (bad.length) f.push(`These numbers are not in the facts you listed: ${bad.join(', ')}. State only numbers from the facts, exactly as written.`)
   const commentBad = [...new Set(extractNumbers(d.first_comment).filter((h) => !allowed.has(h.value)).map((h) => h.raw))]
   if (commentBad.length) f.push(`The first comment has numbers not in the facts: ${commentBad.join(', ')}.`)
 
-  // At most two statistics: numbers from number facts, not a unit/door count, not a year, not part of the offer or a story.
-  const nonStat = new Set<string>()
-  for (const x of used) if (x.kind !== 'number') for (const n of numbersIn(x.text)) nonStat.add(n)
-  const statFacts = new Set<string>()
-  for (const x of used) if (x.kind === 'number') for (const n of numbersIn(x.text)) statFacts.add(n)
-  const stats = [
-    ...new Set(
-      hits
-        .filter((h) => statFacts.has(h.value) && !nonStat.has(h.value) && !isYear(h.value))
-        .filter((h) => !SCALE_AFTER.test(body.slice(h.index + h.raw.length)))
-        .map((h) => h.value)
-    ),
-  ]
+  // At most two statistics, unit and door counts included.
+  const stats = countStats(body)
   if (stats.length > MAX_STATS) f.push(`The post uses ${stats.length} statistics (${stats.join(', ')}); use at most ${MAX_STATS}, both serving the one story.`)
 
   // Invented people, customers, places.

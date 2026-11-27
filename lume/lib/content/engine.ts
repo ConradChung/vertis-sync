@@ -2,8 +2,8 @@ import { callEstimateUsd, fitsCap, monthStartIso, ptParts, round4, type ContentC
 import { pickFacts, pickedFacts, REUSE_WINDOW_DAYS, type Fact, type LeadUse } from '@/lib/content/facts'
 import { matchPosts, type MatchDraft, type MatchPost } from '@/lib/content/match'
 import { buildContentMessage } from '@/lib/content/message'
-import { buildSystem, buildUser, parseOutput, type References } from '@/lib/content/prompt'
-import { checkDraft, type DraftOutput } from '@/lib/content/rules'
+import { buildSystem, buildUser, parseOutput, type References, type WeekContext } from '@/lib/content/prompt'
+import { BUILT_LINE, checkDraft, hasTagline, taglineOf, type DraftOutput } from '@/lib/content/rules'
 import { inScheduledWindow, slotForDay, variantFor, type Slot, type Variant } from '@/lib/content/slots'
 
 /**
@@ -45,6 +45,8 @@ export interface ContentStore {
   getConfig(): Promise<ContentConfig>
   activeFacts(): Promise<Fact[]>
   leadUses(sinceIso: string): Promise<LeadUse[]>
+  /** Drafts with a body created since then (any status but rejected), newest first. */
+  recentDrafts(sinceIso: string): Promise<RecentDraft[]>
   monthSpend(fromIso: string): Promise<number>
   addSpend(row: { model: string; usd: number; input_tokens: number; output_tokens: number }): Promise<number>
   linkSpend(spendIds: number[], draftId: number): Promise<void>
@@ -54,6 +56,41 @@ export interface ContentStore {
   recentPosts(sinceIso: string): Promise<MatchPost[]>
   unmatchedDrafts(sinceIso: string): Promise<MatchDraft[]>
   markPosted(draftId: number, postId: string, postedAt: string): Promise<boolean>
+}
+
+export interface RecentDraft {
+  id: number
+  slot: string
+  status: string
+  run_date: string
+  body: string
+}
+
+export const SAMENESS_DAYS = 14
+const WEEK_COUNTED = new Set(['accepted', 'skipped', 'posted'])
+
+/** Monday (YYYY-MM-DD) of the week a YYYY-MM-DD date falls in. */
+export function weekStart(date: string): string {
+  const [y, m, d] = date.split('-').map(Number)
+  const t = new Date(Date.UTC(y, m - 1, d))
+  t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7))
+  return t.toISOString().slice(0, 10)
+}
+
+/**
+ * What the week already used: the other drafts from the last 14 days (shown
+ * to the model and checked for shared runs of words), and whether this
+ * week's live drafts (superseded and rejected ones don't count) already
+ * carry the tagline or a "we built Kaspen" line.
+ */
+export function weekContext(recent: RecentDraft[], runDate: string, tagline: string, excludeId?: number | null): WeekContext {
+  const others = recent.filter((d) => d.id !== excludeId && d.status !== 'rejected' && d.body)
+  const week = others.filter((d) => WEEK_COUNTED.has(d.status) && weekStart(d.run_date) === weekStart(runDate))
+  return {
+    recent: others.map((d) => ({ id: d.id, slot: d.slot, body: d.body })),
+    taglineTaken: week.some((d) => hasTagline(d.body, tagline)),
+    builtTaken: week.some((d) => BUILT_LINE.test(d.body)),
+  }
 }
 
 export interface AiResult {
@@ -132,9 +169,14 @@ export async function generateDraft(args: GenArgs, deps: Deps): Promise<GenResul
   const pick = pickFacts(slot, variant, facts, await store.leadUses(since), now)
   if ('error' in pick) return reject(pick.error)
 
+  const since14 = new Date(now.getTime() - SAMENESS_DAYS * 86_400_000).toISOString()
+  const tagline = taglineOf(facts)
+  const week = weekContext(await store.recentDrafts(since14), runDate, tagline)
+  // A tagline already used this week isn't offered again.
+  if (week.taglineTaken) pick.background = pick.background.filter((f) => !/^tagline:/i.test(f.text))
   const provided = pickedFacts(pick)
   const system = buildSystem(deps.refs())
-  const ctx = { provided, leadId: pick.lead.id, offerId: pick.offer.id, variant }
+  const ctx = { provided, leadId: pick.lead.id, offerId: pick.offer.id, variant, tagline, recent: week.recent, taglineTaken: week.taglineTaken, builtTaken: week.builtTaken }
   let mtd = await store.monthSpend(monthStartIso(now))
   let usd = 0
   let attempts = 0
@@ -152,7 +194,7 @@ export async function generateDraft(args: GenArgs, deps: Deps): Promise<GenResul
     attempts++
     let res: AiResult
     try {
-      res = await ai.write({ model: deps.model, system, user: buildUser(slot, variant, pick, last && failures.length ? { previous: last, failures } : undefined) })
+      res = await ai.write({ model: deps.model, system, user: buildUser(slot, variant, pick, last && failures.length ? { previous: last, failures } : undefined, week) })
     } catch (err) {
       stopReason = `claude_error: ${err instanceof Error ? err.message.slice(0, 200) : 'unknown'}`
       break

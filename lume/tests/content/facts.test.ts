@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pickFacts, recentLeadIds, type LeadUse } from '@/lib/content/facts'
+import { pickFacts, recentLeadIds, storyScore, type LeadUse } from '@/lib/content/facts'
 import { FACTS } from './fixtures'
 
 const now = new Date('2026-12-01T14:30:00Z')
@@ -12,9 +12,23 @@ const pick = (slot: 'proof' | 'owner_view' | 'hand_raiser', variant: 'breakdown'
 }
 
 describe('fact picking', () => {
-  it('Proof leads with a number; offer and quotes come along', () => {
+  it('Proof prefers a fact with a story attached: days on market (after AI in leasing), then the 9:57 PM call', () => {
+    expect(pick('proof', null).lead.id).toBe(8)
+    expect(pick('proof', null, [use(8, 2)]).lead.id).toBe(9)
+    // Bare results only once those led recently.
+    expect([3, 4, 5, 6, 7]).toContain(pick('proof', null, [use(8, 2), use(9, 2)]).lead.id)
+  })
+
+  it('an owner-added detail puts a fact first', () => {
+    const facts = FACTS.map((f) => (f.id === 3 ? { ...f, detail: 'They stopped hiring a second leasing agent.' } : f))
+    expect(pick('proof', null, [], facts).lead.id).toBe(3)
+    expect(storyScore(facts[2])).toBe(0)
+    expect(storyScore(FACTS[7])).toBe(1)
+    expect(storyScore(FACTS[2])).toBe(2)
+  })
+
+  it('Proof brings the offer and quotes along', () => {
     const p = pick('proof', null)
-    expect(p.lead.kind).toBe('number')
     expect(p.offer.id).toBe(1)
     expect(p.background.map((f) => f.id)).toEqual([2, 11])
     expect(p.supporting).toBeNull()
@@ -37,24 +51,26 @@ describe('fact picking', () => {
     const second = pick('proof', null, [use(first, 20)]).lead.id
     expect(second).not.toBe(first)
     // 22 days ago is outside the window: with every other number fresh, it leads again.
-    const others = FACTS.filter((f) => f.kind === 'number' && f.id !== first).map((f) => use(f.id, 5))
+    const others = FACTS.filter((f) => (f.kind === 'number' || f.kind === 'story') && f.id !== first).map((f) => use(f.id, 5))
     expect(pick('proof', null, [use(first, 22), ...others]).lead.id).toBe(first)
     expect(pickFacts('proof', null, FACTS, [use(first, 20), ...others], now)).toEqual({ error: 'no_fresh_lead_fact_for_proof' })
-    // Rejected drafts never count.
+    // Rejected and superseded drafts never count.
     expect(pick('proof', null, [use(first, 1, 'rejected')]).lead.id).toBe(first)
+    expect(pick('proof', null, [use(first, 1, 'superseded')]).lead.id).toBe(first)
     expect(recentLeadIds([use(3, 5), use(4, 30), use(5, 1, 'rejected')], now)).toEqual(new Set([3]))
   })
 
   it('prefers facts never led, then the least recently led', () => {
-    const numbers = FACTS.filter((f) => f.kind === 'number').map((f) => f.id)
-    const uses = numbers.slice(0, -1).map((id, i) => use(id, 30 + i))
+    const numbers = FACTS.filter((f) => f.kind === 'number' && storyScore(f) === 2).map((f) => f.id)
+    const storied = [8, 9].map((id) => use(id, 2))
+    const uses = [...storied, ...numbers.slice(0, -1).map((id, i) => use(id, 30 + i))]
     expect(pick('proof', null, uses).lead.id).toBe(numbers[numbers.length - 1])
-    const allOld = numbers.map((id, i) => use(id, 30 + i))
+    const allOld = [...storied, ...numbers.map((id, i) => use(id, 30 + i))]
     expect(pick('proof', null, allOld).lead.id).toBe(numbers[numbers.length - 1]) // oldest use = largest days
   })
 
   it('errors when every eligible fact led recently, or there is no offer', () => {
-    const uses = FACTS.filter((f) => f.kind === 'number').map((f) => use(f.id, 3))
+    const uses = FACTS.filter((f) => f.kind === 'number' || f.kind === 'story').map((f) => use(f.id, 3))
     expect(pickFacts('proof', null, FACTS, uses, now)).toEqual({ error: 'no_fresh_lead_fact_for_proof' })
     expect(pickFacts('proof', null, FACTS.filter((f) => f.kind !== 'offer'), [], now)).toEqual({ error: 'no_active_offer_fact' })
   })
