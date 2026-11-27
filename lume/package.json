@@ -10,7 +10,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "smoke:db": "tsx --conditions=react-server scripts/smoke-db.ts",
-    "content:facts": "tsx scripts/content-facts.ts"
+    "content:facts": "tsx scripts/content-facts.ts",
+    "hiring:doors": "tsx --conditions=react-server scripts/hiring-doors-backfill.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.134.0",

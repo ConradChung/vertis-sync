@@ -64,6 +64,8 @@ export interface SignalEvent {
   person_id?: number
   /** Units the company has, when this signal's source knows (signal_people, influencer_reactors; hiring rows carry none). */
   doors?: DoorCount | null
+  /** Hiring signals only: the signal_hiring id (a typed count is saved on it). */
+  hiring_id?: number
 }
 
 /** Source-specific fields of one signal (scraped text, clipped): what each source tab shows in its columns. */
@@ -203,6 +205,8 @@ export interface SignalAccount {
   warmth: { tier: WarmthTier; at: string | null }
   /** The count from the newest signal that has one; null when no signal does. */
   doors?: DoorCount | null
+  /** No count anywhere and a hiring signal: its signal_hiring id, where the owner's typed count is saved. */
+  hiring_id?: number | null
   /** LinkedIn people held by the ICP gate (units unknown): the owner types a count on the row. */
   held?: { id: number; name: string | null }[]
   /** False when the account's only lead signals are LinkedIn people who have not passed the ICP gate (kept out of Today). */
@@ -310,6 +314,7 @@ export function mergeSignals(events: readonly SignalEvent[]): SignalAccount[] {
       latest,
       warmth,
       doors: members.find((m) => m.doors && m.doors.count > 0)?.doors ?? null,
+      hiring_id: members.some((m) => m.doors && m.doors.count > 0) ? null : (members.find((m) => m.source === 'hiring' && typeof m.hiring_id === 'number')?.hiring_id ?? null),
       held: members.filter((m) => m.gate === 'held' && typeof m.person_id === 'number').map((m) => ({ id: m.person_id as number, name: m.person?.trim() || null })),
       queue_ready: members.some(queueable),
     })

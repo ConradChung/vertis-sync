@@ -82,6 +82,8 @@ describe('hiringEvent', () => {
       person: null,
       person_title: null,
       linkedin: null,
+      doors: null,
+      hiring_id: 1,
       detail: { source: 'hiring', signal: 'Hiring', role: 'Regional Property Manager' },
     })
     expect(hiringEvent(hiring({ signal: 'new_manager', role_title: null, headline: 'Jane joins as VP Ops', posted_at: null, company_domain: null }))).toMatchObject({

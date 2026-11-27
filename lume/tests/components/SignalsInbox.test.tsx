@@ -209,18 +209,17 @@ describe('Doors column', () => {
     rows: [
       row({ key: 'd:big.com', name: 'Big PM', domain: 'big.com', sources: ['influencer'], doors: { count: 1200, source: 'apollo', confidence: 'high' } }),
       row({ key: 'd:mid.com', name: 'Mid PM', domain: 'mid.com', sources: ['comment'] }),
-      row({ key: 'd:jobs.com', name: 'Jobs PM', domain: 'jobs.com', sources: ['hiring'] }),
+      row({ key: 'd:jobs.com', name: 'Jobs PM', domain: 'jobs.com', sources: ['hiring'], hiring_id: 31 }),
     ],
   }
   const items = () => within(screen.getByRole('list', { name: 'Signal accounts' })).getAllByRole('listitem')
 
-  it('shows the count with a thousands separator and its source on hover, Unknown when missing, a dash for hiring-only', () => {
+  it('shows the count with a thousands separator and its source on hover, Unknown when missing, the same for a hiring row', () => {
     wrap(<SignalsInbox initial={doorRows} />)
     const [big, mid, jobs] = items()
     expect(within(big).getByText('1,200').getAttribute('title')).toBe('Source: apollo · Confidence: high')
     expect(within(mid).getByText('Unknown')).toBeTruthy()
-    expect(within(jobs).queryByText('Unknown')).toBeNull()
-    expect(jobs.querySelector('[data-doors]')?.textContent).toContain('—')
+    expect(within(jobs).getByText('Unknown')).toBeTruthy()
     expect(document.querySelector('[data-heads]')?.textContent).toBe('AccountDoorsLatest signalTouchesStatusPipeline')
   })
 
@@ -243,6 +242,20 @@ describe('Doors column', () => {
     fireEvent.click(btn)
     await waitFor(() => expect(urls).toContain('/api/signals/inbox?min_doors=500'))
     expect(btn.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('a hiring account with no count takes a typed one: saved on its hiring row, then the inbox refreshes', async () => {
+    const calls: { url: string; body: unknown }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null })
+      return new Response(JSON.stringify(url.includes('/units') ? { ok: true } : doorRows), { status: 200 })
+    }))
+    wrap(<SignalsInbox initial={doorRows} />)
+    const [big, , jobs] = items()
+    expect(within(big).queryByLabelText('Door count for Big PM')).toBeNull()
+    fireEvent.change(within(jobs).getByLabelText('Door count for Jobs PM'), { target: { value: '750' } })
+    fireEvent.click(within(jobs).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.find((c) => c.url === '/api/signals/hiring/31/units')?.body).toEqual({ units: 750 }))
   })
 
   it('the Reddit tab has no Doors column and no 500+ filter', async () => {

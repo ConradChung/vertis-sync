@@ -48,7 +48,16 @@ export function checkQuestion(c: CheckCompany, icp: string): string {
 
 export const CONTACT_QUESTION = "5. What is the company's main office phone number and its official website URL, as listed on its own site or a business directory? Say unknown if not stated."
 
-export const hiringCheckQuestion = (c: CheckCompany, icp = HIRING_ICP) => `${checkQuestion(c, icp)}\n${CONTACT_QUESTION}`
+/** Hiring-only: pins the door count in question 3 to a quoted number on a cited page (port of the signal lane's doorQuestion). */
+export const DOOR_CITE_QUESTION = '6. For the door count in question 3: quote the exact number and cite the page it is on. Say unknown if no page states it.'
+
+export const hiringCheckQuestion = (c: CheckCompany, icp = HIRING_ICP) => `${checkQuestion(c, icp)}\n${CONTACT_QUESTION}\n${DOOR_CITE_QUESTION}`
+
+/** Port of the edge doorQuestion (_shared/influencer/verify.ts): the standalone lookup the backfill asks. */
+export function doorQuestion(company: string, location: string): string {
+  const clean = (s: string) => s.replace(/"/g, "'").replace(/\s+/g, ' ').trim().slice(0, 300)
+  return `How many doors or units under management does the property management company "${clean(company)}" (${clean(location)}) have? Quote the exact number and cite the page.`
+}
 
 export function perplexityRequest(question: string) {
   return { model: PPLX_MODEL, messages: [{ role: 'user', content: question }], max_tokens: 600, web_search_options: { search_context_size: 'low' } }
@@ -78,7 +87,10 @@ Rules:
 export const CONTACT_RULES = `- phone: the company's main office phone number exactly as the answer states it; "" if the answer does not state one. Never guess.
 - website: the company's own website URL as the answer states it; "" if none.`
 
-export const HIRING_PARSE_SYSTEM = `${PARSE_SYSTEM}\n${CONTACT_RULES}`
+export const DOOR_RULES = `- doors_source: copy EXACTLY the numbered source URL of the page that states the door count, or "". Never write a URL not in the list.
+- doors_confidence: "high" if the company's own website states the count, "medium" if a directory, article or profile does, "low" if thin or ambiguous; "" if doors is 0.`
+
+export const HIRING_PARSE_SYSTEM = `${PARSE_SYSTEM}\n${DOOR_RULES}\n${CONTACT_RULES}`
 
 const S = { type: 'string' }
 /** Copy of the edge PARSE_SCHEMA. */
@@ -100,8 +112,8 @@ export const PARSE_SCHEMA = {
 
 export const HIRING_PARSE_SCHEMA = {
   ...PARSE_SCHEMA,
-  properties: { ...PARSE_SCHEMA.properties, phone: S, website: S },
-  required: [...PARSE_SCHEMA.required, 'phone', 'website'],
+  properties: { ...PARSE_SCHEMA.properties, doors_source: S, doors_confidence: { type: 'string', enum: ['high', 'medium', 'low', ''] }, phone: S, website: S },
+  required: [...PARSE_SCHEMA.required, 'doors_source', 'doors_confidence', 'phone', 'website'],
 }
 
 export function parseRequest(c: CheckCompany, answer: string, citations: string[], icp = HIRING_ICP) {
@@ -124,13 +136,39 @@ export interface HiringCheck {
   evidence: string
   phone: string | null
   website: string | null
+  /** Units the company manages, kept only when a cited source backs it (groundDoors); else null. */
+  door_count?: number | null
+  door_count_source?: string | null
+  door_count_confidence?: 'high' | 'medium' | 'low' | null
+}
+
+export interface GroundedDoors {
+  door_count: number | null
+  door_count_source: string | null
+  door_count_confidence: 'high' | 'medium' | 'low' | null
+}
+export const NO_DOORS: GroundedDoors = { door_count: null, door_count_source: null, door_count_confidence: null }
+const CONF = new Set(['high', 'medium', 'low'])
+
+/**
+ * Port of the edge groundDoorCount: a count is kept only when it is a positive
+ * whole number, its source is an http(s) URL that is one of the returned
+ * citations, and it has a confidence. Anything else is unknown: never a guess.
+ */
+export function groundDoors(json: unknown, citations: readonly string[]): GroundedDoors {
+  const j = (json && typeof json === 'object' ? json : {}) as Record<string, unknown>
+  const n = j.doors
+  const src = typeof j.doors_source === 'string' ? j.doors_source.trim() : ''
+  const conf = typeof j.doors_confidence === 'string' ? j.doors_confidence.trim() : ''
+  const ok = typeof n === 'number' && Number.isFinite(n) && n >= 1 && n <= 1_000_000 && /^https?:\/\//i.test(src) && citations.includes(src) && CONF.has(conf)
+  return ok ? { door_count: Math.floor(n), door_count_source: src.slice(0, 300), door_count_confidence: conf as 'high' | 'medium' | 'low' } : NO_DOORS
 }
 
 const FITS = new Set(['fit', 'not_fit', 'unclear'])
 const PHONE = /^\+?[\d\s().-]{7,25}(\s*(x|ext\.?)\s*\d{1,6})?$/i
 
 /** The parsed JSON → the fields the signal keeps. Throws on a bad icp_fit. A phone must look like one, else dropped. */
-export function parseHiringCheck(json: unknown): HiringCheck {
+export function parseHiringCheck(json: unknown, citations: readonly string[] = []): HiringCheck {
   const j = (json && typeof json === 'object' ? json : {}) as Record<string, unknown>
   const s = (k: string, n: number) => (typeof j[k] === 'string' ? (j[k] as string).trim().slice(0, n) : '')
   const fit = s('icp_fit', 20)
@@ -143,6 +181,29 @@ export function parseHiringCheck(json: unknown): HiringCheck {
     evidence: s('evidence', 300) || s('what_it_does', 300),
     phone: phone && PHONE.test(phone) && (phone.match(/\d/g) ?? []).length >= 7 ? phone : null,
     website: /^(https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)+/i.test(website) ? website : null,
+    ...groundDoors(json, citations),
+  }
+}
+
+/** The backfill's own Haiku parse: just the count, its source and confidence. */
+export const DOOR_PARSE_SCHEMA = {
+  type: 'object',
+  properties: { doors: { type: 'integer' }, doors_source: S, doors_confidence: { type: 'string', enum: ['high', 'medium', 'low', ''] } },
+  required: ['doors', 'doors_source', 'doors_confidence'],
+  additionalProperties: false,
+}
+export const DOOR_PARSE_SYSTEM = `You turn a web-research answer about one property management company into strict JSON.\nRules:\n- doors: the number of doors / units / properties it manages as an integer if the answer states one (take the lower bound of a range, "500+" = 500); 0 if unknown. Never guess.\n${DOOR_RULES}\nIf the answer is about a different company than the one named, doors is 0.`
+
+export function doorParseRequest(company: string, answer: string, citations: string[]) {
+  const head = `Company: ${q(company)}\n\nResearch answer:\n`
+  const sources = `\n\nSources:\n${citations.slice(0, 10).map((u, i) => `[${i + 1}] ${u.slice(0, 300)}`).join('\n')}`
+  const room = Math.max(0, PARSE_USER_MAX_CHARS - head.length - sources.length)
+  return {
+    model: HAIKU_MODEL,
+    max_tokens: 200,
+    system: DOOR_PARSE_SYSTEM,
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: DOOR_PARSE_SCHEMA } },
+    messages: [{ role: 'user', content: `${head}${answer.slice(0, room)}${sources}`.slice(0, PARSE_USER_MAX_CHARS) }],
   }
 }
 

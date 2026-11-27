@@ -84,6 +84,9 @@ export interface RowPatch {
   contact_linkedin?: string | null
   contact_email?: string | null
   contact_source?: ContactSource | 'none' | null
+  door_count?: number | null
+  door_count_source?: string | null
+  door_count_confidence?: 'high' | 'medium' | 'low' | null
 }
 
 export interface CachedCheck {
@@ -92,6 +95,9 @@ export interface CachedCheck {
   evidence: string | null
   phone: string | null
   website: string | null
+  door_count?: number | null
+  door_count_source?: string | null
+  door_count_confidence?: 'high' | 'medium' | 'low' | null
 }
 
 export interface HiringStore {
@@ -458,7 +464,7 @@ async function processRow(r: PendingRow, ctx: ProcessCtx): Promise<void> {
         ctx.spend(res.usd)
         await store.addSpend({ lane: r.signal, kind: 'check', usd: res.usd, status: 'settled', row_id: r.id })
         await store.saveCheck(key, r.company_name, res.check, res.usd)
-        check = { icp_fit: res.check.icp_fit, property_type: res.check.property_type, evidence: res.check.evidence, phone: res.check.phone, website: res.check.website }
+        check = { icp_fit: res.check.icp_fit, property_type: res.check.property_type, evidence: res.check.evidence, phone: res.check.phone, website: res.check.website, door_count: res.check.door_count, door_count_source: res.check.door_count_source, door_count_confidence: res.check.door_count_confidence }
       } catch (e) {
         const attempts = r.attempts + 1
         if (attempts >= MAX_ATTEMPTS) return await skip('check_failed', { attempts, last_error: msg(e) })
@@ -469,6 +475,8 @@ async function processRow(r: PendingRow, ctx: ProcessCtx): Promise<void> {
     }
 
     const patch: RowPatch = { pm_fit: check.icp_fit, pm_evidence: check.evidence }
+    // The company's unit count rides on the row as information (it changes no gate); only a cited, grounded count is ever stored.
+    if (check.door_count && check.door_count > 0) Object.assign(patch, { door_count: check.door_count, door_count_source: check.door_count_source ?? null, door_count_confidence: check.door_count_confidence ?? null })
     if (!r.company_phone && check.phone) patch.company_phone = check.phone
     if (!r.company_website && check.website) patch.company_website = /^https?:\/\//i.test(check.website) ? check.website : `https://${check.website}`
     if (!domain && check.website) {

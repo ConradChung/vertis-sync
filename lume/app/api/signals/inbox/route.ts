@@ -25,7 +25,7 @@ export async function GET(req: Request) {
   }
   const sort = pick(sp.get('sort'), ['doors_desc', 'doors_asc'] as const)
   try {
-    return NextResponse.json(await loadInbox(filter, undefined, sort === 'doors_desc' ? 'desc' : sort === 'doors_asc' ? 'asc' : undefined), { headers: { 'Cache-Control': 'no-store' } })
+    return NextResponse.json(await (sort ? loadInbox(filter, undefined, sort === 'doors_desc' ? 'desc' : 'asc') : loadInbox(filter)), { headers: { 'Cache-Control': 'no-store' } })
   } catch (err) {
     return dbErrorResponse(err, 'api/signals/inbox')
   }

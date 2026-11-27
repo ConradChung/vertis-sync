@@ -14,7 +14,7 @@ const clip = (v: string | null | undefined, n: number) => {
 // ── signal_hiring ──────────────────────────────────────────────────────────
 
 export const HIRING_COLS =
-  'id, signal, role_title, headline, source_url, posted_at, company_name, company_domain, company_website, company_phone, person_name, person_title, person_linkedin, stage, skip_reason, status, created_at'
+  'id, signal, role_title, headline, source_url, posted_at, company_name, company_domain, company_website, company_phone, person_name, person_title, person_linkedin, stage, skip_reason, status, created_at, door_count, door_count_source, door_count_confidence'
 
 export interface HiringSource {
   id: number
@@ -34,6 +34,9 @@ export interface HiringSource {
   skip_reason: string | null
   status: string
   created_at: string
+  door_count?: number | null
+  door_count_source?: string | null
+  door_count_confidence?: string | null
 }
 
 const HIRING_WORD: Record<string, string> = { hiring: 'Hiring', new_manager: 'New manager', expansion: 'Expansion' }
@@ -54,6 +57,8 @@ export function hiringEvent(r: HiringSource): SignalEvent | null {
     person: r.person_name,
     person_title: r.person_title,
     linkedin: r.person_linkedin,
+    doors: doorCount(r.door_count, r.door_count_source, r.door_count_confidence),
+    hiring_id: r.id,
     detail: { source: 'hiring', signal: HIRING_WORD[r.signal] ?? 'Hiring signal', role: what || null },
   }
 }

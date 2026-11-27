@@ -354,6 +354,45 @@ function Ext({ href, className, children }: { href: string | null | undefined; c
  * A LinkedIn person the ICP gate held: no unit count was found, so no Slack
  * card. Typing the count releases them (500+ goes on to the card, under 500 is skipped).
  */
+function HiringUnits({ id, name }: { id: number; name: string }) {
+  const { mutate } = useSWRConfig()
+  const [value, setValue] = useState('')
+  const [saving, setSaving] = useState(false)
+  const units = /^\d{1,7}$/.test(value.trim()) && Number(value.trim()) > 0 ? Number(value.trim()) : null
+  async function save() {
+    if (units === null) return
+    setSaving(true)
+    const a = await sendJson(`/api/signals/hiring/${id}/units`, { units })
+    setSaving(false)
+    if (a.status === 200) {
+      toast(`${name}: ${units.toLocaleString('en-US')} doors saved`)
+      void mutate((k) => typeof k === 'string' && k.startsWith('/api/signals/inbox'))
+    } else toast.error(a.status === 404 ? 'Already has a count. Refresh.' : 'Could not save. Try again.')
+  }
+  return (
+    <form
+      className="flex flex-wrap items-center gap-2"
+      onSubmit={(e) => {
+        e.preventDefault()
+        void save()
+      }}
+    >
+      <input
+        inputMode="numeric"
+        aria-label={'Door count for ' + name}
+        placeholder="Doors"
+        value={value}
+        disabled={saving}
+        onChange={(e) => setValue(e.target.value)}
+        className="h-7 w-20 rounded-md bg-secondary px-2 font-mono text-[12px] text-fg tabular-nums outline-none placeholder:text-fg-46 focus-visible:ring-2 focus-visible:ring-ring"
+      />
+      <Button type="submit" size="sm" variant="secondary" className="h-7 rounded-md px-2.5 text-[12px]" disabled={saving || units === null}>
+        Save
+      </Button>
+    </form>
+  )
+}
+
 function HeldUnits({ id, name }: { id: number; name: string | null }) {
   const { mutate } = useSWRConfig()
   const [value, setValue] = useState('')
@@ -403,12 +442,11 @@ const doorsTitle = (d: DoorCount) => {
 /**
  * The Doors column: the account's count from its newest signal that has one,
  * or a muted Unknown. A LinkedIn person the ICP gate held is released from
- * here by typing their count. Hiring rows carry no count at all, so an
- * account with only hiring signals shows a dash.
+ * here by typing their count, and an account with no count and a hiring row
+ * takes one the same way (stored on that row, source "owner").
  */
 function DoorsCell({ r }: { r: SignalRow }) {
   const held = r.held ?? []
-  const hiringOnly = r.sources.length > 0 && r.sources.every((s) => s === 'hiring')
   return (
     <div data-doors className="min-w-0">
       <p className="mb-1 text-[12px] text-fg-46 xl:hidden">Doors</p>
@@ -416,10 +454,13 @@ function DoorsCell({ r }: { r: SignalRow }) {
         <span title={doorsTitle(r.doors)} className="font-mono text-[13px] text-fg tabular-nums">
           {formatDoors(r.doors.count)}
         </span>
-      ) : hiringOnly && held.length === 0 ? (
-        <Muted>—</Muted>
       ) : (
         <Muted>Unknown</Muted>
+      )}
+      {!r.doors && held.length === 0 && typeof r.hiring_id === 'number' && (
+        <div className="mt-2">
+          <HiringUnits id={r.hiring_id} name={r.name} />
+        </div>
       )}
       {held.length > 0 && (
         <div className="mt-2 flex flex-col gap-2">
