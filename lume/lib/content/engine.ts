@@ -39,6 +39,8 @@ export interface DraftRow {
   dry_run: boolean
   trigger: Trigger
   redo_of: number | null
+  /** Why each failed try was rejected (kept on accepted drafts too). */
+  attempt_log: { try: number; failures: string[] }[]
 }
 
 export interface ContentStore {
@@ -155,6 +157,7 @@ export async function generateDraft(args: GenArgs, deps: Deps): Promise<GenResul
       char_count: null,
       lead_fact_id: null,
       fact_ids: [],
+      attempt_log: [],
       reject_reason: reason.slice(0, 2000),
       attempts: 0,
       usd: 0,
@@ -185,6 +188,7 @@ export async function generateDraft(args: GenArgs, deps: Deps): Promise<GenResul
   let failures: string[] = []
   let accepted: { out: DraftOutput; chars: number } | null = null
   let stopReason: string | null = null
+  const attemptLog: { try: number; failures: string[] }[] = []
 
   while (attempts < MAX_TRIES) {
     if (!fitsCap(mtd, cfg.monthly_cap_usd, callEstimateUsd(deps.model))) {
@@ -205,6 +209,7 @@ export async function generateDraft(args: GenArgs, deps: Deps): Promise<GenResul
     const out = res.text !== null && res.stop !== 'refusal' && res.stop !== 'max_tokens' ? parseOutput(res.text) : null
     if (!out) {
       failures = [`The reply was not usable (stop: ${res.stop}); return JSON matching the schema.`]
+      attemptLog.push({ try: attempts, failures })
       continue
     }
     last = out
@@ -214,6 +219,7 @@ export async function generateDraft(args: GenArgs, deps: Deps): Promise<GenResul
       break
     }
     failures = check.failures
+    attemptLog.push({ try: attempts, failures })
   }
 
   if (!accepted) {
@@ -227,6 +233,7 @@ export async function generateDraft(args: GenArgs, deps: Deps): Promise<GenResul
       first_comment: last?.first_comment ?? null,
       char_count: last ? last.body.length : null,
       fact_ids: last?.fact_ids ?? [],
+      attempt_log: attemptLog,
     })
     if (spendIds.length) await store.linkSpend(spendIds, r.draft_id)
     return r
@@ -244,6 +251,7 @@ export async function generateDraft(args: GenArgs, deps: Deps): Promise<GenResul
     lead_fact_id: pick.lead.id,
     fact_ids: factIds,
     reject_reason: null,
+    attempt_log: attemptLog,
     attempts,
     usd,
   })

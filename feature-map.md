@@ -139,6 +139,7 @@ stops blocking by itself once #2 merges.
   from the last 14 days (closing paragraph and fact wording excepted); stats count unit/door counts (before/after pair
   once; times, years, 9-to-5 excluded); Proof prefers facts with a story (`content_facts.detail`, `*_lume_content_fact_detail.sql`,
   then cause-stating facts); superseded drafts don't block a lead fact.
+  `content_drafts.attempt_log` (`*_lume_content_attempt_log.sql`) keeps why each failed try was rejected, on accepted drafts too.
 
 ### Reddit signals (GTM-15, F5Bot emails)
 - **Where:** `lume/lib/reddit/`, doc `docs/lume/f5bot-apps-script.gs`.

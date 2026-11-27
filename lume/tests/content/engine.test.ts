@@ -44,6 +44,7 @@ describe('generateDraft', () => {
     const r = await generateDraft({ now: TUE_630, slot: 'proof', variant: null, trigger: 'manual' }, d)
     expect(r.status).toBe('accepted')
     expect(r.attempts).toBe(2)
+    expect(m.drafts[0].attempt_log).toEqual([{ try: 1, failures: expect.arrayContaining([expect.stringContaining('60k')]) }])
     const second = (write.mock.calls[1] as unknown as [{ user: string }])[0].user
     expect(second).toContain('Your previous draft was rejected')
     expect(second).toContain('60k')
