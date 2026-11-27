@@ -1,9 +1,9 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import useSWR from 'swr'
-import { Check, ExternalLink, Search } from 'lucide-react'
+import { ArrowUpRight, Check, ExternalLink, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { SimpleSelect } from '@/components/ui/simple-select'
@@ -12,10 +12,11 @@ import { phoneHref } from '@/components/portal/format'
 import { fetchJson } from '@/hooks/fetcher'
 import { shortDate } from '@/lib/crm/pilot'
 import {
-  SIGNAL_SOURCES,
   SIGNAL_STATUSES,
   SOURCE_LABEL,
   TOUCH_CHANNELS,
+  type LatestSignal,
+  type SignalDetail,
   type SignalInbox,
   type SignalRow,
   type SignalSource,
@@ -26,12 +27,29 @@ import { ownerDate } from '@/lib/time/owner'
 import { sendJson } from '@/lib/validate/client'
 import { cn } from '@/lib/utils'
 
-const STATUS_LABEL: Record<SignalStatus, string> = { new: 'New', working: 'Working', replied: 'Replied', dropped: 'Dropped' }
-const TOUCH_LABEL: Record<TouchChannel, string> = { email: 'Email', linkedin: 'LinkedIn', call: 'Call' }
-const STATUS_OPTIONS = SIGNAL_STATUSES.map((s) => ({ value: s, label: STATUS_LABEL[s] }))
+const STATUS_LABEL: Record<SignalStatus, string> = {
+  new: 'New',
+  working: 'Working',
+  replied: 'Replied',
+  dropped: 'Dropped',
+}
+const TOUCH_LABEL: Record<TouchChannel, string> = {
+  email: 'Email',
+  linkedin: 'LinkedIn',
+  call: 'Call',
+}
+const STATUS_OPTIONS = SIGNAL_STATUSES.map((s) => ({
+  value: s,
+  label: STATUS_LABEL[s],
+}))
 
 type StatusFilter = SignalStatus | 'all'
-type Patch = { status?: SignalStatus; touch?: { channel: TouchChannel; done: boolean } }
+type Patch = {
+  status?: SignalStatus
+  touch?: { channel: TouchChannel; done: boolean }
+}
+/** Which columns the rows use: the All tab's, or one source tab's. */
+type View = 'all' | 'comment' | 'reddit' | 'hiring'
 
 export function inboxKey(source: SignalSource | 'all', status: StatusFilter, q: string): string {
   const p = new URLSearchParams()
@@ -42,19 +60,43 @@ export function inboxKey(source: SignalSource | 'all', status: StatusFilter, q: 
   return qs ? '/api/signals/inbox?' + qs : '/api/signals/inbox'
 }
 
+const dealHref = (id: string) => '/crm?campaign=signals&deal=' + id
+const day = (iso: string | null | undefined) => (iso ? shortDate(ownerDate(iso)) : null)
+const isHttp = (u: string | null | undefined): u is string => !!u && /^https?:\/\//i.test(u)
+
+/*
+ * Column tracks per view, shared by the header row and every row (xl and up;
+ * below that a row stacks). The last three are always Touches, Status and
+ * Pipeline. Whole literal strings, so Tailwind sees them.
+ */
+const GRID: Record<View, string> = {
+  all: 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_15rem_7rem_9rem]',
+  comment: 'xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.4fr)_minmax(0,1fr)_4.5rem_15rem_7rem_9rem]',
+  reddit: 'xl:grid-cols-[minmax(0,0.9fr)_10rem_minmax(0,1fr)_minmax(0,1.3fr)_4.5rem_15rem_7rem_9rem]',
+  hiring: 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,0.9fr)_4.5rem_15rem_7rem_9rem]',
+}
+const HEADS: Record<View, string[]> = {
+  all: ['Account', 'Latest signal'],
+  comment: ['Person', 'Comment', 'Post', 'Date'],
+  reddit: ['Author', 'Subreddit', 'Thread', 'Excerpt', 'Date'],
+  hiring: ['Company', 'Signal', 'Contact', 'Date'],
+}
+
 /**
- * The Signals inbox: one row per company, merged across hiring signals, post
- * comments, Reddit mentions and influencer reactions. Each row shows where
- * the signal came from, the newest one, a status and three touches (email,
- * LinkedIn, call). A touch is a tick the owner makes after doing it by hand;
- * nothing is sent from here. "Start deal" puts the account on the Pipeline
- * in Conversation.
+ * The Signals inbox: one row per company (a Reddit author is its own
+ * account). The All tab merges every source; a source tab (`fixedSource`)
+ * shows that source's newest signal per account in columns that fit it.
  *
- * `fixedSource` pins the source filter (the /signals/hiring view);
- * `defaultSource` only starts it there (`/signals?source=`).
+ * Touches are a log, not actions: ticking Email, LinkedIn or Call records
+ * that the owner did it by hand, with the date. Nothing is sent or dialled.
+ * "Add to pipeline" creates the account's deal in Conversation on the
+ * Pipeline, and the row then links to it.
+ *
+ * `defaultSource` only starts the All tab filtered (`/signals?source=influencer`).
  */
 export function SignalsInbox({ initial, fixedSource, defaultSource }: { initial?: SignalInbox; fixedSource?: SignalSource; defaultSource?: SignalSource }) {
   const [source, setSource] = useState<SignalSource | 'all'>(fixedSource ?? defaultSource ?? 'all')
+  const view: View = fixedSource === 'comment' || fixedSource === 'reddit' || fixedSource === 'hiring' ? fixedSource : 'all'
   const [status, setStatus] = useState<StatusFilter>('all')
   const [typed, setTyped] = useState('')
   const [q, setQ] = useState('')
@@ -78,6 +120,8 @@ export function SignalsInbox({ initial, fixedSource, defaultSource }: { initial?
       else next.delete(key)
       return next
     })
+  // Deals made here, so the row links to its deal before the refetch lands.
+  const [made, setMade] = useState<Record<string, string>>({})
 
   async function patch(row: SignalRow, body: Patch) {
     hold(row.key, true)
@@ -87,12 +131,20 @@ export function SignalsInbox({ initial, fixedSource, defaultSource }: { initial?
     void mutate()
   }
 
-  async function startDeal(row: SignalRow) {
+  async function addToPipeline(row: SignalRow) {
     hold(row.key, true)
     const a = await sendJson<{ deal_id: string }>('/api/signals/accounts/deal', { key: row.state_key })
     hold(row.key, false)
-    if ((a.status === 200 || a.status === 201) && a.body) toast(row.name + ' is in Conversation', { description: 'Open it from the row or the Pipeline.' })
-    else toast.error('Could not start the deal. Try again.')
+    const id = a.body?.deal_id
+    if ((a.status === 200 || a.status === 201) && id) {
+      setMade((m) => ({ ...m, [row.key]: id }))
+      toast(row.name + ' is on the Pipeline', {
+        action: {
+          label: 'Open deal',
+          onClick: () => window.location.assign(dealHref(id)),
+        },
+      })
+    } else toast.error('Could not add it to the pipeline. Try again.')
     void mutate()
   }
 
@@ -117,26 +169,21 @@ export function SignalsInbox({ initial, fixedSource, defaultSource }: { initial?
             </button>
           ))}
         </div>
-        <div className="ml-auto flex flex-wrap items-center gap-3">
-          {!fixedSource && (
-            <SimpleSelect
-              aria-label="Source"
-              size="sm"
-              className="w-44"
-              value={source}
-              onValueChange={(v) => setSource((v || 'all') as SignalSource | 'all')}
-              options={[{ value: 'all', label: 'All sources' }, ...SIGNAL_SOURCES.map((s) => ({ value: s, label: SOURCE_LABEL[s] }))]}
-            />
+        <div className="flex flex-wrap items-center gap-3 max-sm:w-full sm:ml-auto">
+          {!fixedSource && source !== 'all' && (
+            <button type="button" onClick={() => setSource('all')} className="text-[13px] text-fg-70 hover:text-fg">
+              {SOURCE_LABEL[source]}s only · <span className="underline">show all</span>
+            </button>
           )}
-          <label className="relative block">
+          <label className="relative block max-sm:w-full">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-fg-46" strokeWidth={1.75} aria-hidden />
             <input
               type="search"
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
-              placeholder="Search company"
-              aria-label="Search company"
-              className="h-8 w-52 rounded-lg bg-secondary pr-3 pl-9 text-[13px] text-fg outline-none placeholder:text-fg-46 focus-visible:ring-2 focus-visible:ring-ring"
+              placeholder={view === 'reddit' ? 'Search author' : 'Search company or person'}
+              aria-label="Search"
+              className="h-8 w-full rounded-lg sm:w-60 bg-secondary pr-3 pl-9 text-[13px] text-fg outline-none placeholder:text-fg-46 focus-visible:ring-2 focus-visible:ring-ring"
             />
           </label>
         </div>
@@ -152,11 +199,20 @@ export function SignalsInbox({ initial, fixedSource, defaultSource }: { initial?
       {data && rows.length === 0 && <p className="text-[13px] text-fg-46">{everything === 0 ? 'No signal accounts yet.' : 'No accounts match.'}</p>}
 
       {rows.length > 0 && (
-        <ul aria-label="Signal accounts" className="flex flex-col gap-8">
-          {rows.map((r) => (
-            <Row key={r.key} row={r} busy={busy.has(r.key)} onPatch={patch} onStartDeal={startDeal} />
-          ))}
-        </ul>
+        <div className="flex flex-col gap-4">
+          <div aria-hidden data-heads className={cn('hidden gap-x-5 text-[12px] text-fg-46 xl:grid', GRID[view])}>
+            {[...HEADS[view], 'Touches', 'Status', 'Pipeline'].map((h) => (
+              <span key={h} className={h === 'Touches' ? 'pl-2' : undefined}>
+                {h}
+              </span>
+            ))}
+          </div>
+          <ul aria-label="Signal accounts" className="flex flex-col gap-7">
+            {rows.map((r) => (
+              <Row key={r.key} row={r} view={view} dealId={r.deal_id ?? made[r.key] ?? null} busy={busy.has(r.key)} onPatch={patch} onAdd={addToPipeline} />
+            ))}
+          </ul>
+        </div>
       )}
       {data && data.total > rows.length && (
         <p className="text-[12px] text-fg-46">
@@ -167,43 +223,34 @@ export function SignalsInbox({ initial, fixedSource, defaultSource }: { initial?
   )
 }
 
-function Row({ row: r, busy, onPatch, onStartDeal }: { row: SignalRow; busy: boolean; onPatch: (r: SignalRow, b: Patch) => void; onStartDeal: (r: SignalRow) => void }) {
-  const tel = phoneHref(r.phone)
-  const contact = r.contacts[0]
+function Row({
+  row: r,
+  view,
+  dealId,
+  busy,
+  onPatch,
+  onAdd,
+}: {
+  row: SignalRow
+  view: View
+  dealId: string | null
+  busy: boolean
+  onPatch: (r: SignalRow, b: Patch) => void
+  onAdd: (r: SignalRow) => void
+}) {
   return (
-    <li data-key={r.key} className="grid gap-x-6 gap-y-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-      <div className="min-w-0">
-        <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span className="text-[15px] font-medium text-fg">{r.name}</span>
-          {r.domain && (
-            <a href={'https://' + r.domain} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[13px] text-fg-46 hover:text-fg">
-              {r.domain} <ExternalLink className="size-3" strokeWidth={1.75} aria-hidden />
-            </a>
-          )}
-          {tel && (
-            <a href={tel} className="font-mono text-[13px] text-fg-70 hover:text-fg">
-              {r.phone}
-            </a>
-          )}
-        </p>
-        <p data-newest className="mt-1 line-clamp-2 text-[13px] text-fg-70">
-          {r.newest.url && /^https?:\/\//i.test(r.newest.url) ? (
-            <a href={r.newest.url} target="_blank" rel="noreferrer" className="hover:text-fg hover:underline">
-              {r.newest.label}
-            </a>
-          ) : (
-            r.newest.label
-          )}
-        </p>
-        <p className="mt-1 flex flex-wrap gap-x-3 text-[12px] text-fg-46">
-          <span data-sources>{r.sources.map((s) => SOURCE_LABEL[s]).join(' · ')}</span>
-          {r.newest.at && <time dateTime={r.newest.at}>{shortDate(ownerDate(r.newest.at))}</time>}
-          {r.count > 1 && <span>{r.count} signals</span>}
-          {contact && <span className="truncate">{[contact.name, contact.title].filter(Boolean).join(', ')}</span>}
-        </p>
-      </div>
+    <li data-key={r.key} className={cn('grid gap-x-5 gap-y-2 xl:items-center', GRID[view])}>
+      {cellsFor(view, r)}
 
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="max-xl:mt-1">
+        <p className="mb-1 text-[12px] text-fg-46 xl:hidden">Touches</p>
+        <div role="group" aria-label={'Touches for ' + r.name} className="flex items-start gap-1">
+          {TOUCH_CHANNELS.map((c) => (
+            <Touch key={c} label={TOUCH_LABEL[c]} at={r.touches[c]} disabled={busy} onToggle={(done) => onPatch(r, { touch: { channel: c, done } })} />
+          ))}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-3 xl:contents">
         <SimpleSelect
           aria-label={'Status of ' + r.name}
           size="sm"
@@ -215,40 +262,192 @@ function Row({ row: r, busy, onPatch, onStartDeal }: { row: SignalRow; busy: boo
           }}
           options={STATUS_OPTIONS}
         />
-        <div role="group" aria-label={'Touches for ' + r.name} className="flex items-center gap-2">
-          {TOUCH_CHANNELS.map((c) => {
-            const at = r.touches[c]
-            return (
-              <button
-                key={c}
-                type="button"
-                aria-pressed={!!at}
-                aria-label={TOUCH_LABEL[c] + (at ? ' done' : '')}
-                disabled={busy}
-                title={at ? TOUCH_LABEL[c] + ' done ' + shortDate(ownerDate(at)) : undefined}
-                onClick={() => onPatch(r, { touch: { channel: c, done: !at } })}
-                className={cn(
-                  'inline-flex h-8 items-center gap-1 rounded-lg px-3 text-[13px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50',
-                  at ? 'bg-foreground text-background' : 'bg-secondary text-fg-70 hover:text-fg'
-                )}
-              >
-                {at && <Check className="size-3.5" strokeWidth={1.75} aria-hidden />}
-                {TOUCH_LABEL[c]}
-                {at && <span className="font-mono text-[11px] opacity-70">{shortDate(ownerDate(at))}</span>}
-              </button>
-            )
-          })}
+        <div>
+          {dealId ? (
+            <Link href={dealHref(dealId)} className="inline-flex h-8 items-center gap-1.5 text-[13px] text-fg hover:underline">
+              Open deal <ArrowUpRight className="size-3.5" strokeWidth={1.75} aria-hidden />
+            </Link>
+          ) : (
+            <Button size="sm" variant="secondary" className="h-8 rounded-lg px-3" disabled={busy} onClick={() => onAdd(r)}>
+              Add to pipeline
+            </Button>
+          )}
         </div>
-        {r.deal_id ? (
-          <Link href={'/crm?campaign=signals&deal=' + r.deal_id} className="inline-flex h-8 items-center px-1 text-[13px] text-fg hover:underline">
-            Open deal
-          </Link>
-        ) : (
-          <Button size="sm" variant="secondary" className="h-8 rounded-lg px-3" disabled={busy} onClick={() => onStartDeal(r)}>
-            Start deal
-          </Button>
-        )}
       </div>
     </li>
+  )
+}
+
+/** One touch in the log: a tick box, the channel, and the date it was ticked (— until then). */
+function Touch({ label, at, disabled, onToggle }: { label: string; at: string | null; disabled: boolean; onToggle: (done: boolean) => void }) {
+  const when = day(at)
+  return (
+    <button
+      type="button"
+      aria-pressed={!!at}
+      aria-label={at ? `${label} done ${when}` : label}
+      disabled={disabled}
+      onClick={() => onToggle(!at)}
+      className="flex w-[76px] flex-col items-start gap-0.5 rounded-lg px-2 py-1 text-left outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+    >
+      <span className={cn('flex items-center gap-1.5 text-[13px]', at ? 'text-fg' : 'text-fg-70')}>
+        <span aria-hidden className={cn('grid size-3.5 shrink-0 place-items-center rounded-[4px] border', at ? 'border-transparent bg-foreground text-background' : 'border-(--line)')}>
+          {at && <Check className="size-2.5" strokeWidth={2.25} />}
+        </span>
+        {label}
+      </span>
+      <span className="pl-5 font-mono text-[11px] text-fg-46 tabular-nums">{when ?? '—'}</span>
+    </button>
+  )
+}
+
+// ── cells ──────────────────────────────────────────────────────────────────
+
+function Ext({ href, className, children }: { href: string | null | undefined; className?: string; children: ReactNode }) {
+  if (!isHttp(href)) return <span className={className}>{children}</span>
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className={cn('hover:text-fg hover:underline', className)}>
+      {children}
+    </a>
+  )
+}
+
+const Muted = ({ children }: { children: ReactNode }) => <span className="text-[13px] text-fg-46">{children}</span>
+
+function DateCell({ at }: { at: string | null | undefined }) {
+  const d = day(at)
+  return d && at ? (
+    <time dateTime={at} className="font-mono text-[12px] text-fg-46 tabular-nums">
+      {d}
+    </time>
+  ) : (
+    <Muted>—</Muted>
+  )
+}
+
+function CompanyCell({ r }: { r: SignalRow }) {
+  const tel = phoneHref(r.phone)
+  return (
+    <div className="min-w-0">
+      <p className="truncate text-[14px] font-medium text-fg">{r.name}</p>
+      {(r.domain || tel) && (
+        <p className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[13px] text-fg-46">
+          {r.domain && (
+            <a href={'https://' + r.domain} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-fg">
+              {r.domain} <ExternalLink className="size-3" strokeWidth={1.75} aria-hidden />
+            </a>
+          )}
+          {tel && (
+            <a href={tel} className="font-mono text-[12px] text-fg-70 hover:text-fg">
+              {r.phone}
+            </a>
+          )}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function detailOf<S extends SignalDetail['source']>(l: LatestSignal | undefined, s: S): Extract<SignalDetail, { source: S }> | null {
+  return l?.detail?.source === s ? (l.detail as Extract<SignalDetail, { source: S }>) : null
+}
+
+function cellsFor(view: View, r: SignalRow): ReactNode {
+  if (view === 'comment') {
+    const l = r.latest.comment
+    const d = detailOf(l, 'comment')
+    return (
+      <>
+        <div className="min-w-0">
+          <p className="truncate text-[14px] font-medium text-fg">
+            <Ext href={l?.linkedin}>{l?.person ?? r.contacts[0]?.name ?? r.name}</Ext>
+          </p>
+          <p className="mt-0.5 truncate text-[13px] text-fg-46">{[l?.person_title, r.name !== l?.person ? r.name : null].filter(Boolean).join(' · ')}</p>
+        </div>
+        <p className="line-clamp-3 text-[13px] leading-snug text-fg-70">
+          {d?.reaction ? <Muted>Reacted, no comment</Muted> : d?.comment ? <Ext href={l?.url}>“{d.comment}”</Ext> : <Ext href={l?.url}>{l?.label ?? r.newest.label}</Ext>}
+        </p>
+        <p className="line-clamp-2 text-[13px] leading-snug text-fg-70">
+          {d?.post_excerpt ? <Ext href={d.post_url}>{d.post_excerpt}</Ext> : d?.post_url ? <Ext href={d.post_url}>Watched post</Ext> : <Muted>—</Muted>}
+        </p>
+        <DateCell at={l?.at ?? r.newest.at} />
+      </>
+    )
+  }
+  if (view === 'reddit') {
+    const l = r.latest.reddit
+    const d = detailOf(l, 'reddit')
+    const author = d?.author?.replace(/^u\//, '')
+    return (
+      <>
+        <p className="truncate text-[14px] font-medium text-fg">
+          <Ext href={author ? 'https://www.reddit.com/user/' + encodeURIComponent(author) : null}>{author ? 'u/' + author : r.name}</Ext>
+        </p>
+        <p className="truncate text-[13px] text-fg-70">{d?.subreddit ? <Ext href={'https://www.reddit.com/r/' + encodeURIComponent(d.subreddit)}>r/{d.subreddit}</Ext> : <Muted>—</Muted>}</p>
+        <p className="line-clamp-2 text-[13px] leading-snug text-fg">
+          <Ext href={l?.url}>{d?.thread ?? l?.label ?? r.newest.label}</Ext>
+        </p>
+        <p className="line-clamp-3 text-[13px] leading-snug text-fg-70">{d?.excerpt ?? <Muted>—</Muted>}</p>
+        <DateCell at={l?.at ?? r.newest.at} />
+      </>
+    )
+  }
+  if (view === 'hiring') {
+    const l = r.latest.hiring
+    const d = detailOf(l, 'hiring')
+    const contact = r.contacts[0]
+    return (
+      <>
+        <CompanyCell r={r} />
+        <div className="min-w-0">
+          <p className="line-clamp-2 text-[13px] leading-snug text-fg">
+            <Ext href={l?.url}>{d?.role ?? l?.label ?? r.newest.label}</Ext>
+          </p>
+          {d && <p className="mt-0.5 text-[12px] text-fg-46">{d.signal}</p>}
+        </div>
+        <div className="min-w-0">
+          {contact ? (
+            <>
+              <p className="truncate text-[13px] text-fg">
+                <Ext href={contact.linkedin}>{contact.name}</Ext>
+              </p>
+              {contact.title && <p className="truncate text-[12px] text-fg-46">{contact.title}</p>}
+            </>
+          ) : (
+            <Muted>—</Muted>
+          )}
+        </div>
+        <DateCell at={l?.at ?? r.newest.at} />
+      </>
+    )
+  }
+  const contact = r.contacts[0]
+  return (
+    <>
+      <div className="min-w-0">
+        <CompanyCell r={r} />
+        {contact && <p className="mt-0.5 truncate text-[12px] text-fg-46">{[contact.name, contact.title].filter(Boolean).join(', ')}</p>}
+      </div>
+      <div className="min-w-0">
+        <p data-newest className="line-clamp-2 text-[13px] leading-snug text-fg-70">
+          {isHttp(r.newest.url) ? (
+            <a href={r.newest.url} target="_blank" rel="noreferrer" className="hover:text-fg hover:underline">
+              {r.newest.label}
+            </a>
+          ) : (
+            r.newest.label
+          )}
+        </p>
+        <p className="mt-1 flex flex-wrap gap-x-3 text-[12px] text-fg-46">
+          <span data-sources>{r.sources.map((s) => SOURCE_LABEL[s]).join(' · ')}</span>
+          {r.newest.at && (
+            <time dateTime={r.newest.at} className="font-mono tabular-nums">
+              {day(r.newest.at)}
+            </time>
+          )}
+          {r.count > 1 && <span>{r.count} signals</span>}
+        </p>
+      </div>
+    </>
   )
 }

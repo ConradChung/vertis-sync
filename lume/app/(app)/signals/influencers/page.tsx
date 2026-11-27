@@ -1,16 +1,9 @@
 import type { Metadata } from 'next'
-import { PageHead } from '@/components/shell/PageHead'
 import { InfluencersList } from '@/components/signals/InfluencersList'
-import { SignalsNav } from '@/components/signals/SignalsNav'
 
-export const metadata: Metadata = { title: 'Influencers' }
+export const metadata: Metadata = { title: 'Signals: influencers' }
 
-/** `/signals/influencers`: the influencers page's place inside Signals. (`/influencers` still lands on the candidate lists in Leads.) */
+/** `/signals/influencers`: the influencers whose post reactions are scraped. (`/influencers` still lands on the candidate lists in Leads.) */
 export default function SignalsInfluencersPage() {
-  return (
-    <>
-      <PageHead title="Influencers" actions={<SignalsNav current="influencers" />} />
-      <InfluencersList />
-    </>
-  )
+  return <InfluencersList />
 }

@@ -56,7 +56,7 @@ const TAB_WORDS: Record<string, string> = {
   '/agent': 'chat ai assistant',
   '/crm': 'crm deals board pilots all campaigns',
   '/actions': 'pending actions confirm history decided',
-  '/signals': 'inbox accounts companies hiring comments reddit influencer reactions touches start deal',
+  '/signals': 'inbox accounts companies hiring comments reddit influencer reactions touches add to pipeline deal',
   '/calendar': 'tasks schedule linear sprint',
   '/playground': 'admin pipelines diagrams flows showcase',
   '/operator': 'admin grok bot operator',
@@ -65,6 +65,8 @@ const TAB_WORDS: Record<string, string> = {
 
 /** Pages that are not tabs but keep their own ⌘K entry. */
 const EXTRA_PAGES = [
+  { href: '/signals/comments', label: 'Signals — Post comments', words: 'linkedin comments watched posts commenters', icon: Radar },
+  { href: '/signals/reddit', label: 'Signals — Reddit', words: 'reddit subreddit threads mentions', icon: Radar },
   { href: '/signals/hiring', label: 'Signals — Hiring', words: 'hiring ops signal jobs drafts emails', icon: Radar },
   { href: '/signals/influencers', label: 'Signals — Influencers', words: 'linkedin reactions reactors posts', icon: Radar },
 ]

@@ -7,7 +7,7 @@
 
 /* ------------------------------------------------------------------ */
 /* Tokens → Tailwind                                                   */
-/* Two themes (dark "gamer", light "nature") over <AppBackground />.    */
+/* Two themes (dark, light) over <AppBackground />'s quiet gradient.   */
 /* Surfaces use the glass recipe (--glass-fill/-border/-highlight).     */
 /* ------------------------------------------------------------------ */
 @theme inline {
@@ -558,11 +558,58 @@ html[data-chat] .glass {
   backdrop-filter: none;
 }
 
-/* The dark background image: a slow pan and breathe (components/theme/AppBackground.tsx). */
-@keyframes bg-drift {
-  0% { transform: scale(1.08) translate3d(0, 0, 0); }
-  50% { transform: scale(1.16) translate3d(-3vw, 2vh, 0); }
-  100% { transform: scale(1.1) translate3d(2vw, -2vh, 0); }
+/* App background (components/theme/AppBackground.tsx): a near-neutral base and
+   three soft-edged fields that drift over minutes. Low contrast on purpose;
+   the lime field is a tint, never a colour. All stops interpolate in oklch. */
+:root,
+:root.dark {
+  --bg-top: oklch(0.155 0.004 125);
+  --bg-bottom: oklch(0.12 0.002 125);
+  --bg-field-a: oklch(0.34 0.075 128 / 0.32);
+  --bg-field-b: oklch(0.27 0.012 250 / 0.45);
+  --bg-field-c: oklch(0.22 0.008 250 / 0.4);
+}
+:root.light {
+  --bg-top: oklch(0.975 0.005 120);
+  --bg-bottom: oklch(0.95 0.008 125);
+  --bg-field-a: oklch(0.93 0.075 125 / 0.5);
+  --bg-field-b: oklch(0.995 0.003 240 / 0.75);
+  --bg-field-c: oklch(0.93 0.008 230 / 0.4);
+}
+.app-bg {
+  background: linear-gradient(170deg in oklch, var(--bg-top), var(--bg-bottom));
+}
+.app-bg-field {
+  position: absolute;
+  width: 80vmax;
+  height: 80vmax;
+  border-radius: 9999px;
+  will-change: transform;
+}
+.app-bg-field-a {
+  top: -30vmax;
+  right: -20vmax;
+  background: radial-gradient(closest-side in oklch, var(--bg-field-a), transparent);
+  animation: blob-drift-a 70s ease-in-out infinite;
+}
+.app-bg-field-b {
+  bottom: -35vmax;
+  left: -25vmax;
+  background: radial-gradient(closest-side in oklch, var(--bg-field-b), transparent);
+  animation: blob-drift-b 90s ease-in-out infinite;
+}
+.app-bg-field-c {
+  top: 20vh;
+  left: 30vw;
+  width: 60vmax;
+  height: 60vmax;
+  background: radial-gradient(closest-side in oklch, var(--bg-field-c), transparent);
+  animation: blob-drift-c 110s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-bg-field {
+    animation: none;
+  }
 }
 @keyframes blob-drift-a {
   0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
