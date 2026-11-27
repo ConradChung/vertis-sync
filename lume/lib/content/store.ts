@@ -67,7 +67,7 @@ export const liveStore: ContentStore = {
   getConfig: getContentConfig,
 
   async activeFacts(): Promise<Fact[]> {
-    const res = await sb().from('content_facts').select('id, kind, text, source, active').eq('active', true).order('id')
+    const res = await sb().from('content_facts').select('id, kind, text, source, active, detail').eq('active', true).order('id')
     if (res.error) throw new DbError('activeFacts', res.error)
     return ((res.data ?? []) as Fact[]).filter((f) => isFactKind(f.kind))
   },
@@ -76,6 +76,19 @@ export const liveStore: ContentStore = {
     const res = await sb().from('content_drafts').select('lead_fact_id, created_at, status').gte('created_at', sinceIso).limit(1000)
     if (res.error) throw new DbError('leadUses', res.error)
     return (res.data ?? []) as LeadUse[]
+  },
+
+  async recentDrafts(sinceIso: string) {
+    const res = await sb()
+      .from('content_drafts')
+      .select('id, slot, status, run_date, body')
+      .neq('status', 'rejected')
+      .not('body', 'is', null)
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: false })
+      .limit(30)
+    if (res.error) throw new DbError('recentDrafts', res.error)
+    return (res.data ?? []) as { id: number; slot: string; status: string; run_date: string; body: string }[]
   },
 
   async monthSpend(fromIso: string): Promise<number> {

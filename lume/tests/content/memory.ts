@@ -11,6 +11,8 @@ export function memoryStore(cfgValue: unknown = {}, opts: { spent?: number; post
   const store: ContentStore = {
     getConfig: async () => parseContentConfig(cfgValue),
     activeFacts: async () => FACTS.filter((f) => f.active),
+    recentDrafts: async () =>
+      [...drafts].reverse().filter((d) => d.status !== 'rejected' && d.body).map((d) => ({ id: d.id, slot: d.slot, status: d.status, run_date: d.run_date, body: d.body! })),
     leadUses: async (): Promise<LeadUse[]> => drafts.map((d) => ({ lead_fact_id: d.lead_fact_id, created_at: d.created_at, status: d.status })),
     monthSpend: async () => round4(spend.reduce((s, r) => s + r.usd, 0)),
     addSpend: async (r) => {

@@ -7,6 +7,8 @@
  *   cd lume
  *   npm run content:facts -- list
  *   npm run content:facts -- add number "Customer result: ..." "kaspen.ai, read 2026-12-01"
+ *   npm run content:facts -- detail 3 "How it happened, in the customer's or Frank's real words"
+ *   npm run content:facts -- detail 3 --clear
  *   npm run content:facts -- retire 7
  *   npm run content:facts -- restore 7
  *
@@ -32,6 +34,7 @@ try {
 const USAGE = `usage:
   content:facts list [--all]
   content:facts add <${FACT_KINDS.join('|')}> "<text>" "<source>"
+  content:facts detail <id> "<the real story behind the fact>" | --clear
   content:facts retire <id>
   content:facts restore <id>`
 
@@ -43,11 +46,11 @@ async function main() {
   const [cmd, ...rest] = process.argv.slice(2)
 
   if (cmd === 'list') {
-    let q = sb.from('content_facts').select('id, kind, text, source, active').order('id')
+    let q = sb.from('content_facts').select('id, kind, text, source, active, detail').order('id')
     if (!rest.includes('--all')) q = q.eq('active', true)
     const res = await q
     if (res.error) throw new Error(res.error.message)
-    for (const f of res.data ?? []) console.log(`#${f.id} [${f.kind}${f.active ? '' : ', retired'}] ${f.text}  (${f.source})`)
+    for (const f of res.data ?? []) console.log(`#${f.id} [${f.kind}${f.active ? '' : ', retired'}] ${f.text}  (${f.source})${f.detail ? `\n    story: ${f.detail}` : ''}`)
     return
   }
   if (cmd === 'add') {
@@ -56,6 +59,16 @@ async function main() {
     const res = await sb.from('content_facts').insert({ kind, text: text.trim(), source: source.trim() }).select('id').single()
     if (res.error) throw new Error(res.error.message)
     console.log(`added fact #${res.data.id}`)
+    return
+  }
+  if (cmd === 'detail') {
+    const id = Number(rest[0])
+    const text = rest[1]
+    if (!Number.isSafeInteger(id) || id <= 0 || !text?.trim()) throw new Error(USAGE)
+    const detail = text === '--clear' ? null : text.trim()
+    const res = await sb.from('content_facts').update({ detail }).eq('id', id).select('id')
+    if (res.error) throw new Error(res.error.message)
+    console.log((res.data ?? []).length ? `${detail ? 'set' : 'cleared'} the story on fact #${id}` : `no fact #${id}`)
     return
   }
   if (cmd === 'retire' || cmd === 'restore') {

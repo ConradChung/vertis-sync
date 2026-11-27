@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkDraft, extractNumbers, normalizeNumber, unknownNames } from '@/lib/content/rules'
+import { checkDraft, countStats, extractNumbers, functionsIn, normalizeNumber, sharedRun, unknownNames, vendorsIn } from '@/lib/content/rules'
 import { ctxFor, fact, goodDraft, GOOD_BODY } from './fixtures'
 
 const fails = (body: string, over = {}, ctx = {}) => checkDraft(goodDraft({ body, ...over }), ctxFor(ctx)).failures
@@ -74,7 +74,7 @@ describe('checkDraft', () => {
 
   it('closing ask: from the offer, in the last paragraph, offer price only there', () => {
     expect(has(fails(swapLast("That's why we built Kaspen. Think about it and tell me what you find this year.")), /closing ask taken from the offer/)).toBe(true)
-    expect(has(fails(GOOD_BODY.replace('That math works', 'At $9.50 a door that math works')), /offer \(and its price\) to the closing ask/)).toBe(true)
+    expect(has(fails(GOOD_BODY.replace('That math works', 'At $9.50 a door that math works')), /No price and no per-door figure/)).toBe(true)
     expect(has(fails(GOOD_BODY.replace('That math works', 'Comment below. That math works')), /no comment requests/)).toBe(true)
   })
 
@@ -98,12 +98,43 @@ describe('checkDraft', () => {
     expect(has(fails(GOOD_BODY, { first_comment: '24/7 support: kaspen.ai' }), /first comment has numbers/)).toBe(true)
   })
 
-  it('stats: at most two, unit counts and story numbers excluded', () => {
-    const ctx = { provided: [fact(8), fact(1)], leadId: 8, offerId: 1, variant: null }
-    const body = GOOD_BODY.replace("I didn't grow my firm from 35 to 1,000 doors by hiring faster.", 'Days on market went from 30+ to 19 and units leased per agent rose 280%.').replace('Three years in, we were at 1,000 doors, and', 'And')
-    const r = checkDraft(goodDraft({ body, fact_ids: [8, 1] }), ctx)
-    expect(has(r.failures, /uses 3 statistics/)).toBe(true)
-    expect(checkDraft(goodDraft(), ctxFor()).stats).toEqual(['35', '3'])
+  it('stats: at most two, unit and door counts included; a before/after pair counts once', () => {
+    expect(checkDraft(goodDraft(), ctxFor()).stats).toEqual(['1000', '3'])
+    expect(countStats('Days on market went from 30+ to 19 and units leased per agent rose 280%.')).toEqual(['19', '280'])
+    expect(countStats('One call at 9:57 PM led to a 153-property deal. We went from 9-to-5 to 365 days a year in 2026.')).toEqual(['153', '365'])
+    // Draft 2 of the first production run: 1,600 units, 1,000 units and 17 hours is three.
+    const ctx = { provided: [fact(10), fact(4), fact(1)], leadId: 10, offerId: 1, variant: null }
+    const body = GOOD_BODY.replace("I didn't grow my firm from 35 to 1,000 doors by hiring faster.", 'An asset manager who owns 1,600 units in the Sun Belt told me he wants to bring management in-house.').replace('Three years in, we were at 1,000 doors, and', 'One customer runs 1,000 units in Houston and got back 17 hours per manager every week, and')
+    const r = checkDraft(goodDraft({ body, fact_ids: [10, 4, 1] }), ctx)
+    expect(has(r.failures, /uses 3 statistics \(1600, 1000, 17\)/)).toBe(true)
+  })
+
+  it('no price or per-door figure in the body; the first comment may carry it', () => {
+    expect(has(fails(swapLast("That's why we built Kaspen. Take a free week on the doors you pick. After that it's $9.50 per door per month.")), /No price/)).toBe(true)
+    expect(has(fails(GOOD_BODY.replace('another salary', 'another cost per door')), /No price/)).toBe(true)
+    expect(fails(GOOD_BODY, { first_comment: 'After the free week it is $9.50 per door per month: kaspen.ai' })).toEqual([])
+  })
+
+  it('landing-page copy: more than one software name or three product functions is rejected', () => {
+    expect(has(fails(GOOD_BODY.replace('another late night', 'another late night in AppFolio and Yardi')), /Don't list software names \(AppFolio, Yardi\)/)).toBe(true)
+    expect(fails(GOOD_BODY.replace('another late night', 'another late night in AppFolio'))).toEqual([])
+    const list = GOOD_BODY.replace('Work orders moved.', 'Leasing, maintenance, move-ins and delinquency got handled.')
+    expect(has(fails(list), /Don't list the product's functions \(leasing, maintenance, move-ins, delinquency\)/)).toBe(true)
+    expect(functionsIn('Leasing, maintenance and accounting.')).toEqual(['leasing', 'maintenance', 'accounting'])
+    expect(vendorsIn('Rent Manager or Buildium')).toEqual(['Buildium', 'Rent Manager'])
+  })
+
+  it('sameness: tagline and "we built Kaspen" once a week, no 8-word runs from the last 14 days', () => {
+    const tag = swapLast('Grow doors, not payroll. Take a free week on the doors you pick, with setup done for you, and see what changes.')
+    expect(fails(tag)).toEqual([])
+    expect(has(fails(tag, {}, { taglineTaken: true }), /tagline is already used/)).toBe(true)
+    expect(has(fails(GOOD_BODY, {}, { builtTaken: true }), /we built Kaspen" line is already used/)).toBe(true)
+    const other = 'A different post.\n\nFor a long time I thought the only way to add doors was to add people, and I was wrong.\n\nClose.'
+    expect(has(fails(GOOD_BODY, {}, { recent: [{ id: 2, body: other }] }), /repeats "for a long time i thought the only" from draft #2/)).toBe(true)
+    // Closing asks may repeat; so may a fact's own words.
+    const sameClose = 'Unrelated opening line here.\n\nNothing in common in this middle part at all.\n\n' + GOOD_BODY.split('\n\n').slice(-1)[0]
+    expect(fails(GOOD_BODY, {}, { recent: [{ id: 3, body: sameClose }] })).toEqual([])
+    expect(sharedRun('He owns 1,600 units in the Sun Belt and told him his firm is considering it.\n\nx', 'A man who owns 1,600 units in the Sun Belt told him his firm is considering cutting.\n\ny', [fact(10)])).toBeNull()
   })
 
   it('facts: ids must be provided, lead and offer listed, one story, two number facts', () => {

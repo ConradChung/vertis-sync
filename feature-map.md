@@ -134,6 +134,11 @@ stops blocking by itself once #2 merges.
   posted; a lead fact can't lead again within 21 days; every Claude call checked against the $5/month cap first and
   recorded in `content_spend`; `dry_run` (default true) means nothing reaches Slack; nothing ever posts to LinkedIn.
   Redo/Skip only touch `content_drafts`. Post matching reads `signal_posts`, never writes it.
+  Tune-up (2026-11-27): no price or per-door figure in the body (first comment only); >1 PMS vendor name or >3 product
+  functions rejected; tagline and "we built Kaspen" at most once per week (live drafts); no 8-word run shared with a draft
+  from the last 14 days (closing paragraph and fact wording excepted); stats count unit/door counts (before/after pair
+  once; times, years, 9-to-5 excluded); Proof prefers facts with a story (`content_facts.detail`, `*_lume_content_fact_detail.sql`,
+  then cause-stating facts); superseded drafts don't block a lead fact.
 
 ### Reddit signals (GTM-15, F5Bot emails)
 - **Where:** `lume/lib/reddit/`, doc `docs/lume/f5bot-apps-script.gs`.
