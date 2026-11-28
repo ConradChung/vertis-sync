@@ -8,7 +8,7 @@ vi.mock('next/navigation', () => ({ usePathname: () => '/signals/reddit' }))
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { info: vi.fn(), error: vi.fn(), success: vi.fn() }) }))
 
 import { SignalsSection } from '@/components/portal/SignalsSection'
-import { SignalsInbox, inboxKey } from '@/components/signals/SignalsInbox'
+import { SignalsInbox, exportHref, inboxKey } from '@/components/signals/SignalsInbox'
 import { SignalsNav, tabOf } from '@/components/signals/SignalsNav'
 import type { PortalSignalsResponse } from '@/lib/portal/signals'
 import type { SignalInbox, SignalRow } from '@/lib/signals/merge'
@@ -284,6 +284,43 @@ describe('Doors column', () => {
     fireEvent.click(within(li).getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(calls.some((c) => c.url === '/api/signals/people/77/units')).toBe(true))
     expect(calls.find((c) => c.url === '/api/signals/people/77/units')?.body).toEqual({ units: 650 })
+  })
+})
+
+describe('Export CSV', () => {
+  const exportLink = () => screen.getByText(/Export CSV/).closest('a') as HTMLAnchorElement
+  const two: SignalInbox = { ...inbox, total: 2 }
+  it('links to the export for exactly the filters on screen (500+, sort), over every page', async () => {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => { urls.push(url); return new Response(JSON.stringify(two), { status: 200 }) }))
+    wrap(<SignalsInbox initial={two} />)
+    const link = exportLink()
+    expect(link.getAttribute('href')).toBe('/api/signals/export')
+    expect(link.hasAttribute('download')).toBe(true)
+    expect(link.textContent).toContain('2')
+    fireEvent.click(screen.getByRole('button', { name: '500+' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by doors' }))
+    await waitFor(() => expect(exportLink().getAttribute('href')).toBe('/api/signals/export?min_doors=500&sort=doors_desc'))
+  })
+  it('exportHref carries source, status, search, 500+ and sort', () => {
+    expect(exportHref('hiring', 'working', 'acme', { min: true, sort: 'asc' })).toBe('/api/signals/export?source=hiring&status=working&q=acme&min_doors=500&sort=doors_asc')
+  })
+  it('with nothing to export the button is disabled and shows 0; no link, no download', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...inbox, rows: [], total: 0 }), { status: 200 })))
+    wrap(<SignalsInbox fixedSource="hiring" />)
+    const btn = (await screen.findByText(/Export CSV/)).closest('button') as HTMLButtonElement
+    expect((btn as HTMLButtonElement).disabled).toBe(true)
+    expect(btn.textContent).toContain('0')
+    expect(screen.getByText(/Export CSV/).closest('a')).toBeNull()
+  })
+  it('the hiring tab exports hiring; Reddit has no export', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(two), { status: 200 })))
+    const { unmount } = wrap(<SignalsInbox fixedSource="hiring" />)
+    await waitFor(() => expect(screen.getByText(/Export CSV/).closest('a')?.getAttribute('href')).toBe('/api/signals/export?source=hiring'))
+    unmount()
+    wrap(<SignalsInbox fixedSource="reddit" />)
+    await screen.findByRole('list', { name: 'Signal accounts' })
+    expect(screen.queryByText(/Export CSV/)).toBeNull()
   })
 })
 

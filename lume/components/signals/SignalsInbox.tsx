@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState, type ReactNode } from 'react'
 import useSWR, { useSWRConfig } from 'swr'
-import { ArrowDown, ArrowUp, ArrowUpRight, Check, ExternalLink, Search } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpRight, Check, Download, ExternalLink, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { SimpleSelect } from '@/components/ui/simple-select'
@@ -58,6 +58,11 @@ type View = 'all' | 'comment' | 'reddit' | 'hiring'
 export interface DoorOptions {
   min?: boolean
   sort?: 'desc' | 'asc' | null
+}
+
+/** `GET /api/signals/export` for the same filters the table shows (a plain link: the session cookie rides along, no key in the URL). */
+export function exportHref(source: SignalSource | 'all', status: StatusFilter, q: string, doors: DoorOptions = {}): string {
+  return inboxKey(source, status, q, doors).replace('/api/signals/inbox', '/api/signals/export')
 }
 
 export function inboxKey(source: SignalSource | 'all', status: StatusFilter, q: string, doors: DoorOptions = {}): string {
@@ -195,6 +200,9 @@ export function SignalsInbox({ initial, fixedSource, defaultSource }: { initial?
           </button>
         )}
         <div className="flex flex-wrap items-center gap-3 max-sm:w-full sm:ml-auto">
+          {hasDoors && (
+            <ExportCsv href={exportHref(source, status, q, { min: min500, sort: doorSort })} count={data?.total ?? null} />
+          )}
           {!fixedSource && source !== 'all' && (
             <button type="button" onClick={() => setSource('all')} className="text-[13px] text-fg-70 hover:text-fg">
               {SOURCE_LABEL[source]}s only · <span className="underline">show all</span>
@@ -258,6 +266,30 @@ export function SignalsInbox({ initial, fixedSource, defaultSource }: { initial?
         </p>
       )}
     </Surface>
+  )
+}
+
+/** Download every row the table matches (all pages) as CSV. Neutral, not the accent; disabled at 0 rows. */
+function ExportCsv({ href, count }: { href: string; count: number | null }) {
+  const n = count === null ? '' : count.toLocaleString('en-US')
+  const body = (
+    <>
+      <Download className="size-3.5" strokeWidth={1.75} aria-hidden />
+      Export CSV
+      {n && <span className="font-mono text-[12px] text-fg-46 tabular-nums">{n}</span>}
+    </>
+  )
+  if (count === null || count === 0) {
+    return (
+      <Button size="sm" variant="secondary" className="h-8 gap-1.5 rounded-lg px-3" disabled>
+        {body}
+      </Button>
+    )
+  }
+  return (
+    <Button size="sm" variant="secondary" className="h-8 gap-1.5 rounded-lg px-3" nativeButton={false} render={<a href={href} download />}>
+      {body}
+    </Button>
   )
 }
 

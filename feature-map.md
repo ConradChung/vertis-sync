@@ -232,6 +232,11 @@ stops blocking by itself once #2 merges.
   the answer's citations), cached on `signal_company_checks`; migration `*_lume_hiring_door_count.sql`. Backfill:
   `cd lume && npm run hiring:doors` (dry run) / `-- --run` ($1 cap, lane ledger and monthly cap). Tests: `lume/tests/signals/doors.test.ts`,
   `tests/hiring/{doorsBackfill,checkPrompt,engine}.test.ts`, `tests/components/SignalsInbox.test.tsx`, `tests/api/signalsRoutes.test.ts`.
+  **Export CSV** (All, Post comments, Hiring; not Reddit): `GET /api/signals/export?source=&status=&q=&min_doors=500&sort=` returns every account the tab
+  matches over all pages (the same `inboxRows` the table uses), columns per tab in `lume/lib/signals/export.ts`, `signals-<tab>[-500plus]-YYYY-MM-DD.csv`,
+  UTF-8 BOM, RFC 4180, a cell starting `= + - @ tab CR` gets a leading apostrophe, unknown values are empty cells. Owner's own session only
+  (`requireOwnerSession`: 401 signed out, 403 portal clients and the internal bearer); the button is disabled at 0 rows. Tests: `tests/signals/export.test.ts`,
+  `tests/api/signalsRoutes.test.ts`, `tests/components/SignalsInbox.test.tsx`.
   In the portal, signal accounts and the scoreboard go only to the signals client (`LUME_SIGNALS_CLIENT`, default Kaspen):
   any other client gets `{ enabled: false }` and no data.
 
