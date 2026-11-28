@@ -77,6 +77,8 @@ export type SignalDetail =
 
 /** The newest signal an account has from one source, with that source's fields. */
 export interface LatestSignal {
+  /** The signal's stable id inside its source (e.g. "hiring:12"). */
+  ref?: string
   label: string
   at: string | null
   url: string | null
@@ -298,7 +300,7 @@ export function mergeSignals(events: readonly SignalEvent[]): SignalAccount[] {
     const latest: SignalAccount['latest'] = {}
     for (const m of members) {
       if (latest[m.source]) continue
-      latest[m.source] = { label: m.label, at: m.at, url: m.url, person: m.person?.trim() || null, person_title: m.person_title?.trim() || null, linkedin: m.linkedin?.trim() || null, detail: m.detail ?? null }
+      latest[m.source] = { ref: m.ref, label: m.label, at: m.at, url: m.url, person: m.person?.trim() || null, person_title: m.person_title?.trim() || null, linkedin: m.linkedin?.trim() || null, detail: m.detail ?? null }
     }
     out.push({
       key,

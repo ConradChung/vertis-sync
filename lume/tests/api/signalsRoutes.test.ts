@@ -4,7 +4,7 @@ const session = vi.hoisted(() => ({ email: 'owner@example.com' as string | null 
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({ auth: { getClaims: async () => ({ data: session.email ? { claims: { sub: 'u', email: session.email } } : null }) } }),
 }))
-const store = vi.hoisted(() => ({ loadInbox: vi.fn(), patchAccount: vi.fn(), startDeal: vi.fn(), loadAllRows: vi.fn() }))
+const store = vi.hoisted(() => ({ loadExport: vi.fn(), loadInbox: vi.fn(), patchAccount: vi.fn(), startDeal: vi.fn(), loadAllRows: vi.fn() }))
 vi.mock('@/lib/signals/store', () => store)
 const held = vi.hoisted(() => ({ typeHiringUnits: vi.fn() }))
 vi.mock('@/lib/signals/held', () => held)
@@ -17,6 +17,7 @@ import { GET as inboxGET } from '@/app/api/signals/inbox/route'
 import { PATCH as accountPATCH } from '@/app/api/signals/accounts/route'
 import { POST as dealPOST } from '@/app/api/signals/accounts/deal/route'
 import { POST as hiringUnitsPOST } from '@/app/api/signals/hiring/[id]/units/route'
+import { GET as exportGET } from '@/app/api/signals/export/route'
 import { GET as portalGET } from '@/app/api/portal/signals/route'
 import type { SignalRow } from '@/lib/signals/merge'
 
@@ -202,5 +203,46 @@ describe('POST /api/signals/hiring/:id/units', () => {
     expect((await call('31', { units: 5, extra: 1 })).status).toBe(400)
     session.email = null
     expect((await call('31', { units: 750 })).status).toBeGreaterThanOrEqual(401)
+  })
+})
+
+describe('GET /api/signals/export', () => {
+  const get = (qs = '', headers: Record<string, string> = {}) => exportGET(new Request('http://localhost/api/signals/export' + qs, { headers }))
+  beforeEach(() => {
+    store.loadExport.mockResolvedValue({
+      rows: [row({ key: 'd:acme.com', name: 'Acme PM', domain: 'acme.com', doors: { count: 1200, source: 'apollo', confidence: 'high' }, latest: { hiring: { ref: 'hiring:1', label: 'x', at: null, url: null, person: null, person_title: null, linkedin: null, detail: null } } })],
+      hiring: new Map(),
+      failed: [],
+    })
+  })
+  it('signed out is 401, and nothing is read', async () => {
+    session.email = null
+    expect((await get('?source=hiring&min_doors=500')).status).toBe(401)
+    expect(store.loadExport).not.toHaveBeenCalled()
+  })
+  it('a portal client (any account that is not the owner) is refused, and nothing is read', async () => {
+    session.email = 'frank@kaspen.co'
+    portal.getPortalUser.mockResolvedValue({ email: 'frank@kaspen.co', client: 'Kaspen', campaign_ids: ['c1'], linkedin_set_ids: [], sheet_set_ids: [] })
+    expect((await get('?source=hiring')).status).toBe(403)
+    expect(store.loadExport).not.toHaveBeenCalled()
+  })
+  it('the agent\'s internal bearer is not enough: only the owner\'s own session exports', async () => {
+    session.email = null
+    expect((await get('', { authorization: 'Bearer internal-secret-for-tests' })).status).toBe(403)
+    expect(store.loadExport).not.toHaveBeenCalled()
+  })
+  it('the owner gets a no-store CSV attachment with a BOM and the tab-named file', async () => {
+    const res = await get('?source=hiring&min_doors=500&status=working&q=acme&sort=doors_desc')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('text/csv')
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    expect(res.headers.get('content-disposition')).toMatch(/^attachment; filename="signals-hiring-500plus-\d{4}-\d{2}-\d{2}\.csv"$/)
+    const bytes = new Uint8Array(await res.arrayBuffer())
+    expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]) // UTF-8 BOM
+    expect(new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes)).toContain('Acme PM')
+    expect(store.loadExport).toHaveBeenCalledWith(expect.objectContaining({ source: 'hiring', status: 'working', q: 'acme', minDoors: 500 }), 'desc')
+  })
+  it('Reddit is not exportable', async () => {
+    expect((await get('?source=reddit')).status).toBe(400)
   })
 })

@@ -2,9 +2,9 @@ import 'server-only'
 import { ensureDeal, getDeal, setStage } from '@/lib/crm/service'
 import { DbError } from '@/lib/db/service'
 import {
-  HIRING_COLS, PERSON_COLS, POST_COLS, REACTOR_COLS, REDDIT_COLS,
+  EXPORT_HIRING_COLS, HIRING_COLS, PERSON_COLS, POST_COLS, REACTOR_COLS, REDDIT_COLS,
   hiringEvent, personEvent, reactorEvent, redditEvent,
-  type HiringSource, type PersonSource, type PostSource, type ReactorSource, type RedditSource,
+  type HiringExtra, type HiringSource, type PersonSource, type PostSource, type ReactorSource, type RedditSource,
 } from '@/lib/signals/events'
 import {
   applyState, countByStatus, filterRows, isResearchOnly, mergeSignals, placeholderEmail, SIGNALS_CAMPAIGN_ID, sortByDoors,
@@ -82,10 +82,34 @@ export async function loadAllRows(): Promise<{ rows: SignalRow[]; failed: Signal
  */
 export async function loadInbox(filter: SignalFilter = {}, limit = 100, doorSort?: DoorSort): Promise<SignalInbox> {
   const { rows, failed } = await loadAllRows()
+  const { scope, shown } = inboxRows(rows, filter, doorSort)
+  return { rows: shown.slice(0, limit), counts: countByStatus(scope), total: shown.length, failed }
+}
+
+/**
+ * The one place that decides which accounts a tab shows: its scope (a source
+ * tab, or every lead account on All), then the status / search / 500+ filter,
+ * then the door sort. The page and the CSV export both go through it, so the
+ * export is exactly the rows on screen, over every page.
+ */
+export function inboxRows(rows: SignalRow[], filter: SignalFilter, doorSort?: DoorSort): { scope: SignalRow[]; shown: SignalRow[] } {
   const scope = filter.source && filter.source !== 'all' ? filterRows(rows, { source: filter.source }) : rows.filter((r) => !isResearchOnly(r))
   const filtered = filterRows(scope, filter)
-  const shown = doorSort ? sortByDoors(filtered, doorSort) : filtered
-  return { rows: shown.slice(0, limit), counts: countByStatus(scope), total: shown.length, failed }
+  return { scope, shown: doorSort ? sortByDoors(filtered, doorSort) : filtered }
+}
+
+/** Every matching account (no page limit) with the newest hiring row's own fields, for the CSV export. */
+export async function loadExport(filter: SignalFilter, doorSort?: DoorSort): Promise<{ rows: SignalRow[]; hiring: Map<string, HiringExtra>; failed: SignalSource[] }> {
+  const { rows: all, failed } = await loadAllRows()
+  const { shown } = inboxRows(all, filter, doorSort)
+  const ids = [...new Set(shown.map((r) => r.latest.hiring?.ref).filter((x): x is string => !!x).map((ref) => Number(ref.replace('hiring:', ''))).filter((n) => Number.isInteger(n)))]
+  const hiring = new Map<string, HiringExtra>()
+  for (let i = 0; i < ids.length; i += 200) {
+    const res = await sb().from('signal_hiring').select(EXPORT_HIRING_COLS).in('id', ids.slice(i, i + 200))
+    if (res.error) throw new DbError('signals.loadExport', res.error)
+    for (const h of (res.data ?? []) as unknown as HiringExtra[]) hiring.set(`hiring:${h.id}`, h)
+  }
+  return { rows: shown, hiring, failed }
 }
 
 export interface AccountPatch {

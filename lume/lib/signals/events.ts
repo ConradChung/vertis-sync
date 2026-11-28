@@ -207,3 +207,29 @@ export function reactorEvent(r: ReactorSource): SignalEvent | null {
     detail: { source: 'influencer', reacted_to: (r.reacted_to ?? []).filter(Boolean).map(titled), doors: typeof r.door_count === 'number' && r.door_count > 0 ? r.door_count : null },
   }
 }
+
+// ── CSV export: the newest hiring row's own fields ──────────────────────────
+
+export const EXPORT_HIRING_COLS =
+  'id, role_title, role_tier, location, country, posted_at, source_url, company_linkedin, company_phone, contact_name, contact_title, contact_linkedin, contact_email, person_name, person_title, person_linkedin, pm_fit, created_at'
+
+export interface HiringExtra {
+  id: number
+  role_title: string | null
+  role_tier: string | null
+  location: string | null
+  country: string | null
+  posted_at: string | null
+  source_url: string | null
+  company_linkedin: string | null
+  company_phone: string | null
+  contact_name: string | null
+  contact_title: string | null
+  contact_linkedin: string | null
+  contact_email: string | null
+  person_name: string | null
+  person_title: string | null
+  person_linkedin: string | null
+  pm_fit: string | null
+  created_at: string | null
+}
